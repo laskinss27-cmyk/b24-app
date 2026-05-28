@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+.vercel/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.tsbuildinfo
+coverage/
+
+# секреты разведки — webhook URL, OAuth credentials и т.п.
+.secrets/
+secrets.local.json
+
+.vercel

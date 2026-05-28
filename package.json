@@ -1,0 +1,24 @@
+{
+  "name": "b24-app",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Bitrix24 application — кастомные вкладки сделки/поставки/инвентаризации для umnydom",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:backend": "npm -w @b24-app/backend run dev",
+    "dev:frontend": "npm -w @b24-app/frontend run dev",
+    "build": "npm -ws --if-present run build",
+    "typecheck": "npm -ws --if-present run typecheck",
+    "lint": "npm -ws --if-present run lint",
+    "gen:types": "tsx scripts/gen-types.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,323 @@
+{
+	"ID": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": true,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "ID"
+	},
+	"CATALOG_ID": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": true,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Каталог"
+	},
+	"PRICE": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Цена"
+	},
+	"CURRENCY_ID": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Валюта"
+	},
+	"NAME": {
+		"type": "string",
+		"isRequired": true,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Название"
+	},
+	"CODE": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "CODE"
+	},
+	"DESCRIPTION": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Описание"
+	},
+	"DESCRIPTION_TYPE": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Тип описания"
+	},
+	"ACTIVE": {
+		"type": "char",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Активен"
+	},
+	"SECTION_ID": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Раздел"
+	},
+	"SORT": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Сортировка"
+	},
+	"VAT_ID": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Ставка НДС"
+	},
+	"VAT_INCLUDED": {
+		"type": "char",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "НДС включён в цену"
+	},
+	"MEASURE": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Единица измерения"
+	},
+	"XML_ID": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Внешний код"
+	},
+	"PREVIEW_PICTURE": {
+		"type": "product_file",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Картинка для анонса"
+	},
+	"DETAIL_PICTURE": {
+		"type": "product_file",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Детальная картинка"
+	},
+	"DATE_CREATE": {
+		"type": "datetime",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Дата создания"
+	},
+	"TIMESTAMP_X": {
+		"type": "datetime",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": true,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Дата изменения"
+	},
+	"MODIFIED_BY": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Кем изменён"
+	},
+	"CREATED_BY": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Кем создан"
+	},
+	"PROPERTY_100": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": true,
+		"isDynamic": true,
+		"propertyType": "F",
+		"userType": "",
+		"title": "Картинки галереи"
+	},
+	"PROPERTY_108": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "",
+		"title": "Имя"
+	},
+	"PROPERTY_160": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "Money",
+		"title": "Розница"
+	},
+	"PROPERTY_326": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "N",
+		"userType": "",
+		"title": "ИД вариации (из базы)"
+	},
+	"PROPERTY_328": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "N",
+		"userType": "",
+		"title": "ID (из базы)"
+	},
+	"PROPERTY_330": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "",
+		"title": "Модель"
+	},
+	"PROPERTY_332": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": true,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "",
+		"title": "Имя вариации"
+	},
+	"PROPERTY_334": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "",
+		"title": "Производитель"
+	},
+	"PROPERTY_336": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "",
+		"title": "Поставщик"
+	},
+	"PROPERTY_338": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "Money",
+		"title": "Закупка"
+	},
+	"PROPERTY_362": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "S",
+		"userType": "Money",
+		"title": "Закупочная цена"
+	},
+	"PROPERTY_622": {
+		"type": "product_property",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": true,
+		"propertyType": "E",
+		"userType": "EList",
+		"title": "Склад"
+	}
+}

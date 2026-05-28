@@ -1,0 +1,72 @@
+[
+	{
+		"CURRENCY": "RUB",
+		"AMOUNT_CNT": "1",
+		"AMOUNT": "1.0000",
+		"SORT": "100",
+		"BASE": "Y",
+		"FULL_NAME": "Российский рубль",
+		"LID": "ru",
+		"FORMAT_STRING": "# &#8381;",
+		"DEC_POINT": ".",
+		"THOUSANDS_SEP": null,
+		"DECIMALS": "2",
+		"DATE_UPDATE": "2025-04-24T14:31:38+03:00"
+	},
+	{
+		"CURRENCY": "USD",
+		"AMOUNT_CNT": "1",
+		"AMOUNT": "68.7900",
+		"SORT": "200",
+		"BASE": "N",
+		"FULL_NAME": "Доллар США",
+		"LID": "ru",
+		"FORMAT_STRING": "$#",
+		"DEC_POINT": ".",
+		"THOUSANDS_SEP": null,
+		"DECIMALS": "2",
+		"DATE_UPDATE": "2025-04-24T14:31:38+03:00"
+	},
+	{
+		"CURRENCY": "EUR",
+		"AMOUNT_CNT": "1",
+		"AMOUNT": "78.3200",
+		"SORT": "300",
+		"BASE": "N",
+		"FULL_NAME": "Евро",
+		"LID": "ru",
+		"FORMAT_STRING": "# &euro;",
+		"DEC_POINT": ".",
+		"THOUSANDS_SEP": null,
+		"DECIMALS": "2",
+		"DATE_UPDATE": "2025-04-24T14:31:38+03:00"
+	},
+	{
+		"CURRENCY": "UAH",
+		"AMOUNT_CNT": "10",
+		"AMOUNT": "25.1100",
+		"SORT": "400",
+		"BASE": "N",
+		"FULL_NAME": "Гривна",
+		"LID": "ru",
+		"FORMAT_STRING": "# грн.",
+		"DEC_POINT": ".",
+		"THOUSANDS_SEP": null,
+		"DECIMALS": "2",
+		"DATE_UPDATE": "2025-04-24T14:31:38+03:00"
+	},
+	{
+		"CURRENCY": "BYN",
+		"AMOUNT_CNT": "1",
+		"AMOUNT": "32.2000",
+		"SORT": "500",
+		"BASE": "N",
+		"FULL_NAME": "Белорусский рубль",
+		"LID": "ru",
+		"FORMAT_STRING": "# руб.",
+		"DEC_POINT": ".",
+		"THOUSANDS_SEP": null,
+		"DECIMALS": "2",
+		"DATE_UPDATE": "2025-04-24T14:31:38+03:00"
+	}
+]

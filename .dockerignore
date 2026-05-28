@@ -1,0 +1,30 @@
+# Игнор для docker build context — что НЕ копируется в образ.
+# Совпадает с .gitignore + ещё чуть-чуть мусора.
+
+node_modules
+**/node_modules
+**/dist
+**/.tsbuildinfo
+
+.env
+.env.*
+
+.git
+.gitignore
+
+.vscode
+.idea
+.DS_Store
+
+.vercel/
+
+coverage/
+*.log
+npm-debug.log*
+
+# Артефакты Vite/TS которые не нужны в образе
+**/*.map
+
+# Документы и медиа репозитория — в образ незачем
+README.md
+*.md

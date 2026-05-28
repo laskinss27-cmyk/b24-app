@@ -1,0 +1,182 @@
+{
+	"ID": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": true,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "ID"
+	},
+	"OWNER_ID": {
+		"type": "integer",
+		"isRequired": true,
+		"isReadOnly": false,
+		"isImmutable": true,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "ID владельца"
+	},
+	"OWNER_TYPE": {
+		"type": "string",
+		"isRequired": true,
+		"isReadOnly": false,
+		"isImmutable": true,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Тип владельца"
+	},
+	"PRODUCT_ID": {
+		"type": "integer",
+		"isRequired": true,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Товар"
+	},
+	"PRODUCT_NAME": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Название товара"
+	},
+	"PRICE": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Цена"
+	},
+	"PRICE_EXCLUSIVE": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Цена без налога со скидкой"
+	},
+	"PRICE_NETTO": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "PRICE_NETTO"
+	},
+	"PRICE_BRUTTO": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "PRICE_BRUTTO"
+	},
+	"QUANTITY": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Количество"
+	},
+	"DISCOUNT_TYPE_ID": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Тип скидки"
+	},
+	"DISCOUNT_RATE": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Величина скидки"
+	},
+	"DISCOUNT_SUM": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Сумма скидки"
+	},
+	"TAX_RATE": {
+		"type": "double",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Налог"
+	},
+	"TAX_INCLUDED": {
+		"type": "char",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Налог включен в цену"
+	},
+	"CUSTOMIZED": {
+		"type": "char",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Изменен"
+	},
+	"MEASURE_CODE": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Код единицы измерения"
+	},
+	"MEASURE_NAME": {
+		"type": "string",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Единица измерения"
+	},
+	"SORT": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": false,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "Сортировка"
+	},
+	"TYPE": {
+		"type": "integer",
+		"isRequired": false,
+		"isReadOnly": true,
+		"isImmutable": false,
+		"isMultiple": false,
+		"isDynamic": false,
+		"title": "TYPE"
+	}
+}

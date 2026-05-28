@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>b24-app dev</title>
+	</head>
+	<body>
+		<!-- На dev открываем эту страницу напрямую (Vite на :5173).
+		     На проде она не используется — Битрикс грузит наш main.tsx
+		     через iframe, который генерит backend в /placement/deal-tab. -->
+		<div id="root"></div>
+		<script>
+			// На локальном dev контекст не приходит от Битрикса — подставляем мок,
+			// чтобы можно было разрабатывать UI без портала.
+			if (!window.__B24_CONTEXT__) {
+				window.__B24_CONTEXT__ = {
+					dealId: 32592,
+					domain: 'umniydom.bitrix24.ru',
+					memberId: null,
+					__mock: true,
+				};
+			}
+		</script>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>
