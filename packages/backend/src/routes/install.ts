@@ -1,31 +1,90 @@
 import type { FastifyInstance } from 'fastify';
-import { PlacementBodySchema } from '../handlers/placement-context.js';
+import {
+	PlacementBodySchema,
+	PlacementQuerySchema,
+	extractInstallAuth,
+} from '../handlers/placement-context.js';
+import { B24Client, B24ApiError } from '../b24/client.js';
+import { bindDealTabPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
 
 /**
- * POST /install — Б24 шлёт сюда POST при установке приложения.
+ * POST /install — Б24 шлёт POST при установке приложения.
  *
- * Sprint 1 stub: логируем, отвечаем HTML с installFinish(). Реальная регистрация
- * placements (placement.bind для CRM_DEAL_DETAIL_TAB) — после получения
- * APP_CLIENT_ID/SECRET от Володи.
+ * Что приходит в form-body:
+ *   DOMAIN          — домен портала (например umniydom.bitrix24.ru)
+ *   AUTH_ID         — OAuth access_token (валиден 1 час)
+ *   REFRESH_ID      — refresh_token (для обновления токена через 1 час)
+ *   AUTH_EXPIRES    — TTL access_token в секундах
+ *   member_id       — стабильный ID портала
+ *   status          — "L" локальное, "P" платное, и т.п.
+ *   PLACEMENT       — "DEFAULT" при первой установке
+ *
+ * Что мы делаем в Sprint 1:
+ *   1. Берём AUTH_ID + DOMAIN
+ *   2. Через B24Client вызываем placement.bind(CRM_DEAL_DETAIL_TAB)
+ *   3. Возвращаем installFinish HTML — Б24 его покажет в окне установки
+ *
+ * Sprint 1 НЕ делает:
+ *   - Не сохраняет токены долгосрочно. Это для следующих фаз когда нужно будет
+ *     ходить в Б24 от имени приложения вне install-flow (например, фоновые задачи).
+ *     Сейчас всё что фронт делает — он делает своим токеном через BX24.callMethod.
+ *   - Не создаёт UF (per-deal коэффициент, аудит-лог HL-блок) — отложено
+ *     до момента когда они реально понадобятся (open questions с заказчиком).
  */
 export function registerInstallRoute(app: FastifyInstance): void {
 	app.post('/install', async (req, reply) => {
-		const parsed = PlacementBodySchema.safeParse(req.body);
-		if (!parsed.success) {
-			app.log.warn({ error: parsed.error.format() }, '[install] invalid body');
+		// TEMP DEBUG: сырое тело + content-type + ключи — увидим что реально шлёт Б24.
+		// Снести когда подтвердим формат payload.
+		app.log.info({
+			contentType: req.headers['content-type'],
+			rawBody: req.body,
+			bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : null,
+		}, '[install] RAW INCOMING — debug dump');
+
+		const parsedBody = PlacementBodySchema.safeParse(req.body);
+		const parsedQuery = PlacementQuerySchema.safeParse(req.query);
+		if (!parsedBody.success) {
+			app.log.warn({ error: parsedBody.error.format() }, '[install] invalid body');
 			return reply.code(400).send({ ok: false, error: 'invalid body' });
 		}
 
-		const body = parsed.data;
+		const body = parsedBody.data;
+		const query = parsedQuery.success ? parsedQuery.data : {};
+		const auth = extractInstallAuth(body, query);
+
 		app.log.info({
-			domain: body.DOMAIN,
+			domain: body.DOMAIN ?? query.DOMAIN,
 			member_id: body.member_id,
 			status: body.status,
 			placement: body.PLACEMENT,
-			hasAuth: Boolean(body.AUTH_ID),
+			scope: body.APPLICATION_SCOPE,
+			hasAuth: Boolean(auth),
 		}, '[install] received');
 
-		// TODO: сохранить токены, вызвать placement.bind, создать UF и HL-блок аудита.
+		// Регистрируем placement, если есть auth-контекст.
+		if (auth) {
+			try {
+				const client = new B24Client({
+					auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken },
+				});
+				const result = await bindDealTabPlacement({
+					client,
+					publicBaseUrl: app.config.publicBaseUrl,
+				});
+				app.log.info({ placement: DEAL_TAB_PLACEMENT, status: result.status, domain: auth.domain },
+					'[install] placement bound');
+			} catch (err) {
+				const errInfo = err instanceof B24ApiError
+					? { code: err.code, description: err.description, httpStatus: err.httpStatus }
+					: { error: String(err) };
+				app.log.error({ ...errInfo, placement: DEAL_TAB_PLACEMENT }, '[install] placement.bind failed');
+			}
+		} else {
+			app.log.warn({
+				hasAuthId: Boolean(body.AUTH_ID),
+				hasDomain: Boolean(body.DOMAIN ?? query.DOMAIN),
+			}, '[install] no auth context — placement.bind skipped');
+		}
 
 		return reply
 			.code(200)
@@ -34,8 +93,8 @@ export function registerInstallRoute(app: FastifyInstance): void {
 <html lang="ru">
 <head><meta charset="utf-8"><title>b24-app установлен</title></head>
 <body>
-	<h1>b24-app установлен</h1>
-	<p>Откройте карточку сделки — должна появиться вкладка приложения.</p>
+	<h1>b24-app установлен ✅</h1>
+	<p>Откройте любую сделку — увидите вкладку <strong>b24-app</strong> рядом со стандартными.</p>
 	<script src="//api.bitrix24.com/api/v1/"></script>
 	<script>BX24.init(function(){ BX24.installFinish(); });</script>
 </body>

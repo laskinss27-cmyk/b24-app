@@ -7,6 +7,8 @@ const ConfigSchema = z.object({
 	port: z.coerce.number().int().positive().default(3000),
 	host: z.string().default('0.0.0.0'),
 	portalDomain: z.string().min(1).default('umniydom.bitrix24.ru'),
+	/** Публичный URL нашего приложения. Используется в placement.bind как handler URL. */
+	publicBaseUrl: z.string().url().default('https://bba0fouaqgab742ohki8.containers.yandexcloud.net'),
 	appClientId: z.string().optional(),
 	appClientSecret: z.string().optional(),
 	appSecret: z.string().optional(),
@@ -22,6 +24,7 @@ export function loadConfig(): Config {
 		port: process.env['PORT'],
 		host: process.env['HOST'],
 		portalDomain: process.env['PORTAL_DOMAIN'],
+		publicBaseUrl: process.env['PUBLIC_BASE_URL'],
 		appClientId: process.env['APP_CLIENT_ID'],
 		appClientSecret: process.env['APP_CLIENT_SECRET'],
 		appSecret: process.env['APP_SECRET'],
