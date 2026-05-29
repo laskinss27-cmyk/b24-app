@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 
 /**
- * GET /health — sanity-check. Используем для проверки что Vercel
+ * GET /health — sanity-check. Используем для проверки что Y.Cloud
  * задеплоил, что приложение поднимается, что конфиг прочитался.
  */
 export function registerHealthRoute(app: FastifyInstance): void {

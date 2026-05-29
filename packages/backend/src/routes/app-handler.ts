@@ -6,6 +6,7 @@ import {
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { bindDealTabPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { verifyBitrixRequest } from '../security.js';
 
 /**
  * POST /app/handler — главная страница приложения.
@@ -68,16 +69,18 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 
 	// POST — открытие из Б24. Тело содержит AUTH_ID + DOMAIN. Используем для placement.bind.
 	app.post('/app/handler', async (req, reply) => {
-		app.log.info({
-			contentType: req.headers['content-type'],
-			bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : null,
-			rawBody: req.body,
-		}, '[app/handler] RAW INCOMING — debug dump');
-
 		const parsedBody = PlacementBodySchema.safeParse(req.body);
 		const parsedQuery = PlacementQuerySchema.safeParse(req.query);
 		const body = parsedBody.success ? parsedBody.data : {};
 		const query = parsedQuery.success ? parsedQuery.data : {};
+
+		// Проверка подлинности: только наш портал.
+		const verdict = verifyBitrixRequest(body, query, app.config);
+		if (!verdict.ok) {
+			app.log.warn({ reason: verdict.reason }, '[app/handler] rejected — failed verification');
+			return reply.code(403).type('text/html; charset=utf-8').send(renderHtml('no-auth'));
+		}
+
 		const auth = extractInstallAuth(body, query);
 
 		let status: 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle' = 'idle';

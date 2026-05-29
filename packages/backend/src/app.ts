@@ -11,7 +11,6 @@ import { registerInstallRoute } from './routes/install.js';
 import { registerUninstallRoute } from './routes/uninstall.js';
 import { registerPlacementDealTabRoute } from './routes/placement-deal-tab.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
-import { registerAdminBindRoute } from './routes/admin-bind.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,30 +29,28 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	const app = Fastify({
 		logger: {
 			level: config.nodeEnv === 'production' ? 'info' : 'debug',
+			// Подстраховка: даже если что-то залогируем вместе с телом запроса —
+			// OAuth-токены не утекут в логи Y.Cloud.
+			redact: {
+				paths: [
+					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'client_secret',
+					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.client_secret',
+				],
+				censor: '[REDACTED]',
+			},
 		},
 	});
 
 	app.register(formbody);
 
-	// TEMP: глобальный логгер каждого запроса — увидим что реально шлёт Б24, на любой URL.
-	// Снести когда разберёмся с install/oauth flow.
-	app.addHook('onRequest', async (req) => {
-		app.log.info({
-			method: req.method,
-			url: req.url,
-			contentType: req.headers['content-type'],
-			userAgent: req.headers['user-agent'],
-			query: req.query,
-		}, '[REQ] incoming');
-	});
-	app.addHook('preHandler', async (req) => {
-		if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
-			app.log.info({
-				method: req.method,
-				url: req.url,
-				body: req.body,
-			}, '[REQ] body');
-		}
+	// Security-заголовки на все ответы.
+	// frame-ancestors: нас встраивает только портал Б24 (iframe карточки сделки),
+	// поэтому фреймить нас могут лишь *.bitrix24.ru — защита от clickjacking.
+	// script-src НЕ задаём — иначе сломаем инлайн __B24_CONTEXT__ и SDK с api.bitrix24.com.
+	app.addHook('onRequest', async (_req, reply) => {
+		reply.header('X-Content-Type-Options', 'nosniff');
+		reply.header('Referrer-Policy', 'no-referrer');
+		reply.header('Content-Security-Policy', "frame-ancestors 'self' https://*.bitrix24.ru");
 	});
 
 	// Статика фронта. Если dist ещё нет — пропускаем (на dev фронт через Vite на :5173)
@@ -81,7 +78,6 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerUninstallRoute(app);
 	registerPlacementDealTabRoute(app);
 	registerAppHandlerRoute(app);
-	registerAdminBindRoute(app);
 
 	return app;
 }

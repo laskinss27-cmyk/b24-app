@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { PlacementBodySchema, buildPlacementContext } from '../handlers/placement-context.js';
+import { PlacementBodySchema, PlacementQuerySchema, buildPlacementContext } from '../handlers/placement-context.js';
+import { verifyBitrixRequest } from '../security.js';
 
 /**
  * POST /placement/deal-tab — Б24 дёргает когда юзер открывает нашу вкладку
@@ -23,6 +24,13 @@ export function registerPlacementDealTabRoute(app: FastifyInstance): void {
 			return reply.code(400).send('invalid placement body');
 		}
 
+		const query = PlacementQuerySchema.safeParse(req.query);
+		const verdict = verifyBitrixRequest(parsed.data, query.success ? query.data : {}, app.config);
+		if (!verdict.ok) {
+			app.log.warn({ reason: verdict.reason }, '[placement/deal-tab] rejected — failed verification');
+			return reply.code(403).send('forbidden');
+		}
+
 		const ctx = buildPlacementContext(parsed.data);
 		app.log.info(ctx, '[placement/deal-tab] opened');
 
@@ -37,10 +45,17 @@ export function registerPlacementDealTabRoute(app: FastifyInstance): void {
 				</body></html>`);
 		}
 
-		// Инжектим контекст и BX24 SDK в <head>
+		// Инжектим контекст и BX24 SDK в <head>.
+		// Экранируем JSON под HTML-контекст <script>: символы < > & переводим в \uXXXX,
+		// иначе строка вида "</script>" в значении (member_id/domain) разорвёт тэг (XSS).
+		// U+2028/U+2029 не трогаем — с ES2019 они легальны внутри строковых литералов.
+		const ctxJson = JSON.stringify(ctx)
+			.replace(/</g, '\\u003c')
+			.replace(/>/g, '\\u003e')
+			.replace(/&/g, '\\u0026');
 		const inject = `
 	<script src="//api.bitrix24.com/api/v1/"></script>
-	<script>window.__B24_CONTEXT__ = ${JSON.stringify(ctx)};</script>
+	<script>window.__B24_CONTEXT__ = ${ctxJson};</script>
 `;
 		const html = indexHtml.replace('</head>', `${inject}</head>`);
 

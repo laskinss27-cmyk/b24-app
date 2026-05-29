@@ -1,9 +1,9 @@
 /**
  * Парсинг form-body, который Б24 шлёт в placement-endpoints и /install.
  *
- * Б24 отправляет application/x-www-form-urlencoded. На Vercel @vercel/node
- * автоматически парсит form-body в req.body как объект, но мы дополнительно
- * нормализуем поля и достаём контекст placement-а.
+ * Б24 отправляет application/x-www-form-urlencoded. @fastify/formbody парсит
+ * его в req.body как объект, а мы валидируем zod-схемой, нормализуем поля
+ * и достаём контекст placement-а.
  */
 
 import { z } from 'zod';

@@ -6,6 +6,7 @@ import {
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { bindDealTabPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { verifyBitrixRequest } from '../security.js';
 
 /**
  * POST /install — Б24 шлёт POST при установке приложения.
@@ -33,14 +34,6 @@ import { bindDealTabPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
  */
 export function registerInstallRoute(app: FastifyInstance): void {
 	app.post('/install', async (req, reply) => {
-		// TEMP DEBUG: сырое тело + content-type + ключи — увидим что реально шлёт Б24.
-		// Снести когда подтвердим формат payload.
-		app.log.info({
-			contentType: req.headers['content-type'],
-			rawBody: req.body,
-			bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : null,
-		}, '[install] RAW INCOMING — debug dump');
-
 		const parsedBody = PlacementBodySchema.safeParse(req.body);
 		const parsedQuery = PlacementQuerySchema.safeParse(req.query);
 		if (!parsedBody.success) {
@@ -50,6 +43,14 @@ export function registerInstallRoute(app: FastifyInstance): void {
 
 		const body = parsedBody.data;
 		const query = parsedQuery.success ? parsedQuery.data : {};
+
+		// Проверка подлинности: только наш портал (domain allowlist + опц. application_token).
+		const verdict = verifyBitrixRequest(body, query, app.config);
+		if (!verdict.ok) {
+			app.log.warn({ reason: verdict.reason, domain: body.DOMAIN ?? query.DOMAIN }, '[install] rejected — failed verification');
+			return reply.code(403).send({ ok: false, error: 'unrecognized portal' });
+		}
+
 		const auth = extractInstallAuth(body, query);
 
 		app.log.info({
