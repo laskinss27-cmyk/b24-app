@@ -214,11 +214,14 @@ export async function fetchStoreInventory(storeId: number): Promise<InvLine[]> {
 // ── Инвентаризация: хранилище (entity.*) + инициаторы (app.option) ────────────
 // ВАЖНО: entity.* и app.option.* работают только в контексте приложения (iframe), не через вебхук.
 
-const ENT_INV = 'ctv_inv';
-
-// Хранилище (entity ctv_inv) создаётся на БЭКЕНДЕ (placement.ts → ensureInventoryEntity),
-// т.к. entity.add — админская операция, и фронтовый BX24 вешается на вложенном ACCESS.
-// Фронт только читает/пишет записи (entity.item.*), без вложенных параметров.
+// Хранилище инвентаризации (entity) фронт НЕ трогает — BX24 виснет на entity.*.
+// Все операции идут через наш бэкенд (/api/inventory/*), который ходит в entity
+// серверным B24Client (чистый JSON). Сюда шлём BX24-токен пользователя + домен.
+function bx24Auth(): { domain: string; accessToken: string } {
+	const a = window.BX24 ? window.BX24.getAuth() : false;
+	if (!a || !a.access_token || !a.domain) throw new Error('нет авторизации BX24 (getAuth)');
+	return { domain: a.domain, accessToken: a.access_token };
+}
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */
 const DEFAULT_INITIATORS = ['1', '986'];
@@ -255,40 +258,25 @@ export interface Inventory {
 	createdAt: string;
 }
 
-interface RawEntityItem {
-	ID?: string;
-	NAME?: string;
-	DETAIL_TEXT?: string;
-	DATE_CREATE?: string;
-	CREATED_BY?: string;
-}
-
 export async function listInventories(): Promise<Inventory[]> {
-	const items = await call<RawEntityItem[]>('entity.item.get', { ENTITY: ENT_INV });
-	return (items ?? []).map((it) => {
-		let body: Record<string, unknown> = {};
-		try {
-			body = it.DETAIL_TEXT ? (JSON.parse(it.DETAIL_TEXT) as Record<string, unknown>) : {};
-		} catch {
-			/* битый JSON — пропускаем */
-		}
-		return {
-			id: String(it.ID ?? ''),
-			title: String(it.NAME ?? ''),
-			status: String(body['status'] ?? 'active'),
-			points: Array.isArray(body['points']) ? (body['points'] as InvPoint[]) : [],
-			createdById: String(body['createdById'] ?? it.CREATED_BY ?? ''),
-			createdAt: String(body['createdAt'] ?? it.DATE_CREATE ?? ''),
-		};
+	const res = await fetch('/api/inventory/list', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(bx24Auth()),
 	});
+	const json = (await res.json()) as { ok: boolean; error?: string; inventories?: Inventory[] };
+	if (!json.ok) throw new Error(json.error ?? 'ошибка хранилища');
+	return json.inventories ?? [];
 }
 
-export async function createInventory(title: string, points: InvPoint[], createdById: string, createdAt: string): Promise<void> {
-	await call('entity.item.add', {
-		ENTITY: ENT_INV,
-		NAME: title,
-		DETAIL_TEXT: JSON.stringify({ status: 'active', points, createdById, createdAt }),
+export async function createInventory(title: string, points: InvPoint[], createdById: string, _createdAt: string): Promise<void> {
+	const res = await fetch('/api/inventory/create', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), title, points, createdById }),
 	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить');
 }
 
 export interface SimpleUser {

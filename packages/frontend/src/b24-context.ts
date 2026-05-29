@@ -44,6 +44,7 @@ export interface BX24Sdk {
 		calls: Record<string, [string, Record<string, unknown>]>,
 		callback: (results: Record<string, { data(): unknown; error(): unknown }>) => void,
 	): void;
+	getAuth(): { access_token?: string; domain?: string; member_id?: string } | false;
 	resizeWindow(width: number, height: number): void;
 	fitWindow(): void;
 }
