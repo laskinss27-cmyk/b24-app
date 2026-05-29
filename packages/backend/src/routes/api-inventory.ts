@@ -46,6 +46,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 					id: String(it['ID'] ?? ''),
 					title: String(it['NAME'] ?? ''),
 					status: String(parsed['status'] ?? 'active'),
+					deadline: String(parsed['deadline'] ?? ''),
 					points: Array.isArray(parsed['points']) ? parsed['points'] : [],
 					createdById: String(parsed['createdById'] ?? it['CREATED_BY'] ?? ''),
 					createdAt: String(parsed['createdAt'] ?? it['DATE_CREATE'] ?? ''),
@@ -62,7 +63,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 
 	// Создать инвентаризацию.
 	app.post('/api/inventory/create', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { title?: string; points?: unknown; createdById?: string };
+		const b = (req.body ?? {}) as AuthBody & { title?: string; points?: unknown; createdById?: string; deadline?: string };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		if (!b.title || !Array.isArray(b.points) || !b.points.length) {
@@ -74,7 +75,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			await client.call('entity.item.add', {
 				ENTITY: INVENTORY_ENTITY,
 				NAME: b.title,
-				DETAIL_TEXT: JSON.stringify({ status: 'active', points: b.points, createdById: b.createdById ?? '', createdAt: new Date().toISOString() }),
+				DETAIL_TEXT: JSON.stringify({ status: 'active', deadline: b.deadline ?? '', points: b.points, createdById: b.createdById ?? '', createdAt: new Date().toISOString() }),
 			});
 			app.log.info({}, '[api/inventory/create] ok');
 			return { ok: true };

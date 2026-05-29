@@ -450,3 +450,36 @@ h2.inv-h2 {
 	border-radius: 6px;
 	font-size: 13px;
 }
+.inv-field {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
+	margin-bottom: 8px;
+}
+.inv-date {
+	padding: 7px 10px;
+	border: 1px solid #ccc;
+	border-radius: 8px;
+	font-size: 14px;
+}
+.deadline {
+	font-size: 12px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	white-space: nowrap;
+}
+.deadline.ok {
+	color: #555;
+	background: #f0f0f0;
+}
+.deadline.soon {
+	color: #9a3412;
+	background: #fff7ed;
+	font-weight: 600;
+}
+.deadline.overdue {
+	color: #c0392b;
+	background: #fde8e8;
+	font-weight: 600;
+}

@@ -253,6 +253,8 @@ export interface Inventory {
 	id: string;
 	title: string;
 	status: string;
+	/** Крайний срок сдачи (YYYY-MM-DD). Пусто — без срока. */
+	deadline: string;
 	points: InvPoint[];
 	createdById: string;
 	createdAt: string;
@@ -269,11 +271,11 @@ export async function listInventories(): Promise<Inventory[]> {
 	return json.inventories ?? [];
 }
 
-export async function createInventory(title: string, points: InvPoint[], createdById: string, _createdAt: string): Promise<void> {
+export async function createInventory(title: string, points: InvPoint[], deadline: string, createdById: string): Promise<void> {
 	const res = await fetch('/api/inventory/create', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), title, points, createdById }),
+		body: JSON.stringify({ ...bx24Auth(), title, points, deadline, createdById }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить');

@@ -37,6 +37,20 @@ const MOCK_USERS: SimpleUser[] = [
 	{ id: '34', name: 'Петров Пётр' },
 ];
 
+/** Статус крайнего срока для списка (браузерная дата — это фронт, не workflow). */
+function deadlineStatus(deadline: string): { text: string; cls: string } | null {
+	if (!deadline) return null;
+	const dd = new Date(`${deadline}T00:00:00`);
+	if (Number.isNaN(dd.getTime())) return null;
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	const days = Math.round((dd.getTime() - today.getTime()) / 86400000);
+	if (days < 0) return { text: '🔴 просрочено', cls: 'overdue' };
+	if (days === 0) return { text: '⚠️ срок сегодня', cls: 'soon' };
+	if (days === 1) return { text: '⚠️ остался 1 день', cls: 'soon' };
+	return { text: `до ${dd.toLocaleDateString('ru-RU')}`, cls: 'ok' };
+}
+
 export function InventoryHome(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
@@ -49,6 +63,7 @@ export function InventoryHome(): JSX.Element {
 	const [creating, setCreating] = useState(false);
 	const [title, setTitle] = useState('');
 	const [picked, setPicked] = useState<Record<number, string>>({});
+	const [deadline, setDeadline] = useState('');
 	const [saving, setSaving] = useState(false);
 	const [storageWarn, setStorageWarn] = useState<string | null>(null);
 
@@ -59,9 +74,9 @@ export function InventoryHome(): JSX.Element {
 			setStores(MOCK_STORES);
 			setUsers(MOCK_USERS);
 			setInventories([
-				{ id: '1', title: 'Инвентаризация Июнь', status: 'active', createdById: '1', createdAt: '2026-06-01', points: [
+				{ id: '1', title: 'Инвентаризация Июнь', status: 'active', deadline: '2026-06-05', createdById: '1', createdAt: '2026-06-01', points: [
 					{ storeId: 8, storeName: 'Максидом Дунайский 64', responsibleId: '18', responsibleName: 'Иванов Иван' },
-					{ storeId: 10, storeName: 'Максидом Богатырский 15', responsibleId: '34', responsibleName: 'Петров Пётр' },
+					{ storeId: 10, storeName: 'Максидом Богатырский 15', responsibleId: '', responsibleName: '' },
 				] },
 			]);
 			setPhase({ k: 'ready' });
@@ -110,34 +125,34 @@ export function InventoryHome(): JSX.Element {
 	}, [ctx]);
 
 	async function submitCreate(): Promise<void> {
-		const points: InvPoint[] = Object.entries(picked)
-			.filter(([, rid]) => rid)
-			.map(([sid, rid]) => {
-				const store = stores.find((s) => s.id === Number(sid));
-				const user = users.find((u) => u.id === rid);
-				return {
-					storeId: Number(sid),
-					storeName: store?.title ?? `склад #${sid}`,
-					responsibleId: rid,
-					responsibleName: user?.name ?? rid,
-				};
-			});
-		if (!title.trim() || !points.length) return;
+		// ответственный необязателен: берём все отмеченные точки, responsible может быть пустым (назначится сам при «Начал выполнение»)
+		const points: InvPoint[] = Object.entries(picked).map(([sid, rid]) => {
+			const store = stores.find((s) => s.id === Number(sid));
+			const user = rid ? users.find((u) => u.id === rid) : undefined;
+			return {
+				storeId: Number(sid),
+				storeName: store?.title ?? `склад #${sid}`,
+				responsibleId: rid || '',
+				responsibleName: user?.name ?? '',
+			};
+		});
+		if (!title.trim() || !points.length || !deadline) return;
 		setSaving(true);
 		const now = new Date().toISOString();
 		try {
 			if (ctx.__mock) {
 				setInventories((prev) => [
-					{ id: String(prev.length + 1), title: title.trim(), status: 'active', points, createdById: me.id, createdAt: now },
+					{ id: String(prev.length + 1), title: title.trim(), status: 'active', deadline, points, createdById: me.id, createdAt: now },
 					...prev,
 				]);
 			} else {
-				await withTimeout(createInventory(title.trim(), points, me.id, now), 15000, 'entity.item.add');
-				setInventories(await withTimeout(listInventories(), 12000, 'entity.item.get'));
+				await withTimeout(createInventory(title.trim(), points, deadline, me.id), 15000, 'create');
+				setInventories(await withTimeout(listInventories(), 12000, 'list'));
 			}
 			setCreating(false);
 			setTitle('');
 			setPicked({});
+			setDeadline('');
 		} catch (e) {
 			setPhase({ k: 'error', msg: `Не удалось создать: ${String(e instanceof Error ? e.message : e)}` });
 		} finally {
@@ -168,7 +183,7 @@ export function InventoryHome(): JSX.Element {
 	}
 
 	// Инициатор
-	const canSave = Boolean(title.trim()) && Object.values(picked).some(Boolean);
+	const canSave = Boolean(title.trim()) && Object.keys(picked).length > 0 && Boolean(deadline);
 	return (
 		<div className="inv">
 			<header>
@@ -183,7 +198,8 @@ export function InventoryHome(): JSX.Element {
 			{creating && (
 				<div className="inv-card create">
 					<input className="inv-input" placeholder="Название (напр. «Инвентаризация Июнь»)" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
-					<p className="muted">Точки и ответственные:</p>
+					<label className="inv-field">Крайний срок сдачи: <input type="date" className="inv-date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
+					<p className="muted">Точки (ответственного можно не ставить — менеджер сам возьмёт точку):</p>
 					<div className="point-pick">
 						{stores.map((s) => {
 							const checked = picked[s.id] !== undefined;
@@ -203,7 +219,7 @@ export function InventoryHome(): JSX.Element {
 									</label>
 									{checked && (
 										<select value={picked[s.id]} onChange={(e) => setPicked((p) => ({ ...p, [s.id]: e.target.value }))}>
-											<option value="">— ответственный —</option>
+											<option value="">— не назначен —</option>
 											{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
 										</select>
 									)}
@@ -220,17 +236,21 @@ export function InventoryHome(): JSX.Element {
 
 			{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
 			<h2 className="inv-h2">Инвентаризации</h2>
-			{inventories.length ? inventories.map((inv) => (
-				<div className="inv-card" key={inv.id}>
-					<div className="inv-card-head">
-						<strong>{inv.title}</strong>
-						<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status}</span>
+			{inventories.length ? inventories.map((inv) => {
+				const ds = deadlineStatus(inv.deadline);
+				return (
+					<div className="inv-card" key={inv.id}>
+						<div className="inv-card-head">
+							<strong>{inv.title}</strong>
+							<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status}</span>
+							{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
+						</div>
+						<ul>{inv.points.map((p) => (
+							<li key={p.storeId}>{p.storeName} — <span className="muted">{p.responsibleName || 'не назначен'}</span> <span className="status-dot">⚪ не начато</span></li>
+						))}</ul>
 					</div>
-					<ul>{inv.points.map((p) => (
-						<li key={p.storeId}>{p.storeName} — <span className="muted">{p.responsibleName}</span> <span className="status-dot">⚪ не начато</span></li>
-					))}</ul>
-				</div>
-			)) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
+				);
+			}) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
 		</div>
 	);
 }
