@@ -98,3 +98,23 @@ export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Prom
 		throw err;
 	}
 }
+
+/**
+ * Хранилище инвентаризации (entity). Создаётся с бэкенда (чистый JSON + app-контекст),
+ * т.к. entity.add — админская операция и фронтовый BX24 кривит вложенный ACCESS.
+ * Идемпотентно: уже существует → 'exists'. Создавать может только админ (Володя).
+ */
+export const INVENTORY_ENTITY = 'ctv_inv';
+
+export async function ensureInventoryEntity(client: B24Client): Promise<{ status: string }> {
+	try {
+		await client.call('entity.add', { ENTITY: INVENTORY_ENTITY, NAME: 'CTV Инвентаризации', ACCESS: { AU: 'W' } });
+		return { status: 'created' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'exists' };
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}

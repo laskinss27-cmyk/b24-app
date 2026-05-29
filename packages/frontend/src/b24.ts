@@ -47,6 +47,15 @@ export function callBatch(calls: Record<string, [string, Record<string, unknown>
 	});
 }
 
+/** Promise с таймаутом — чтобы зависший BX24-вызов не вешал UI навечно. */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout>;
+	const timeout = new Promise<T>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`таймаут: ${label} (>${Math.round(ms / 1000)}с)`)), ms);
+	});
+	return Promise.race([p.finally(() => clearTimeout(timer)), timeout]);
+}
+
 // ── Доменные типы ─────────────────────────────────────────────────────────────
 
 /** TYPE строки: 1 = товар, 7 = работа/услуга (подтверждено разведкой портала). */
@@ -207,16 +216,9 @@ export async function fetchStoreInventory(storeId: number): Promise<InvLine[]> {
 
 const ENT_INV = 'ctv_inv';
 
-async function ensureEntity(entity: string, name: string): Promise<void> {
-	try {
-		await call('entity.add', { ENTITY: entity, NAME: name, ACCESS: { AU: 'W' } });
-	} catch {
-		// уже существует — это норма
-	}
-}
-export async function ensureInventoryStorage(): Promise<void> {
-	await ensureEntity(ENT_INV, 'CTV Инвентаризации');
-}
+// Хранилище (entity ctv_inv) создаётся на БЭКЕНДЕ (placement.ts → ensureInventoryEntity),
+// т.к. entity.add — админская операция, и фронтовый BX24 вешается на вложенном ACCESS.
+// Фронт только читает/пишет записи (entity.item.*), без вложенных параметров.
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */
 const DEFAULT_INITIATORS = ['1', '986'];
@@ -262,7 +264,7 @@ interface RawEntityItem {
 }
 
 export async function listInventories(): Promise<Inventory[]> {
-	const items = await call<RawEntityItem[]>('entity.item.get', { ENTITY: ENT_INV, SORT: { ID: 'DESC' } });
+	const items = await call<RawEntityItem[]>('entity.item.get', { ENTITY: ENT_INV });
 	return (items ?? []).map((it) => {
 		let body: Record<string, unknown> = {};
 		try {

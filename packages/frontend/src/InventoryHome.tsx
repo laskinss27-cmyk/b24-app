@@ -6,8 +6,8 @@ import {
 	listInventories,
 	createInventory,
 	getInitiators,
-	ensureInventoryStorage,
 	fetchCurrentUserId,
+	withTimeout,
 	BETA_USER_IDS,
 	type Inventory,
 	type InvPoint,
@@ -50,6 +50,7 @@ export function InventoryHome(): JSX.Element {
 	const [title, setTitle] = useState('');
 	const [picked, setPicked] = useState<Record<number, string>>({});
 	const [saving, setSaving] = useState(false);
+	const [storageWarn, setStorageWarn] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (ctx.__mock) {
@@ -73,25 +74,37 @@ export function InventoryHome(): JSX.Element {
 		}
 		bx.init(() => {
 			void (async () => {
-				const uid = await fetchCurrentUserId();
+				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
 				if (!BETA_USER_IDS.includes(uid)) {
 					setPhase({ k: 'denied' });
 					return;
 				}
-				const initiators = await getInitiators();
+				// инициаторы не критичны (бета = инициатор) — с таймаутом и фолбэком
+				let initiators: string[] = [];
+				try {
+					initiators = await withTimeout(getInitiators(), 8000, 'app.option.get');
+				} catch {
+					initiators = [];
+				}
 				const init = BETA_USER_IDS.includes(uid) || initiators.includes(uid);
 				setIsInitiator(init);
-				await ensureInventoryStorage();
-				const [invs, sts, usrs] = await Promise.all([
-					listInventories(),
-					fetchStores(),
-					init ? fetchUsers() : Promise.resolve<SimpleUser[]>([]),
-				]);
+
+				// критичное: точки + сотрудники (эти методы уже работают в других экранах)
+				const sts = await withTimeout(fetchStores(), 15000, 'catalog.store.list');
+				const usrs = init ? await withTimeout(fetchUsers(), 15000, 'user.get').catch(() => [] as SimpleUser[]) : [];
 				setMe({ id: uid, name: usrs.find((u) => u.id === uid)?.name ?? uid });
-				setInventories(invs);
 				setStores(sts.filter((s) => s.active));
 				setUsers(usrs);
-				setPhase({ k: 'ready' });
+				setPhase({ k: 'ready' }); // рендерим модуль уже здесь — хранилище не блокирует
+
+				// хранилище (entity) — в фоне; зависание/ошибка не вешает экран, а показывает предупреждение
+				void (async () => {
+					try {
+						setInventories(await withTimeout(listInventories(), 12000, 'entity.item.get'));
+					} catch (e: unknown) {
+						setStorageWarn(`${String(e instanceof Error ? e.message : e)} (если хранилище не создано — пусть Володя/админ откроет приложение)`);
+					}
+				})();
 			})().catch((e: unknown) => setPhase({ k: 'error', msg: String(e instanceof Error ? e.message : e) }));
 		});
 	}, [ctx]);
@@ -119,8 +132,8 @@ export function InventoryHome(): JSX.Element {
 					...prev,
 				]);
 			} else {
-				await createInventory(title.trim(), points, me.id, now);
-				setInventories(await listInventories());
+				await withTimeout(createInventory(title.trim(), points, me.id, now), 15000, 'entity.item.add');
+				setInventories(await withTimeout(listInventories(), 12000, 'entity.item.get'));
 			}
 			setCreating(false);
 			setTitle('');
@@ -205,6 +218,7 @@ export function InventoryHome(): JSX.Element {
 				</div>
 			)}
 
+			{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
 			<h2 className="inv-h2">Инвентаризации</h2>
 			{inventories.length ? inventories.map((inv) => (
 				<div className="inv-card" key={inv.id}>
