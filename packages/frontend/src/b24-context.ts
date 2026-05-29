@@ -5,8 +5,10 @@
 
 export interface B24Context {
 	dealId: number | null;
-	/** id задачи — приходит из placement задачи (инвентаризация). Если задан — рендерим отчёт. */
+	/** id задачи — устаревший путь (task placement не принимается новой карточкой). */
 	taskId?: number | null;
+	/** какой экран рендерить. 'inventory' — модуль инвентаризации (вход из левого меню). */
+	view?: 'inventory' | null;
 	domain: string | null;
 	memberId: string | null;
 	/** true только когда контекст подставлен моком в index.html (dev) */

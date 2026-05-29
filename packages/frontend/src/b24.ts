@@ -201,3 +201,103 @@ export async function fetchStoreInventory(storeId: number): Promise<InvLine[]> {
 		.filter((r) => r.productId > 0)
 		.map((r) => ({ productId: r.productId, name: names.get(r.productId) ?? `#${r.productId}`, book: r.amount }));
 }
+
+// ── Инвентаризация: хранилище (entity.*) + инициаторы (app.option) ────────────
+// ВАЖНО: entity.* и app.option.* работают только в контексте приложения (iframe), не через вебхук.
+
+const ENT_INV = 'ctv_inv';
+
+async function ensureEntity(entity: string, name: string): Promise<void> {
+	try {
+		await call('entity.add', { ENTITY: entity, NAME: name, ACCESS: { AU: 'W' } });
+	} catch {
+		// уже существует — это норма
+	}
+}
+export async function ensureInventoryStorage(): Promise<void> {
+	await ensureEntity(ENT_INV, 'CTV Инвентаризации');
+}
+
+/** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */
+const DEFAULT_INITIATORS = ['1', '986'];
+
+export async function getInitiators(): Promise<string[]> {
+	try {
+		const opts = await call<Record<string, unknown>>('app.option.get', {});
+		const raw = opts?.['inv_initiators'];
+		if (typeof raw === 'string' && raw) {
+			const arr = JSON.parse(raw) as unknown;
+			if (Array.isArray(arr) && arr.length) return arr.map(String);
+		}
+	} catch {
+		/* настройки нет — дефолт */
+	}
+	return DEFAULT_INITIATORS;
+}
+export async function setInitiators(ids: string[]): Promise<void> {
+	await call('app.option.set', { options: { inv_initiators: JSON.stringify([...new Set(ids)]) } });
+}
+
+export interface InvPoint {
+	storeId: number;
+	storeName: string;
+	responsibleId: string;
+	responsibleName: string;
+}
+export interface Inventory {
+	id: string;
+	title: string;
+	status: string;
+	points: InvPoint[];
+	createdById: string;
+	createdAt: string;
+}
+
+interface RawEntityItem {
+	ID?: string;
+	NAME?: string;
+	DETAIL_TEXT?: string;
+	DATE_CREATE?: string;
+	CREATED_BY?: string;
+}
+
+export async function listInventories(): Promise<Inventory[]> {
+	const items = await call<RawEntityItem[]>('entity.item.get', { ENTITY: ENT_INV, SORT: { ID: 'DESC' } });
+	return (items ?? []).map((it) => {
+		let body: Record<string, unknown> = {};
+		try {
+			body = it.DETAIL_TEXT ? (JSON.parse(it.DETAIL_TEXT) as Record<string, unknown>) : {};
+		} catch {
+			/* битый JSON — пропускаем */
+		}
+		return {
+			id: String(it.ID ?? ''),
+			title: String(it.NAME ?? ''),
+			status: String(body['status'] ?? 'active'),
+			points: Array.isArray(body['points']) ? (body['points'] as InvPoint[]) : [],
+			createdById: String(body['createdById'] ?? it.CREATED_BY ?? ''),
+			createdAt: String(body['createdAt'] ?? it.DATE_CREATE ?? ''),
+		};
+	});
+}
+
+export async function createInventory(title: string, points: InvPoint[], createdById: string, createdAt: string): Promise<void> {
+	await call('entity.item.add', {
+		ENTITY: ENT_INV,
+		NAME: title,
+		DETAIL_TEXT: JSON.stringify({ status: 'active', points, createdById, createdAt }),
+	});
+}
+
+export interface SimpleUser {
+	id: string;
+	name: string;
+}
+/** Активные сотрудники — для назначения ответственных (v1: первая страница ~50). */
+export async function fetchUsers(): Promise<SimpleUser[]> {
+	const users = await call<Array<Record<string, unknown>>>('user.get', { FILTER: { ACTIVE: true }, SORT: 'LAST_NAME', ORDER: 'ASC' });
+	return (users ?? []).map((u) => ({
+		id: String(u['ID']),
+		name: `${u['LAST_NAME'] ?? ''} ${u['NAME'] ?? ''}`.trim() || String(u['ID']),
+	}));
+}

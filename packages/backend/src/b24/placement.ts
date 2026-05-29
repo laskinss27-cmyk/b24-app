@@ -69,3 +69,32 @@ export async function bindTaskInventoryPlacement(opts: BindDealTabOptions): Prom
 		throw err;
 	}
 }
+
+/**
+ * Пункт «Инвентаризация» в ЛЕВОМ МЕНЮ — вход в модуль инвентаризации.
+ * Заменяет задачную кнопку (TASK_VIEW_TOP_PANEL не принимается новой карточкой задач).
+ */
+export const INVENTORY_MENU_PLACEMENT = 'LEFT_MENU';
+export const INVENTORY_MENU_TITLE = 'Инвентаризация';
+
+export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: 'bound' | 'already-bound' }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/inventory`;
+
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: INVENTORY_MENU_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: INVENTORY_MENU_TITLE,
+			LANG_ALL: {
+				ru: { TITLE: INVENTORY_MENU_TITLE },
+				en: { TITLE: 'Inventory' },
+			},
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError && /already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) {
+			return { status: 'already-bound' };
+		}
+		throw err;
+	}
+}

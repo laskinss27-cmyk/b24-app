@@ -5,21 +5,16 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindTaskInventoryPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
  * POST /app/handler — главная страница приложения.
- * Б24 редиректит сюда когда юзер открывает приложение из «Перейти к приложению»
- * на карточке локального приложения.
+ * Б24 редиректит сюда когда юзер открывает приложение из «Перейти к приложению».
+ * OAuth-токен Б24 передаёт в теле каждого запроса → отсюда вызываем placement.bind.
  *
- * ВАЖНОЕ: для локальных приложений Б24 cloud отдельного install-flow с AUTH_ID НЕТ
- * (см. логи: /install приходит ровно один раз при создании приложения, без токена).
- * OAuth-токен Б24 передаёт В ТЕЛЕ КАЖДОГО ЗАПРОСА на главную страницу приложения.
- * Поэтому placement.bind мы вызываем ОТСЮДА, не из /install.
- *
- * Идемпотентно: если placement уже зарегистрирован — Б24 вернёт ошибку
- * "already-bound", мы её ловим и игнорим.
+ * Две привязки независимы: вкладка сделки (CRM_DEAL_DETAIL_TAB) и кнопка
+ * инвентаризации в задаче (TASK_VIEW_TOP_PANEL). Падение одной не ломает другую.
  */
 export function registerAppHandlerRoute(app: FastifyInstance): void {
 	const welcomeHtml = `<!doctype html>
@@ -51,15 +46,19 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 </body>
 </html>`;
 
-	const renderHtml = (status: 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle'): string => {
-		const blocks: Record<typeof status, string> = {
-			'bound': '<div class="card ok"><strong>✅ Вкладка зарегистрирована.</strong> Откройте сделку — увидите.</div>',
-			'already-bound': '<div class="card ok"><strong>✅ Вкладка уже была зарегистрирована.</strong> Откройте сделку — увидите.</div>',
-			'failed': '<div class="card err"><strong>⛔ Не удалось зарегистрировать вкладку.</strong> См. логи бэкенда.</div>',
-			'no-auth': '<div class="card err"><strong>⚠️ Нет OAuth-токена в запросе.</strong> Открой через карточку приложения, а не напрямую.</div>',
+	type Status = 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle';
+	const renderHtml = (status: Status, taskInfo = ''): string => {
+		const blocks: Record<Status, string> = {
+			'bound': '<div class="card ok"><strong>✅ Вкладка сделки зарегистрирована.</strong></div>',
+			'already-bound': '<div class="card ok"><strong>✅ Вкладка сделки уже была зарегистрирована.</strong></div>',
+			'failed': '<div class="card err"><strong>⛔ Не удалось зарегистрировать вкладку сделки.</strong></div>',
+			'no-auth': '<div class="card err"><strong>⚠️ Нет OAuth-токена.</strong> Открой через карточку приложения.</div>',
 			'idle': '',
 		};
-		return welcomeHtml.replace('__STATUS_BLOCK__', blocks[status]);
+		const taskCard = taskInfo
+			? `<div class="card"><strong>Пункт «Инвентаризация» (левое меню):</strong> ${taskInfo.replace(/</g, '&lt;')}</div>`
+			: '';
+		return welcomeHtml.replace('__STATUS_BLOCK__', blocks[status] + taskCard);
 	};
 
 	// GET — прямое открытие в браузере, без auth, просто welcome.
@@ -67,14 +66,13 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml('idle'));
 	});
 
-	// POST — открытие из Б24. Тело содержит AUTH_ID + DOMAIN. Используем для placement.bind.
+	// POST — открытие из Б24. Тело содержит AUTH_ID + DOMAIN.
 	app.post('/app/handler', async (req, reply) => {
 		const parsedBody = PlacementBodySchema.safeParse(req.body);
 		const parsedQuery = PlacementQuerySchema.safeParse(req.query);
 		const body = parsedBody.success ? parsedBody.data : {};
 		const query = parsedQuery.success ? parsedQuery.data : {};
 
-		// Проверка подлинности: только наш портал.
 		const verdict = verifyBitrixRequest(body, query, app.config);
 		if (!verdict.ok) {
 			app.log.warn({ reason: verdict.reason }, '[app/handler] rejected — failed verification');
@@ -82,38 +80,39 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		}
 
 		const auth = extractInstallAuth(body, query);
-
-		let status: 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle' = 'idle';
+		let status: Status = 'idle';
+		let taskInfo = '';
 
 		if (auth) {
+			const client = new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken } });
+
+			// 1) Вкладка сделки
 			try {
-				const client = new B24Client({
-					auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken },
-				});
-				const result = await bindDealTabPlacement({
-					client,
-					publicBaseUrl: app.config.publicBaseUrl,
-				});
+				const result = await bindDealTabPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				status = result.status;
-				app.log.info({ placement: DEAL_TAB_PLACEMENT, status: result.status, domain: auth.domain },
-					'[app/handler] placement bound');
-				const taskResult = await bindTaskInventoryPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
-				app.log.info({ placement: 'TASK_VIEW_TOP_PANEL', status: taskResult.status }, '[app/handler] task placement bound');
+				app.log.info({ placement: DEAL_TAB_PLACEMENT, status: result.status }, '[app/handler] deal placement bound');
 			} catch (err) {
 				status = 'failed';
-				const errInfo = err instanceof B24ApiError
-					? { code: err.code, description: err.description, httpStatus: err.httpStatus }
-					: { error: String(err) };
-				app.log.error({ ...errInfo, placement: DEAL_TAB_PLACEMENT }, '[app/handler] placement.bind failed');
+				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+				app.log.error({ placement: DEAL_TAB_PLACEMENT }, `[app/handler] deal placement.bind failed — ${e}`);
+			}
+
+			// 2) Пункт «Инвентаризация» в левом меню — независимо; падение не ломает вкладку сделки.
+			try {
+				const menuResult = await bindInventoryMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				taskInfo = `✅ ${menuResult.status}`;
+				app.log.info({ status: menuResult.status }, '[app/handler] inventory menu bound');
+			} catch (err) {
+				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+				taskInfo = `⛔ ${e}`;
+				app.log.error({}, `[app/handler] inventory menu bind failed — ${e}`);
 			}
 		} else {
 			status = 'no-auth';
-			app.log.warn({
-				hasAuthId: Boolean(body.AUTH_ID),
-				hasDomain: Boolean(body.DOMAIN ?? query.DOMAIN),
-			}, '[app/handler] no auth context — placement.bind skipped');
+			app.log.warn({ hasAuthId: Boolean(body.AUTH_ID), hasDomain: Boolean(body.DOMAIN ?? query.DOMAIN) },
+				'[app/handler] no auth context — placement.bind skipped');
 		}
 
-		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml(status));
+		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml(status, taskInfo));
 	});
 }

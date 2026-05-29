@@ -69,6 +69,8 @@ export function extractInstallAuth(body: PlacementBody, query: PlacementQuery): 
 export interface PlacementContext {
 	dealId: number | null;
 	taskId: number | null;
+	/** 'inventory' — вход в модуль инвентаризации (placement левого меню). */
+	view?: 'inventory';
 	domain: string | null;
 	memberId: string | null;
 	placement: string | null;
@@ -106,11 +108,23 @@ export function buildPlacementContext(body: PlacementBody): PlacementContext {
 	};
 }
 
-/** Контекст для placement задачи (TASK_VIEW_TOP_PANEL): taskId из {taskId|TASK_ID|ID}. */
+/** Контекст для placement задачи (TASK_VIEW_TOP_PANEL): taskId из {taskId|TASK_ID|ID}. УСТАРЕЛО (не принимается новой карточкой). */
 export function buildTaskInventoryContext(body: PlacementBody): PlacementContext {
 	return {
 		dealId: null,
 		taskId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['taskId', 'TASK_ID', 'ID']),
+		domain: body.DOMAIN ?? null,
+		memberId: body.member_id ?? null,
+		placement: body.PLACEMENT ?? null,
+	};
+}
+
+/** Контекст для placement левого меню — вход в модуль инвентаризации (view='inventory'). */
+export function buildInventoryContext(body: PlacementBody): PlacementContext {
+	return {
+		dealId: null,
+		taskId: null,
+		view: 'inventory',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,
 		placement: body.PLACEMENT ?? null,

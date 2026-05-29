@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { getContext } from './b24-context.js';
 import { DealProductsTab } from './DealProductsTab.js';
-import { InventoryReport } from './InventoryReport.js';
+import { InventoryHome } from './InventoryHome.js';
 import './styles.css';
 
 const root = document.getElementById('root');
@@ -16,6 +16,6 @@ const ctx = getContext();
 
 createRoot(root).render(
 	<StrictMode>
-		{ctx.taskId != null ? <InventoryReport /> : <DealProductsTab />}
+		{ctx.view === 'inventory' ? <InventoryHome /> : <DealProductsTab />}
 	</StrictMode>,
 );
