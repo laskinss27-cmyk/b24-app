@@ -36,6 +36,10 @@ export interface BX24Sdk {
 		params: Record<string, unknown>,
 		callback: (result: { data(): unknown; error(): unknown }) => void,
 	): void;
+	callBatch(
+		calls: Record<string, [string, Record<string, unknown>]>,
+		callback: (results: Record<string, { data(): unknown; error(): unknown }>) => void,
+	): void;
 	resizeWindow(width: number, height: number): void;
 	fitWindow(): void;
 }

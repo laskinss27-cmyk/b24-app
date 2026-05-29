@@ -1,0 +1,150 @@
+/**
+ * Тонкая промис-обёртка над BX24.js + доменные фетчеры для вкладки товаров.
+ * Всё ЧТЕНИЕ. Запись (создание документов реализации) — отдельная фаза, не здесь.
+ *
+ * BX24 работает на колбэках; оборачиваем в Promise, чтобы грузить данные async/await.
+ * Запросы идут токеном смотрящего пользователя — права Битрикса соблюдаются автоматически.
+ */
+
+import type { BX24Sdk } from './b24-context.js';
+
+function getBx24(): BX24Sdk {
+	const bx = window.BX24;
+	if (!bx) {
+		throw new Error('BX24 SDK не загружен (нет <script src="//api.bitrix24.com/api/v1/"> в HTML).');
+	}
+	return bx;
+}
+
+/** Один вызов метода Б24 → Promise. */
+export function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+	return new Promise((resolve, reject) => {
+		getBx24().callMethod(method, params, (res) => {
+			const err = res.error();
+			if (err) {
+				reject(new Error(`${method}: ${typeof err === 'object' ? JSON.stringify(err) : String(err)}`));
+				return;
+			}
+			resolve(res.data() as T);
+		});
+	});
+}
+
+/**
+ * Пакетный вызов (до 50 операций за раз). Ошибку отдельного вызова не валит весь
+ * батч — такой ключ просто получит null.
+ */
+export function callBatch(calls: Record<string, [string, Record<string, unknown>]>): Promise<Record<string, unknown>> {
+	return new Promise((resolve) => {
+		getBx24().callBatch(calls, (results) => {
+			const out: Record<string, unknown> = {};
+			for (const key of Object.keys(calls)) {
+				const r = results[key];
+				out[key] = r && !r.error() ? r.data() : null;
+			}
+			resolve(out);
+		});
+	});
+}
+
+// ── Доменные типы ─────────────────────────────────────────────────────────────
+
+/** TYPE строки: 1 = товар, 7 = работа/услуга (подтверждено разведкой портала). */
+export const ROW_TYPE_GOODS = 1;
+export const ROW_TYPE_WORK = 7;
+
+export interface DealProductRow {
+	id: string;
+	productId: number;
+	name: string;
+	type: number;
+	price: number;
+	quantity: number;
+	discountSum: number;
+	measure: string;
+}
+
+export interface StoreInfo {
+	id: number;
+	title: string;
+	active: boolean;
+}
+
+export interface StockAtStore {
+	storeId: number;
+	amount: number;
+}
+
+export interface ProductEnrichment {
+	stocks: StockAtStore[];
+	/** Нативная закупочная цена каталога. null — не заполнена (источник прибыли уточняем у Володи). */
+	purchasingPrice: number | null;
+}
+
+// ── Фетчеры ───────────────────────────────────────────────────────────────────
+
+export async function fetchProductRows(dealId: number): Promise<DealProductRow[]> {
+	const raw = await call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+	return (raw ?? []).map((r) => ({
+		id: String(r['ID']),
+		productId: Number(r['PRODUCT_ID'] ?? 0),
+		name: String(r['PRODUCT_NAME'] ?? ''),
+		type: Number(r['TYPE'] ?? 0),
+		price: Number(r['PRICE'] ?? 0),
+		quantity: Number(r['QUANTITY'] ?? 0),
+		discountSum: Number(r['DISCOUNT_SUM'] ?? 0),
+		measure: String(r['MEASURE_NAME'] ?? ''),
+	}));
+}
+
+export async function fetchStores(): Promise<StoreInfo[]> {
+	const res = await call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', {
+		select: ['id', 'title', 'active'],
+		order: { id: 'ASC' },
+	});
+	return (res?.stores ?? []).map((s) => ({
+		id: Number(s['id']),
+		title: String(s['title'] ?? `Склад #${s['id']}`),
+		active: s['active'] === 'Y',
+	}));
+}
+
+/** Коэффициент прибыли работ из app.option (default 0.5). */
+export async function fetchProfitCoef(): Promise<number> {
+	try {
+		const res = await call<Record<string, unknown>>('app.option.get', {});
+		const v = res?.['profit_coef'];
+		const n = v == null ? NaN : Number(v);
+		return Number.isFinite(n) && n > 0 ? n : 0.5;
+	} catch {
+		return 0.5;
+	}
+}
+
+/**
+ * Для набора товарных productId одним батчем тянем остатки по складам (amount>0)
+ * и нативную закупочную цену. Работы (type=7) сюда не передаём — у них нет склада.
+ */
+export async function fetchStockAndPurchasing(productIds: number[]): Promise<Record<number, ProductEnrichment>> {
+	const out: Record<number, ProductEnrichment> = {};
+	const ids = productIds.filter((id) => id > 0).slice(0, 24); // ≤24 товаров = ≤48 операций в батче (лимит 50)
+	if (!ids.length) return out;
+
+	const calls: Record<string, [string, Record<string, unknown>]> = {};
+	for (const pid of ids) {
+		calls[`stock_${pid}`] = ['catalog.storeproduct.list', { filter: { productId: pid }, select: ['storeId', 'amount'] }];
+		calls[`prod_${pid}`] = ['catalog.product.get', { id: pid }];
+	}
+	const res = await callBatch(calls);
+
+	for (const pid of ids) {
+		const stockRes = res[`stock_${pid}`] as { storeProducts?: Array<Record<string, unknown>> } | null;
+		const prodRes = res[`prod_${pid}`] as { product?: Record<string, unknown> } | null;
+		const stocks = (stockRes?.storeProducts ?? [])
+			.map((s) => ({ storeId: Number(s['storeId']), amount: Number(s['amount'] ?? 0) }))
+			.filter((s) => s.amount > 0);
+		const pp = prodRes?.product?.['purchasingPrice'];
+		out[pid] = { stocks, purchasingPrice: pp == null || pp === '' ? null : Number(pp) };
+	}
+	return out;
+}
