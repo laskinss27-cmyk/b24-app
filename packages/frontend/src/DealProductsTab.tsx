@@ -8,15 +8,9 @@ import {
 	call,
 	ROW_TYPE_GOODS,
 	ROW_TYPE_WORK,
+	BETA_USER_IDS,
 	type DealProductRow,
 } from './b24.js';
-
-/**
- * Канареечный доступ к новой таблице. Пока только Сергей Ласкин (Bitrix ID 1858).
- * Остальные видят спокойную заглушку и продолжают работать в стандартной вкладке «Товары».
- * Расширять по мере готовности; позже вынести в app.option, чтобы менять без передеплоя.
- */
-const BETA_USER_IDS = ['1858'];
 
 interface EnrichedRow extends DealProductRow {
 	stocks: Array<{ storeId: number; storeName: string; amount: number }>;

@@ -5,6 +5,8 @@
 
 export interface B24Context {
 	dealId: number | null;
+	/** id задачи — приходит из placement задачи (инвентаризация). Если задан — рендерим отчёт. */
+	taskId?: number | null;
 	domain: string | null;
 	memberId: string | null;
 	/** true только когда контекст подставлен моком в index.html (dev) */

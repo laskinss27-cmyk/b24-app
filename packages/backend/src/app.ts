@@ -10,6 +10,7 @@ import { registerHealthRoute } from './routes/health.js';
 import { registerInstallRoute } from './routes/install.js';
 import { registerUninstallRoute } from './routes/uninstall.js';
 import { registerPlacementDealTabRoute } from './routes/placement-deal-tab.js';
+import { registerPlacementTaskInventoryRoute } from './routes/placement-task-inventory.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -77,6 +78,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerInstallRoute(app);
 	registerUninstallRoute(app);
 	registerPlacementDealTabRoute(app);
+	registerPlacementTaskInventoryRoute(app);
 	registerAppHandlerRoute(app);
 
 	return app;

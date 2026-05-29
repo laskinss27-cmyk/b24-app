@@ -68,28 +68,49 @@ export function extractInstallAuth(body: PlacementBody, query: PlacementQuery): 
 
 export interface PlacementContext {
 	dealId: number | null;
+	taskId: number | null;
 	domain: string | null;
 	memberId: string | null;
 	placement: string | null;
 }
 
-export function parsePlacementOptions(raw: string | undefined): { dealId: number | null } {
-	if (!raw) return { dealId: null };
+/** Достаёт числовой id из PLACEMENT_OPTIONS по одному из ключей (Б24 шлёт по-разному). */
+function parseIdFromOptions(raw: string | undefined, keys: string[]): number | null {
+	if (!raw) return null;
 	try {
-		const parsed = JSON.parse(raw) as { ID?: string | number };
-		const id = parsed.ID;
-		if (id === undefined || id === null) return { dealId: null };
-		const numeric = typeof id === 'string' ? Number.parseInt(id, 10) : id;
-		return { dealId: Number.isFinite(numeric) ? numeric : null };
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		for (const key of keys) {
+			const v = parsed[key];
+			if (v === undefined || v === null || v === '') continue;
+			const numeric = typeof v === 'string' ? Number.parseInt(v, 10) : typeof v === 'number' ? v : NaN;
+			if (Number.isFinite(numeric)) return numeric;
+		}
+		return null;
 	} catch {
-		return { dealId: null };
+		return null;
 	}
 }
 
+export function parsePlacementOptions(raw: string | undefined): { dealId: number | null } {
+	return { dealId: parseIdFromOptions(raw, ['ID']) };
+}
+
+/** Контекст для placement сделки (CRM_DEAL_DETAIL_TAB): dealId из {ID}. */
 export function buildPlacementContext(body: PlacementBody): PlacementContext {
-	const { dealId } = parsePlacementOptions(body.PLACEMENT_OPTIONS);
 	return {
-		dealId,
+		dealId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['ID']),
+		taskId: null,
+		domain: body.DOMAIN ?? null,
+		memberId: body.member_id ?? null,
+		placement: body.PLACEMENT ?? null,
+	};
+}
+
+/** Контекст для placement задачи (TASK_VIEW_TOP_PANEL): taskId из {taskId|TASK_ID|ID}. */
+export function buildTaskInventoryContext(body: PlacementBody): PlacementContext {
+	return {
+		dealId: null,
+		taskId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['taskId', 'TASK_ID', 'ID']),
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,
 		placement: body.PLACEMENT ?? null,

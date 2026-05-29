@@ -43,3 +43,29 @@ export async function bindDealTabPlacement(opts: BindDealTabOptions): Promise<{ 
 		throw err;
 	}
 }
+
+/** Кнопка «Приступить» в карточке задачи (инвентаризация). Идемпотентно. */
+export const TASK_INVENTORY_PLACEMENT = 'TASK_VIEW_TOP_PANEL';
+export const TASK_INVENTORY_TITLE = 'Инвентаризация';
+
+export async function bindTaskInventoryPlacement(opts: BindDealTabOptions): Promise<{ status: 'bound' | 'already-bound' }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/task-inventory`;
+
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: TASK_INVENTORY_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: TASK_INVENTORY_TITLE,
+			LANG_ALL: {
+				ru: { TITLE: TASK_INVENTORY_TITLE, DESCRIPTION: 'Электронный отчёт инвентаризации' },
+				en: { TITLE: 'Inventory', DESCRIPTION: 'Inventory report' },
+			},
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError && /already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) {
+			return { status: 'already-bound' };
+		}
+		throw err;
+	}
+}

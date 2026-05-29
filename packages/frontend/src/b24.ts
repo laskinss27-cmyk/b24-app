@@ -148,3 +148,56 @@ export async function fetchStockAndPurchasing(productIds: number[]): Promise<Rec
 	}
 	return out;
 }
+
+/** Канареечный доступ к новым экранам — пока только Сергей Ласкин (Bitrix ID 1858). */
+export const BETA_USER_IDS = ['1858'];
+
+/** ID текущего пользователя, который смотрит (для канареечного гейта). */
+export async function fetchCurrentUserId(): Promise<string> {
+	const u = await call<{ ID?: string | number }>('user.current');
+	return String(u?.ID ?? '');
+}
+
+export interface InvLine {
+	productId: number;
+	name: string;
+	/** Учётный остаток на складе (что система думает, есть). */
+	book: number;
+}
+
+/**
+ * Все остатки склада (с пагинацией) + имена товаров — для отчёта инвентаризации.
+ * Учёт = amount из catalog.storeproduct.list, имя — из catalog.product.get (батчами).
+ */
+export async function fetchStoreInventory(storeId: number): Promise<InvLine[]> {
+	const rows: Array<{ productId: number; amount: number }> = [];
+	let start = 0;
+	for (let page = 0; page < 20; page++) {
+		// до 20 страниц по 50 = кап 1000 позиций на склад
+		const res = await call<{ storeProducts?: Array<Record<string, unknown>>; next?: number }>('catalog.storeproduct.list', {
+			filter: { storeId },
+			select: ['productId', 'amount'],
+			start,
+		});
+		for (const r of res?.storeProducts ?? []) rows.push({ productId: Number(r['productId']), amount: Number(r['amount'] ?? 0) });
+		if (res?.next == null) break;
+		start = res.next;
+	}
+
+	const ids = [...new Set(rows.map((r) => r.productId).filter((x) => x > 0))];
+	const names = new Map<number, string>();
+	for (let i = 0; i < ids.length; i += 40) {
+		const chunk = ids.slice(i, i + 40);
+		const calls: Record<string, [string, Record<string, unknown>]> = {};
+		for (const id of chunk) calls[`p${id}`] = ['catalog.product.get', { id }];
+		const res = await callBatch(calls);
+		for (const id of chunk) {
+			const p = (res[`p${id}`] as { product?: Record<string, unknown> } | null)?.product;
+			names.set(id, p ? String(p['name'] ?? `#${id}`) : `#${id}`);
+		}
+	}
+
+	return rows
+		.filter((r) => r.productId > 0)
+		.map((r) => ({ productId: r.productId, name: names.get(r.productId) ?? `#${r.productId}`, book: r.amount }));
+}

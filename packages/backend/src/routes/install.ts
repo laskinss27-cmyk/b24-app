@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindTaskInventoryPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
@@ -74,6 +74,8 @@ export function registerInstallRoute(app: FastifyInstance): void {
 				});
 				app.log.info({ placement: DEAL_TAB_PLACEMENT, status: result.status, domain: auth.domain },
 					'[install] placement bound');
+				const taskResult = await bindTaskInventoryPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ placement: 'TASK_VIEW_TOP_PANEL', status: taskResult.status }, '[install] task placement bound');
 			} catch (err) {
 				const errInfo = err instanceof B24ApiError
 					? { code: err.code, description: err.description, httpStatus: err.httpStatus }
