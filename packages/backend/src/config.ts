@@ -9,6 +9,10 @@ const ConfigSchema = z.object({
 	portalDomain: z.string().min(1).default('umniydom.bitrix24.ru'),
 	/** Публичный URL нашего приложения. Используется в placement.bind как handler URL. */
 	publicBaseUrl: z.string().url().default('https://bba0fouaqgab742ohki8.containers.yandexcloud.net'),
+	/** URL раздела «Инвентаризация» в портале — для ссылки в задаче-оповещении (заполнит Сергей). */
+	appSectionUrl: z.string().default(''),
+	/** Гейт оповещения: off — соисполнителей не добавляем (мьют на обкатке); on — шлём выбранным в UI. */
+	inventoryNotify: z.enum(['off', 'on']).default('on'),
 	appClientId: z.string().optional(),
 	appClientSecret: z.string().optional(),
 	appSecret: z.string().optional(),
@@ -25,6 +29,8 @@ export function loadConfig(): Config {
 		host: process.env['HOST'],
 		portalDomain: process.env['PORTAL_DOMAIN'],
 		publicBaseUrl: process.env['PUBLIC_BASE_URL'],
+		appSectionUrl: process.env['APP_SECTION_URL'],
+		inventoryNotify: process.env['INVENTORY_NOTIFY'],
 		appClientId: process.env['APP_CLIENT_ID'],
 		appClientSecret: process.env['APP_CLIENT_SECRET'],
 		appSecret: process.env['APP_SECRET'],

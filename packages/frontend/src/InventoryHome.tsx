@@ -3,27 +3,53 @@ import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchStores,
 	fetchUsers,
+	fetchSections,
 	listInventories,
 	createInventory,
+	claimPoint,
+	deleteInventory,
+	makeActPoint,
+	reopenPoint,
+	buildPointDocuments,
 	getInitiators,
-	fetchCurrentUserId,
+	fetchCurrentUser,
+	isPortalAdmin,
 	withTimeout,
-	BETA_USER_IDS,
 	type Inventory,
 	type InvPoint,
+	type BuiltDoc,
+	type InvResult,
 	type SimpleUser,
 	type StoreInfo,
 } from './b24.js';
+import { InventoryCount } from './InventoryReport.js';
 
 /**
  * Модуль инвентаризации (вход из левого меню). Своя сущность, без привязки к задаче.
- * v1: инициатор создаёт инвентаризацию (точки + ответственные) и видит список.
- * v2 (дальше): менеджер открывает свою точку → считает → отправляет; живая сводка статусов.
+ * v1: инициатор создаёт инвентаризацию (точки + срок) и видит список.
+ * v2: менеджер берёт свою точку («Начал выполнение») → считает → отправляет;
+ *     инициатор видит живую сводку статусов точек (не начато / в работе / отправлено).
  *
- * Канарейка: модуль виден только бета-юзеру (Сергей 1858). Бета = инициатор (для теста).
+ * Канарейка: модуль виден только бета-юзеру (Сергей 1858). Бета = инициатор (для теста),
+ * но он же может пройти точку как менеджер — кнопки действий есть и у инициатора.
  */
 
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'error'; msg: string } | { k: 'ready' };
+
+/** Активный подсчёт точки (открыт экран InventoryCount). */
+interface Counting {
+	inventoryId: string;
+	storeId: number;
+	storeName: string;
+	draft?: Record<number, number> | undefined;
+	/** Охват (#13): разделы инвентаризации — прокидываем в подсчёт. */
+	sectionIds?: number[] | undefined;
+	/** 'act' — второй раунд (сверка акта разногласий), иначе обычный подсчёт. */
+	mode?: 'count' | 'act' | undefined;
+	/** Режим акта: расхождения 1-го раунда (что показываем) + размер инвентаризации (для слияния). */
+	actLines?: InvResult['lines'] | undefined;
+	total1?: number | undefined;
+}
 
 const MOCK_STORES: StoreInfo[] = [
 	{ id: 8, title: 'Максидом Дунайский 64', active: true },
@@ -35,6 +61,11 @@ const MOCK_USERS: SimpleUser[] = [
 	{ id: '986', name: 'Бекасов Игорь' },
 	{ id: '18', name: 'Иванов Иван' },
 	{ id: '34', name: 'Петров Пётр' },
+];
+const MOCK_SECTIONS: { id: number; name: string }[] = [
+	{ id: 156, name: 'Кабель и расходники' },
+	{ id: 190, name: 'Домофоны' },
+	{ id: 194, name: 'Камеры' },
 ];
 
 /** Статус крайнего срока для списка (браузерная дата — это фронт, не workflow). */
@@ -51,6 +82,18 @@ function deadlineStatus(deadline: string): { text: string; cls: string } | null 
 	return { text: `до ${dd.toLocaleDateString('ru-RU')}`, cls: 'ok' };
 }
 
+/** Текст и значок статуса точки для сводки. */
+function pointState(p: InvPoint): { dot: string; text: string } {
+	const st = p.status ?? 'idle';
+	const who = p.responsibleName ? ` · ${p.responsibleName}` : '';
+	const disc = p.result ? ` · расхождений ${p.result.discrepancies}` : '';
+	if (st === 'reconciled') return { dot: '✅', text: `сверено${who}${disc}` };
+	if (st === 'act') return { dot: '📝', text: `акт на сверке${who}` };
+	if (st === 'submitted') return { dot: '🟢', text: `отправлено${who}${disc}` };
+	if (st === 'in_progress') return { dot: '🔵', text: `в работе${who}` };
+	return { dot: '⚪', text: p.responsibleName ? `назначен: ${p.responsibleName}` : 'не начато' };
+}
+
 export function InventoryHome(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
@@ -59,13 +102,23 @@ export function InventoryHome(): JSX.Element {
 	const [inventories, setInventories] = useState<Inventory[]>([]);
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [users, setUsers] = useState<SimpleUser[]>([]);
+	const [sections, setSections] = useState<{ id: number; name: string }[]>([]);
 
 	const [creating, setCreating] = useState(false);
 	const [title, setTitle] = useState('');
 	const [picked, setPicked] = useState<Record<number, string>>({});
 	const [deadline, setDeadline] = useState('');
+	const [notify, setNotify] = useState<string[]>([]);
+	const [pickedSections, setPickedSections] = useState<number[]>([]);
 	const [saving, setSaving] = useState(false);
 	const [storageWarn, setStorageWarn] = useState<string | null>(null);
+
+	const [counting, setCounting] = useState<Counting | null>(null);
+	const [actionErr, setActionErr] = useState<string | null>(null);
+	/** Ключ `invId:storeId` раскрытой точки (просмотр расхождений). */
+	const [expanded, setExpanded] = useState<string | null>(null);
+	/** Результат формирования документов: текст + ссылки на черновики (кнопки «Открыть»). */
+	const [docResult, setDocResult] = useState<{ docs: BuiltDoc[]; text: string } | null>(null);
 
 	useEffect(() => {
 		if (ctx.__mock) {
@@ -73,11 +126,20 @@ export function InventoryHome(): JSX.Element {
 			setIsInitiator(true);
 			setStores(MOCK_STORES);
 			setUsers(MOCK_USERS);
+			setSections(MOCK_SECTIONS);
 			setInventories([
-				{ id: '1', title: 'Инвентаризация Июнь', status: 'active', deadline: '2026-06-05', createdById: '1', createdAt: '2026-06-01', points: [
-					{ storeId: 8, storeName: 'Максидом Дунайский 64', responsibleId: '18', responsibleName: 'Иванов Иван' },
-					{ storeId: 10, storeName: 'Максидом Богатырский 15', responsibleId: '', responsibleName: '' },
-				] },
+				{
+					id: '1',
+					title: 'Инвентаризация Июнь',
+					status: 'active',
+					deadline: '2026-06-05',
+					createdById: '1',
+					createdAt: '2026-06-01',
+					points: [
+						{ storeId: 8, storeName: 'Максидом Дунайский 64', responsibleId: '18', responsibleName: 'Иванов Иван', status: 'in_progress', startedAt: '2026-06-01' },
+						{ storeId: 10, storeName: 'Максидом Богатырский 15', responsibleId: '', responsibleName: '', status: 'idle' },
+					],
+				},
 			]);
 			setPhase({ k: 'ready' });
 			return;
@@ -89,30 +151,31 @@ export function InventoryHome(): JSX.Element {
 		}
 		bx.init(() => {
 			void (async () => {
-				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
-				if (!BETA_USER_IDS.includes(uid)) {
+				const meUser = await withTimeout(fetchCurrentUser(), 15000, 'user.current');
+					const uid = meUser.id;
+				if (false /* GA: канарейка снята — модуль инвентаризации доступен всем */) {
 					setPhase({ k: 'denied' });
 					return;
 				}
-				// инициаторы не критичны (бета = инициатор) — с таймаутом и фолбэком
 				let initiators: string[] = [];
 				try {
 					initiators = await withTimeout(getInitiators(), 8000, 'app.option.get');
 				} catch {
 					initiators = [];
 				}
-				const init = BETA_USER_IDS.includes(uid) || initiators.includes(uid);
+				// роль инициатора — ниже (админ ИЛИ в списке инициаторов)
+					const init = isPortalAdmin() || initiators.includes(uid);
 				setIsInitiator(init);
 
-				// критичное: точки + сотрудники (эти методы уже работают в других экранах)
 				const sts = await withTimeout(fetchStores(), 15000, 'catalog.store.list');
 				const usrs = init ? await withTimeout(fetchUsers(), 15000, 'user.get').catch(() => [] as SimpleUser[]) : [];
-				setMe({ id: uid, name: usrs.find((u) => u.id === uid)?.name ?? uid });
+				const secs = init ? await withTimeout(fetchSections(), 15000, 'catalog.section.list').catch(() => [] as { id: number; name: string }[]) : [];
+				setMe(meUser);
 				setStores(sts.filter((s) => s.active));
 				setUsers(usrs);
-				setPhase({ k: 'ready' }); // рендерим модуль уже здесь — хранилище не блокирует
+				setSections(secs);
+				setPhase({ k: 'ready' });
 
-				// хранилище (entity) — в фоне; зависание/ошибка не вешает экран, а показывает предупреждение
 				void (async () => {
 					try {
 						setInventories(await withTimeout(listInventories(), 12000, 'entity.item.get'));
@@ -124,8 +187,127 @@ export function InventoryHome(): JSX.Element {
 		});
 	}, [ctx]);
 
+	async function reload(): Promise<void> {
+		if (ctx.__mock) return;
+		try {
+			setInventories(await withTimeout(listInventories(), 12000, 'list'));
+		} catch {
+			/* оставляем текущий список */
+		}
+	}
+
+	function markPoint(invId: string, storeId: number, patch: Partial<InvPoint>): void {
+		setInventories((prev) =>
+			prev.map((inv) => (inv.id !== invId ? inv : { ...inv, points: inv.points.map((p) => (p.storeId !== storeId ? p : { ...p, ...patch })) })),
+		);
+	}
+
+	/** «Начал выполнение» — берём точку себе и открываем подсчёт. */
+	async function startPoint(inv: Inventory, p: InvPoint): Promise<void> {
+		setActionErr(null);
+		if (ctx.__mock) {
+			markPoint(inv.id, p.storeId, { status: 'in_progress', responsibleId: me.id, responsibleName: me.name, startedAt: new Date().toISOString() });
+		} else {
+			try {
+				await withTimeout(claimPoint(inv.id, p.storeId, me.id, me.name), 12000, 'claim');
+			} catch (e: unknown) {
+				setActionErr(String(e instanceof Error ? e.message : e));
+				return;
+			}
+		}
+		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, draft: p.draft, sectionIds: inv.sectionIds });
+	}
+
+	function continuePoint(inv: Inventory, p: InvPoint, mode?: 'count' | 'act'): void {
+		setActionErr(null);
+		setCounting({
+			inventoryId: inv.id,
+			storeId: p.storeId,
+			storeName: p.storeName,
+			draft: p.draft,
+			sectionIds: inv.sectionIds,
+			mode,
+			actLines: mode === 'act' ? p.result?.lines : undefined,
+			total1: mode === 'act' ? p.result?.total : undefined,
+		});
+	}
+
+	/** «Сформировать акт разногласий» (инициатор) — отправленная точка уходит менеджеру на сверку. */
+	async function makeAct(inv: Inventory, p: InvPoint): Promise<void> {
+		setActionErr(null);
+		if (ctx.__mock) {
+			markPoint(inv.id, p.storeId, { status: 'act', actAt: new Date().toISOString() });
+			return;
+		}
+		try {
+			await withTimeout(makeActPoint(inv.id, p.storeId, me.id), 12000, 'makeAct');
+			markPoint(inv.id, p.storeId, { status: 'act' });
+		} catch (e: unknown) {
+			setActionErr(String(e instanceof Error ? e.message : e));
+		}
+	}
+
+	/** «Вернуть в работу» (инициатор) — точка снова в работе, пересчёт с прошлых цифр. */
+	async function reopenWork(inv: Inventory, p: InvPoint): Promise<void> {
+		setActionErr(null);
+		if (ctx.__mock) {
+			markPoint(inv.id, p.storeId, { status: 'in_progress' });
+			return;
+		}
+		try {
+			await withTimeout(reopenPoint(inv.id, p.storeId, me.id), 12000, 'reopen');
+			markPoint(inv.id, p.storeId, { status: 'in_progress' });
+		} catch (e: unknown) {
+			setActionErr(String(e instanceof Error ? e.message : e));
+		}
+	}
+
+	/** Открыть карточку складского документа в Б24 (слайдером, не уходя из приложения). */
+	function openDoc(id: number): void {
+		const path = `/shop/documents/details/${id}/?inventoryManagementSource=inventory`;
+		const bx = window.BX24;
+		if (bx && typeof bx.openPath === 'function') bx.openPath(path);
+		else {
+			const auth = bx ? bx.getAuth() : false;
+			window.open(`https://${auth ? (auth.domain ?? '') : ''}${path}`, '_blank');
+		}
+	}
+
+	/** Сформировать черновики списания/оприходования по сверённой точке (фаза C). Проведение — вручную в Б24. */
+	async function buildDocs(inv: Inventory, p: InvPoint): Promise<void> {
+		setActionErr(null);
+		setDocResult(null);
+		if (ctx.__mock) {
+			setDocResult({ docs: [], text: 'dev-мок: документы формируются только на проде.' });
+			return;
+		}
+		if (!window.confirm(`Сформировать ЧЕРНОВИКИ списания/оприходования по точке «${p.storeName}»? Остатки не изменятся — проводить будешь сам в Б24.`)) return;
+		try {
+			const { docs, message } = await withTimeout(buildPointDocuments(inv.id, p.storeId, me.id), 20000, 'build-documents');
+			setDocResult({ docs, text: message ?? 'Черновики созданы (не проведены). Открой, проверь и проведи в Б24:' });
+			void reload();
+		} catch (e: unknown) {
+			setActionErr(String(e instanceof Error ? e.message : e));
+		}
+	}
+
+	/** Удалить инвентаризацию целиком (необратимо, с подтверждением). */
+	async function removeInventory(inv: Inventory): Promise<void> {
+		if (!window.confirm(`Удалить «${inv.title}»? Это насовсем.`)) return;
+		setActionErr(null);
+		if (ctx.__mock) {
+			setInventories((prev) => prev.filter((x) => x.id !== inv.id));
+			return;
+		}
+		try {
+			await withTimeout(deleteInventory(inv.id), 12000, 'delete');
+			setInventories((prev) => prev.filter((x) => x.id !== inv.id));
+		} catch (e: unknown) {
+			setActionErr(String(e instanceof Error ? e.message : e));
+		}
+	}
+
 	async function submitCreate(): Promise<void> {
-		// ответственный необязателен: берём все отмеченные точки, responsible может быть пустым (назначится сам при «Начал выполнение»)
 		const points: InvPoint[] = Object.entries(picked).map(([sid, rid]) => {
 			const store = stores.find((s) => s.id === Number(sid));
 			const user = rid ? users.find((u) => u.id === rid) : undefined;
@@ -134,6 +316,7 @@ export function InventoryHome(): JSX.Element {
 				storeName: store?.title ?? `склад #${sid}`,
 				responsibleId: rid || '',
 				responsibleName: user?.name ?? '',
+				status: 'idle',
 			};
 		});
 		if (!title.trim() || !points.length || !deadline) return;
@@ -142,17 +325,19 @@ export function InventoryHome(): JSX.Element {
 		try {
 			if (ctx.__mock) {
 				setInventories((prev) => [
-					{ id: String(prev.length + 1), title: title.trim(), status: 'active', deadline, points, createdById: me.id, createdAt: now },
+					{ id: String(prev.length + 1), title: title.trim(), status: 'active', deadline, points, createdById: me.id, createdAt: now, sectionIds: pickedSections },
 					...prev,
 				]);
 			} else {
-				await withTimeout(createInventory(title.trim(), points, deadline, me.id), 15000, 'create');
+				await withTimeout(createInventory(title.trim(), points, deadline, me.id, notify, pickedSections), 15000, 'create');
 				setInventories(await withTimeout(listInventories(), 12000, 'list'));
 			}
 			setCreating(false);
 			setTitle('');
 			setPicked({});
 			setDeadline('');
+			setNotify([]);
+			setPickedSections([]);
 		} catch (e) {
 			setPhase({ k: 'error', msg: `Не удалось создать: ${String(e instanceof Error ? e.message : e)}` });
 		} finally {
@@ -164,25 +349,143 @@ export function InventoryHome(): JSX.Element {
 	if (phase.k === 'denied') return <Shell><p className="stub-calm">Раздел инвентаризации в разработке. Пока доступен не всем.</p></Shell>;
 	if (phase.k === 'error') return <Shell><p className="error">⛔ {phase.msg}</p></Shell>;
 
-	// Менеджер (не инициатор): его точки
+	// Экран подсчёта точки
+	if (counting) {
+		return (
+			<InventoryCount
+				inventoryId={counting.inventoryId}
+				storeId={counting.storeId}
+				storeName={counting.storeName}
+				sectionIds={counting.sectionIds}
+				me={me}
+				initialDraft={counting.draft}
+				mode={counting.mode}
+				actLines={counting.actLines}
+				total1={counting.total1}
+				mock={ctx.__mock}
+				onBack={() => {
+					setCounting(null);
+					void reload();
+				}}
+				onSubmitted={(result, facts) => {
+					if (ctx.__mock) {
+						markPoint(counting.inventoryId, counting.storeId, {
+							status: counting.mode === 'act' ? 'reconciled' : 'submitted',
+							submittedAt: new Date().toISOString(),
+							responsibleId: me.id,
+							responsibleName: me.name,
+							result,
+							draft: facts,
+						});
+					} else {
+						void reload();
+					}
+					setCounting(null);
+				}}
+			/>
+		);
+	}
+
+	// Действие на точке по статусу/владельцу
+	const pointAction = (inv: Inventory, p: InvPoint): JSX.Element | null => {
+		const st = p.status ?? 'idle';
+		const mine = p.responsibleId === me.id;
+		const key = `${inv.id}:${p.storeId}`;
+		const openBtn = p.result ? (
+			<button className="btn-mini ghost" onClick={() => setExpanded(expanded === key ? null : key)}>
+				{expanded === key ? 'Скрыть' : 'Открыть'}
+			</button>
+		) : null;
+		const reopenBtn = isInitiator ? (
+			<button className="btn-mini ghost" onClick={() => void reopenWork(inv, p)}>
+				Вернуть в работу
+			</button>
+		) : null;
+		if (st === 'idle') return !p.responsibleId || mine ? <button className="btn-mini" onClick={() => void startPoint(inv, p)}>Начал выполнение</button> : null;
+		if (st === 'in_progress') return mine ? <button className="btn-mini" onClick={() => continuePoint(inv, p)}>Продолжить</button> : null;
+		if (st === 'submitted') {
+			return (
+				<>
+					{isInitiator && <button className="btn-mini" onClick={() => void makeAct(inv, p)}>Сформировать акт</button>}
+					{openBtn}
+					{reopenBtn}
+				</>
+			);
+		}
+		if (st === 'act') {
+			return (
+				<>
+					{mine && <button className="btn-mini" onClick={() => continuePoint(inv, p, 'act')}>Проверить акт</button>}
+					{openBtn}
+					{reopenBtn}
+				</>
+			);
+		}
+		if (st === 'reconciled') {
+			return (
+				<>
+					{isInitiator && <button className="btn-mini" onClick={() => void buildDocs(inv, p)}>Сформировать документы</button>}
+					{openBtn}
+					{reopenBtn}
+				</>
+			);
+		}
+		return null;
+	};
+
+	const invCard = (inv: Inventory): JSX.Element => {
+		const ds = deadlineStatus(inv.deadline);
+		return (
+			<div className="inv-card" key={inv.id}>
+				<div className="inv-card-head">
+					<strong>{inv.title}</strong>
+					<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status}</span>
+					{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
+					{isInitiator && (
+						<button className="btn-del" title="Удалить инвентаризацию" onClick={() => void removeInventory(inv)}>
+							✕
+						</button>
+					)}
+				</div>
+				<ul className="point-list">
+					{inv.points.map((p) => {
+						const s = pointState(p);
+						const key = `${inv.id}:${p.storeId}`;
+						return (
+							<li className="point-line-wrap" key={p.storeId}>
+								<div className="point-line">
+									<span className="point-name">{p.storeName}</span>
+									<span className="point-state">
+										{s.dot} {s.text}
+									</span>
+									{pointAction(inv, p)}
+								</div>
+								{expanded === key && p.result && <DiscDetail result={p.result} />}
+							</li>
+						);
+					})}
+				</ul>
+			</div>
+		);
+	};
+
+	const activeInvs = inventories.filter((inv) => inv.status === 'active');
+
+	// Менеджер (не инициатор): активные инвентаризации, берёт свободную/свою точку
 	if (!isInitiator) {
-		const mine = inventories.filter((inv) => inv.status === 'active' && inv.points.some((p) => p.responsibleId === me.id));
 		return (
 			<div className="inv">
-				<header><h1>Инвентаризация</h1><p className="subtitle">{me.name} · ваши точки</p></header>
-				{mine.length ? mine.map((inv) => (
-					<div className="inv-card" key={inv.id}>
-						<strong>{inv.title}</strong>
-						<ul>{inv.points.filter((p) => p.responsibleId === me.id).map((p) => (
-							<li key={p.storeId}>{p.storeName} <span className="muted">— подсчёт скоро</span></li>
-						))}</ul>
-					</div>
-				)) : <p className="stub-calm">Для вас сейчас нет активных инвентаризаций.</p>}
+				<header>
+					<h1>Инвентаризация</h1>
+					<p className="subtitle">{me.name} · возьмите точку, где вы сейчас работаете</p>
+				</header>
+				{actionErr && <div className="beta-banner">⛔ {actionErr}</div>}
+				{activeInvs.length ? activeInvs.map(invCard) : <p className="stub-calm">Сейчас нет активных инвентаризаций.</p>}
 			</div>
 		);
 	}
 
-	// Инициатор
+	// Инициатор: создание + сводка статусов (и сам может пройти точку)
 	const canSave = Boolean(title.trim()) && Object.keys(picked).length > 0 && Boolean(deadline);
 	return (
 		<div className="inv">
@@ -227,30 +530,184 @@ export function InventoryHome(): JSX.Element {
 							);
 						})}
 					</div>
+					<p className="muted">Охват — разделы каталога (пусто = весь склад):</p>
+					<MultiPick
+						placeholder="Поиск раздела…"
+						options={sections.length ? [{ id: '0', label: 'Без раздела (товары без категории)' }, ...sections.map((s) => ({ id: String(s.id), label: s.name }))] : []}
+						selected={pickedSections.map(String)}
+						onChange={(ids) => setPickedSections(ids.map(Number))}
+						empty="Разделы не загрузились — будет весь склад."
+					/>
+					<p className="muted">Кого оповестить задачей (пусто = без оповещения):</p>
+					<TagPicker
+						placeholder="Начните вводить имя сотрудника…"
+						options={users.map((u) => ({ id: u.id, label: u.name }))}
+						selected={notify}
+						onChange={setNotify}
+						empty="Сотрудники не загрузились."
+					/>
 					<div className="inv-actions">
 						<button className="btn-primary" disabled={saving || !canSave} onClick={() => void submitCreate()}>{saving ? 'Сохраняю…' : 'Создать'}</button>
-						<button className="btn-secondary" onClick={() => { setCreating(false); setTitle(''); setPicked({}); }}>Отмена</button>
+						<button className="btn-secondary" onClick={() => { setCreating(false); setTitle(''); setPicked({}); setNotify([]); setPickedSections([]); }}>Отмена</button>
 					</div>
 				</div>
 			)}
 
-			{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
-			<h2 className="inv-h2">Инвентаризации</h2>
-			{inventories.length ? inventories.map((inv) => {
-				const ds = deadlineStatus(inv.deadline);
-				return (
-					<div className="inv-card" key={inv.id}>
-						<div className="inv-card-head">
-							<strong>{inv.title}</strong>
-							<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status}</span>
-							{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
-						</div>
-						<ul>{inv.points.map((p) => (
-							<li key={p.storeId}>{p.storeName} — <span className="muted">{p.responsibleName || 'не назначен'}</span> <span className="status-dot">⚪ не начато</span></li>
-						))}</ul>
+			{actionErr && <div className="beta-banner">⛔ {actionErr}</div>}
+			{docResult && (
+					<div className="beta-banner ok">
+						✅ {docResult.text}
+						{docResult.docs.map((d) => (
+							<button key={d.id} className="btn-mini doc-open" onClick={() => openDoc(d.id)}>
+								Открыть {d.type === 'D' ? 'списание' : 'оприходование'} #{d.id}
+							</button>
+						))}
 					</div>
-				);
-			}) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
+				)}
+				{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
+			<h2 className="inv-h2">Инвентаризации</h2>
+			{inventories.length ? inventories.map(invCard) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
+		</div>
+	);
+}
+
+/** Детали отчёта точки: посчитано N/M + список расхождений (учёт/факт/разница). */
+function DiscDetail({ result }: { result: InvResult }): JSX.Element {
+	return (
+		<div className="disc-detail">
+			<div className="disc-head">
+				Посчитано {result.counted}/{result.total}
+				{result.total - result.counted > 0 ? ` · не введено ${result.total - result.counted}` : ''} · расхождений {result.discrepancies}
+			</div>
+			{result.lines.length ? (
+				<table className="disc-table">
+					<thead>
+						<tr>
+							<th>Товар</th>
+							<th className="num">Учёт</th>
+							<th className="num">Факт</th>
+							<th className="num">Разница</th>
+						</tr>
+					</thead>
+					<tbody>
+						{result.lines.map((l) => (
+							<tr key={l.productId}>
+								<td>{l.name}</td>
+								<td className="num">{l.book}</td>
+								<td className="num">{l.fact}</td>
+								<td className={`num ${l.diff < 0 ? 'short' : 'over'}`}>{l.diff > 0 ? `+${l.diff}` : l.diff}</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			) : (
+				<p className="muted">Расхождений нет — факт сошёлся с учётом.</p>
+			)}
+		</div>
+	);
+}
+
+/** Поисковый мультивыбор (чекбоксы со скроллом). Для охвата-разделов и списка оповещаемых. */
+function MultiPick(props: {
+	options: { id: string; label: string }[];
+	selected: string[];
+	onChange: (ids: string[]) => void;
+	placeholder: string;
+	empty: string;
+}): JSX.Element {
+	const { options, selected, onChange, placeholder, empty } = props;
+	const [q, setQ] = useState('');
+	const sel = new Set(selected);
+	const ql = q.trim().toLowerCase();
+	const shown = ql ? options.filter((o) => o.label.toLowerCase().includes(ql)) : options;
+	function toggle(id: string): void {
+		const next = new Set(sel);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		onChange([...next]);
+	}
+	if (!options.length) return <p className="muted small">{empty}</p>;
+	return (
+		<div className="multi-pick">
+			<input className="inv-input" placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
+			<div className="multi-toolbar">
+				<button type="button" className="link-btn" onClick={() => onChange(options.map((o) => o.id))}>Выбрать все</button>
+				<button type="button" className="link-btn" onClick={() => onChange([])}>Снять все</button>
+				{selected.length > 0 && <span className="multi-count">выбрано: {selected.length}</span>}
+			</div>
+			<div className="multi-list">
+				{shown.map((o) => (
+					<label className="multi-item" key={o.id}>
+						<input type="checkbox" checked={sel.has(o.id)} onChange={() => toggle(o.id)} /> {o.label}
+					</label>
+				))}
+				{!shown.length && <p className="muted small">Ничего не найдено.</p>}
+			</div>
+		</div>
+	);
+}
+
+/** Тег-инпут с автокомплитом: набираешь → выбираешь из совпадений → чип-хэштег; «×» убирает. Компактно. */
+function TagPicker(props: {
+	options: { id: string; label: string }[];
+	selected: string[];
+	onChange: (ids: string[]) => void;
+	placeholder: string;
+	empty: string;
+}): JSX.Element {
+	const { options, selected, onChange, placeholder, empty } = props;
+	const [q, setQ] = useState('');
+	const sel = new Set(selected);
+	const byId = new Map(options.map((o) => [o.id, o.label]));
+	const ql = q.trim().toLowerCase();
+	const matches = ql ? options.filter((o) => !sel.has(o.id) && o.label.toLowerCase().includes(ql)).slice(0, 8) : [];
+	function add(id: string): void {
+		if (sel.has(id)) return;
+		onChange([...selected, id]);
+		setQ('');
+	}
+	function remove(id: string): void {
+		onChange(selected.filter((x) => x !== id));
+	}
+	if (!options.length) return <p className="muted small">{empty}</p>;
+	return (
+		<div className="tag-pick">
+			{selected.length > 0 && (
+				<div className="tag-chips">
+					{selected.map((id) => (
+						<span className="tag-chip" key={id}>
+							{byId.get(id) ?? id}
+							<button type="button" className="tag-x" onClick={() => remove(id)} aria-label="убрать">×</button>
+						</span>
+					))}
+				</div>
+			)}
+			<div className="tag-input-wrap">
+				<input
+					className="inv-input"
+					placeholder={placeholder}
+					value={q}
+					onChange={(e) => setQ(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === 'Enter') {
+							const first = matches[0];
+							if (first) {
+								e.preventDefault();
+								add(first.id);
+							}
+						}
+					}}
+				/>
+				{matches.length > 0 && (
+					<div className="tag-dropdown">
+						{matches.map((o) => (
+							<button type="button" className="tag-option" key={o.id} onMouseDown={(e) => { e.preventDefault(); add(o.id); }}>
+								{o.label}
+							</button>
+						))}
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }

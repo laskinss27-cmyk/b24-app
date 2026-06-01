@@ -47,7 +47,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 </html>`;
 
 	type Status = 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle';
-	const renderHtml = (status: Status, taskInfo = '', storageInfo = ''): string => {
+	const renderHtml = (status: Status, taskInfo = '', storageInfo = '', placementsInfo = ''): string => {
 		const blocks: Record<Status, string> = {
 			'bound': '<div class="card ok"><strong>✅ Вкладка сделки зарегистрирована.</strong></div>',
 			'already-bound': '<div class="card ok"><strong>✅ Вкладка сделки уже была зарегистрирована.</strong></div>',
@@ -61,7 +61,10 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		const storageCard = storageInfo
 			? `<div class="card"><strong>Хранилище инвентаризации:</strong> ${storageInfo.replace(/</g, '&lt;')}</div>`
 			: '';
-		return welcomeHtml.replace('__STATUS_BLOCK__', blocks[status] + taskCard + storageCard);
+		const placementsCard = placementsInfo
+			? `<div class="card"><strong>placement.list — доступные точки встраивания:</strong><br><code>${placementsInfo.replace(/</g, '&lt;')}</code></div>`
+			: '';
+		return welcomeHtml.replace('__STATUS_BLOCK__', blocks[status] + taskCard + storageCard + placementsCard);
 	};
 
 	// GET — прямое открытие в браузере, без auth, просто welcome.
@@ -86,6 +89,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		let status: Status = 'idle';
 		let taskInfo = '';
 		let storageInfo = '';
+		let placementsInfo = '';
 
 		if (auth) {
 			const client = new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken } });
@@ -116,12 +120,35 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			const st = await ensureInventoryEntity(client);
 			storageInfo = st.status === 'created' ? '✅ создано' : st.status === 'exists' ? '✅ уже есть' : `⛔ ${st.status}`;
 			app.log.info({ status: st.status }, '[app/handler] inventory entity');
+
+			// 4) ДИАГНОСТИКА (Сергей просил «проверяй»): какие placement-точки реально
+			// доступны приложению на этом портале — вкл. мобильные/универсальные. Только чтение.
+			try {
+				const raw = await client.call<unknown>('placement.list', { FULL: true });
+				if (Array.isArray(raw)) {
+					const codes = raw.map((x) =>
+						typeof x === 'string'
+							? x
+							: x && typeof x === 'object' && 'placement' in x
+								? String((x as { placement: unknown }).placement)
+								: JSON.stringify(x),
+					);
+					placementsInfo = codes.length ? codes.join(', ') : '(пусто)';
+				} else {
+					placementsInfo = JSON.stringify(raw).slice(0, 1000);
+				}
+				app.log.info({}, `[app/handler] placement.list = ${placementsInfo}`);
+			} catch (err) {
+				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+				placementsInfo = `⛔ ${e}`;
+				app.log.error({}, `[app/handler] placement.list failed — ${e}`);
+			}
 		} else {
 			status = 'no-auth';
 			app.log.warn({ hasAuthId: Boolean(body.AUTH_ID), hasDomain: Boolean(body.DOMAIN ?? query.DOMAIN) },
 				'[app/handler] no auth context — placement.bind skipped');
 		}
 
-		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml(status, taskInfo));
+		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml(status, taskInfo, storageInfo, placementsInfo));
 	});
 }

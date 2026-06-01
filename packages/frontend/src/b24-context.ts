@@ -38,13 +38,17 @@ export interface BX24Sdk {
 	callMethod(
 		method: string,
 		params: Record<string, unknown>,
-		callback: (result: { data(): unknown; error(): unknown }) => void,
+		callback: (result: { data(): unknown; error(): unknown; total?(): number; more?(): boolean; next?(): void }) => void,
 	): void;
 	callBatch(
 		calls: Record<string, [string, Record<string, unknown>]>,
 		callback: (results: Record<string, { data(): unknown; error(): unknown }>) => void,
 	): void;
 	getAuth(): { access_token?: string; domain?: string; member_id?: string } | false;
+	/** true, если смотрящий — администратор портала (синхронно, без REST). */
+	isAdmin(): boolean;
 	resizeWindow(width: number, height: number): void;
 	fitWindow(): void;
+	/** Открыть путь портала (слайдером/навигацией) — напр. карточку складского документа. */
+	openPath(path: string, callback?: () => void): void;
 }
