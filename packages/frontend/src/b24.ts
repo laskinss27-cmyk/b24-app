@@ -246,6 +246,26 @@ function pictureUrl(v: unknown): string | undefined {
 	}
 	return undefined;
 }
+/** id родителя у оффера «с предложениями» (у простого товара его нет). */
+function parentIdOf(p: Record<string, unknown>): number | undefined {
+	const raw = p['parentId'] && typeof p['parentId'] === 'object'
+		? (p['parentId'] as { value?: unknown }).value
+		: p['parentId'];
+	const n = Number(raw ?? propVal(p['property102']));
+	return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+/** url первой картинки галереи оффера (property104): форма [{value:{url}}] или {url}. */
+function galleryUrl(v: unknown): string | undefined {
+	const first = Array.isArray(v) ? v[0] : v;
+	if (first && typeof first === 'object') {
+		const inner = (first as Record<string, unknown>)['value'] ?? first;
+		if (inner && typeof inner === 'object') {
+			const u = (inner as Record<string, unknown>)['url'];
+			if (typeof u === 'string' && u) return u;
+		}
+	}
+	return undefined;
+}
 
 /** iblock'и каталога: 24 = торговые предложения (ТАМ разделы офферов/остатков!), 26 = родительские товары.
  *  Остатки (storeproduct.list) ссылаются на офферы iblock 24 → раздел берём оттуда; 26 льём для надёжности. */
@@ -283,34 +303,66 @@ export async function fetchSections(): Promise<{ id: number; name: string }[]> {
  * Учёт = amount (catalog.storeproduct.list); по каждому товару — название, артикул
  * (property360), раздел, модель/производитель и путь к фото (catalog.product.get батчами).
  */
-/** По productId подтягивает опознание (название, артикул property360, раздел, модель, произв, фото). */
+/** Батч catalog.product.get по списку id → Map<id, product>. */
+async function fetchProducts(ids: number[], prefix: string): Promise<Map<number, Record<string, unknown>>> {
+	const out = new Map<number, Record<string, unknown>>();
+	for (let i = 0; i < ids.length; i += 40) {
+		const chunk = ids.slice(i, i + 40);
+		const calls: Record<string, [string, Record<string, unknown>]> = {};
+		for (const id of chunk) calls[`${prefix}${id}`] = ['catalog.product.get', { id }];
+		const res = await callBatch(calls);
+		for (const id of chunk) {
+			const p = (res[`${prefix}${id}`] as { product?: Record<string, unknown> } | null)?.product;
+			if (p) out.set(id, p);
+		}
+	}
+	return out;
+}
+
+/**
+ * По productId подтягивает опознание. ДВА ТИПА товаров:
+ *  - ПРОСТОЙ (нет parentId): бренд (property334), модель (property330), фото (detailPicture) — со своего товара;
+ *  - ОФФЕР «с предложениями» (есть parentId): на оффере property334 ПУСТ → БРЕНД и базовую модель
+ *    берём с РОДИТЕЛЯ; вариация-модель — своё property360 (УКП-12/УКП-12м); фото — галерея оффера property104.
+ * Поэтому делаем второй проход — догрузку родителей офферов (батчем).
+ */
 async function enrichProducts(ids: number[]): Promise<Map<number, Omit<InvLine, 'productId' | 'book'>>> {
 	const info = new Map<number, Omit<InvLine, 'productId' | 'book'>>();
 	const uniq = [...new Set(ids.filter((x) => x > 0))];
 	if (!uniq.length) return info;
 	const sections = await fetchSectionNames();
-	for (let i = 0; i < uniq.length; i += 40) {
-		const chunk = uniq.slice(i, i + 40);
-		const calls: Record<string, [string, Record<string, unknown>]> = {};
-		for (const id of chunk) calls[`p${id}`] = ['catalog.product.get', { id }];
-		const res = await callBatch(calls);
-		for (const id of chunk) {
-			const p = (res[`p${id}`] as { product?: Record<string, unknown> } | null)?.product;
-			if (!p) {
-				info.set(id, { name: `#${id}` });
-				continue;
-			}
-			const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
-			info.set(id, {
-				name: String(p['name'] ?? `#${id}`),
-				article: propVal(p['property360']),
-				sectionId: sid,
-				sectionName: sid ? sections.get(sid) : undefined,
-				model: propVal(p['property330']),
-				manufacturer: propVal(p['property334']),
-				photoPath: pictureUrl(p['detailPicture']) ?? pictureUrl(p['previewPicture']),
-			});
+
+	const prod = await fetchProducts(uniq, 'p');
+	const parentIds = [...new Set(
+		[...prod.values()].map((p) => parentIdOf(p)).filter((x): x is number => x !== undefined),
+	)];
+	const parents = parentIds.length ? await fetchProducts(parentIds, 'par') : new Map<number, Record<string, unknown>>();
+
+	for (const id of uniq) {
+		const p = prod.get(id);
+		if (!p) {
+			info.set(id, { name: `#${id}` });
+			continue;
 		}
+		const pid = parentIdOf(p);
+		const par = pid ? parents.get(pid) : undefined;
+		const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
+		// Бренд: у оффера на нём пусто → берём с родителя; иначе со своего товара.
+		const manufacturer = (par && propVal(par['property334'])) ?? propVal(p['property334']);
+		// Модель: вариация оффера (property360) → модель родителя → своя property330.
+		const model = propVal(p['property360']) ?? (par && propVal(par['property330'])) ?? propVal(p['property330']);
+		info.set(id, {
+			name: String(p['name'] ?? `#${id}`),
+			article: propVal(p['property360']),
+			sectionId: sid,
+			sectionName: sid ? sections.get(sid) : undefined,
+			model,
+			manufacturer,
+			// Фото: галерея оффера → detailPicture/previewPicture товара → detailPicture родителя.
+			photoPath: galleryUrl(p['property104'])
+				?? pictureUrl(p['detailPicture']) ?? pictureUrl(p['previewPicture'])
+				?? (par ? pictureUrl(par['detailPicture']) : undefined),
+		});
 	}
 	return info;
 }

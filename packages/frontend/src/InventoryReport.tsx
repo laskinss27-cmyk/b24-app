@@ -129,7 +129,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		if (!q) return list;
 		const words = q.split(/\s+/);
 		return list.filter((i) => {
-			const hay = `${i.name} ${i.article ?? ''} ${i.sectionName ?? ''}`.toLowerCase();
+			const hay = `${i.name} ${i.article ?? ''} ${i.manufacturer ?? ''} ${i.model ?? ''} ${i.sectionName ?? ''}`.toLowerCase();
 			return words.every((w) => hay.includes(w));
 		});
 	}, [list, search]);
@@ -291,8 +291,8 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 										<div className="count-main">
 											<div className="count-name">{i.name}</div>
 											<div className="count-meta">
-												{i.article && <span className="art">{i.article}</span>}
 												{i.manufacturer && <span className="mf">{i.manufacturer}</span>}
+												{i.article && <span className="art">{i.article}</span>}
 											</div>
 										</div>
 										<div className="count-nums">
