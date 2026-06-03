@@ -81,24 +81,27 @@ export const INVENTORY_MENU_TITLE = 'Товары';
 
 export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/inventory`;
-	// ВАЖНО: placement.bind НЕ меняет TITLE уже привязанного хендлера. Чтобы переименование
-	// («Инвентаризация» → «Товары») реально применилось — сперва снимаем старую привязку,
-	// затем биндим с актуальным названием. unbind на непривязанном — не страшно (игнорим).
+	// ТОЛЬКО идемпотентный bind, БЕЗ unbind. Прежний unbind+rebind (ради смены TITLE) на
+	// КАЖДОМ открытии оставлял окно «снято → ещё не привязано»; под одновременным открытием
+	// двумя юзерами это давало ГОНКУ и ломало пункт → «приложение не найдено» (инцидент 2026-06-03).
+	// Название «Товары» уже применилось ранее; здесь просто гарантируем, что привязка ЕСТЬ.
 	try {
-		await opts.client.call('placement.unbind', { PLACEMENT: INVENTORY_MENU_PLACEMENT, HANDLER: handlerUrl });
-	} catch {
-		/* не была привязана — ок */
+		await opts.client.call('placement.bind', {
+			PLACEMENT: INVENTORY_MENU_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: INVENTORY_MENU_TITLE,
+			LANG_ALL: {
+				ru: { TITLE: INVENTORY_MENU_TITLE },
+				en: { TITLE: 'Products' },
+			},
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError && /already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) {
+			return { status: 'already-bound' };
+		}
+		throw err;
 	}
-	await opts.client.call('placement.bind', {
-		PLACEMENT: INVENTORY_MENU_PLACEMENT,
-		HANDLER: handlerUrl,
-		TITLE: INVENTORY_MENU_TITLE,
-		LANG_ALL: {
-			ru: { TITLE: INVENTORY_MENU_TITLE },
-			en: { TITLE: 'Products' },
-		},
-	});
-	return { status: 'bound (Товары)' };
 }
 
 /**
