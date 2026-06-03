@@ -69,7 +69,9 @@ export async function handleOAuthCallback(
 	}
 	try {
 		const tok = await exchangeCodeForToken({ clientId: cfg.appClientId, clientSecret: secret, code });
-		const domain = tok.domain ?? cfg.portalDomain;
+		// ВАЖНО: tok.domain из обмена = 'oauth.bitrix.info' (центральный OAuth-сервер), это НЕ
+		// REST-хост. Токен валиден для НАШЕГО портала — REST-вызовы шлём на него.
+		const domain = cfg.portalDomain;
 		const sessToken = seal(secret, { accessToken: tok.accessToken, domain, scope: tok.scope ?? '', exp: nowSec() + SESSION_TTL_SEC });
 		const isProd = cfg.nodeEnv === 'production';
 		return {
