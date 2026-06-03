@@ -187,8 +187,8 @@ export async function fetchStockAndPurchasing(productIds: number[]): Promise<Rec
 	return out;
 }
 
-/** Канареечный доступ к новым экранам — пока только Сергей Ласкин (Bitrix ID 1858). */
-export const BETA_USER_IDS = ['1858'];
+/** Канареечный доступ к новым экранам: Сергей Ласкин (1858) + Игорь Бекасов (986, рук. розницы). */
+export const BETA_USER_IDS = ['1858', '986'];
 
 /** ID текущего пользователя, который смотрит (для канареечного гейта). */
 export async function fetchCurrentUserId(): Promise<string> {
