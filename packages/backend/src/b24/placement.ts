@@ -71,31 +71,78 @@ export async function bindTaskInventoryPlacement(opts: BindDealTabOptions): Prom
 }
 
 /**
- * Пункт «Инвентаризация» в ЛЕВОМ МЕНЮ — вход в модуль инвентаризации.
- * Заменяет задачную кнопку (TASK_VIEW_TOP_PANEL не принимается новой карточкой задач).
+ * Пункт ЛЕВОГО МЕНЮ — вход в «Базу товаров» (каталог-браузер склада). Инвентаризация
+ * теперь живёт ВНУТРИ Базы, поэтому пункт называется «Товары», а не «Инвентаризация».
+ * Обработчик — /placement/inventory (рендерит ProductBase). LEFT_MENU — единственное
+ * легальное место входа: складской учёт/каталог Битрикс приложениям не отдаёт.
  */
 export const INVENTORY_MENU_PLACEMENT = 'LEFT_MENU';
-export const INVENTORY_MENU_TITLE = 'Инвентаризация';
+export const INVENTORY_MENU_TITLE = 'Товары';
 
-export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: 'bound' | 'already-bound' }> {
+export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/inventory`;
+	// ВАЖНО: placement.bind НЕ меняет TITLE уже привязанного хендлера. Чтобы переименование
+	// («Инвентаризация» → «Товары») реально применилось — сперва снимаем старую привязку,
+	// затем биндим с актуальным названием. unbind на непривязанном — не страшно (игнорим).
+	try {
+		await opts.client.call('placement.unbind', { PLACEMENT: INVENTORY_MENU_PLACEMENT, HANDLER: handlerUrl });
+	} catch {
+		/* не была привязана — ок */
+	}
+	await opts.client.call('placement.bind', {
+		PLACEMENT: INVENTORY_MENU_PLACEMENT,
+		HANDLER: handlerUrl,
+		TITLE: INVENTORY_MENU_TITLE,
+		LANG_ALL: {
+			ru: { TITLE: INVENTORY_MENU_TITLE },
+			en: { TITLE: 'Products' },
+		},
+	});
+	return { status: 'bound (Товары)' };
+}
 
+/**
+ * ЭКСПЕРИМЕНТ (по просьбе Сергея): единственная зацепка в зоне каталога из живого
+ * placement.list — `CATALOG_EXTERNAL_PRODUCT` (в публичной доке не описан). Биндим,
+ * чтобы вживую увидеть, КУДА Битрикс сажает приложение в Складском учёте/каталоге.
+ * Обработчик — лёгкая диагностика (/placement/catalog). НЕ throw'ит: если плейсмент
+ * не поддержан (ERROR_PLACEMENT_NOT_FOUND) — вернём статус строкой, не ломая остальные бинды.
+ * Внимание: бинд портально-широкий (не канарейка). После осмотра — placement.unbind.
+ */
+export const CATALOG_EXTERNAL_PLACEMENT = 'CATALOG_EXTERNAL_PRODUCT';
+export const CATALOG_EXTERNAL_TITLE = 'База товаров';
+
+export async function bindCatalogExternalPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/catalog`;
 	try {
 		await opts.client.call('placement.bind', {
-			PLACEMENT: INVENTORY_MENU_PLACEMENT,
+			PLACEMENT: CATALOG_EXTERNAL_PLACEMENT,
 			HANDLER: handlerUrl,
-			TITLE: INVENTORY_MENU_TITLE,
+			TITLE: CATALOG_EXTERNAL_TITLE,
 			LANG_ALL: {
-				ru: { TITLE: INVENTORY_MENU_TITLE },
-				en: { TITLE: 'Inventory' },
+				ru: { TITLE: CATALOG_EXTERNAL_TITLE, DESCRIPTION: 'Каталог-браузер склада' },
+				en: { TITLE: 'Product base', DESCRIPTION: 'Warehouse catalog browser' },
 			},
 		});
 		return { status: 'bound' };
 	} catch (err) {
-		if (err instanceof B24ApiError && /already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) {
-			return { status: 'already-bound' };
+		if (err instanceof B24ApiError) {
+			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			return { status: `${err.code}: ${err.description ?? ''}` };
 		}
-		throw err;
+		return { status: String(err) };
+	}
+}
+
+/** Снять экспериментальный бинд каталога (placement.unbind). Идемпотентно. */
+export async function unbindCatalogExternalPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/catalog`;
+	try {
+		await opts.client.call('placement.unbind', { PLACEMENT: CATALOG_EXTERNAL_PLACEMENT, HANDLER: handlerUrl });
+		return { status: 'unbound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) return { status: `${err.code}: ${err.description ?? ''}` };
+		return { status: String(err) };
 	}
 }
 

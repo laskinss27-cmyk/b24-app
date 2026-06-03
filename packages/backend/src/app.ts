@@ -12,6 +12,7 @@ import { registerUninstallRoute } from './routes/uninstall.js';
 import { registerPlacementDealTabRoute } from './routes/placement-deal-tab.js';
 import { registerPlacementTaskInventoryRoute } from './routes/placement-task-inventory.js';
 import { registerPlacementInventoryRoute } from './routes/placement-inventory.js';
+import { registerPlacementCatalogRoute } from './routes/placement-catalog.js';
 import { registerApiInventoryRoute } from './routes/api-inventory.js';
 import { registerApiCatalogRoute } from './routes/api-catalog.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
@@ -83,6 +84,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerPlacementDealTabRoute(app);
 	registerPlacementTaskInventoryRoute(app);
 	registerPlacementInventoryRoute(app);
+	registerPlacementCatalogRoute(app);
 	registerApiInventoryRoute(app);
 	registerApiCatalogRoute(app);
 	registerAppHandlerRoute(app);

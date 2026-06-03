@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
@@ -47,7 +47,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 </html>`;
 
 	type Status = 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle';
-	const renderHtml = (status: Status, taskInfo = '', storageInfo = '', placementsInfo = ''): string => {
+	const renderHtml = (status: Status, taskInfo = '', storageInfo = '', placementsInfo = '', catalogInfo = ''): string => {
 		const blocks: Record<Status, string> = {
 			'bound': '<div class="card ok"><strong>✅ Вкладка сделки зарегистрирована.</strong></div>',
 			'already-bound': '<div class="card ok"><strong>✅ Вкладка сделки уже была зарегистрирована.</strong></div>',
@@ -61,10 +61,13 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		const storageCard = storageInfo
 			? `<div class="card"><strong>Хранилище инвентаризации:</strong> ${storageInfo.replace(/</g, '&lt;')}</div>`
 			: '';
+		const catalogCard = catalogInfo
+			? `<div class="card"><strong>ОПЫТ: каталог-встройка (CATALOG_EXTERNAL_PRODUCT):</strong> ${catalogInfo.replace(/</g, '&lt;')}</div>`
+			: '';
 		const placementsCard = placementsInfo
 			? `<div class="card"><strong>placement.list — доступные точки встраивания:</strong><br><code>${placementsInfo.replace(/</g, '&lt;')}</code></div>`
 			: '';
-		return welcomeHtml.replace('__STATUS_BLOCK__', blocks[status] + taskCard + storageCard + placementsCard);
+		return welcomeHtml.replace('__STATUS_BLOCK__', blocks[status] + taskCard + storageCard + catalogCard + placementsCard);
 	};
 
 	// GET — прямое открытие в браузере, без auth, просто welcome.
@@ -90,6 +93,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		let taskInfo = '';
 		let storageInfo = '';
 		let placementsInfo = '';
+		let catalogInfo = '';
 
 		if (auth) {
 			const client = new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken } });
@@ -121,6 +125,19 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			storageInfo = st.status === 'created' ? '✅ создано' : st.status === 'exists' ? '✅ уже есть' : `⛔ ${st.status}`;
 			app.log.info({ status: st.status }, '[app/handler] inventory entity');
 
+			// 4.5) ЧИСТКА эксперимента: снимаем временную привязку CATALOG_EXTERNAL_PRODUCT.
+			// Проверили — каталог/складской учёт приложениям зацепки не даёт; вход остаётся
+			// в левом меню (пункт «Товары»). unbind на непривязанном — просто статус, не ломает.
+			try {
+				const cat = await unbindCatalogExternalPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				catalogInfo = `🧹 эксперимент снят: ${cat.status}`;
+				app.log.info({ placement: CATALOG_EXTERNAL_PLACEMENT, status: cat.status }, '[app/handler] catalog placement cleanup');
+			} catch (err) {
+				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+				catalogInfo = `⛔ ${e}`;
+				app.log.error({ placement: CATALOG_EXTERNAL_PLACEMENT }, `[app/handler] catalog placement cleanup failed — ${e}`);
+			}
+
 			// 4) ДИАГНОСТИКА (Сергей просил «проверяй»): какие placement-точки реально
 			// доступны приложению на этом портале — вкл. мобильные/универсальные. Только чтение.
 			try {
@@ -149,6 +166,6 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 				'[app/handler] no auth context — placement.bind skipped');
 		}
 
-		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml(status, taskInfo, storageInfo, placementsInfo));
+		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml(status, taskInfo, storageInfo, placementsInfo, catalogInfo));
 	});
 }
