@@ -5,9 +5,12 @@ import {
 	fetchStores,
 	fetchCurrentUserId,
 	openProductCard,
+	createQuickSale,
+	openDeal,
 	photoFullUrl,
 	withTimeout,
 	BETA_USER_IDS,
+	QUICKSALE_USER_IDS,
 	type BaseRow,
 	type StoreInfo,
 } from './b24.js';
@@ -65,6 +68,12 @@ export function ProductBase(): JSX.Element {
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [meta, setMeta] = useState<{ generatedAt: string; cached: boolean } | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
+	const [uid, setUid] = useState('');
+	// Корзина быстрой продажи: productId → количество.
+	const [cart, setCart] = useState<Map<number, number>>(() => new Map());
+	const [showCart, setShowCart] = useState(false);
+	const [creatingSale, setCreatingSale] = useState(false);
+	const [saleErr, setSaleErr] = useState<string | null>(null);
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
@@ -76,6 +85,7 @@ export function ProductBase(): JSX.Element {
 	useEffect(() => {
 		if (ctx.__mock) {
 			setGate('beta');
+			setUid('1858');
 			setStores(MOCK_STORES);
 			setRows(MOCK_ROWS);
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
@@ -96,6 +106,7 @@ export function ProductBase(): JSX.Element {
 					return;
 				}
 				setGate('beta');
+				setUid(uid);
 				const sts = await withTimeout(fetchStores(), 15000, 'catalog.store.list');
 				setStores(sts.filter((s) => s.active));
 				const base = await withTimeout(fetchProductBase(), 90000, 'catalog/browse');
@@ -169,6 +180,45 @@ export function ProductBase(): JSX.Element {
 		}
 	}
 
+	// ── корзина быстрой продажи ───────────────────────────────────────────────
+	const canQuickSale = QUICKSALE_USER_IDS.includes(uid);
+	const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+	const cartList = useMemo(
+		() => [...cart.entries()].map(([id, qty]) => ({ row: rowById.get(id), qty })).filter((c): c is { row: BaseRow; qty: number } => Boolean(c.row)),
+		[cart, rowById],
+	);
+	const cartSum = cartList.reduce((s, c) => s + (c.row.retail ?? 0) * c.qty, 0);
+
+	function addToCart(id: number): void {
+		setCart((prev) => new Map(prev).set(id, (prev.get(id) ?? 0) + 1));
+	}
+	function setCartQty(id: number, qty: number): void {
+		setCart((prev) => {
+			const n = new Map(prev);
+			if (qty <= 0) n.delete(id);
+			else n.set(id, qty);
+			return n;
+		});
+	}
+
+	async function createSale(): Promise<void> {
+		setSaleErr(null);
+		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty }));
+		if (!items.length) return;
+		if (ctx.__mock) { setSaleErr('dev-мок: продажа создаётся только на проде.'); return; }
+		setCreatingSale(true);
+		try {
+			const dealId = await withTimeout(createQuickSale(items, uid), 20000, 'quicksale/create');
+			setCart(new Map());
+			setShowCart(false);
+			openDeal(dealId);
+		} catch (e) {
+			setSaleErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setCreatingSale(false);
+		}
+	}
+
 	const storeName = (id: number): string => shortStore(stores.find((s) => s.id === id)?.title ?? `#${id}`);
 	const sumPurchase = useMemo(() => view.reduce((s, r) => s + r.qty * (r.d.purchase ?? 0), 0), [view]);
 
@@ -222,6 +272,9 @@ export function ProductBase(): JSX.Element {
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				<div className="tb-spacer" />
+				{canQuickSale && cart.size > 0 && (
+					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartSum)} ₽</button>
+				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				<button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>
 			</div>
@@ -240,6 +293,7 @@ export function ProductBase(): JSX.Element {
 							<th className="num" onClick={() => toggleSort('purchase')}>Закупка ₽{sortMark('purchase')}</th>
 							<th className="num c-store" onClick={() => toggleSort('stock')}>Остаток{sortMark('stock')}</th>
 							<th onClick={() => toggleSort('total')}>Остатки по складам{sortMark('total')}</th>
+							{canQuickSale && <th className="sale-col">В продажу</th>}
 						</tr>
 					</thead>
 					<tbody>
@@ -265,9 +319,22 @@ export function ProductBase(): JSX.Element {
 											{others.length ? others.map((o) => <span className="wh" key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
 										</div>
 									</td>
+									{canQuickSale && (
+										<td className="sale-col" onClick={(e) => e.stopPropagation()}>
+											{cart.has(d.id) ? (
+												<div className="qty-stepper">
+													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 1) - 1)} aria-label="меньше">−</button>
+													<span className="qty-val">{cart.get(d.id)}</span>
+													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 0) + 1)} aria-label="больше">+</button>
+												</div>
+											) : (
+												<button className="btn-add" onClick={() => addToCart(d.id)} title="Добавить в быструю продажу">＋</button>
+											)}
+										</td>
+									)}
 								</tr>
 							);
-						}) : <tr><td colSpan={10} className="base-empty">Ничего не найдено</td></tr>}
+						}) : <tr><td colSpan={canQuickSale ? 11 : 10} className="base-empty">Ничего не найдено</td></tr>}
 					</tbody>
 				</table>
 			</div>
@@ -276,6 +343,43 @@ export function ProductBase(): JSX.Element {
 				<span>{meta ? `данные на ${hhmm(meta.generatedAt)}${meta.cached ? ' · из кэша' : ''}` : ''}</span>
 				<span>Сумма по закупке (видимое): {fmt(sumPurchase)} ₽</span>
 			</div>
+
+			{showCart && (
+				<div className="cart-overlay" onClick={() => setShowCart(false)}>
+					<div className="cart-modal" onClick={(e) => e.stopPropagation()}>
+						<h2>🛒 Быстрая продажа</h2>
+						{cartList.length ? (
+							<>
+								<div className="cart-items">
+									{cartList.map((c) => (
+										<div className="cart-item" key={c.row.id}>
+											<span className="cart-nm">{c.row.name}</span>
+											<span className="cart-unit money">{fmt(c.row.retail)} ₽</span>
+											<div className="qty-stepper">
+												<button onClick={() => setCartQty(c.row.id, c.qty - 1)} aria-label="меньше">−</button>
+												<input className="qty-input" type="number" min={1} value={c.qty} onChange={(e) => setCartQty(c.row.id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+												<button onClick={() => setCartQty(c.row.id, c.qty + 1)} aria-label="больше">+</button>
+											</div>
+											<span className="cart-line money">{fmt((c.row.retail ?? 0) * c.qty)} ₽</span>
+											<button className="cart-del" onClick={() => setCartQty(c.row.id, 0)} aria-label="убрать">✕</button>
+										</div>
+									))}
+								</div>
+								<div className="cart-total">Итого: <b>{fmt(cartSum)} ₽</b></div>
+								{saleErr && <div className="cart-err">⛔ {saleErr}</div>}
+								<div className="cart-actions">
+									<button className="btn-secondary" onClick={() => setCart(new Map())}>Очистить</button>
+									<button className="btn-secondary" onClick={() => setShowCart(false)}>Закрыть</button>
+									<button className="btn-primary" disabled={creatingSale} onClick={() => void createSale()}>{creatingSale ? 'Создаю…' : 'Создать продажу'}</button>
+								</div>
+								<p className="cart-hint muted">Создастся сделка в воронке «Быстрая продажа» (стадия «Подбор оборудования») с этими позициями и сразу откроется. Оплату/кассу проводишь в сделке нативно, клиента добавишь в карточке.</p>
+							</>
+						) : (
+							<p className="muted">Корзина пуста.</p>
+						)}
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }

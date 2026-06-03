@@ -1149,3 +1149,96 @@ html, body, #root { height: 100%; }
 	border: 1px solid #e3e8ef;
 	border-radius: 10px;
 }
+
+/* ── Быстрая продажа: корзина ─────────────────────────────────────────────── */
+.base-table .sale-col { text-align: center; white-space: nowrap; }
+.btn-add {
+	border: 1px solid #0b5fff;
+	color: #0b5fff;
+	background: #fff;
+	border-radius: 7px;
+	width: 28px;
+	height: 28px;
+	font-size: 18px;
+	line-height: 1;
+	cursor: pointer;
+}
+.btn-add:hover { background: #eef4ff; }
+.qty-stepper {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	border: 1px solid #e3e8ef;
+	border-radius: 7px;
+	overflow: hidden;
+}
+.qty-stepper button {
+	border: 0;
+	background: #f1f5f9;
+	width: 26px;
+	height: 28px;
+	font-size: 16px;
+	cursor: pointer;
+	color: #1a2231;
+}
+.qty-stepper button:hover { background: #e2e8f0; }
+.qty-val { min-width: 26px; text-align: center; font-weight: 600; }
+.qty-input {
+	width: 44px;
+	height: 28px;
+	border: 0;
+	text-align: center;
+	font-size: 14px;
+	-moz-appearance: textfield;
+}
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.base-cart-btn { background: #11a36b; }
+.base-cart-btn:hover { background: #0e8c5b; }
+
+.cart-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(16, 24, 40, 0.45);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 50;
+	padding: 18px;
+}
+.cart-modal {
+	background: #fff;
+	border-radius: 14px;
+	padding: 20px;
+	width: 100%;
+	max-width: 640px;
+	max-height: 85vh;
+	overflow: auto;
+	box-shadow: 0 18px 50px rgba(16, 24, 40, 0.3);
+}
+.cart-modal h2 { margin: 0 0 14px; font-size: 18px; }
+.cart-items { display: flex; flex-direction: column; gap: 8px; }
+.cart-item {
+	display: grid;
+	grid-template-columns: 1fr auto auto auto auto;
+	gap: 10px;
+	align-items: center;
+	padding: 8px 0;
+	border-bottom: 1px solid #eef1f5;
+}
+.cart-nm { font-weight: 550; font-size: 13.5px; }
+.cart-unit { color: #7a8699; font-size: 12.5px; }
+.cart-line { font-weight: 600; min-width: 80px; text-align: right; }
+.money { font-variant-numeric: tabular-nums; }
+.cart-del {
+	border: 0;
+	background: none;
+	color: #e5484d;
+	font-size: 16px;
+	cursor: pointer;
+	padding: 2px 6px;
+}
+.cart-total { text-align: right; font-size: 15px; margin: 14px 0; }
+.cart-err { color: #e5484d; margin: 8px 0; }
+.cart-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.cart-hint { margin-top: 12px; font-size: 12px; }

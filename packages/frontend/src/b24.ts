@@ -474,6 +474,37 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached) };
 }
 
+/** Доступ к «Быстрой продаже» (ЗАПИСЬ) — пока только Сергей (1858), до обкатки. */
+export const QUICKSALE_USER_IDS = ['1858'];
+
+export interface QuickSaleItem {
+	productId: number;
+	name: string;
+	price: number;
+	quantity: number;
+}
+/** Создать сделку «Быстрая продажа» (кат. 6) из корзины → вернуть ID сделки. */
+export async function createQuickSale(items: QuickSaleItem[], assignedById?: string): Promise<number> {
+	const res = await fetch('/api/quicksale/create', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), items, assignedById }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; dealId?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось создать продажу');
+	return json.dealId ?? 0;
+}
+/** Открыть карточку сделки в Б24 (слайдером). */
+export function openDeal(dealId: number): void {
+	const path = `/crm/deal/details/${dealId}/`;
+	const bx = window.BX24;
+	if (bx && typeof bx.openPath === 'function') bx.openPath(path);
+	else {
+		const a = bx ? bx.getAuth() : false;
+		window.open(`https://${a ? (a.domain ?? '') : ''}${path}`, '_blank');
+	}
+}
+
 /** Открыть нативную карточку товара Б24 (слайдером, не уходя из приложения). */
 export function openProductCard(iblockId: number, productId: number): void {
 	const path = `/shop/documents-catalog/${iblockId}/product/${productId}/`;
