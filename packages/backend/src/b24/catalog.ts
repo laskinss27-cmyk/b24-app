@@ -1,50 +1,53 @@
 /**
- * Сборка «Базы товаров» — единый каталог-браузер склада.
+ * Сборка «Базы товаров» — единый каталог-браузер склада (весь каталог, как нативные «Товары»).
  *
- * Делается на БЭКЕНДЕ серверным B24Client (а не на фронте), потому что:
- *  - фронтовый BX24 виснет на catalog.product.list (наша давняя грабля);
- *  - объём (~2.5к складских позиций) удобнее собрать одним проходом с p-throttle.
+ * Делается на БЭКЕНДЕ серверным B24Client (фронтовый BX24 виснет на catalog.product.list).
  *
- * Скорость: всё, что можно, гоним БАТЧ-ОФСЕТАМИ — список постранично собираем
- * не 55 round-trip'ами (res.next), а батчами по 50 sub-call'ов со start-офсетом
- * (серверный REST честно уважает start, в отличие от фронтового BX24). product.get
- * и price.list сливаем в ОДИН батч, чтобы вдвое срезать число HTTP-запросов.
+ * Скорость — главное: НЕ дёргаем product.get на каждый товар. Вместо этого:
+ *  - catalog.product.list отдаёт нужные свойства прямо в select (property334/330/360,
+ *    detailPicture, purchasingPrice, раздел) — весь каталог за единицы батч-запросов;
+ *  - catalog.price.list принимает МАССИВ productId — цены тянем пачками;
+ *  - родителей офферов держим в памяти (iblock 24), бренд/модель оффера берём оттуда.
  *
- * Источники полей (подтверждены разведкой recon-baza):
- *  - остаток по складам: catalog.storeproduct.list (amount>0), группируем по productId;
- *  - имя/бренд/модель/раздел/фото: catalog.product.get (+ родитель у офферов — там бренд);
- *  - розница: catalog.price.list, тип цены ЕДИНСТВЕННЫЙ — BASE (catalogGroupId=2);
- *  - закупка: product.purchasingPrice (часто пусто → null, в UI показываем 0).
+ * Структура каталога портала (выяснено разведкой recon-baza-full):
+ *  - iblock 24 — основные товары (4704): простые (type 1), услуги (type 7),
+ *    родители «с предложениями» (type 3). Свойства: property334 (бренд), property330 (модель).
+ *  - iblock 26 — торговые предложения/вариации (291, type 4): parentId → товар из 24,
+ *    property360 (артикул/вариация). Бренд/модель — с родителя.
+ * Плоский «sellable» каталог = (iblock 24 КРОМЕ родителей type 3) + (все офферы 26).
+ * Родители (type 3) в плоском списке не показываем — их представляют офферы.
+ *
+ * Остаток цепляем из catalog.storeproduct.list (БЕЗ фильтра amount>0 — нужны и нули,
+ * чтобы галка «только остаток>0» на фронте реально фильтровала). Розница = BASE (group 2).
  */
 import { B24Client, type BatchCall } from './client.js';
 
-/** Каталожные iblock'и: 24 = торговые предложения (там остатки/разделы), 26 = родительские товары. */
-const CATALOG_IBLOCK_IDS = [24, 26];
+/** iblock основных товаров (простые/услуги/родители). */
+const MAIN_IBLOCK = 24;
+/** iblock торговых предложений (вариации, parentId → MAIN_IBLOCK). */
+const OFFER_IBLOCK = 26;
+/** type «товар с предложениями» (родитель) — в плоском списке заменяется офферами. */
+const PARENT_TYPE = 3;
 /** Тип цены «Розница». На портале он ОДИН — BASE (catalog.priceType.list → #2). */
 const RETAIL_PRICE_GROUP = 2;
 
+/** select для основного iblock (24). Несуществующие на iblock поля Битрикс молча игнорирует. */
+const SELECT_MAIN = ['id', 'iblockId', 'name', 'type', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice', 'detailPicture', 'previewPicture'];
+/** select для офферов (26): + parentId и property360 (артикул). */
+const SELECT_OFFER = ['id', 'iblockId', 'name', 'type', 'parentId', 'property360', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice', 'detailPicture', 'previewPicture'];
+
 export interface BaseRow {
-	/** productId = «ИД» = id элемента каталога (= артикул в терминах Владимира; всегда есть). */
 	id: number;
-	/** iblock товара (24/26) — нужен для нативной карточки openPath. */
 	iblockId: number;
 	name: string;
-	/** Артикул/вариация (property360) — главный различитель SKU; ~85% заполнен. */
 	article?: string | undefined;
-	/** Модель (property360 → модель родителя → property330). */
 	model?: string | undefined;
-	/** Производитель (property334; у офферов берём с родителя — на оффере пусто). */
 	manufacturer?: string | undefined;
 	sectionName?: string | undefined;
-	/** Розница (BASE), null — цены нет. */
 	retail: number | null;
-	/** Закупка (purchasingPrice), null — не заполнена. */
 	purchase: number | null;
-	/** Относительный url фото; полный URL с токеном собирает фронт (внутри iframe). */
 	photoPath?: string | undefined;
-	/** Суммарный остаток по всем складам. */
 	total: number;
-	/** storeId → остаток (только >0). */
 	stockByStore: Record<number, number>;
 }
 
@@ -53,7 +56,7 @@ export interface ProductBaseData {
 	generatedAt: string;
 }
 
-// ── извлечение значений каталога (порт из frontend/b24.ts) ──────────────────────
+// ── извлечение значений каталога ────────────────────────────────────────────────
 
 function propVal(v: unknown): string | undefined {
 	if (v == null) return undefined;
@@ -71,29 +74,18 @@ function pictureUrl(v: unknown): string | undefined {
 	}
 	return undefined;
 }
-function galleryUrl(v: unknown): string | undefined {
-	const first = Array.isArray(v) ? v[0] : v;
-	if (first && typeof first === 'object') {
-		const inner = (first as Record<string, unknown>)['value'] ?? first;
-		if (inner && typeof inner === 'object') {
-			const u = (inner as Record<string, unknown>)['url'];
-			if (typeof u === 'string' && u) return u;
-		}
-	}
-	return undefined;
-}
 function parentIdOf(p: Record<string, unknown>): number | undefined {
 	const raw = p['parentId'] && typeof p['parentId'] === 'object' ? (p['parentId'] as { value?: unknown }).value : p['parentId'];
-	const n = Number(raw ?? propVal(p['property102']));
+	const n = Number(raw);
 	return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+function numOrNull(v: unknown): number | null {
+	return v == null || v === '' ? null : Number(v);
 }
 
 // ── батч-помощники ──────────────────────────────────────────────────────────────
 
-/**
- * Собрать ВСЕ страницы list-метода батч-офсетами. Первую страницу (start=0) берём из
- * total-пробы, дальше — батчами по start. Сервер уважает start (в отличие от фронта).
- */
+/** Все страницы list-метода батч-офсетами: первая из total-пробы, дальше батчами по start. */
 async function fetchAllPaged(
 	client: B24Client,
 	method: string,
@@ -115,24 +107,19 @@ async function fetchAllPaged(
 	return out;
 }
 
-/** Батч catalog.product.get по списку id → Map<id, product>. */
-async function batchProductGet(client: B24Client, ids: number[], prefix: string): Promise<Map<number, Record<string, unknown>>> {
-	const out = new Map<number, Record<string, unknown>>();
-	if (!ids.length) return out;
-	const calls: Record<string, BatchCall> = {};
-	for (const id of ids) calls[`${prefix}${id}`] = { method: 'catalog.product.get', params: { id } };
-	const res = await client.callBatch(calls); // chunks по 50 внутри
-	for (const id of ids) {
-		const p = (res.result[`${prefix}${id}`] as { product?: Record<string, unknown> } | undefined)?.product;
-		if (p) out.set(id, p);
-	}
-	return out;
+async function fetchAllProducts(client: B24Client, iblockId: number, select: string[]): Promise<Array<Record<string, unknown>>> {
+	return fetchAllPaged(
+		client,
+		'catalog.product.list',
+		{ select, filter: { iblockId }, order: { id: 'ASC' } },
+		(r) => (r as { products?: Array<Record<string, unknown>> })?.products ?? [],
+	);
 }
 
-/** Имена разделов (id→name) по каталожным iblock'ам. id разделов в Битриксе глобально уникальны. */
+/** Имена разделов (id→name) по каталожным iblock'ам. id разделов глобально уникальны. */
 async function fetchSectionNames(client: B24Client): Promise<Map<number, string>> {
 	const map = new Map<number, string>();
-	for (const iblockId of CATALOG_IBLOCK_IDS) {
+	for (const iblockId of [MAIN_IBLOCK, OFFER_IBLOCK]) {
 		try {
 			const sections = await fetchAllPaged(
 				client,
@@ -148,86 +135,116 @@ async function fetchSectionNames(client: B24Client): Promise<Map<number, string>
 	return map;
 }
 
-// ── главная сборка ──────────────────────────────────────────────────────────────
-
-export async function buildProductBase(client: B24Client): Promise<ProductBaseData> {
-	// 1. Все складские позиции с остатком>0, группируем по товару.
+/** Остатки по складам: productId → { storeId: amount } (включая нули — для фильтра «только>0»). */
+async function fetchStock(client: B24Client): Promise<Map<number, Record<number, number>>> {
 	const sp = await fetchAllPaged(
 		client,
 		'catalog.storeproduct.list',
-		{ select: ['productId', 'storeId', 'amount'], filter: { '>amount': 0 }, order: { id: 'ASC' } },
+		{ select: ['productId', 'storeId', 'amount'], order: { id: 'ASC' } },
 		(r) => (r as { storeProducts?: Array<Record<string, unknown>> })?.storeProducts ?? [],
 	);
-	const stockByProduct = new Map<number, Record<number, number>>();
+	const map = new Map<number, Record<number, number>>();
 	for (const r of sp) {
 		const pid = Number(r['productId']);
+		if (pid <= 0) continue;
 		const storeId = Number(r['storeId']);
 		const amount = Number(r['amount'] ?? 0);
-		if (pid <= 0 || amount <= 0) continue;
-		const m = stockByProduct.get(pid) ?? {};
-		m[storeId] = (m[storeId] ?? 0) + amount;
-		stockByProduct.set(pid, m);
+		const e = map.get(pid) ?? {};
+		e[storeId] = (e[storeId] ?? 0) + amount;
+		map.set(pid, e);
 	}
-	const productIds = [...stockByProduct.keys()];
+	return map;
+}
 
-	// 2. Разделы + товары (product.get) и цены (price.list) ОДНИМ батчем (вдвое меньше HTTP).
-	const sections = await fetchSectionNames(client);
-
+/** Розница (BASE) пачками. price.list — list-метод (≤50 строк за вызов), поэтому массив id
+ *  режем по 50: один товар = одна BASE-цена → ровно влезает в страницу. */
+async function fetchPrices(client: B24Client, ids: number[]): Promise<Map<number, number | null>> {
+	const out = new Map<number, number | null>();
+	if (!ids.length) return out;
 	const calls: Record<string, BatchCall> = {};
-	for (const id of productIds) {
-		calls[`prod${id}`] = { method: 'catalog.product.get', params: { id } };
-		calls[`price${id}`] = {
+	for (let i = 0; i < ids.length; i += 50) {
+		calls[`pr${i}`] = {
 			method: 'catalog.price.list',
-			params: { filter: { productId: id, catalogGroupId: RETAIL_PRICE_GROUP }, select: ['productId', 'price', 'catalogGroupId'] },
+			params: { filter: { productId: ids.slice(i, i + 50), catalogGroupId: RETAIL_PRICE_GROUP }, select: ['productId', 'price'] },
 		};
 	}
-	const main = await client.callBatch(calls);
-
-	const prodMap = new Map<number, Record<string, unknown>>();
-	const retailMap = new Map<number, number | null>();
-	for (const id of productIds) {
-		const p = (main.result[`prod${id}`] as { product?: Record<string, unknown> } | undefined)?.product;
-		if (p) prodMap.set(id, p);
-		const prices = (main.result[`price${id}`] as { prices?: Array<Record<string, unknown>> } | undefined)?.prices ?? [];
-		const price = prices[0]?.['price'];
-		retailMap.set(id, price == null || price === '' ? null : Number(price));
+	const res = await client.callBatch(calls);
+	for (const key of Object.keys(calls)) {
+		const prices = (res.result[key] as { prices?: Array<Record<string, unknown>> } | undefined)?.prices ?? [];
+		for (const p of prices) out.set(Number(p['productId']), numOrNull(p['price']));
 	}
+	return out;
+}
 
-	// 3. Родители офферов (там бренд/базовая модель) — вторым проходом.
-	const parentIds = [...new Set([...prodMap.values()].map(parentIdOf).filter((x): x is number => x !== undefined))];
-	const parents = await batchProductGet(client, parentIds, 'par');
+// ── главная сборка ──────────────────────────────────────────────────────────────
 
-	// 4. Сборка строк.
-	const rows: BaseRow[] = productIds.map((id) => {
-		const stockByStore = stockByProduct.get(id) ?? {};
+export async function buildProductBase(client: B24Client): Promise<ProductBaseData> {
+	const main = await fetchAllProducts(client, MAIN_IBLOCK, SELECT_MAIN);
+	const offers = await fetchAllProducts(client, OFFER_IBLOCK, SELECT_OFFER);
+	const sections = await fetchSectionNames(client);
+	const stock = await fetchStock(client);
+
+	// карта основных товаров (для бренда/модели/раздела/фото родителя у офферов)
+	const mainById = new Map<number, Record<string, unknown>>();
+	for (const p of main) mainById.set(Number(p['id']), p);
+
+	const stockOf = (id: number): { stockByStore: Record<number, number>; total: number } => {
+		const stockByStore = stock.get(id) ?? {};
 		const total = Object.values(stockByStore).reduce((s, n) => s + n, 0);
-		const p = prodMap.get(id);
-		if (!p) {
-			return { id, iblockId: 0, name: `#${id}`, retail: retailMap.get(id) ?? null, purchase: null, total, stockByStore };
-		}
-		const pid = parentIdOf(p);
-		const par = pid ? parents.get(pid) : undefined;
+		return { stockByStore, total };
+	};
+	const sectionName = (sid: number | undefined): string | undefined => (sid ? sections.get(sid) : undefined);
+
+	const rows: BaseRow[] = [];
+
+	// основные товары: всё, кроме родителей «с предложениями» (их представляют офферы)
+	for (const p of main) {
+		if (Number(p['type']) === PARENT_TYPE) continue;
+		const id = Number(p['id']);
 		const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
-		const pp = p['purchasingPrice'];
-		return {
+		const { stockByStore, total } = stockOf(id);
+		rows.push({
 			id,
-			iblockId: Number(p['iblockId'] ?? 0),
+			iblockId: MAIN_IBLOCK,
 			name: String(p['name'] ?? `#${id}`),
-			article: propVal(p['property360']),
-			model: propVal(p['property360']) ?? (par && propVal(par['property330'])) ?? propVal(p['property330']),
-			manufacturer: (par && propVal(par['property334'])) ?? propVal(p['property334']),
-			sectionName: sid ? sections.get(sid) : undefined,
-			retail: retailMap.get(id) ?? null,
-			purchase: pp == null || pp === '' ? null : Number(pp),
-			photoPath:
-				galleryUrl(p['property104']) ??
-				pictureUrl(p['detailPicture']) ??
-				pictureUrl(p['previewPicture']) ??
-				(par ? pictureUrl(par['detailPicture']) : undefined),
+			article: undefined,
+			model: propVal(p['property330']),
+			manufacturer: propVal(p['property334']),
+			sectionName: sectionName(sid),
+			retail: null,
+			purchase: numOrNull(p['purchasingPrice']),
+			photoPath: pictureUrl(p['detailPicture']) ?? pictureUrl(p['previewPicture']),
 			total,
 			stockByStore,
-		};
-	});
+		});
+	}
+
+	// офферы (вариации): бренд/модель/раздел/фото добираем с родителя из mainById
+	for (const o of offers) {
+		const id = Number(o['id']);
+		const pid = parentIdOf(o);
+		const par = pid ? mainById.get(pid) : undefined;
+		const sid = (Number(o['iblockSectionId'] ?? 0) || undefined) ?? (par ? Number(par['iblockSectionId'] ?? 0) || undefined : undefined);
+		const { stockByStore, total } = stockOf(id);
+		rows.push({
+			id,
+			iblockId: OFFER_IBLOCK,
+			name: String(o['name'] ?? (par ? par['name'] : undefined) ?? `#${id}`),
+			article: propVal(o['property360']),
+			model: propVal(o['property360']) ?? (par ? propVal(par['property330']) : undefined),
+			manufacturer: propVal(o['property334']) ?? (par ? propVal(par['property334']) : undefined),
+			sectionName: sectionName(sid),
+			retail: null,
+			purchase: numOrNull(o['purchasingPrice']) ?? (par ? numOrNull(par['purchasingPrice']) : null),
+			photoPath: pictureUrl(o['detailPicture']) ?? pictureUrl(o['previewPicture']) ?? (par ? pictureUrl(par['detailPicture']) : undefined),
+			total,
+			stockByStore,
+		});
+	}
+
+	// розница пачками
+	const prices = await fetchPrices(client, rows.map((r) => r.id));
+	for (const r of rows) r.retail = prices.get(r.id) ?? null;
 
 	rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 	return { rows, generatedAt: new Date().toISOString() };
