@@ -82,13 +82,18 @@ export interface CookieOptions {
 	maxAgeSec: number;
 	/** В проде true (HTTPS). На localhost-dev можно false. */
 	secure?: boolean;
+	/** Путь cookie. По умолчанию '/' — чтобы доходила и до /m, и до /app/handler
+	 *  (Б24 для локального приложения возвращает OAuth code на ОБРАБОТЧИК приложения,
+	 *  а не на наш redirect_uri=/m/callback). SameSite=Lax — top-level navigation с портала
+	 *  обратно к нам шлёт cookie. */
+	path?: string;
 }
 
 /** Собирает значение заголовка Set-Cookie для сессии мобильного пульта. */
 export function buildSessionCookie(name: string, value: string, opts: CookieOptions): string {
 	const parts = [
 		`${name}=${value}`,
-		'Path=/m',
+		`Path=${opts.path ?? '/'}`,
 		'HttpOnly',
 		'SameSite=Lax',
 		`Max-Age=${opts.maxAgeSec}`,
@@ -98,8 +103,8 @@ export function buildSessionCookie(name: string, value: string, opts: CookieOpti
 }
 
 /** Значение, стирающее cookie. */
-export function clearSessionCookie(name: string): string {
-	return `${name}=; Path=/m; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function clearSessionCookie(name: string, path = '/'): string {
+	return `${name}=; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
 /** Достаёт значение cookie по имени из заголовка Cookie. */

@@ -1,29 +1,30 @@
 import type { FastifyInstance } from 'fastify';
+import type { Config } from '../config.js';
 import { buildAuthorizeUrl, exchangeCodeForToken, OAuthError } from '../b24/oauth.js';
 import { B24Client } from '../b24/client.js';
 import { seal, unseal, buildSessionCookie, clearSessionCookie, readCookie, randomNonce, safeEqual } from '../mobile-session.js';
 
 /**
- * ФАЗА A мобильного QR-пульта: проба автономной авторизации телефона через OAuth.
+ * ФАЗА A мобильного QR-пульта: автономная авторизация телефона через OAuth.
  *
- * Цель — доказать, что телефон (вне iframe Б24) добывает токен юзера штатным OAuth-редиректом
- * через живую сессию портала, НЕ открывая портальное приложение (которое при открытии в мобильном
- * вебе роняет приложение ПОРТАЛЬНО у всех — инцидент 2026-06-03). Здесь только аутентификация
- * + проба user.current; пульт инвентаризации — Фаза B.
+ * Цель — телефон (вне iframe Б24) добывает токен юзера штатным OAuth-редиректом через живую
+ * сессию портала, НЕ открывая портальное приложение (которое в мобильном вебе роняет приложение
+ * ПОРТАЛЬНО у всех — инцидент 2026-06-03). Здесь только аутентификация + проба user.current.
  *
- * Поток: GET /m → (нет сессии) seal(state{nonce}) + cookie → redirect на /oauth/authorize/
- *        → портал вернёт code+state → GET /m/callback → сверка nonce → exchange code→токен
- *        → шифрованная cookie сессии → redirect /m → user.current → «залогинен как X».
- *
- * Всё ИНСТРУМЕНТИРОВАНО: на живой пробе логи покажут, что именно вернул портал (куда пришёл code,
- * какие query-поля) — это снимет неизвестности из oauth.ts.
+ * ВАЖНО (выяснено живой пробой): Б24 для ЛОКАЛЬНОГО приложения возвращает authorization code
+ * на ОБРАБОТЧИК ПРИЛОЖЕНИЯ (/app/handler), а НЕ на наш redirect_uri=/m/callback. Поэтому логика
+ * обмена вынесена в общую handleOAuthCallback() и вызывается из ОБОИХ роутов. Cookie — Path=/
+ * (чтобы доходили и до /app/handler, и до /m).
  */
-const SESSION_COOKIE = 'm_sess';
-const STATE_COOKIE = 'm_state';
-const SESSION_TTL_SEC = 30 * 60; // 30 минут
+export const M_SESSION_COOKIE = 'm_sess';
+export const M_STATE_COOKIE = 'm_state';
+const SESSION_TTL_SEC = 30 * 60;
 const STATE_TTL_SEC = 10 * 60;
 
-function pageHtml(body: string): string {
+const nowSec = (): number => Math.floor(Date.now() / 1000);
+const mobileSecret = (cfg: Config): string => cfg.appClientSecret ?? cfg.appSecret ?? '';
+
+export function mobilePage(body: string): string {
 	return `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Мобильный пульт</title>
 <style>
@@ -35,22 +36,67 @@ function pageHtml(body: string): string {
 </style></head><body>${body}</body></html>`;
 }
 
+const notConfiguredHtml = mobilePage('<div class="err"><b>OAuth не настроен.</b><br>Нет <code>APP_CLIENT_ID</code> / <code>APP_CLIENT_SECRET</code> в env контейнера.</div>');
+
+export type OAuthResult =
+	| { ok: true; cookies: string[]; redirect: string }
+	| { ok: false; status: number; html: string };
+
+/**
+ * Обработка OAuth-возврата (code+state): сверка nonce (CSRF) → обмен code на токен →
+ * шифрованная cookie сессии. Общая для /m/callback и /app/handler (см. шапку файла).
+ */
+export async function handleOAuthCallback(
+	cfg: Config,
+	query: Record<string, string | undefined>,
+	cookieHeader: string | undefined,
+): Promise<OAuthResult> {
+	const secret = mobileSecret(cfg);
+	if (!cfg.appClientId || !secret) return { ok: false, status: 200, html: notConfiguredHtml };
+
+	const code = query['code'];
+	const state = query['state'];
+	if (!code || !state) {
+		return { ok: false, status: 400, html: mobilePage(`<div class="err">Нет <code>code</code>/<code>state</code>.</div>`) };
+	}
+	// CSRF: nonce из state == nonce из cookie
+	const st = unseal(secret, state, nowSec());
+	const cookieSt = unseal(secret, readCookie(cookieHeader, M_STATE_COOKIE), nowSec());
+	const stNonce = String(st?.['nonce'] ?? '');
+	const ckNonce = String(cookieSt?.['nonce'] ?? '');
+	if (!stNonce || !ckNonce || !safeEqual(stNonce, ckNonce)) {
+		return { ok: false, status: 403, html: mobilePage('<div class="err">Неверный state (CSRF). Открой <a href="/m">/m</a> заново.</div>') };
+	}
+	try {
+		const tok = await exchangeCodeForToken({ clientId: cfg.appClientId, clientSecret: secret, code });
+		const domain = tok.domain ?? cfg.portalDomain;
+		const sessToken = seal(secret, { accessToken: tok.accessToken, domain, exp: nowSec() + SESSION_TTL_SEC });
+		const isProd = cfg.nodeEnv === 'production';
+		return {
+			ok: true,
+			cookies: [
+				buildSessionCookie(M_SESSION_COOKIE, sessToken, { maxAgeSec: SESSION_TTL_SEC, secure: isProd, path: '/' }),
+				clearSessionCookie(M_STATE_COOKIE, '/'),
+			],
+			redirect: '/m',
+		};
+	} catch (err) {
+		const msg = err instanceof OAuthError ? `${err.code}: ${err.description ?? ''}` : String(err);
+		return { ok: false, status: 200, html: mobilePage(`<div class="err"><b>Обмен code→токен не удался:</b><br><code>${msg.replace(/</g, '&lt;')}</code></div>`) };
+	}
+}
+
 export function registerMobileRoute(app: FastifyInstance): void {
 	const cfg = app.config;
-	const secret = cfg.appClientSecret ?? cfg.appSecret ?? '';
-	const redirectUri = `${cfg.publicBaseUrl.replace(/\/$/, '')}/m/callback`;
+	const secret = mobileSecret(cfg);
 	const isProd = cfg.nodeEnv === 'production';
-	const nowSec = (): number => Math.floor(Date.now() / 1000);
-	const notConfigured = (): string =>
-		pageHtml('<div class="err"><b>OAuth не настроен.</b><br>Нет <code>APP_CLIENT_ID</code> / <code>APP_CLIENT_SECRET</code> в env контейнера.</div>');
 
-	// GET /m — вход с телефона.
+	// GET /m — вход с телефона. Нет сессии → OAuth. Есть → проба user.current.
 	app.get('/m', async (req, reply) => {
 		if (!cfg.appClientId || !secret) {
-			return reply.code(200).type('text/html; charset=utf-8').send(notConfigured());
+			return reply.code(200).type('text/html; charset=utf-8').send(notConfiguredHtml);
 		}
-		// уже есть сессия? → проба user.current
-		const sess = unseal(secret, readCookie(req.headers.cookie, SESSION_COOKIE), nowSec());
+		const sess = unseal(secret, readCookie(req.headers.cookie, M_SESSION_COOKIE), nowSec());
 		const accessToken = sess?.['accessToken'];
 		const domain = sess?.['domain'];
 		if (typeof accessToken === 'string' && typeof domain === 'string') {
@@ -59,63 +105,33 @@ export function registerMobileRoute(app: FastifyInstance): void {
 				const u = await client.call<{ NAME?: string; LAST_NAME?: string; ID?: string | number }>('user.current', {});
 				const name = [u?.LAST_NAME, u?.NAME].filter(Boolean).join(' ').trim() || `id ${u?.ID ?? '?'}`;
 				return reply.code(200).type('text/html; charset=utf-8').send(
-					pageHtml(`<div class="ok"><b>✅ OAuth работает.</b><br>Телефон залогинен как <b>${name.replace(/</g, '&lt;')}</b> — автономно, вне портала.</div>
+					mobilePage(`<div class="ok"><b>✅ OAuth работает.</b><br>Телефон залогинен как <b>${name.replace(/</g, '&lt;')}</b> — автономно, вне портала.</div>
 					<p>Это проба Фазы A. Если ты это видишь и десктоп НЕ упал — путь верный, дальше тут будет пульт инвентаризации.</p>`),
 				);
 			} catch (err) {
 				app.log.warn({}, `[m] user.current failed — ${err instanceof Error ? err.message : String(err)}`);
-				reply.header('Set-Cookie', clearSessionCookie(SESSION_COOKIE));
-				return reply.code(200).type('text/html; charset=utf-8').send(pageHtml('<div class="err">Сессия истекла. <a href="/m">Войти заново</a>.</div>'));
+				reply.header('Set-Cookie', clearSessionCookie(M_SESSION_COOKIE, '/'));
+				return reply.code(200).type('text/html; charset=utf-8').send(mobilePage('<div class="err">Сессия истекла. <a href="/m">Войти заново</a>.</div>'));
 			}
 		}
 		// нет сессии → старт OAuth
 		const nonce = randomNonce();
 		const stateToken = seal(secret, { nonce, exp: nowSec() + STATE_TTL_SEC });
-		const url = buildAuthorizeUrl({ domain: cfg.portalDomain, clientId: cfg.appClientId, state: stateToken, redirectUri });
-		reply.header('Set-Cookie', buildSessionCookie(STATE_COOKIE, stateToken, { maxAgeSec: STATE_TTL_SEC, secure: isProd }));
-		app.log.info({ redirectUri }, '[m] redirect → /oauth/authorize/');
+		const url = buildAuthorizeUrl({ domain: cfg.portalDomain, clientId: cfg.appClientId, state: stateToken });
+		reply.header('Set-Cookie', buildSessionCookie(M_STATE_COOKIE, stateToken, { maxAgeSec: STATE_TTL_SEC, secure: isProd, path: '/' }));
+		app.log.info({}, '[m] redirect → /oauth/authorize/');
 		return reply.redirect(url);
 	});
 
-	// GET /m/callback — портал вернул code+state.
+	// GET /m/callback — если Б24 всё-таки уважит redirect_uri (резерв).
 	app.get('/m/callback', async (req, reply) => {
 		const q = (req.query ?? {}) as Record<string, string | undefined>;
-		// ДИАГНОСТИКА живой пробы: что именно вернул портал.
 		app.log.info({ keys: Object.keys(q) }, `[m/callback] query=${JSON.stringify(q)}`);
-		if (!cfg.appClientId || !secret) return reply.code(200).type('text/html; charset=utf-8').send(notConfigured());
-
-		const code = q['code'];
-		const state = q['state'];
-		if (!code || !state) {
-			return reply.code(400).type('text/html; charset=utf-8').send(
-				pageHtml(`<div class="err">Нет <code>code</code>/<code>state</code>. Пришло: <code>${JSON.stringify(q).replace(/</g, '&lt;')}</code></div>`),
-			);
+		const r = await handleOAuthCallback(cfg, q, req.headers.cookie);
+		if (r.ok) {
+			reply.header('Set-Cookie', r.cookies);
+			return reply.redirect(r.redirect);
 		}
-		// CSRF: nonce из state == nonce из cookie
-		const st = unseal(secret, state, nowSec());
-		const cookieSt = unseal(secret, readCookie(req.headers.cookie, STATE_COOKIE), nowSec());
-		const stNonce = String(st?.['nonce'] ?? '');
-		const ckNonce = String(cookieSt?.['nonce'] ?? '');
-		if (!stNonce || !ckNonce || !safeEqual(stNonce, ckNonce)) {
-			app.log.warn({ hasState: Boolean(st), hasCookie: Boolean(cookieSt) }, '[m/callback] state/nonce mismatch');
-			return reply.code(403).type('text/html; charset=utf-8').send(pageHtml('<div class="err">Неверный state (CSRF). Открой <a href="/m">/m</a> заново.</div>'));
-		}
-		try {
-			const tok = await exchangeCodeForToken({ clientId: cfg.appClientId, clientSecret: secret, code });
-			const domain = tok.domain ?? cfg.portalDomain;
-			const sessToken = seal(secret, { accessToken: tok.accessToken, domain, exp: nowSec() + SESSION_TTL_SEC });
-			reply.header('Set-Cookie', [
-				buildSessionCookie(SESSION_COOKIE, sessToken, { maxAgeSec: SESSION_TTL_SEC, secure: isProd }),
-				clearSessionCookie(STATE_COOKIE),
-			]);
-			app.log.info({ domain, scope: tok.scope }, '[m/callback] token exchange OK');
-			return reply.redirect('/m');
-		} catch (err) {
-			const msg = err instanceof OAuthError ? `${err.code}: ${err.description ?? ''}` : String(err);
-			app.log.error({}, `[m/callback] exchange failed — ${msg}`);
-			return reply.code(200).type('text/html; charset=utf-8').send(
-				pageHtml(`<div class="err"><b>Обмен code→токен не удался:</b><br><code>${msg.replace(/</g, '&lt;')}</code></div>`),
-			);
-		}
+		return reply.code(r.status).type('text/html; charset=utf-8').send(r.html);
 	});
 }

@@ -7,6 +7,7 @@ import {
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { bindDealTabPlacement, bindInventoryMenuPlacement, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
+import { handleOAuthCallback } from './mobile.js';
 
 /**
  * POST /app/handler — главная страница приложения.
@@ -71,12 +72,19 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 	};
 
 	// GET — прямое открытие в браузере, без auth, просто welcome.
-	// ДИАГНОСТИКА QR-OAuth: если локальное приложение возвращает code сюда (а не на /m/callback) —
-	// зафиксируем, чтобы на живой пробе понять, куда Б24 шлёт authorization code.
+	// QR-OAuth: Б24 для локального приложения возвращает authorization code на ОБРАБОТЧИК
+	// приложения (сюда), а не на наш redirect_uri=/m/callback. Если пришёл code+state —
+	// это возврат мобильного OAuth: обмениваем на токен, ставим cookie сессии и шлём на /m.
 	app.get('/app/handler', async (req, reply) => {
 		const q = (req.query ?? {}) as Record<string, string | undefined>;
-		if (q['code'] || q['state']) {
-			app.log.info({ keys: Object.keys(q) }, `[app/handler GET] возможно OAuth code сюда: ${JSON.stringify(q)}`);
+		if (q['code'] && q['state']) {
+			app.log.info({ keys: Object.keys(q) }, '[app/handler GET] OAuth callback (мобильный) — обрабатываю');
+			const r = await handleOAuthCallback(app.config, q, req.headers.cookie);
+			if (r.ok) {
+				reply.header('Set-Cookie', r.cookies);
+				return reply.redirect(r.redirect);
+			}
+			return reply.code(r.status).type('text/html; charset=utf-8').send(r.html);
 		}
 		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml('idle'));
 	});
