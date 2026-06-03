@@ -59,6 +59,35 @@ const MOCK_ROWS: BaseRow[] = [
 
 type SortKey = 'id' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
 
+/**
+ * Поле ввода количества с локальным состоянием: можно очистить и вписать своё, не теряя
+ * позицию. В корзину уходит только валидное число ≥1 (пустое/0 при редактировании не
+ * трогает корзину — иначе backspace удалял бы товар). На blur пустое возвращается к value.
+ */
+function QtyInput({ value, onChange }: { value: number; onChange: (n: number) => void }): JSX.Element {
+	const [text, setText] = useState(String(value));
+	useEffect(() => { setText(String(value)); }, [value]);
+	return (
+		<input
+			className="qty-input"
+			type="number"
+			min={1}
+			value={text}
+			onClick={(e) => e.stopPropagation()}
+			onChange={(e) => {
+				const t = e.target.value;
+				setText(t);
+				const n = Math.floor(Number(t));
+				if (t !== '' && Number.isFinite(n) && n >= 1) onChange(n);
+			}}
+			onBlur={() => {
+				const n = Math.floor(Number(text));
+				if (!(Number.isFinite(n) && n >= 1)) setText(String(value));
+			}}
+		/>
+	);
+}
+
 export function ProductBase(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [gate, setGate] = useState<Gate>('checking');
@@ -348,7 +377,7 @@ export function ProductBase(): JSX.Element {
 											{cart.has(d.id) ? (
 												<div className="qty-stepper">
 													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 1) - 1)} aria-label="меньше">−</button>
-													<input className="qty-input" type="number" min={1} value={cart.get(d.id)} onChange={(e) => setCartQty(d.id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+													<QtyInput value={cart.get(d.id) ?? 1} onChange={(n) => setCartQty(d.id, n)} />
 													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 0) + 1)} aria-label="больше">+</button>
 												</div>
 											) : (
@@ -384,7 +413,7 @@ export function ProductBase(): JSX.Element {
 											<span className="cart-unit money">{fmt(c.row.retail)} ₽</span>
 											<div className="qty-stepper">
 												<button onClick={() => setCartQty(c.row.id, c.qty - 1)} aria-label="меньше">−</button>
-												<input className="qty-input" type="number" min={1} value={c.qty} onChange={(e) => setCartQty(c.row.id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+												<QtyInput value={c.qty} onChange={(n) => setCartQty(c.row.id, n)} />
 												<button onClick={() => setCartQty(c.row.id, c.qty + 1)} aria-label="больше">+</button>
 											</div>
 											<input className="disc-input sm" type="number" min={0} max={99} value={discOf(c.row.id)} onChange={(e) => setItemDiscount(c.row.id, Number(e.target.value))} />
