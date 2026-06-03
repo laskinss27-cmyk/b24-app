@@ -153,13 +153,25 @@ export async function unbindCatalogExternalPlacement(opts: BindDealTabOptions): 
  */
 export const INVENTORY_ENTITY = 'ctv_inv';
 
+/** Кэш на процесс: хранилище создаётся один раз. */
+let entityEnsured = false;
+
 export async function ensureInventoryEntity(client: B24Client): Promise<{ status: string }> {
+	// entity.add — ПИШУЩАЯ попытка на КАЖДЫЙ запрос (list/update/create). Под нагрузкой
+	// (кто-то создаёт инвентаризацию) это добавляет контеншн в entity-хранилище и тормозит
+	// чужие чтения → фронт ловит таймаут. Хранилище создаём ОДИН раз за жизнь контейнера;
+	// дальше не дёргаем. (Если удалят извне — переподнимется при рестарте контейнера.)
+	if (entityEnsured) return { status: 'cached' };
 	try {
 		await client.call('entity.add', { ENTITY: INVENTORY_ENTITY, NAME: 'CTV Инвентаризации', ACCESS: { AU: 'W' } });
+		entityEnsured = true;
 		return { status: 'created' };
 	} catch (err) {
 		if (err instanceof B24ApiError) {
-			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'exists' };
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) {
+				entityEnsured = true;
+				return { status: 'exists' };
+			}
 			return { status: `${err.code}: ${err.description ?? ''}` };
 		}
 		return { status: String(err) };

@@ -178,7 +178,7 @@ export function InventoryHome(): JSX.Element {
 
 				void (async () => {
 					try {
-						setInventories(await withTimeout(listInventories(), 12000, 'entity.item.get'));
+						setInventories(await withTimeout(listInventories(), 20000, 'entity.item.get'));
 					} catch (e: unknown) {
 						setStorageWarn(`${String(e instanceof Error ? e.message : e)} (если хранилище не создано — пусть Володя/админ откроет приложение)`);
 					}
@@ -190,7 +190,7 @@ export function InventoryHome(): JSX.Element {
 	async function reload(): Promise<void> {
 		if (ctx.__mock) return;
 		try {
-			setInventories(await withTimeout(listInventories(), 12000, 'list'));
+			setInventories(await withTimeout(listInventories(), 20000, 'list'));
 		} catch {
 			/* оставляем текущий список */
 		}
@@ -330,7 +330,7 @@ export function InventoryHome(): JSX.Element {
 				]);
 			} else {
 				await withTimeout(createInventory(title.trim(), points, deadline, me.id, notify, pickedSections), 15000, 'create');
-				setInventories(await withTimeout(listInventories(), 12000, 'list'));
+				setInventories(await withTimeout(listInventories(), 20000, 'list'));
 			}
 			setCreating(false);
 			setTitle('');
@@ -389,7 +389,8 @@ export function InventoryHome(): JSX.Element {
 	// Действие на точке по статусу/владельцу
 	const pointAction = (inv: Inventory, p: InvPoint): JSX.Element | null => {
 		const st = p.status ?? 'idle';
-		const mine = p.responsibleId === me.id;
+		// Считать может КТО УГОДНО в любое время — без блокировки по «взял/назначен».
+		// Назначенный ответственный — только для уведомления в задаче, не замок (правило Сергея).
 		const key = `${inv.id}:${p.storeId}`;
 		const openBtn = p.result ? (
 			<button className="btn-mini ghost" onClick={() => setExpanded(expanded === key ? null : key)}>
@@ -401,8 +402,8 @@ export function InventoryHome(): JSX.Element {
 				Вернуть в работу
 			</button>
 		) : null;
-		if (st === 'idle') return !p.responsibleId || mine ? <button className="btn-mini" onClick={() => void startPoint(inv, p)}>Начал выполнение</button> : null;
-		if (st === 'in_progress') return mine ? <button className="btn-mini" onClick={() => continuePoint(inv, p)}>Продолжить</button> : null;
+		if (st === 'idle') return <button className="btn-mini" onClick={() => void startPoint(inv, p)}>Начал выполнение</button>;
+		if (st === 'in_progress') return <button className="btn-mini" onClick={() => continuePoint(inv, p)}>Продолжить</button>;
 		if (st === 'submitted') {
 			return (
 				<>
@@ -415,7 +416,7 @@ export function InventoryHome(): JSX.Element {
 		if (st === 'act') {
 			return (
 				<>
-					{mine && <button className="btn-mini" onClick={() => continuePoint(inv, p, 'act')}>Проверить акт</button>}
+					<button className="btn-mini" onClick={() => continuePoint(inv, p, 'act')}>Проверить акт</button>
 					{openBtn}
 					{reopenBtn}
 				</>

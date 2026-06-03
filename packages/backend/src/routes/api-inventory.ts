@@ -190,10 +190,9 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 
 			if (b.action === 'claim') {
 				if (status === 'submitted') return reply.code(200).send({ ok: false, error: 'точка уже отправлена' });
-				const resp = String(pt['responsibleId'] ?? '');
-				if (resp && resp !== meId) {
-					return reply.code(200).send({ ok: false, error: `точку уже взял ${pt['responsibleName'] || resp}` });
-				}
+				// БЕЗ блокировки по ответственному: считать может кто угодно (правило Сергея).
+				// «Начал выполнение» делает текущего юзера ответственным (для отображения), но
+				// не запрещает другим — назначение лишь для уведомления, не замок.
 				pt['responsibleId'] = meId;
 				pt['responsibleName'] = String(b.userName ?? '');
 				pt['status'] = 'in_progress';
