@@ -151,11 +151,6 @@ export function ProductBase(): JSX.Element {
 		return list;
 	}, [rows, q, onlyStock, isAll, sid, sortKey, sortDir]);
 
-	// Растягиваем iframe под доступное место (таблица широкая) — после данных и при смене числа строк.
-	useEffect(() => {
-		if (mode === 'base') window.BX24?.fitWindow();
-	}, [mode, view.length]);
-
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
 		if (ctx.__mock) {
@@ -275,11 +270,11 @@ export function ProductBase(): JSX.Element {
 						}) : <tr><td colSpan={10} className="base-empty">Ничего не найдено</td></tr>}
 					</tbody>
 				</table>
-				<div className="base-foot">
-					<span>Позиций: {view.length}</span>
-					<span>{meta ? `данные на ${hhmm(meta.generatedAt)}${meta.cached ? ' · из кэша' : ''}` : ''}</span>
-					<span>Сумма по закупке (видимое): {fmt(sumPurchase)} ₽</span>
-				</div>
+			</div>
+			<div className="base-foot">
+				<span>Позиций: {view.length}</span>
+				<span>{meta ? `данные на ${hhmm(meta.generatedAt)}${meta.cached ? ' · из кэша' : ''}` : ''}</span>
+				<span>Сумма по закупке (видимое): {fmt(sumPurchase)} ₽</span>
 			</div>
 		</div>
 	);
