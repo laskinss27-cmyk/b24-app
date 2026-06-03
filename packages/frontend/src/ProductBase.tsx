@@ -35,6 +35,12 @@ function shortStore(title: string): string {
 function fmt(n: number | null | undefined): string {
 	return n == null ? '—' : n.toLocaleString('ru-RU');
 }
+/** Время сборки базы в HH:MM (для метки свежести/кэша). */
+function hhmm(iso: string): string {
+	if (!iso) return '';
+	const d = new Date(iso);
+	return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
 
 const MOCK_STORES: StoreInfo[] = [
 	{ id: 8, title: 'Максидом Дунайский 64', active: true },
@@ -57,6 +63,8 @@ export function ProductBase(): JSX.Element {
 	const [mode, setMode] = useState<Mode>('loading');
 	const [rows, setRows] = useState<BaseRow[]>([]);
 	const [stores, setStores] = useState<StoreInfo[]>([]);
+	const [meta, setMeta] = useState<{ generatedAt: string; cached: boolean } | null>(null);
+	const [refreshing, setRefreshing] = useState(false);
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
@@ -70,6 +78,7 @@ export function ProductBase(): JSX.Element {
 			setGate('beta');
 			setStores(MOCK_STORES);
 			setRows(MOCK_ROWS);
+			setMeta({ generatedAt: new Date().toISOString(), cached: false });
 			setMode('base');
 			return;
 		}
@@ -90,7 +99,8 @@ export function ProductBase(): JSX.Element {
 				const sts = await withTimeout(fetchStores(), 15000, 'catalog.store.list');
 				setStores(sts.filter((s) => s.active));
 				const base = await withTimeout(fetchProductBase(), 90000, 'catalog/browse');
-				setRows(base);
+				setRows(base.rows);
+				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setMode('base');
 			})().catch((e: unknown) => {
 				setGate('error');
@@ -140,6 +150,29 @@ export function ProductBase(): JSX.Element {
 		});
 		return list;
 	}, [rows, q, onlyStock, isAll, sid, sortKey, sortDir]);
+
+	// Растягиваем iframe под доступное место (таблица широкая) — после данных и при смене числа строк.
+	useEffect(() => {
+		if (mode === 'base') window.BX24?.fitWindow();
+	}, [mode, view.length]);
+
+	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
+	async function refresh(): Promise<void> {
+		if (ctx.__mock) {
+			setMeta({ generatedAt: new Date().toISOString(), cached: false });
+			return;
+		}
+		setRefreshing(true);
+		try {
+			const base = await withTimeout(fetchProductBase(true), 90000, 'catalog/browse');
+			setRows(base.rows);
+			setMeta({ generatedAt: base.generatedAt, cached: false });
+		} catch {
+			/* пересборка не удалась — оставляем текущие данные */
+		} finally {
+			setRefreshing(false);
+		}
+	}
 
 	const storeName = (id: number): string => shortStore(stores.find((s) => s.id === id)?.title ?? `#${id}`);
 	const sumPurchase = useMemo(() => view.reduce((s, r) => s + r.qty * (r.d.purchase ?? 0), 0), [view]);
@@ -194,6 +227,7 @@ export function ProductBase(): JSX.Element {
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				<div className="tb-spacer" />
+				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				<button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>
 			</div>
 
@@ -243,6 +277,7 @@ export function ProductBase(): JSX.Element {
 				</table>
 				<div className="base-foot">
 					<span>Позиций: {view.length}</span>
+					<span>{meta ? `данные на ${hhmm(meta.generatedAt)}${meta.cached ? ' · из кэша' : ''}` : ''}</span>
 					<span>Сумма по закупке (видимое): {fmt(sumPurchase)} ₽</span>
 				</div>
 			</div>

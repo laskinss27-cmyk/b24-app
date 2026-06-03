@@ -924,7 +924,7 @@ h2.inv-h2 {
 
 /* ── База товаров (каталог-браузер) ──────────────────────────────────────────── */
 .base {
-	max-width: 1180px;
+	max-width: 100%;
 	margin: 0 auto;
 	padding: 18px;
 	color: #1a2231;
@@ -1009,7 +1009,7 @@ h2.inv-h2 {
 	background: #fff;
 	border: 1px solid #e3e8ef;
 	border-radius: 12px;
-	overflow: hidden;
+	overflow-x: auto;
 	box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
 }
 .base-table {

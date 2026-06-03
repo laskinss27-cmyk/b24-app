@@ -450,19 +450,28 @@ export interface BaseRow {
 	stockByStore: Record<number, number>;
 }
 
+export interface ProductBaseResult {
+	rows: BaseRow[];
+	/** ISO-время сборки на бэкенде (для метки свежести). */
+	generatedAt: string;
+	/** true — отдано из кэша бэкенда (не пересобиралось). */
+	cached: boolean;
+}
+
 /**
  * Вся База одним запросом (сборка на бэкенде серверным B24Client — фронтовый BX24
  * виснет на catalog.product.list). Дальше фронт фильтрует/ищет/сортирует локально.
+ * Бэкенд кэширует сборку (TTL ~5 мин); force=true — принудительная пересборка.
  */
-export async function fetchProductBase(): Promise<BaseRow[]> {
+export async function fetchProductBase(force = false): Promise<ProductBaseResult> {
 	const res = await fetch('/api/catalog/browse', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(bx24Auth()),
+		body: JSON.stringify({ ...bx24Auth(), force }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; generatedAt?: string; cached?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
-	return json.rows ?? [];
+	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached) };
 }
 
 /** Открыть нативную карточку товара Б24 (слайдером, не уходя из приложения). */
