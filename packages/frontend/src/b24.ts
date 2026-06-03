@@ -474,8 +474,8 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached) };
 }
 
-/** Доступ к «Быстрой продаже» (ЗАПИСЬ) — пока только Сергей (1858), до обкатки. */
-export const QUICKSALE_USER_IDS = ['1858'];
+/** Доступ к «Быстрой продаже» (ЗАПИСЬ): Сергей (1858) + Бекасов (986) — совместная обкатка. */
+export const QUICKSALE_USER_IDS = ['1858', '986'];
 
 export interface QuickSaleItem {
 	productId: number;
