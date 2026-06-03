@@ -432,6 +432,50 @@ export function photoFullUrl(photoPath: string): string | null {
 	return `https://${a.domain}${photoPath}${sep}auth=${encodeURIComponent(a.access_token)}`;
 }
 
+// ── База товаров (каталог-браузер склада) ─────────────────────────────────────
+
+/** Строка Базы — собирается на бэкенде (/api/catalog/browse). Зеркало BaseRow бэкенда. */
+export interface BaseRow {
+	id: number;
+	iblockId: number;
+	name: string;
+	article?: string | undefined;
+	model?: string | undefined;
+	manufacturer?: string | undefined;
+	sectionName?: string | undefined;
+	retail: number | null;
+	purchase: number | null;
+	photoPath?: string | undefined;
+	total: number;
+	stockByStore: Record<number, number>;
+}
+
+/**
+ * Вся База одним запросом (сборка на бэкенде серверным B24Client — фронтовый BX24
+ * виснет на catalog.product.list). Дальше фронт фильтрует/ищет/сортирует локально.
+ */
+export async function fetchProductBase(): Promise<BaseRow[]> {
+	const res = await fetch('/api/catalog/browse', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(bx24Auth()),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
+	return json.rows ?? [];
+}
+
+/** Открыть нативную карточку товара Б24 (слайдером, не уходя из приложения). */
+export function openProductCard(iblockId: number, productId: number): void {
+	const path = `/shop/documents-catalog/${iblockId}/product/${productId}/`;
+	const bx = window.BX24;
+	if (bx && typeof bx.openPath === 'function') bx.openPath(path);
+	else {
+		const auth = bx ? bx.getAuth() : false;
+		window.open(`https://${auth ? (auth.domain ?? '') : ''}${path}`, '_blank');
+	}
+}
+
 // ── Инвентаризация: хранилище (entity.*) + инициаторы (app.option) ────────────
 // ВАЖНО: entity.* и app.option.* работают только в контексте приложения (iframe), не через вебхук.
 

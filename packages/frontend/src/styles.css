@@ -921,3 +921,214 @@ h2.inv-h2 {
 		background: none;
 	}
 }
+
+/* ── База товаров (каталог-браузер) ──────────────────────────────────────────── */
+.base {
+	max-width: 1180px;
+	margin: 0 auto;
+	padding: 18px;
+	color: #1a2231;
+}
+.base header h1 {
+	margin: 0 0 2px;
+	font-size: 20px;
+}
+.base .subtitle {
+	margin: 0 0 14px;
+	color: #7a8699;
+	font-size: 12.5px;
+}
+.base .muted {
+	color: #7a8699;
+}
+.base .error {
+	color: #e5484d;
+}
+.base-load {
+	color: #7a8699;
+	padding: 24px 4px;
+}
+.base-backbar {
+	max-width: 1180px;
+	margin: 0 auto;
+	padding: 12px 18px 0;
+}
+
+.base-toolbar {
+	background: #fff;
+	border: 1px solid #e3e8ef;
+	border-radius: 12px;
+	padding: 12px;
+	display: flex;
+	gap: 10px;
+	align-items: flex-end;
+	flex-wrap: wrap;
+	margin-bottom: 12px;
+	box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+.tb-field {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	font-size: 12px;
+	color: #7a8699;
+}
+.tb-field select,
+.tb-field input {
+	border: 1px solid #e3e8ef;
+	border-radius: 9px;
+	padding: 9px 11px;
+	font-size: 14px;
+	outline: none;
+	background: #fff;
+	color: #1a2231;
+}
+.tb-field select:focus,
+.tb-field input:focus {
+	border-color: #0b5fff;
+}
+.tb-search {
+	flex: 1;
+	min-width: 240px;
+}
+.tb-chk {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 13.5px;
+	color: #1a2231;
+	cursor: pointer;
+	user-select: none;
+	padding-bottom: 9px;
+}
+.tb-spacer {
+	flex: 1;
+}
+
+.base-tablewrap {
+	background: #fff;
+	border: 1px solid #e3e8ef;
+	border-radius: 12px;
+	overflow: hidden;
+	box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+.base-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.base-table thead th {
+	position: sticky;
+	top: 0;
+	background: #f8fafc;
+	text-align: left;
+	font-size: 11.5px;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	color: #7a8699;
+	font-weight: 700;
+	padding: 10px 12px;
+	border-bottom: 1px solid #e3e8ef;
+	white-space: nowrap;
+	cursor: pointer;
+}
+.base-table th.num,
+.base-table td.num {
+	text-align: right;
+}
+.base-table tbody td {
+	padding: 9px 12px;
+	border-bottom: 1px solid #eef1f5;
+	vertical-align: middle;
+}
+.base-table tbody tr {
+	cursor: pointer;
+}
+.base-table tbody tr:hover {
+	background: #f8fbff;
+}
+.base-table.hide-store .c-store {
+	display: none;
+}
+.base-table .idcol {
+	color: #7a8699;
+	font-family: ui-monospace, Menlo, monospace;
+	font-size: 12.5px;
+}
+.base-table .ph-col {
+	width: 48px;
+}
+.base-table .ph {
+	width: 40px;
+	height: 40px;
+	border-radius: 7px;
+	background: #f1f5f9;
+	object-fit: cover;
+	display: block;
+}
+.base-table .no-ph {
+	width: 40px;
+	height: 40px;
+	border-radius: 7px;
+	background: #f1f5f9;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #cbd5e1;
+}
+.base-table .nm {
+	font-weight: 550;
+}
+.base-table .art {
+	font-size: 12px;
+	color: #1a56db;
+	font-family: ui-monospace, Menlo, monospace;
+}
+.base-table .brand {
+	display: inline-block;
+	font-weight: 600;
+	color: #374151;
+	background: #eef2ff;
+	border-radius: 4px;
+	padding: 1px 7px;
+	font-size: 12.5px;
+}
+.base-table .money {
+	font-variant-numeric: tabular-nums;
+}
+.base-table .stock {
+	font-weight: 700;
+}
+.base-table .stock.zero {
+	color: #7a8699;
+	font-weight: 400;
+}
+.base-table .whs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+.base-table .wh {
+	font-size: 11.5px;
+	background: #f1f5f9;
+	border-radius: 5px;
+	padding: 1px 7px;
+	color: #475569;
+	white-space: nowrap;
+}
+.base-table .wh b {
+	color: #1a2231;
+}
+.base-empty {
+	padding: 30px;
+	text-align: center;
+	color: #7a8699;
+}
+.base-foot {
+	display: flex;
+	justify-content: space-between;
+	color: #7a8699;
+	font-size: 12.5px;
+	padding: 10px 12px;
+	background: #f8fafc;
+	border-top: 1px solid #e3e8ef;
+}

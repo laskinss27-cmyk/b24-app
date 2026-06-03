@@ -13,6 +13,7 @@ import { registerPlacementDealTabRoute } from './routes/placement-deal-tab.js';
 import { registerPlacementTaskInventoryRoute } from './routes/placement-task-inventory.js';
 import { registerPlacementInventoryRoute } from './routes/placement-inventory.js';
 import { registerApiInventoryRoute } from './routes/api-inventory.js';
+import { registerApiCatalogRoute } from './routes/api-catalog.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,6 +84,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerPlacementTaskInventoryRoute(app);
 	registerPlacementInventoryRoute(app);
 	registerApiInventoryRoute(app);
+	registerApiCatalogRoute(app);
 	registerAppHandlerRoute(app);
 
 	return app;
