@@ -74,6 +74,7 @@ export function ProductBase(): JSX.Element {
 	const [showCart, setShowCart] = useState(false);
 	const [creatingSale, setCreatingSale] = useState(false);
 	const [saleErr, setSaleErr] = useState<string | null>(null);
+	const [discountPct, setDiscountPct] = useState(0);
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
@@ -208,8 +209,13 @@ export function ProductBase(): JSX.Element {
 		if (ctx.__mock) { setSaleErr('dev-мок: продажа создаётся только на проде.'); return; }
 		setCreatingSale(true);
 		try {
-			const dealId = await withTimeout(createQuickSale(items, uid), 20000, 'quicksale/create');
+			const dealId = await withTimeout(
+				createQuickSale(items, { assignedById: uid, storeId: isAll ? null : sid, discountPercent: discountPct }),
+				20000,
+				'quicksale/create',
+			);
 			setCart(new Map());
+			setDiscountPct(0);
 			setShowCart(false);
 			openDeal(dealId);
 		} catch (e) {
@@ -324,7 +330,7 @@ export function ProductBase(): JSX.Element {
 											{cart.has(d.id) ? (
 												<div className="qty-stepper">
 													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 1) - 1)} aria-label="меньше">−</button>
-													<span className="qty-val">{cart.get(d.id)}</span>
+													<input className="qty-input" type="number" min={1} value={cart.get(d.id)} onChange={(e) => setCartQty(d.id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
 													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 0) + 1)} aria-label="больше">+</button>
 												</div>
 											) : (
@@ -365,7 +371,15 @@ export function ProductBase(): JSX.Element {
 										</div>
 									))}
 								</div>
-								<div className="cart-total">Итого: <b>{fmt(cartSum)} ₽</b></div>
+								<div className="cart-discount">
+									<label htmlFor="disc">Скидка на всю продажу, %</label>
+									<input id="disc" className="disc-input" type="number" min={0} max={99} value={discountPct} onChange={(e) => setDiscountPct(Math.min(99, Math.max(0, Math.floor(Number(e.target.value) || 0))))} />
+								</div>
+								<div className="cart-total">
+									<div>Сумма: {fmt(cartSum)} ₽</div>
+									{discountPct > 0 && <div className="cart-disc-line">Скидка {discountPct}%: −{fmt(Math.round((cartSum * discountPct) / 100))} ₽</div>}
+									<div className="cart-grand">К оплате: <b>{fmt(Math.round(cartSum * (1 - discountPct / 100)))} ₽</b></div>
+								</div>
 								{saleErr && <div className="cart-err">⛔ {saleErr}</div>}
 								<div className="cart-actions">
 									<button className="btn-secondary" onClick={() => setCart(new Map())}>Очистить</button>

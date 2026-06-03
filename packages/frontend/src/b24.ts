@@ -483,12 +483,25 @@ export interface QuickSaleItem {
 	price: number;
 	quantity: number;
 }
+export interface QuickSaleOpts {
+	assignedById?: string;
+	/** Выбранный склад → станет «Источником» сделки (пусто, если «Все склады»). */
+	storeId?: number | null;
+	/** Скидка % на всю продажу. */
+	discountPercent?: number;
+}
 /** Создать сделку «Быстрая продажа» (кат. 6) из корзины → вернуть ID сделки. */
-export async function createQuickSale(items: QuickSaleItem[], assignedById?: string): Promise<number> {
+export async function createQuickSale(items: QuickSaleItem[], opts: QuickSaleOpts = {}): Promise<number> {
 	const res = await fetch('/api/quicksale/create', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), items, assignedById }),
+		body: JSON.stringify({
+			...bx24Auth(),
+			items,
+			assignedById: opts.assignedById,
+			storeId: opts.storeId ?? undefined,
+			discountPercent: opts.discountPercent ?? 0,
+		}),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; dealId?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать продажу');

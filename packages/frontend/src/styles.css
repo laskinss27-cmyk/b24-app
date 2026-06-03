@@ -1238,7 +1238,26 @@ html, body, #root { height: 100%; }
 	cursor: pointer;
 	padding: 2px 6px;
 }
-.cart-total { text-align: right; font-size: 15px; margin: 14px 0; }
+.cart-discount {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 14px;
+	justify-content: flex-end;
+	color: #7a8699;
+	font-size: 13px;
+}
+.disc-input {
+	width: 70px;
+	height: 30px;
+	border: 1px solid #e3e8ef;
+	border-radius: 7px;
+	text-align: center;
+	font-size: 14px;
+}
+.cart-total { text-align: right; font-size: 13.5px; margin: 10px 0; color: #475569; }
+.cart-disc-line { color: #11a36b; }
+.cart-grand { font-size: 16px; color: #1a2231; margin-top: 4px; }
 .cart-err { color: #e5484d; margin: 8px 0; }
 .cart-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .cart-hint { margin-top: 12px; font-size: 12px; }
