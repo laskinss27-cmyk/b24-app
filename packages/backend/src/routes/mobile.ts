@@ -70,7 +70,7 @@ export async function handleOAuthCallback(
 	try {
 		const tok = await exchangeCodeForToken({ clientId: cfg.appClientId, clientSecret: secret, code });
 		const domain = tok.domain ?? cfg.portalDomain;
-		const sessToken = seal(secret, { accessToken: tok.accessToken, domain, exp: nowSec() + SESSION_TTL_SEC });
+		const sessToken = seal(secret, { accessToken: tok.accessToken, domain, scope: tok.scope ?? '', exp: nowSec() + SESSION_TTL_SEC });
 		const isProd = cfg.nodeEnv === 'production';
 		return {
 			ok: true,
@@ -96,9 +96,15 @@ export function registerMobileRoute(app: FastifyInstance): void {
 		if (!cfg.appClientId || !secret) {
 			return reply.code(200).type('text/html; charset=utf-8').send(notConfiguredHtml);
 		}
+		// ?reset=1 — сбросить сессию и зайти заново (без авто-петли).
+		if ((req.query as Record<string, unknown>)?.['reset']) {
+			reply.header('Set-Cookie', clearSessionCookie(M_SESSION_COOKIE, '/'));
+			return reply.redirect('/m');
+		}
 		const sess = unseal(secret, readCookie(req.headers.cookie, M_SESSION_COOKIE), nowSec());
 		const accessToken = sess?.['accessToken'];
 		const domain = sess?.['domain'];
+		const scope = typeof sess?.['scope'] === 'string' ? sess['scope'] : '';
 		if (typeof accessToken === 'string' && typeof domain === 'string') {
 			try {
 				const client = new B24Client({ auth: { kind: 'oauth', domain, accessToken } });
@@ -109,9 +115,16 @@ export function registerMobileRoute(app: FastifyInstance): void {
 					<p>Это проба Фазы A. Если ты это видишь и десктоп НЕ упал — путь верный, дальше тут будет пульт инвентаризации.</p>`),
 				);
 			} catch (err) {
-				app.log.warn({}, `[m] user.current failed — ${err instanceof Error ? err.message : String(err)}`);
-				reply.header('Set-Cookie', clearSessionCookie(M_SESSION_COOKIE, '/'));
-				return reply.code(200).type('text/html; charset=utf-8').send(mobilePage('<div class="err">Сессия истекла. <a href="/m">Войти заново</a>.</div>'));
+				// ДИАГНОСТИКА: токен получен, но REST упал — показываем реальную ошибку, домен, scope.
+				const msg = (err instanceof Error ? err.message : String(err)).replace(/</g, '&lt;');
+				app.log.warn({ domain, scope }, `[m] user.current failed — ${msg}`);
+				return reply.code(200).type('text/html; charset=utf-8').send(
+					mobilePage(`<div class="err"><b>Токен получен, но REST-вызов упал.</b><br>
+						user.current → <code>${msg}</code><br><br>
+						домен: <code>${String(domain).replace(/</g, '&lt;')}</code><br>
+						scope: <code>${(scope || '(пусто)').replace(/</g, '&lt;')}</code></div>
+						<p><a href="/m?reset=1">Сбросить и войти заново</a></p>`),
+				);
 			}
 		}
 		// нет сессии → старт OAuth
