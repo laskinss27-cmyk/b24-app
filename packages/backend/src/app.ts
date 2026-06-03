@@ -17,6 +17,7 @@ import { registerApiInventoryRoute } from './routes/api-inventory.js';
 import { registerApiCatalogRoute } from './routes/api-catalog.js';
 import { registerApiQuicksaleRoute } from './routes/api-quicksale.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
+import { registerMobileRoute } from './routes/mobile.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -90,6 +91,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerApiCatalogRoute(app);
 	registerApiQuicksaleRoute(app);
 	registerAppHandlerRoute(app);
+	registerMobileRoute(app);
 
 	return app;
 }

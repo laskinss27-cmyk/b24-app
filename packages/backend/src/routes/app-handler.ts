@@ -56,7 +56,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			'idle': '',
 		};
 		const taskCard = taskInfo
-			? `<div class="card"><strong>Пункт «Инвентаризация» (левое меню):</strong> ${taskInfo.replace(/</g, '&lt;')}</div>`
+			? `<div class="card"><strong>Пункт «Товары» (левое меню):</strong> ${taskInfo.replace(/</g, '&lt;')}</div>`
 			: '';
 		const storageCard = storageInfo
 			? `<div class="card"><strong>Хранилище инвентаризации:</strong> ${storageInfo.replace(/</g, '&lt;')}</div>`
@@ -71,7 +71,13 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 	};
 
 	// GET — прямое открытие в браузере, без auth, просто welcome.
-	app.get('/app/handler', async (_req, reply) => {
+	// ДИАГНОСТИКА QR-OAuth: если локальное приложение возвращает code сюда (а не на /m/callback) —
+	// зафиксируем, чтобы на живой пробе понять, куда Б24 шлёт authorization code.
+	app.get('/app/handler', async (req, reply) => {
+		const q = (req.query ?? {}) as Record<string, string | undefined>;
+		if (q['code'] || q['state']) {
+			app.log.info({ keys: Object.keys(q) }, `[app/handler GET] возможно OAuth code сюда: ${JSON.stringify(q)}`);
+		}
 		return reply.code(200).type('text/html; charset=utf-8').send(renderHtml('idle'));
 	});
 
