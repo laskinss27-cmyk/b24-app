@@ -482,13 +482,13 @@ export interface QuickSaleItem {
 	name: string;
 	price: number;
 	quantity: number;
+	/** Скидка % на эту позицию. */
+	discountPercent?: number;
 }
 export interface QuickSaleOpts {
 	assignedById?: string;
 	/** Выбранный склад → станет «Источником» сделки (пусто, если «Все склады»). */
 	storeId?: number | null;
-	/** Скидка % на всю продажу. */
-	discountPercent?: number;
 }
 /** Создать сделку «Быстрая продажа» (кат. 6) из корзины → вернуть ID сделки. */
 export async function createQuickSale(items: QuickSaleItem[], opts: QuickSaleOpts = {}): Promise<number> {
@@ -500,7 +500,6 @@ export async function createQuickSale(items: QuickSaleItem[], opts: QuickSaleOpt
 			items,
 			assignedById: opts.assignedById,
 			storeId: opts.storeId ?? undefined,
-			discountPercent: opts.discountPercent ?? 0,
 		}),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; dealId?: number };

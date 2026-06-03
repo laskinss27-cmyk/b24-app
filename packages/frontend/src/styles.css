@@ -1218,14 +1218,37 @@ html, body, #root { height: 100%; }
 }
 .cart-modal h2 { margin: 0 0 14px; font-size: 18px; }
 .cart-items { display: flex; flex-direction: column; gap: 8px; }
+/* Шапка и строки — ОДИН набор ширин колонок, иначе заголовки не выровнены. */
+.cart-head,
 .cart-item {
 	display: grid;
-	grid-template-columns: 1fr auto auto auto auto;
+	grid-template-columns: minmax(0, 1fr) 76px 116px 60px 92px 24px;
 	gap: 10px;
 	align-items: center;
+}
+.cart-head {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: #7a8699;
+	padding-bottom: 6px;
+	border-bottom: 1px solid #e3e8ef;
+}
+/* Выравнивание по колонкам: товар — слева, цена/сумма — справа, кол-во/скидка — по центру. */
+.cart-head span { text-align: center; }
+.cart-head span:first-child { text-align: left; }
+.cart-head span:nth-child(2),
+.cart-head span:nth-child(5) { text-align: right; }
+.cart-item {
 	padding: 8px 0;
 	border-bottom: 1px solid #eef1f5;
 }
+.cart-item .cart-unit,
+.cart-item .cart-line { text-align: right; }
+.cart-item .qty-stepper,
+.cart-item .disc-input.sm,
+.cart-item .cart-del { justify-self: center; }
+.disc-input.sm { width: 56px; height: 28px; }
 .cart-nm { font-weight: 550; font-size: 13.5px; }
 .cart-unit { color: #7a8699; font-size: 12.5px; }
 .cart-line { font-weight: 600; min-width: 80px; text-align: right; }

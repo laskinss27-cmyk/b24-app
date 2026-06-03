@@ -23,6 +23,8 @@ interface CartItem {
 	name?: string;
 	price?: number;
 	quantity?: number;
+	/** Скидка % на ЭТУ позицию (0..99). */
+	discountPercent?: number;
 }
 
 const QUICKSALE_CATEGORY_ID = 6;
@@ -64,14 +66,20 @@ export function registerApiQuicksaleRoute(app: FastifyInstance): void {
 	};
 
 	app.post('/api/quicksale/create', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { items?: CartItem[]; assignedById?: string | number; title?: string; storeId?: number; discountPercent?: number };
+		const b = (req.body ?? {}) as AuthBody & { items?: CartItem[]; assignedById?: string | number; title?: string; storeId?: number };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
-		// валидация корзины
+		// валидация корзины (скидка — на каждую позицию отдельно, 0..99)
 		const items = Array.isArray(b.items)
 			? b.items
-					.map((it) => ({ productId: Number(it.productId), name: String(it.name ?? ''), price: Number(it.price ?? 0), quantity: Number(it.quantity ?? 0) }))
+					.map((it) => ({
+						productId: Number(it.productId),
+						name: String(it.name ?? ''),
+						price: Number(it.price ?? 0),
+						quantity: Number(it.quantity ?? 0),
+						discountPercent: Math.min(99, Math.max(0, Number(it.discountPercent) || 0)),
+					}))
 					.filter((it) => it.productId > 0 && it.quantity > 0)
 			: [];
 		if (!items.length) return reply.code(400).send({ ok: false, error: 'пустая корзина' });
@@ -80,8 +88,6 @@ export function registerApiQuicksaleRoute(app: FastifyInstance): void {
 		const assignedById = Number(b.assignedById ?? 0) || undefined;
 		// Источник = точка продажи по выбранному складу (пусто, если склад не выбран/без пары).
 		const sourceId = b.storeId ? STORE_TO_SOURCE[Number(b.storeId)] : undefined;
-		// Скидка % на всю продажу (0..99) — применяется к каждой строке.
-		const pct = Math.min(99, Math.max(0, Number(b.discountPercent) || 0));
 
 		try {
 			// 1. Сделка: категория 6, стартовая стадия, розничный покупатель, источник=точка.
@@ -98,19 +104,23 @@ export function registerApiQuicksaleRoute(app: FastifyInstance): void {
 			});
 			if (!dealId || dealId <= 0) throw new Error('crm.deal.add не вернул ID');
 
-			// 2. Корзина → строки (скидка %: PRICE=итоговая, DISCOUNT_RATE — для показа скидки в сделке).
+			// 2. Корзина → строки. Скидка % НА КАЖДУЮ позицию: PRICE=розница×(1−pct/100) (итог),
+			// DISCOUNT_TYPE_ID=2 + DISCOUNT_RATE — Битрикс восстановит нетто=розница и сумму скидки.
 			await client.call('crm.deal.productrows.set', {
 				id: dealId,
-				rows: items.map((it) => ({
-					PRODUCT_ID: it.productId,
-					PRODUCT_NAME: it.name || undefined,
-					PRICE: pct > 0 ? round2(it.price * (1 - pct / 100)) : it.price,
-					QUANTITY: it.quantity,
-					...(pct > 0 ? { DISCOUNT_TYPE_ID: 2, DISCOUNT_RATE: pct } : {}),
-				})),
+				rows: items.map((it) => {
+					const pct = it.discountPercent;
+					return {
+						PRODUCT_ID: it.productId,
+						PRODUCT_NAME: it.name || undefined,
+						PRICE: pct > 0 ? round2(it.price * (1 - pct / 100)) : it.price,
+						QUANTITY: it.quantity,
+						...(pct > 0 ? { DISCOUNT_TYPE_ID: 2, DISCOUNT_RATE: pct } : {}),
+					};
+				}),
 			});
 
-			app.log.info({ dealId, items: items.length, assignedById, sourceId, pct }, '[api/quicksale/create] ok');
+			app.log.info({ dealId, items: items.length, assignedById, sourceId }, '[api/quicksale/create] ok');
 			return { ok: true, dealId };
 		} catch (err) {
 			app.log.error({ items: items.length }, `[api/quicksale/create] failed — ${errInfo(err)}`);

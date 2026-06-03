@@ -74,7 +74,8 @@ export function ProductBase(): JSX.Element {
 	const [showCart, setShowCart] = useState(false);
 	const [creatingSale, setCreatingSale] = useState(false);
 	const [saleErr, setSaleErr] = useState<string | null>(null);
-	const [discountPct, setDiscountPct] = useState(0);
+	// Скидка % на КАЖДУЮ позицию: productId → процент.
+	const [discounts, setDiscounts] = useState<Map<number, number>>(() => new Map());
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
@@ -188,7 +189,11 @@ export function ProductBase(): JSX.Element {
 		() => [...cart.entries()].map(([id, qty]) => ({ row: rowById.get(id), qty })).filter((c): c is { row: BaseRow; qty: number } => Boolean(c.row)),
 		[cart, rowById],
 	);
+	const discOf = (id: number): number => discounts.get(id) ?? 0;
+	const lineFinal = (row: BaseRow, qty: number): number => Math.round((row.retail ?? 0) * (1 - discOf(row.id) / 100)) * qty;
 	const cartSum = cartList.reduce((s, c) => s + (c.row.retail ?? 0) * c.qty, 0);
+	const cartFinal = cartList.reduce((s, c) => s + lineFinal(c.row, c.qty), 0);
+	const cartSaved = cartSum - cartFinal;
 
 	function addToCart(id: number): void {
 		setCart((prev) => new Map(prev).set(id, (prev.get(id) ?? 0) + 1));
@@ -200,22 +205,35 @@ export function ProductBase(): JSX.Element {
 			else n.set(id, qty);
 			return n;
 		});
+		if (qty <= 0) setDiscounts((prev) => { const n = new Map(prev); n.delete(id); return n; });
+	}
+	function setItemDiscount(id: number, pct: number): void {
+		setDiscounts((prev) => {
+			const n = new Map(prev);
+			const v = Math.min(99, Math.max(0, Math.floor(pct || 0)));
+			if (v) n.set(id, v);
+			else n.delete(id);
+			return n;
+		});
+	}
+	function clearCart(): void {
+		setCart(new Map());
+		setDiscounts(new Map());
 	}
 
 	async function createSale(): Promise<void> {
 		setSaleErr(null);
-		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty }));
+		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty, discountPercent: discOf(c.row.id) }));
 		if (!items.length) return;
 		if (ctx.__mock) { setSaleErr('dev-мок: продажа создаётся только на проде.'); return; }
 		setCreatingSale(true);
 		try {
 			const dealId = await withTimeout(
-				createQuickSale(items, { assignedById: uid, storeId: isAll ? null : sid, discountPercent: discountPct }),
+				createQuickSale(items, { assignedById: uid, storeId: isAll ? null : sid }),
 				20000,
 				'quicksale/create',
 			);
-			setCart(new Map());
-			setDiscountPct(0);
+			clearCart();
 			setShowCart(false);
 			openDeal(dealId);
 		} catch (e) {
@@ -279,7 +297,7 @@ export function ProductBase(): JSX.Element {
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				<div className="tb-spacer" />
 				{canQuickSale && cart.size > 0 && (
-					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartSum)} ₽</button>
+					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				<button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>
@@ -356,6 +374,9 @@ export function ProductBase(): JSX.Element {
 						<h2>🛒 Быстрая продажа</h2>
 						{cartList.length ? (
 							<>
+								<div className="cart-head">
+									<span>Товар</span><span>Цена</span><span>Кол-во</span><span>Скидка %</span><span>Сумма</span><span />
+								</div>
 								<div className="cart-items">
 									{cartList.map((c) => (
 										<div className="cart-item" key={c.row.id}>
@@ -366,23 +387,19 @@ export function ProductBase(): JSX.Element {
 												<input className="qty-input" type="number" min={1} value={c.qty} onChange={(e) => setCartQty(c.row.id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
 												<button onClick={() => setCartQty(c.row.id, c.qty + 1)} aria-label="больше">+</button>
 											</div>
-											<span className="cart-line money">{fmt((c.row.retail ?? 0) * c.qty)} ₽</span>
+											<input className="disc-input sm" type="number" min={0} max={99} value={discOf(c.row.id)} onChange={(e) => setItemDiscount(c.row.id, Number(e.target.value))} />
+											<span className="cart-line money">{fmt(lineFinal(c.row, c.qty))} ₽</span>
 											<button className="cart-del" onClick={() => setCartQty(c.row.id, 0)} aria-label="убрать">✕</button>
 										</div>
 									))}
 								</div>
-								<div className="cart-discount">
-									<label htmlFor="disc">Скидка на всю продажу, %</label>
-									<input id="disc" className="disc-input" type="number" min={0} max={99} value={discountPct} onChange={(e) => setDiscountPct(Math.min(99, Math.max(0, Math.floor(Number(e.target.value) || 0))))} />
-								</div>
 								<div className="cart-total">
-									<div>Сумма: {fmt(cartSum)} ₽</div>
-									{discountPct > 0 && <div className="cart-disc-line">Скидка {discountPct}%: −{fmt(Math.round((cartSum * discountPct) / 100))} ₽</div>}
-									<div className="cart-grand">К оплате: <b>{fmt(Math.round(cartSum * (1 - discountPct / 100)))} ₽</b></div>
+									{cartSaved > 0 && <div className="cart-disc-line">Скидка суммарно: −{fmt(cartSaved)} ₽ (без скидки {fmt(cartSum)} ₽)</div>}
+									<div className="cart-grand">К оплате: <b>{fmt(cartFinal)} ₽</b></div>
 								</div>
 								{saleErr && <div className="cart-err">⛔ {saleErr}</div>}
 								<div className="cart-actions">
-									<button className="btn-secondary" onClick={() => setCart(new Map())}>Очистить</button>
+									<button className="btn-secondary" onClick={clearCart}>Очистить</button>
 									<button className="btn-secondary" onClick={() => setShowCart(false)}>Закрыть</button>
 									<button className="btn-primary" disabled={creatingSale} onClick={() => void createSale()}>{creatingSale ? 'Создаю…' : 'Создать продажу'}</button>
 								</div>
