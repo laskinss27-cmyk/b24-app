@@ -105,6 +105,39 @@ export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Prom
 }
 
 /**
+ * Пункт приложения в меню СПИСКА сделок (placement CRM_DEAL_LIST_MENU) — вход в «Отчёт
+ * по продажам» прямо со страницы сделок/канбана (по просьбе Сергея 2026-06-05). По клику
+ * Б24 открывает наш обработчик /placement/sales-report (слайдером). Доступ к отчёту режет
+ * фронт (канарейка троих). НЕ throw'ит: если новый интерфейс сделок плейсмент не отрендерит
+ * (как было с TASK_VIEW_*) — вернём статус строкой, не ломая остальные бинды; фича всё равно
+ * доступна кнопкой в «Базе товаров».
+ */
+export const DEAL_LIST_REPORT_PLACEMENT = 'CRM_DEAL_LIST_MENU';
+export const DEAL_LIST_REPORT_TITLE = 'Отчёт по продажам';
+
+export async function bindDealListReportPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/sales-report`;
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: DEAL_LIST_REPORT_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: DEAL_LIST_REPORT_TITLE,
+			LANG_ALL: {
+				ru: { TITLE: DEAL_LIST_REPORT_TITLE, DESCRIPTION: 'Выгрузка продаж за период по менеджерам (CSV)' },
+				en: { TITLE: 'Sales report', DESCRIPTION: 'Period sales by manager (CSV)' },
+			},
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
+/**
  * ЭКСПЕРИМЕНТ (по просьбе Сергея): единственная зацепка в зоне каталога из живого
  * placement.list — `CATALOG_EXTERNAL_PRODUCT` (в публичной доке не описан). Биндим,
  * чтобы вживую увидеть, КУДА Битрикс сажает приложение в Складском учёте/каталоге.

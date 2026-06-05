@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -132,6 +132,16 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 				taskInfo = `⛔ ${e}`;
 				app.log.error({}, `[app/handler] inventory menu bind failed — ${e}`);
+			}
+
+			// 2.5) Пункт «Отчёт по продажам» в меню списка сделок (CRM_DEAL_LIST_MENU) — независимо;
+			// не throw'ит (новый интерфейс сделок может не отрендерить — фича есть и кнопкой в Базе).
+			try {
+				const rep = await bindDealListReportPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ placement: DEAL_LIST_REPORT_PLACEMENT, status: rep.status }, '[app/handler] sales-report placement');
+			} catch (err) {
+				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+				app.log.error({ placement: DEAL_LIST_REPORT_PLACEMENT }, `[app/handler] sales-report bind failed — ${e}`);
 			}
 
 			// 3) Хранилище инвентаризации (entity) — создаётся с бэка (чистый JSON, app-контекст). Только админ.

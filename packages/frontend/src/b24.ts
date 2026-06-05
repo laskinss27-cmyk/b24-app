@@ -745,3 +745,40 @@ export async function fetchUsers(): Promise<SimpleUser[]> {
 		name: `${u['LAST_NAME'] ?? ''} ${u['NAME'] ?? ''}`.trim() || String(u['ID']),
 	}));
 }
+
+// ── Отчёт по продажам (за период по менеджерам) ───────────────────────────────
+
+/** Воронки сделок (CATEGORY_ID + название) для фильтра отчёта. */
+export async function fetchDealCategories(): Promise<{ id: number; name: string }[]> {
+	const res = await call<{ categories?: Array<Record<string, unknown>> }>('crm.category.list', { entityTypeId: 2 });
+	const list = (res?.categories ?? []).map((c) => ({ id: Number(c['id']), name: String(c['name'] ?? `Воронка ${c['id']}`) }));
+	if (!list.some((c) => c.id === 0)) list.unshift({ id: 0, name: 'Объекты' });
+	return list.sort((a, b) => a.id - b.id);
+}
+
+/** Строка отчёта по продажам — зеркало SalesReportRow бэкенда. */
+export interface SalesReportRow {
+	dealId: number;
+	category: string;
+	dateCreate: string;
+	dateClosed: string;
+	title: string;
+	manager: string;
+	goodsSum: number;
+	worksSum: number;
+	goodsProfit: number;
+	worksProfit: number;
+	goodsNoPurchase: number;
+}
+
+/** Собрать отчёт по продажам (сборка на бэкенде; фронтовый BX24 виснет на тяжёлых list/get). */
+export async function fetchSalesReport(from: string, to: string, categoryIds: number[]): Promise<{ rows: SalesReportRow[]; coef: number }> {
+	const res = await fetch('/api/reports/sales', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), from, to, categoryIds }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: SalesReportRow[]; coef?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать отчёт');
+	return { rows: json.rows ?? [], coef: json.coef ?? 0.5 };
+}

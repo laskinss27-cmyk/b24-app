@@ -1330,3 +1330,12 @@ html, body, #root { height: 100%; }
 	border-radius: 6px;
 	margin-top: 8px;
 }
+
+/* ── Отчёт по продажам ────────────────────────────────────────────────────── */
+.report-form { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
+.report-cats { margin: 10px 0; }
+.report-cat-list { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 6px; }
+.report-cat { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.report-count { margin: 12px 0 6px; }
+.report-preview { margin-top: 8px; }
+.report-table th, .report-table td { font-size: 13px; }

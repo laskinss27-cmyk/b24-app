@@ -15,6 +15,7 @@ import {
 	type StoreInfo,
 } from './b24.js';
 import { InventoryHome } from './InventoryHome.js';
+import { SalesReport } from './SalesReport.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -27,7 +28,7 @@ import { InventoryHome } from './InventoryHome.js';
  */
 
 type Gate = 'checking' | 'beta' | 'plain' | 'error';
-type Mode = 'loading' | 'base' | 'inventory';
+type Mode = 'loading' | 'base' | 'inventory' | 'report';
 
 const ALL = 'all';
 
@@ -297,6 +298,9 @@ export function ProductBase(): JSX.Element {
 			</div>
 		);
 	}
+	if (mode === 'report') {
+		return <SalesReport onBack={() => setMode('base')} />;
+	}
 	if (mode === 'loading') {
 		return (
 			<div className="base">
@@ -330,6 +334,7 @@ export function ProductBase(): JSX.Element {
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				<button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>
+				<button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>
 			</div>
 
 			<div className="base-tablewrap">
