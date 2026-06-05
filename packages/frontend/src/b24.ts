@@ -187,8 +187,9 @@ export async function fetchStockAndPurchasing(productIds: number[]): Promise<Rec
 	return out;
 }
 
-/** Канареечный доступ к новым экранам: Сергей Ласкин (1858) + Игорь Бекасов (986, рук. розницы). */
-export const BETA_USER_IDS = ['1858', '986'];
+/** Канареечный доступ к новым экранам: Сергей Ласкин (1858) + Игорь Бекасов (986, рук. розницы)
+ *  + Владимир Дранишников (1, владелец — видит всё). */
+export const BETA_USER_IDS = ['1858', '986', '1'];
 
 /** ID текущего пользователя, который смотрит (для канареечного гейта). */
 export async function fetchCurrentUserId(): Promise<string> {
@@ -474,8 +475,8 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached) };
 }
 
-/** Доступ к «Быстрой продаже» (ЗАПИСЬ): Сергей (1858) + Бекасов (986) — совместная обкатка. */
-export const QUICKSALE_USER_IDS = ['1858', '986'];
+/** Доступ к «Быстрой продаже» (ЗАПИСЬ): Сергей (1858) + Бекасов (986) + Дранишников (1, владелец). */
+export const QUICKSALE_USER_IDS = ['1858', '986', '1'];
 
 export interface QuickSaleItem {
 	productId: number;
