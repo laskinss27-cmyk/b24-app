@@ -79,6 +79,18 @@ function parentIdOf(p: Record<string, unknown>): number | undefined {
 	const n = Number(raw);
 	return Number.isFinite(n) && n > 0 ? n : undefined;
 }
+/** url первой картинки галереи оффера (property104): форма [{value:{url}}] или {url}. */
+function galleryUrl(v: unknown): string | undefined {
+	const first = Array.isArray(v) ? v[0] : v;
+	if (first && typeof first === 'object') {
+		const inner = (first as Record<string, unknown>)['value'] ?? first;
+		if (inner && typeof inner === 'object') {
+			const u = (inner as Record<string, unknown>)['url'];
+			if (typeof u === 'string' && u) return u;
+		}
+	}
+	return undefined;
+}
 function numOrNull(v: unknown): number | null {
 	return v == null || v === '' ? null : Number(v);
 }
@@ -248,4 +260,103 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 
 	rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 	return { rows, generatedAt: new Date().toISOString() };
+}
+
+// ── Остатки одного склада (для мобильного подсчёта) ───────────────────────────────
+//
+// Зеркало фронтового fetchStoreInventory+enrichProducts (b24.ts), перенесённое на
+// сервер: на телефоне (вне iframe) нет BX24 SDK, поэтому остатки склада собираем здесь
+// серверным B24Client. Только позиции с учётом > 0 (физически отсутствующие в системе
+// добираются «Добавить товар» — а это ТОЛЬКО ПК, на мобиле такого нет).
+
+/** Строка остатка для подсчёта — совпадает по форме с фронтовым InvLine. */
+export interface StockLine {
+	productId: number;
+	name: string;
+	/** Учётный остаток (amount из catalog.storeproduct.list). */
+	book: number;
+	article?: string | undefined;
+	sectionId?: number | undefined;
+	sectionName?: string | undefined;
+	model?: string | undefined;
+	manufacturer?: string | undefined;
+	photoPath?: string | undefined;
+}
+
+/** Батч catalog.product.get по id (без select → полный товар со свойствами) → Map<id, product>. */
+async function fetchProductsFull(client: B24Client, ids: number[], prefix: string): Promise<Map<number, Record<string, unknown>>> {
+	const out = new Map<number, Record<string, unknown>>();
+	for (let i = 0; i < ids.length; i += 40) {
+		const chunk = ids.slice(i, i + 40);
+		const calls: Record<string, BatchCall> = {};
+		for (const id of chunk) calls[`${prefix}${id}`] = { method: 'catalog.product.get', params: { id } };
+		const res = await client.callBatch(calls);
+		for (const id of chunk) {
+			const p = (res.result[`${prefix}${id}`] as { product?: Record<string, unknown> } | undefined)?.product;
+			if (p) out.set(id, p);
+		}
+	}
+	return out;
+}
+
+/**
+ * Опознание товаров по productId (зеркало фронтового enrichProducts):
+ * простой товар — бренд/модель/фото со своего; оффер «с предложениями» — бренд/модель
+ * базовую берём с родителя, артикул/вариацию (property360) и фото-галерею (property104) — со своего.
+ */
+async function enrichProducts(client: B24Client, ids: number[]): Promise<Map<number, Omit<StockLine, 'productId' | 'book'>>> {
+	const info = new Map<number, Omit<StockLine, 'productId' | 'book'>>();
+	const uniq = [...new Set(ids.filter((x) => x > 0))];
+	if (!uniq.length) return info;
+	const sections = await fetchSectionNames(client);
+
+	const prod = await fetchProductsFull(client, uniq, 'p');
+	const parentIds = [...new Set([...prod.values()].map((p) => parentIdOf(p)).filter((x): x is number => x !== undefined))];
+	const parents = parentIds.length ? await fetchProductsFull(client, parentIds, 'par') : new Map<number, Record<string, unknown>>();
+
+	for (const id of uniq) {
+		const p = prod.get(id);
+		if (!p) {
+			info.set(id, { name: `#${id}` });
+			continue;
+		}
+		const pid = parentIdOf(p);
+		const par = pid ? parents.get(pid) : undefined;
+		const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
+		const manufacturer = (par && propVal(par['property334'])) ?? propVal(p['property334']);
+		const model = propVal(p['property360']) ?? (par && propVal(par['property330'])) ?? propVal(p['property330']);
+		info.set(id, {
+			name: String(p['name'] ?? `#${id}`),
+			article: propVal(p['property360']),
+			sectionId: sid,
+			sectionName: sid ? sections.get(sid) : undefined,
+			model,
+			manufacturer,
+			photoPath: galleryUrl(p['property104']) ?? pictureUrl(p['detailPicture']) ?? pictureUrl(p['previewPicture']) ?? (par ? pictureUrl(par['detailPicture']) : undefined),
+		});
+	}
+	return info;
+}
+
+/**
+ * Все остатки склада (учёт > 0) + опознание — для экрана подсчёта. sectionIds — охват
+ * инвентаризации: пусто = весь склад; иначе только эти разделы (id 0 = «Без раздела»).
+ */
+export async function fetchStoreStock(client: B24Client, storeId: number, sectionIds?: number[]): Promise<StockLine[]> {
+	const sp = await fetchAllPaged(
+		client,
+		'catalog.storeproduct.list',
+		{ filter: { storeId }, select: ['productId', 'amount'], order: { id: 'ASC' } },
+		(r) => (r as { storeProducts?: Array<Record<string, unknown>> })?.storeProducts ?? [],
+	);
+	const rows = sp
+		.map((r) => ({ productId: Number(r['productId']), amount: Number(r['amount'] ?? 0) }))
+		.filter((r) => r.productId > 0 && r.amount > 0);
+	const info = await enrichProducts(client, rows.map((r) => r.productId));
+	const lines: StockLine[] = rows.map((r) => ({ productId: r.productId, book: r.amount, ...(info.get(r.productId) ?? { name: `#${r.productId}` }) }));
+	if (sectionIds && sectionIds.length) {
+		const set = new Set(sectionIds);
+		return lines.filter((l) => (l.sectionId != null && set.has(l.sectionId)) || (l.sectionId == null && set.has(0)));
+	}
+	return lines;
 }

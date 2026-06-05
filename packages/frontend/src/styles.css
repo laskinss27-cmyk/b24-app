@@ -1284,3 +1284,49 @@ html, body, #root { height: 100%; }
 .cart-err { color: #e5484d; margin: 8px 0; }
 .cart-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .cart-hint { margin-top: 12px; font-size: 12px; }
+
+/* ── QR точки (мобильный подсчёт) ─────────────────────────────────────────── */
+.qr-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(15, 23, 42, 0.55);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+	padding: 16px;
+}
+.qr-modal {
+	background: #fff;
+	border-radius: 14px;
+	padding: 18px;
+	max-width: 340px;
+	width: 100%;
+	box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+	text-align: center;
+}
+.qr-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+.qr-head strong { font-size: 15px; }
+.qr-img {
+	width: 280px;
+	max-width: 100%;
+	height: auto;
+	display: block;
+	margin: 10px auto;
+	border-radius: 8px;
+}
+.qr-url {
+	display: block;
+	word-break: break-all;
+	font-size: 11px;
+	color: #64748b;
+	background: #f1f5f9;
+	padding: 6px 8px;
+	border-radius: 6px;
+	margin-top: 8px;
+}

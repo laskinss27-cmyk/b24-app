@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
 	fetchStoreInventory,
+	fetchStoreStock,
 	fetchActLines,
 	saveDraftPoint,
 	submitPoint,
@@ -37,6 +38,8 @@ interface InventoryCountProps {
 	sectionIds?: number[] | undefined;
 	/** dev-режим (?inv) — берём мок вместо реального склада. */
 	mock?: boolean | undefined;
+	/** Мобильный режим (/m): остатки грузим серверно (нет BX24 SDK), без «Добавить товар» и без «к точкам». */
+	mobile?: boolean | undefined;
 	onBack: () => void;
 	onSubmitted: (result: InvResult, facts: Record<number, number>) => void;
 }
@@ -58,7 +61,7 @@ const MOCK_STOCK: Record<number, InvLine[]> = {
 };
 
 export function InventoryCount(props: InventoryCountProps): JSX.Element {
-	const { inventoryId, storeId, storeName, me, initialDraft, mode, actLines, total1, sectionIds, mock, onBack, onSubmitted } = props;
+	const { inventoryId, storeId, storeName, me, initialDraft, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
 
 	const [items, setItems] = useState<InvLine[] | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -88,7 +91,9 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 					: fetchActLines(actLines)
 				: mock
 					? Promise.resolve(MOCK_STOCK[storeId] ?? [])
-					: fetchStoreInventory(storeId, sectionIds);
+					: mobile
+						? fetchStoreStock(storeId, sectionIds)
+						: fetchStoreInventory(storeId, sectionIds);
 		load
 			.then((rows) => {
 				if (!alive) return;
@@ -115,7 +120,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		return () => {
 			alive = false;
 		};
-	}, [storeId, mock, mode, actLines, sectionIds]);
+	}, [storeId, mock, mobile, mode, actLines, sectionIds]);
 
 	const list = useMemo<InvLine[]>(() => {
 		const base = items ?? [];
@@ -234,10 +239,15 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				<h1>{mode === 'act' ? 'Акт разногласий' : 'Инвентаризация'} — {storeName}</h1>
 				<p className="subtitle">
 					{me.name} · посчитано {counted}/{list.length}
-					{list.length - counted > 0 ? ` · не введено ${list.length - counted}` : ''} · расхождений {discrepancies} ·{' '}
-					<button className="linklike" onClick={onBack}>
-						← к точкам
-					</button>
+					{list.length - counted > 0 ? ` · не введено ${list.length - counted}` : ''} · расхождений {discrepancies}
+					{!mobile && (
+						<>
+							{' '}·{' '}
+							<button className="linklike" onClick={onBack}>
+								← к точкам
+							</button>
+						</>
+					)}
 				</p>
 			</header>
 
@@ -262,7 +272,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				</button>
 			</div>
 
-			{mode !== 'act' && !loading && !loadErr && (
+			{mode !== 'act' && !mobile && !loading && !loadErr && (
 				<AddProduct existingIds={new Set(list.map((i) => i.productId))} onAdd={(id) => void addProduct(id)} />
 			)}
 

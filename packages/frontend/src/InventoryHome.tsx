@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchStores,
@@ -119,6 +120,8 @@ export function InventoryHome(): JSX.Element {
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/** Результат формирования документов: текст + ссылки на черновики (кнопки «Открыть»). */
 	const [docResult, setDocResult] = useState<{ docs: BuiltDoc[]; text: string } | null>(null);
+	/** Открытая модалка QR точки (мобильный подсчёт): какую точку показываем. */
+	const [qrFor, setQrFor] = useState<{ invId: string; storeId: number; storeName: string } | null>(null);
 
 	useEffect(() => {
 		if (ctx.__mock) {
@@ -460,6 +463,13 @@ export function InventoryHome(): JSX.Element {
 										{s.dot} {s.text}
 									</span>
 									{pointAction(inv, p)}
+									<button
+										className="btn-mini ghost qr-btn"
+										title="QR для подсчёта с телефона"
+										onClick={() => setQrFor({ invId: inv.id, storeId: p.storeId, storeName: p.storeName })}
+									>
+										📱 QR
+									</button>
 								</div>
 								{expanded === key && p.result && <DiscDetail result={p.result} />}
 							</li>
@@ -482,6 +492,7 @@ export function InventoryHome(): JSX.Element {
 				</header>
 				{actionErr && <div className="beta-banner">⛔ {actionErr}</div>}
 				{activeInvs.length ? activeInvs.map(invCard) : <p className="stub-calm">Сейчас нет активных инвентаризаций.</p>}
+				{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
 			</div>
 		);
 	}
@@ -568,6 +579,37 @@ export function InventoryHome(): JSX.Element {
 				{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
 			<h2 className="inv-h2">Инвентаризации</h2>
 			{inventories.length ? inventories.map(invCard) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
+			{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
+		</div>
+	);
+}
+
+/**
+ * Модалка с QR точки: телефон сканирует → /m?inv&store → подсчёт этого склада.
+ * URL строим от origin нашего приложения (контейнер), где живёт роут /m — НЕ от портала.
+ */
+function QrModal({ invId, storeId, storeName, onClose }: { invId: string; storeId: number; storeName: string; onClose: () => void }): JSX.Element {
+	const url = `${window.location.origin}/m?inv=${encodeURIComponent(invId)}&store=${storeId}`;
+	const [dataUrl, setDataUrl] = useState<string | null>(null);
+	const [err, setErr] = useState<string | null>(null);
+	useEffect(() => {
+		let alive = true;
+		QRCode.toDataURL(url, { width: 280, margin: 1 })
+			.then((d) => { if (alive) setDataUrl(d); })
+			.catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)); });
+		return () => { alive = false; };
+	}, [url]);
+	return (
+		<div className="qr-overlay" onClick={onClose}>
+			<div className="qr-modal" onClick={(e) => e.stopPropagation()}>
+				<div className="qr-head">
+					<strong>📱 {storeName}</strong>
+					<button className="btn-del" title="Закрыть" onClick={onClose}>✕</button>
+				</div>
+				<p className="muted">Отсканируйте телефоном — откроется подсчёт этой точки. Войдёте под своей учёткой Б24.</p>
+				{err ? <p className="error">⛔ {err}</p> : dataUrl ? <img className="qr-img" src={dataUrl} alt="QR-код точки" /> : <p>Генерация QR…</p>}
+				<code className="qr-url">{url}</code>
+			</div>
 		</div>
 	);
 }

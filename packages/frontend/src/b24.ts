@@ -391,6 +391,22 @@ export async function fetchStoreInventory(storeId: number, sectionIds?: number[]
 }
 
 /**
+ * Остатки склада для МОБИЛЬНОГО подсчёта (/m, вне iframe): BX24 SDK нет, поэтому
+ * собираем серверно (зеркало fetchStoreInventory на бэке). Авторизация — токен из
+ * мобильного контекста (bx24Auth() сам возьмёт его из __B24_CONTEXT__).
+ */
+export async function fetchStoreStock(storeId: number, sectionIds?: number[]): Promise<InvLine[]> {
+	const res = await fetch('/api/inventory/stock', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), storeId, sectionIds: sectionIds ?? [] }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; lines?: InvLine[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить остатки склада');
+	return json.lines ?? [];
+}
+
+/**
  * Поиск товаров по названию — для «Добавить товар» (позиция физически есть, в остатках 0/нет).
  * Ищем по складским iblock 24+26, схлопываем по полному имени (при дубле берём id из первого iblock 24).
  * Имя — единственный различитель вариантов (УЦЕНКА/СТОК/цвет/цена зашиты в название, структурных полей нет).
@@ -427,10 +443,21 @@ export async function fetchActLines(lines: InvResult['lines']): Promise<InvLine[
  * TODO: для прода аккуратнее — проксировать картинку через наш бэкенд, не светить токен в DOM.
  */
 export function photoFullUrl(photoPath: string): string | null {
+	let domain: string | undefined;
+	let token: string | undefined;
 	const a = window.BX24 ? window.BX24.getAuth() : false;
-	if (!a || !a.domain || !a.access_token) return null;
+	if (a && a.domain && a.access_token) {
+		domain = a.domain;
+		token = a.access_token;
+	} else {
+		// Мобильный режим: домен/токен из контекста (BX24 SDK нет).
+		const ctx = window.__B24_CONTEXT__;
+		domain = ctx?.domain ?? undefined;
+		token = ctx?.accessToken;
+	}
+	if (!domain || !token) return null;
 	const sep = photoPath.includes('?') ? '&' : '?';
-	return `https://${a.domain}${photoPath}${sep}auth=${encodeURIComponent(a.access_token)}`;
+	return `https://${domain}${photoPath}${sep}auth=${encodeURIComponent(token)}`;
 }
 
 // ── База товаров (каталог-браузер склада) ─────────────────────────────────────
@@ -537,8 +564,11 @@ export function openProductCard(iblockId: number, productId: number): void {
 // серверным B24Client (чистый JSON). Сюда шлём BX24-токен пользователя + домен.
 function bx24Auth(): { domain: string; accessToken: string } {
 	const a = window.BX24 ? window.BX24.getAuth() : false;
-	if (!a || !a.access_token || !a.domain) throw new Error('нет авторизации BX24 (getAuth)');
-	return { domain: a.domain, accessToken: a.access_token };
+	if (a && a.access_token && a.domain) return { domain: a.domain, accessToken: a.access_token };
+	// Мобильный режим (/m, вне iframe): BX24 SDK нет — токен/домен приходят в контексте.
+	const ctx = window.__B24_CONTEXT__;
+	if (ctx?.accessToken && ctx.domain) return { domain: ctx.domain, accessToken: ctx.accessToken };
+	throw new Error('нет авторизации (ни BX24 getAuth, ни мобильный контекст)');
 }
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */

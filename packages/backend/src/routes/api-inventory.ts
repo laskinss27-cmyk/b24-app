@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
+import { fetchStoreStock } from '../b24/catalog.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -59,6 +60,24 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.error({ entity: ent.status }, `[api/inventory/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err), entity: ent.status });
+		}
+	});
+
+	// Остатки склада для мобильного подсчёта (на телефоне нет BX24 SDK — собираем серверно).
+	// Только ЧТЕНИЕ, токен юзера в теле (фронт getAuth или мобильный контекст) — права Б24 соблюдаются.
+	app.post('/api/inventory/stock', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { storeId?: number; sectionIds?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (b.storeId == null) return reply.code(400).send({ ok: false, error: 'storeId required' });
+		const sectionIds = Array.isArray(b.sectionIds) ? b.sectionIds.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : undefined;
+		try {
+			const lines = await fetchStoreStock(client, Number(b.storeId), sectionIds);
+			app.log.info({ storeId: b.storeId, count: lines.length }, '[api/inventory/stock] ok');
+			return { ok: true, lines };
+		} catch (err) {
+			app.log.error({ storeId: b.storeId }, `[api/inventory/stock] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
 

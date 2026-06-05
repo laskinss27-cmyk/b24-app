@@ -38,6 +38,17 @@ export function mobilePage(body: string): string {
 
 const notConfiguredHtml = mobilePage('<div class="err"><b>OAuth не настроен.</b><br>Нет <code>APP_CLIENT_ID</code> / <code>APP_CLIENT_SECRET</code> в env контейнера.</div>');
 
+/**
+ * Инжектит мобильный контекст в index.html фронта. В ОТЛИЧИЕ от placement-роутов
+ * НЕ подключаем BX24 SDK (<script src="//api.bitrix24.com/...">): телефон вне iframe,
+ * SDK там бесполезен и падает. Токен/домен/точку фронт берёт из __B24_CONTEXT__.
+ */
+function injectMobileContext(indexHtml: string, ctx: Record<string, unknown>): string {
+	const ctxJson = JSON.stringify(ctx).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+	const inject = `\n<script>window.__B24_CONTEXT__ = ${ctxJson};</script>\n`;
+	return indexHtml.replace('</head>', `${inject}</head>`);
+}
+
 export type OAuthResult =
 	| { ok: true; cookies: string[]; redirect: string }
 	| { ok: false; status: number; html: string };
@@ -74,13 +85,21 @@ export async function handleOAuthCallback(
 		const domain = cfg.portalDomain;
 		const sessToken = seal(secret, { accessToken: tok.accessToken, domain, scope: tok.scope ?? '', exp: nowSec() + SESSION_TTL_SEC });
 		const isProd = cfg.nodeEnv === 'production';
+		// inv/store были упакованы в state на старте OAuth (см. GET /m). Б24 теряет query при
+		// возврате на /app/handler, поэтому достаём их из расшифрованного state и кладём обратно
+		// в редирект на /m — чтобы телефон открыл нужную точку, а не диагностику.
+		const inv = st?.['inv'];
+		const store = st?.['store'];
+		const redirect = inv != null && store != null
+			? `/m?${new URLSearchParams({ inv: String(inv), store: String(store) }).toString()}`
+			: '/m';
 		return {
 			ok: true,
 			cookies: [
 				buildSessionCookie(M_SESSION_COOKIE, sessToken, { maxAgeSec: SESSION_TTL_SEC, secure: isProd, path: '/' }),
 				clearSessionCookie(M_STATE_COOKIE, '/'),
 			],
-			redirect: '/m',
+			redirect,
 		};
 	} catch (err) {
 		const msg = err instanceof OAuthError ? `${err.code}: ${err.description ?? ''}` : String(err);
@@ -103,6 +122,12 @@ export function registerMobileRoute(app: FastifyInstance): void {
 			reply.header('Set-Cookie', clearSessionCookie(M_SESSION_COOKIE, '/'));
 			return reply.redirect('/m');
 		}
+		// Точка из QR (?inv&store) — какой склад считаем. Б24 теряет query при возврате OAuth,
+		// поэтому на старте OAuth прячем их в state и восстанавливаем в редиректе (см. callback).
+		const q = req.query as Record<string, unknown>;
+		const invId = typeof q['inv'] === 'string' ? q['inv'] : '';
+		const storeId = q['store'] != null ? Number(q['store']) : NaN;
+
 		const sess = unseal(secret, readCookie(req.headers.cookie, M_SESSION_COOKIE), nowSec());
 		const accessToken = sess?.['accessToken'];
 		const domain = sess?.['domain'];
@@ -112,9 +137,31 @@ export function registerMobileRoute(app: FastifyInstance): void {
 				const client = new B24Client({ auth: { kind: 'oauth', domain, accessToken } });
 				const u = await client.call<{ NAME?: string; LAST_NAME?: string; ID?: string | number }>('user.current', {});
 				const name = [u?.LAST_NAME, u?.NAME].filter(Boolean).join(' ').trim() || `id ${u?.ID ?? '?'}`;
+
+				// Есть точка → отдаём фронт-бандл с экраном подсчёта (view='mobileCount').
+				if (invId && Number.isFinite(storeId)) {
+					const indexHtml = await app.readFrontendIndex();
+					if (!indexHtml) {
+						return reply.code(503).type('text/html; charset=utf-8').send(mobilePage('<div class="err">Фронт ещё не собран.</div>'));
+					}
+					const ctx = {
+						view: 'mobileCount',
+						dealId: null,
+						memberId: null,
+						domain,
+						accessToken,
+						inventoryId: invId,
+						storeId,
+						me: { id: String(u?.ID ?? ''), name },
+					};
+					app.log.info({ inventoryId: invId, storeId }, '[m] mobileCount opened');
+					return reply.code(200).type('text/html; charset=utf-8').send(injectMobileContext(indexHtml, ctx));
+				}
+
+				// Нет точки → диагностика Фазы A (вход без QR).
 				return reply.code(200).type('text/html; charset=utf-8').send(
-					mobilePage(`<div class="ok"><b>✅ OAuth работает.</b><br>Телефон залогинен как <b>${name.replace(/</g, '&lt;')}</b> — автономно, вне портала.</div>
-					<p>Это проба Фазы A. Если ты это видишь и десктоп НЕ упал — путь верный, дальше тут будет пульт инвентаризации.</p>`),
+					mobilePage(`<div class="ok"><b>✅ Вы вошли как <b>${name.replace(/</g, '&lt;')}</b>.</b></div>
+					<p>Откройте инвентаризацию на ПК и отсканируйте QR у нужной точки — телефон сразу откроет подсчёт этого склада.</p>`),
 				);
 			} catch (err) {
 				// ДИАГНОСТИКА: токен получен, но REST упал — показываем реальную ошибку, домен, scope.
@@ -129,9 +176,12 @@ export function registerMobileRoute(app: FastifyInstance): void {
 				);
 			}
 		}
-		// нет сессии → старт OAuth
+		// нет сессии → старт OAuth. Точку (inv/store) прячем в state — переживёт возврат через /app/handler.
 		const nonce = randomNonce();
-		const stateToken = seal(secret, { nonce, exp: nowSec() + STATE_TTL_SEC });
+		const statePayload: Record<string, unknown> = { nonce, exp: nowSec() + STATE_TTL_SEC };
+		if (invId) statePayload['inv'] = invId;
+		if (Number.isFinite(storeId)) statePayload['store'] = storeId;
+		const stateToken = seal(secret, statePayload);
 		const url = buildAuthorizeUrl({ domain: cfg.portalDomain, clientId: cfg.appClientId, state: stateToken });
 		reply.header('Set-Cookie', buildSessionCookie(M_STATE_COOKIE, stateToken, { maxAgeSec: STATE_TTL_SEC, secure: isProd, path: '/' }));
 		app.log.info({}, '[m] redirect → /oauth/authorize/');

@@ -7,10 +7,15 @@ export interface B24Context {
 	dealId: number | null;
 	/** id задачи — устаревший путь (task placement не принимается новой карточкой). */
 	taskId?: number | null;
-	/** какой экран рендерить. 'inventory' — модуль инвентаризации (вход из левого меню). */
-	view?: 'inventory' | null;
+	/** какой экран рендерить. 'inventory' — модуль (левое меню); 'mobileCount' — мобильный подсчёт точки (/m). */
+	view?: 'inventory' | 'mobileCount' | null;
 	domain: string | null;
 	memberId: string | null;
+	/** Мобильный режим (/m, вне iframe): токен/точка/юзер приходят в контексте, BX24 SDK нет. */
+	accessToken?: string;
+	inventoryId?: string;
+	storeId?: number;
+	me?: { id: string; name: string };
 	/** true только когда контекст подставлен моком в index.html (dev) */
 	__mock?: boolean;
 }
