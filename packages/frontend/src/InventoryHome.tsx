@@ -35,6 +35,9 @@ import { InventoryCount } from './InventoryReport.js';
  * но он же может пройти точку как менеджер — кнопки действий есть и у инициатора.
  */
 
+/** Имя инвентаризации по умолчанию (поле ввода названия убрано — Сергей, 2026-06-05). */
+const INV_TITLE = 'Инвентаризация';
+
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'error'; msg: string } | { k: 'ready' };
 
 /** Активный подсчёт точки (открыт экран InventoryCount). */
@@ -106,7 +109,6 @@ export function InventoryHome(): JSX.Element {
 	const [sections, setSections] = useState<{ id: number; name: string }[]>([]);
 
 	const [creating, setCreating] = useState(false);
-	const [title, setTitle] = useState('');
 	const [picked, setPicked] = useState<Record<number, string>>({});
 	const [deadline, setDeadline] = useState('');
 	const [notify, setNotify] = useState<string[]>([]);
@@ -322,21 +324,20 @@ export function InventoryHome(): JSX.Element {
 				status: 'idle',
 			};
 		});
-		if (!title.trim() || !points.length || !deadline) return;
+		if (!points.length || !deadline) return;
 		setSaving(true);
 		const now = new Date().toISOString();
 		try {
 			if (ctx.__mock) {
 				setInventories((prev) => [
-					{ id: String(prev.length + 1), title: title.trim(), status: 'active', deadline, points, createdById: me.id, createdAt: now, sectionIds: pickedSections },
+					{ id: String(prev.length + 1), title: INV_TITLE, status: 'active', deadline, points, createdById: me.id, createdAt: now, sectionIds: pickedSections },
 					...prev,
 				]);
 			} else {
-				await withTimeout(createInventory(title.trim(), points, deadline, me.id, notify, pickedSections), 15000, 'create');
+				await withTimeout(createInventory(INV_TITLE, points, deadline, me.id, notify, pickedSections), 15000, 'create');
 				setInventories(await withTimeout(listInventories(), 20000, 'list'));
 			}
 			setCreating(false);
-			setTitle('');
 			setPicked({});
 			setDeadline('');
 			setNotify([]);
@@ -498,7 +499,7 @@ export function InventoryHome(): JSX.Element {
 	}
 
 	// Инициатор: создание + сводка статусов (и сам может пройти точку)
-	const canSave = Boolean(title.trim()) && Object.keys(picked).length > 0 && Boolean(deadline);
+	const canSave = Object.keys(picked).length > 0 && Boolean(deadline);
 	return (
 		<div className="inv">
 			<header>
@@ -512,8 +513,7 @@ export function InventoryHome(): JSX.Element {
 
 			{creating && (
 				<div className="inv-card create">
-					<input className="inv-input" placeholder="Название (напр. «Инвентаризация Июнь»)" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
-					<label className="inv-field">Крайний срок сдачи: <input type="date" className="inv-date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
+					<label className="inv-field">Крайний срок сдачи: <input type="date" className="inv-date" value={deadline} onChange={(e) => setDeadline(e.target.value)} autoFocus /></label>
 					<p className="muted">Точки (ответственного можно не ставить — менеджер сам возьмёт точку):</p>
 					<div className="point-pick">
 						{stores.map((s) => {
@@ -560,7 +560,7 @@ export function InventoryHome(): JSX.Element {
 					/>
 					<div className="inv-actions">
 						<button className="btn-primary" disabled={saving || !canSave} onClick={() => void submitCreate()}>{saving ? 'Сохраняю…' : 'Создать'}</button>
-						<button className="btn-secondary" onClick={() => { setCreating(false); setTitle(''); setPicked({}); setNotify([]); setPickedSections([]); }}>Отмена</button>
+						<button className="btn-secondary" onClick={() => { setCreating(false); setPicked({}); setNotify([]); setPickedSections([]); }}>Отмена</button>
 					</div>
 				</div>
 			)}
