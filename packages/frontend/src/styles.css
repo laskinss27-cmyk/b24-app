@@ -1339,3 +1339,15 @@ html, body, #root { height: 100%; }
 .report-count { margin: 12px 0 6px; }
 .report-preview { margin-top: 8px; }
 .report-table th, .report-table td { font-size: 13px; }
+
+/* ── Разделение товаров и работ/услуг в таблице сделки ────────────────────── */
+.products-table tr.group-band td {
+	background: #eef2f7;
+	font-weight: 600;
+	color: #334155;
+	border-top: 2px solid #cbd5e1;
+	padding-top: 8px;
+	padding-bottom: 8px;
+}
+.group-band-count { font-weight: 400; color: #64748b; }
+.group-band-sum { color: #334155; }

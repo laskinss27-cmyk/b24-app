@@ -159,6 +159,47 @@ function RealTable({ data, viewer, dev, dealId }: { data: TableData; viewer: str
 		else profitGoods += (r.price - r.purchasingPrice) * r.quantity;
 	}
 
+	const renderRow = (r: EnrichedRow): JSX.Element => {
+		const isGoods = r.type === ROW_TYPE_GOODS;
+		return (
+			<tr key={r.id}>
+				<td>{r.name}</td>
+				<td><span className={`type-badge ${isGoods ? 'goods' : 'work'}`}>{isGoods ? 'товар' : 'работа'}</span></td>
+				<td className="num">{rub(r.price)}</td>
+				<td className="num">{r.quantity} {r.measure}</td>
+				<td className="num">{rub(line(r))}</td>
+				<td>
+					<span className="shipped" title="Что считать «отгруженным» — согласовываем с Володей (кандидат: проведённые списания со склада объекта). Пока не показываем угаданные числа.">
+						— / {r.quantity}
+					</span>
+				</td>
+				<td className="row-store">
+					{!isGoods ? (
+						<span className="none">—</span>
+					) : r.stocks.length ? (
+						<select defaultValue="">
+							<option value="" disabled>выбрать склад…</option>
+							{r.stocks.map((s) => (
+								<option key={s.storeId} value={s.storeId}>{s.storeName} — {s.amount} {r.measure}</option>
+							))}
+						</select>
+					) : (
+						<span className="none">нет на складах</span>
+					)}
+				</td>
+				<td><input type="checkbox" disabled title="Создание документов реализации отключено в этой фазе" /></td>
+			</tr>
+		);
+	};
+	// Разделяем визуально: блок товаров и блок работ/услуг — полосой-заголовком, чтобы
+	// наглядно было видно, где что (раньше шли вперемешку одним списком).
+	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
+		<tr className="group-band">
+			<td colSpan={5}>{label} <span className="group-band-count">· {list.length}</span></td>
+			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
+		</tr>
+	);
+
 	return (
 		<div className="deal-products-tab">
 			<header>
@@ -185,38 +226,10 @@ function RealTable({ data, viewer, dev, dealId }: { data: TableData; viewer: str
 					</tr>
 				</thead>
 				<tbody>
-					{rows.map((r) => {
-						const isGoods = r.type === ROW_TYPE_GOODS;
-						return (
-							<tr key={r.id}>
-								<td>{r.name}</td>
-								<td><span className={`type-badge ${isGoods ? 'goods' : 'work'}`}>{isGoods ? 'товар' : 'работа'}</span></td>
-								<td className="num">{rub(r.price)}</td>
-								<td className="num">{r.quantity} {r.measure}</td>
-								<td className="num">{rub(line(r))}</td>
-								<td>
-									<span className="shipped" title="Что считать «отгруженным» — согласовываем с Володей (кандидат: проведённые списания со склада объекта). Пока не показываем угаданные числа.">
-										— / {r.quantity}
-									</span>
-								</td>
-								<td className="row-store">
-									{!isGoods ? (
-										<span className="none">—</span>
-									) : r.stocks.length ? (
-										<select defaultValue="">
-											<option value="" disabled>выбрать склад…</option>
-											{r.stocks.map((s) => (
-												<option key={s.storeId} value={s.storeId}>{s.storeName} — {s.amount} {r.measure}</option>
-											))}
-										</select>
-									) : (
-										<span className="none">нет на складах</span>
-									)}
-								</td>
-								<td><input type="checkbox" disabled title="Создание документов реализации отключено в этой фазе" /></td>
-							</tr>
-						);
-					})}
+					{goods.length > 0 && groupBand('🧰 Товары', goods, sumGoods)}
+					{goods.map(renderRow)}
+					{works.length > 0 && groupBand('🔧 Работы и услуги', works, sumWorks)}
+					{works.map(renderRow)}
 				</tbody>
 			</table>
 			</div>
