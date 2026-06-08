@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -138,7 +138,8 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			// не throw'ит (новый интерфейс сделок может не отрендерить — фича есть и кнопкой в Базе).
 			try {
 				const rep = await bindDealListReportPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
-				app.log.info({ placement: DEAL_LIST_REPORT_PLACEMENT, status: rep.status }, '[app/handler] sales-report placement');
+				const old = await unbindDealListReportMenu({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ placement: DEAL_LIST_REPORT_PLACEMENT, status: rep.status, oldMenu: old.status }, '[app/handler] sales-report placement');
 			} catch (err) {
 				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 				app.log.error({ placement: DEAL_LIST_REPORT_PLACEMENT }, `[app/handler] sales-report bind failed — ${e}`);

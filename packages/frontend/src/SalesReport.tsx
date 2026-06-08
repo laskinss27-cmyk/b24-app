@@ -22,6 +22,7 @@ type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
 
 const CSV_HEADERS = [
 	'Воронка',
+	'Источник',
 	'Дата создания',
 	'Дата перевода в успех',
 	'Название сделки',
@@ -34,8 +35,8 @@ const CSV_HEADERS = [
 ];
 
 const MOCK_ROWS: SalesReportRow[] = [
-	{ dealId: 101, category: 'Быстрая продажа', dateCreate: '2026-06-01T10:00:00+03:00', dateClosed: '2026-06-03', title: 'Продажа камеры розница', manager: 'Галанов Сергей', goodsSum: 12000, worksSum: 0, goodsProfit: 4200, worksProfit: 0, goodsNoPurchase: 0 },
-	{ dealId: 102, category: 'Объекты', dateCreate: '2026-05-20T12:30:00+03:00', dateClosed: '2026-06-04', title: 'Видеонаблюдение, склад на Пулковской', manager: 'Литвинов Алексей', goodsSum: 86000, worksSum: 45000, goodsProfit: 23000, worksProfit: 22500, goodsNoPurchase: 2 },
+	{ dealId: 101, category: 'Быстрая продажа', source: 'Дунайский 64', dateCreate: '2026-06-01T10:00:00+03:00', dateClosed: '2026-06-03', title: 'Продажа камеры розница', manager: 'Галанов Сергей', goodsSum: 12000, worksSum: 0, goodsProfit: 4200, worksProfit: 0, goodsNoPurchase: 0 },
+	{ dealId: 102, category: 'Объекты', source: 'Богатырский 15', dateCreate: '2026-05-20T12:30:00+03:00', dateClosed: '2026-06-04', title: 'Видеонаблюдение, склад на Пулковской', manager: 'Литвинов Алексей', goodsSum: 86000, worksSum: 45000, goodsProfit: 23000, worksProfit: 22500, goodsNoPurchase: 2 },
 ];
 
 function pad2(n: number): string {
@@ -65,6 +66,7 @@ function buildCsv(rows: SalesReportRow[]): string {
 	for (const r of rows) {
 		lines.push([
 			r.category,
+			r.source,
 			ruDate(r.dateCreate),
 			ruDate(r.dateClosed),
 			r.title,
@@ -226,7 +228,7 @@ function ReportPreview({ rows }: { rows: SalesReportRow[] }): JSX.Element {
 				<table className="products-table report-table">
 					<thead>
 						<tr>
-							<th>Воронка</th><th>Создана</th><th>Успех</th><th>Сделка</th><th>Менеджер</th>
+							<th>Воронка</th><th>Источник</th><th>Создана</th><th>Успех</th><th>Сделка</th><th>Менеджер</th>
 							<th className="num">Товары</th><th className="num">Услуги</th><th className="num">Приб. тов.</th><th className="num">Приб. усл.</th><th className="num">Без зак.</th>
 						</tr>
 					</thead>
@@ -234,6 +236,7 @@ function ReportPreview({ rows }: { rows: SalesReportRow[] }): JSX.Element {
 						{shown.map((r) => (
 							<tr key={r.dealId}>
 								<td>{r.category}</td>
+								<td>{r.source}</td>
 								<td>{ruDate(r.dateCreate)}</td>
 								<td>{ruDate(r.dateClosed)}</td>
 								<td>{r.title}</td>

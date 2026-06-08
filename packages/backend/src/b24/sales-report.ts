@@ -29,6 +29,8 @@ export interface SalesReportParams {
 export interface SalesReportRow {
 	dealId: number;
 	category: string;
+	/** Источник сделки (SOURCE_ID) — на какой точке/складе оформлена. */
+	source: string;
 	/** Сырые значения из Б24 (ISO/date) — формат в CSV делает фронт. */
 	dateCreate: string;
 	dateClosed: string;
@@ -97,6 +99,19 @@ async function fetchManagerNames(client: B24Client, ids: number[]): Promise<Map<
 	return map;
 }
 
+/** Источники сделок: SOURCE_ID → название (crm.status.list ENTITY_ID='SOURCE'). У портала
+ *  источники = точки продаж/склады (см. маппинг быстрой продажи). */
+async function fetchSourceNames(client: B24Client): Promise<Map<string, string>> {
+	const map = new Map<string, string>();
+	try {
+		const res = await client.call<Array<Record<string, unknown>>>('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' }, order: { SORT: 'ASC' } });
+		for (const s of res ?? []) map.set(String(s['STATUS_ID']), String(s['NAME'] ?? s['STATUS_ID']));
+	} catch {
+		/* без имён — покажем код источника */
+	}
+	return map;
+}
+
 /** Коэффициент прибыли услуг (app.option profit_coef, дефолт 0.5). */
 async function fetchCoef(client: B24Client): Promise<number> {
 	try {
@@ -145,9 +160,9 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 	};
 	if (params.categoryIds && params.categoryIds.length) filter['CATEGORY_ID'] = params.categoryIds;
 
-	const deals = await pageDeals(client, filter, ['ID', 'TITLE', 'CATEGORY_ID', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'CLOSEDATE', 'OPPORTUNITY']);
+	const deals = await pageDeals(client, filter, ['ID', 'TITLE', 'CATEGORY_ID', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'CLOSEDATE', 'OPPORTUNITY', 'SOURCE_ID']);
 
-	const [categoryNames, coef] = await Promise.all([fetchCategoryNames(client), fetchCoef(client)]);
+	const [categoryNames, sourceNames, coef] = await Promise.all([fetchCategoryNames(client), fetchSourceNames(client), fetchCoef(client)]);
 	const managerNames = await fetchManagerNames(client, deals.map((d) => Number(d['ASSIGNED_BY_ID'])));
 	const rowsByDeal = await fetchProductRows(client, deals.map((d) => Number(d['ID'])));
 
@@ -186,6 +201,7 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 		return {
 			dealId,
 			category: categoryNames.get(Number(d['CATEGORY_ID'])) ?? `Воронка ${d['CATEGORY_ID']}`,
+			source: d['SOURCE_ID'] ? (sourceNames.get(String(d['SOURCE_ID'])) ?? String(d['SOURCE_ID'])) : '',
 			dateCreate: String(d['DATE_CREATE'] ?? ''),
 			dateClosed: String(d['CLOSEDATE'] ?? ''),
 			title: String(d['TITLE'] ?? `Сделка #${dealId}`),

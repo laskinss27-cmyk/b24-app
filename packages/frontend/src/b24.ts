@@ -760,6 +760,8 @@ export async function fetchDealCategories(): Promise<{ id: number; name: string 
 export interface SalesReportRow {
 	dealId: number;
 	category: string;
+	/** Источник сделки (точка/склад оформления). */
+	source: string;
 	dateCreate: string;
 	dateClosed: string;
 	title: string;

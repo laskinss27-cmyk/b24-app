@@ -112,7 +112,11 @@ export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Prom
  * (как было с TASK_VIEW_*) — вернём статус строкой, не ломая остальные бинды; фича всё равно
  * доступна кнопкой в «Базе товаров».
  */
-export const DEAL_LIST_REPORT_PLACEMENT = 'CRM_DEAL_LIST_MENU';
+// CRM_DEAL_LIST_TOOLBAR — ВИДИМАЯ кнопка на панели страницы сделок (и канбана). Прежде
+// биндили CRM_DEAL_LIST_MENU (пункт в выпадающем меню — на канбане не виден), поэтому Сергей
+// «не находил кнопку». Переключились на TOOLBAR (2026-06-08), старый MENU снимаем (unbind ниже).
+export const DEAL_LIST_REPORT_PLACEMENT = 'CRM_DEAL_LIST_TOOLBAR';
+export const DEAL_LIST_REPORT_PLACEMENT_OLD = 'CRM_DEAL_LIST_MENU';
 export const DEAL_LIST_REPORT_TITLE = 'Отчёт по продажам';
 
 export async function bindDealListReportPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
@@ -133,6 +137,18 @@ export async function bindDealListReportPlacement(opts: BindDealTabOptions): Pro
 			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
 			return { status: `${err.code}: ${err.description ?? ''}` };
 		}
+		return { status: String(err) };
+	}
+}
+
+/** Снять прежнюю привязку отчёта к меню списка (CRM_DEAL_LIST_MENU). Идемпотентно, не throw'ит. */
+export async function unbindDealListReportMenu(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/sales-report`;
+	try {
+		await opts.client.call('placement.unbind', { PLACEMENT: DEAL_LIST_REPORT_PLACEMENT_OLD, HANDLER: handlerUrl });
+		return { status: 'unbound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) return { status: `${err.code}: ${err.description ?? ''}` };
 		return { status: String(err) };
 	}
 }
