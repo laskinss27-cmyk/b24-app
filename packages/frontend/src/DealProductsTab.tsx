@@ -187,7 +187,11 @@ function RealTable({ data, viewer, dev, dealId }: { data: TableData; viewer: str
 						<span className="none">нет на складах</span>
 					)}
 				</td>
-				<td><input type="checkbox" disabled title="Создание документов реализации отключено в этой фазе" /></td>
+				<td>
+					{isGoods
+						? <input type="checkbox" disabled title="Реализация товаров — в работе" />
+						: <span className="none">—</span>}
+				</td>
 			</tr>
 		);
 	};
