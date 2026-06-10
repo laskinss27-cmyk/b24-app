@@ -495,6 +495,40 @@ h2.inv-h2 {
 .link-btn:hover {
 	text-decoration: underline;
 }
+
+/* ── Окно «Реализации ↔ сделки» ─────────────────────────────── */
+.nowrap { white-space: nowrap; }
+.status-ok {
+	display: inline-block;
+	font-size: 11px;
+	font-weight: 600;
+	color: #1a9b54;
+	background: #e3f6ea;
+	border-radius: 6px;
+	padding: 3px 9px;
+}
+/* колонка СДЕЛКА — лёгкая зелёная подсветка, чтобы выделялась как «то, чего нет в родном экране» */
+th.col-deal-h { color: #1a9b54; }
+td.col-deal { background: #f4fcf7; }
+.deal-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 280px;
+	text-align: left;
+	color: #1a9b54;
+	font-weight: 600;
+	font-size: 13px;
+	background: #e3f6ea;
+	border: 1px solid #c4ead2;
+	border-radius: 7px;
+	padding: 4px 9px;
+	cursor: pointer;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.deal-chip:hover { background: #d3f0de; }
 /* Тег-инпут (оповещаемые): чипы + автокомплит */
 .tag-pick {
 	margin: 4px 0 8px;

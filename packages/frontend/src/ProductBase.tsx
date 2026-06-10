@@ -16,6 +16,7 @@ import {
 } from './b24.js';
 import { InventoryHome } from './InventoryHome.js';
 import { SalesReport } from './SalesReport.js';
+import { Realizations } from './Realizations.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -28,7 +29,7 @@ import { SalesReport } from './SalesReport.js';
  */
 
 type Gate = 'checking' | 'beta' | 'plain' | 'error';
-type Mode = 'loading' | 'base' | 'inventory' | 'report';
+type Mode = 'loading' | 'base' | 'inventory' | 'report' | 'realizations';
 
 const ALL = 'all';
 
@@ -301,6 +302,9 @@ export function ProductBase(): JSX.Element {
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}
+	if (mode === 'realizations') {
+		return <Realizations onBack={() => setMode('base')} />;
+	}
 	if (mode === 'loading') {
 		return (
 			<div className="base">
@@ -329,6 +333,7 @@ export function ProductBase(): JSX.Element {
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				<div className="tb-spacer" />
+				<button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>
 				{canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}

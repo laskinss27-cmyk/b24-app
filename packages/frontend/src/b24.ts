@@ -784,3 +784,32 @@ export async function fetchSalesReport(from: string, to: string, categoryIds: nu
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать отчёт');
 	return { rows: json.rows ?? [], coef: json.coef ?? 0.5 };
 }
+
+// ── Реализации ↔ сделки (зеркало нативного списка + колонка «Сделка») ──────────
+
+/** Строка реализации — зеркало RealizationRow бэкенда. */
+export interface RealizationRow {
+	shipmentId: number;
+	orderId: number;
+	/** Номер реализации, напр. «860/2». */
+	account: string;
+	date: string;
+	responsible: string;
+	sum: number;
+	client: string;
+	clientSub: string;
+	/** Связанная сделка или null (заказ без crm_pr_). */
+	deal: { id: number; title: string } | null;
+}
+
+/** Список реализаций со сделками (сборка на бэкенде; цепочка отгрузка→заказ→crm_pr_→сделка). */
+export async function fetchRealizations(force = false): Promise<{ rows: RealizationRow[]; generatedAt: string; truncated: boolean }> {
+	const res = await fetch('/api/realizations/list', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), force }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: RealizationRow[]; generatedAt?: string; truncated?: boolean };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать реализации');
+	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', truncated: Boolean(json.truncated) };
+}
