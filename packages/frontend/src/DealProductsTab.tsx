@@ -7,11 +7,14 @@ import {
 	fetchProfitCoef,
 	fetchStockAndPurchasing,
 	addProductsToDeal,
+	withTimeout,
 	call,
 	ROW_TYPE_GOODS,
 	ROW_TYPE_WORK,
 	BETA_USER_IDS,
 	type DealProductRow,
+	type StoreInfo,
+	type ProductEnrichment,
 } from './b24.js';
 
 interface EnrichedRow extends DealProductRow {
@@ -42,10 +45,20 @@ const MOCK_DATA: TableData = {
 };
 
 async function loadAll(dealId: number): Promise<TableData> {
-	const [rows, stores, coef] = await Promise.all([fetchProductRows(dealId), fetchStores(), fetchProfitCoef()]);
+	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
+	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
+	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
+	const [rows, stores, coef] = await Promise.all([
+		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
+		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
+		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
+	]);
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
 	const goodsIds = [...new Set(rows.filter((r) => r.type === ROW_TYPE_GOODS).map((r) => r.productId).filter((id) => id > 0))];
-	const enrich = await fetchStockAndPurchasing(goodsIds);
+	// Остатки/закупки тянем только если есть товары (на пустой сделке — сразу пусто, без лишнего вызова).
+	const enrich: Record<number, ProductEnrichment> = goodsIds.length
+		? await withTimeout(fetchStockAndPurchasing(goodsIds), 25000, 'stock/purchasing').catch(() => ({}))
+		: {};
 	const enriched: EnrichedRow[] = rows.map((r) => {
 		const e = enrich[r.productId];
 		return {
