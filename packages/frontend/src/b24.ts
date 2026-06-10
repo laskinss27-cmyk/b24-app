@@ -534,6 +534,32 @@ export async function createQuickSale(items: QuickSaleItem[], opts: QuickSaleOpt
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать продажу');
 	return json.dealId ?? 0;
 }
+// ── Вкладка сделки: «Добавить товар» (пункт 2) ────────────────────────────────
+
+/** Поиск товара по названию + розничная цена (для пикера «Добавить товар» в сделке). */
+export async function searchDealProducts(q: string): Promise<{ id: number; name: string; price: number }[]> {
+	if (q.trim().length < 2) return [];
+	const res = await fetch('/api/deal/search-products', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), q }),
+	});
+	const json = (await res.json()) as { ok: boolean; products?: { id: number; name: string; price: number }[] };
+	return json.products ?? [];
+}
+
+/** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */
+export async function addProductToDeal(dealId: number, productId: number, quantity: number, price?: number): Promise<{ id: number; name: string; price: number; quantity: number }> {
+	const res = await fetch('/api/deal/add-product', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, productId, quantity, price }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; row?: { id: number; name: string; price: number; quantity: number } };
+	if (!json.ok || !json.row) throw new Error(json.error ?? 'не удалось добавить товар');
+	return json.row;
+}
+
 /** Открыть карточку сделки в Б24 (слайдером). */
 export function openDeal(dealId: number): void {
 	const path = `/crm/deal/details/${dealId}/`;

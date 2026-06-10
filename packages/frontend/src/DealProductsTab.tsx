@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductRows,
 	fetchStores,
 	fetchProfitCoef,
 	fetchStockAndPurchasing,
+	searchDealProducts,
+	addProductToDeal,
 	call,
 	ROW_TYPE_GOODS,
 	ROW_TYPE_WORK,
@@ -138,11 +140,18 @@ export function DealProductsTab(): JSX.Element {
 		);
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} />;
+	const reload = async (): Promise<void> => {
+		if (ctx.__mock || ctx.dealId == null) return;
+		const data = await loadAll(ctx.dealId);
+		setState((s) => (s.phase === 'ready' ? { ...s, data } : s));
+	};
+
+	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} reload={reload} />;
 }
 
-function RealTable({ data, viewer, dev, dealId }: { data: TableData; viewer: string; dev: boolean; dealId: number | null }): JSX.Element {
+function RealTable({ data, viewer, dev, dealId, reload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; reload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
+	const [showAdd, setShowAdd] = useState(false);
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 
 	const goods = rows.filter((r) => r.type === ROW_TYPE_GOODS);
@@ -215,6 +224,11 @@ function RealTable({ data, viewer, dev, dealId }: { data: TableData; viewer: str
 				? <div className="dev-banner">dev-режим: данные мок (BX24 недоступен локально). В проде — реальные из Битрикса.</div>
 				: <div className="beta-banner">⚙️ Бета-доступ: эту таблицу пока видишь только ты. Остальные работают в стандартной вкладке «Товары».</div>}
 
+			<div className="deal-addbar">
+				<button className="btn-primary" onClick={() => setShowAdd(true)}>➕ Добавить товар</button>
+				<span className="hint">найти в каталоге и добавить позицию в сделку</span>
+			</div>
+
 			<div className="table-wrap">
 			<table className="products-table">
 				<thead>
@@ -255,6 +269,90 @@ function RealTable({ data, viewer, dev, dealId }: { data: TableData; viewer: str
 			<div className="realize-bar">
 				<button disabled>Реализовать выделенное</button>
 				<span className="hint">запись документов — следующая фаза (тест только на сделке 32592)</span>
+			</div>
+
+			{showAdd && <AddProductModal dealId={dealId} dev={dev} onClose={() => setShowAdd(false)} onAdded={reload} />}
+		</div>
+	);
+}
+
+/**
+ * Пикер «Добавить товар»: поиск по каталогу → цена + количество → «Добавить».
+ * Добавляет одну строку в сделку (crm.item.productrow.add) и обновляет таблицу (onAdded).
+ * Модалка не закрывается — можно добавить несколько позиций подряд.
+ */
+const MOCK_SEARCH = [
+	{ id: 15544, name: 'Вызывная AHD видеопанель CTV-D4Multi', price: 9500 },
+	{ id: 16498, name: 'Компьютерный кабель FTP 5E (Cu) indoor', price: 45 },
+];
+function AddProductModal({ dealId, dev, onClose, onAdded }: { dealId: number | null; dev: boolean; onClose: () => void; onAdded: () => Promise<void> }): JSX.Element {
+	const [q, setQ] = useState('');
+	const [results, setResults] = useState<{ id: number; name: string; price: number }[]>([]);
+	const [searching, setSearching] = useState(false);
+	const [qty, setQty] = useState<Map<number, number>>(() => new Map());
+	const [addingId, setAddingId] = useState<number | null>(null);
+	const [addedIds, setAddedIds] = useState<Set<number>>(() => new Set());
+	const [err, setErr] = useState<string | null>(null);
+	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	useEffect(() => {
+		if (timer.current) clearTimeout(timer.current);
+		const term = q.trim();
+		if (term.length < 2) { setResults([]); return; }
+		timer.current = setTimeout(() => {
+			setSearching(true);
+			setErr(null);
+			(dev ? Promise.resolve(MOCK_SEARCH.filter((p) => p.name.toLowerCase().includes(term.toLowerCase()))) : searchDealProducts(term))
+				.then((r) => setResults(r))
+				.catch((e: unknown) => setErr(String(e instanceof Error ? e.message : e)))
+				.finally(() => setSearching(false));
+		}, 350);
+		return () => { if (timer.current) clearTimeout(timer.current); };
+	}, [q, dev]);
+
+	const qtyOf = (id: number): number => qty.get(id) ?? 1;
+	const setQtyOf = (id: number, n: number): void => setQty((prev) => new Map(prev).set(id, Math.max(1, Math.floor(n || 1))));
+
+	async function add(p: { id: number; name: string; price: number }): Promise<void> {
+		if (dealId == null) { setErr('Нет ID сделки.'); return; }
+		if (dev) { setErr('dev-мок: добавление работает только на проде.'); return; }
+		setErr(null);
+		setAddingId(p.id);
+		try {
+			await addProductToDeal(dealId, p.id, qtyOf(p.id), p.price);
+			setAddedIds((prev) => new Set(prev).add(p.id));
+			await onAdded();
+		} catch (e: unknown) {
+			setErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setAddingId(null);
+		}
+	}
+
+	return (
+		<div className="cart-overlay" onClick={onClose}>
+			<div className="cart-modal" onClick={(e) => e.stopPropagation()}>
+				<h2>➕ Добавить товар в сделку</h2>
+				<input className="add-search" type="search" autoFocus value={q} placeholder="Название товара (мин. 2 символа)…" onChange={(e) => setQ(e.target.value)} />
+				{err && <div className="cart-err">⛔ {err}</div>}
+				<div className="add-results">
+					{searching && <p className="muted">Ищу…</p>}
+					{!searching && q.trim().length >= 2 && results.length === 0 && <p className="muted">Ничего не найдено.</p>}
+					{results.map((p) => (
+						<div className="add-item" key={p.id}>
+							<span className="add-nm">{p.name}</span>
+							<span className="add-price money">{rub(p.price)}</span>
+							<input className="qty-input" type="number" min={1} value={qtyOf(p.id)} onChange={(e) => setQtyOf(p.id, Number(e.target.value))} />
+							<button className="btn-primary add-btn" disabled={addingId === p.id} onClick={() => void add(p)}>
+								{addingId === p.id ? '…' : addedIds.has(p.id) ? '✓ ещё' : 'Добавить'}
+							</button>
+						</div>
+					))}
+				</div>
+				<div className="cart-actions">
+					<button className="btn-secondary" onClick={onClose}>Закрыть</button>
+				</div>
+				{addedIds.size > 0 && <p className="cart-hint muted">Добавлено позиций: {addedIds.size}. Таблица обновлена. Цену/количество можно поправить в строке сделки.</p>}
 			</div>
 		</div>
 	);

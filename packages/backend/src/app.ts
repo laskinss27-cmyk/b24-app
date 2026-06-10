@@ -18,6 +18,7 @@ import { registerApiCatalogRoute } from './routes/api-catalog.js';
 import { registerApiQuicksaleRoute } from './routes/api-quicksale.js';
 import { registerApiReportsRoute } from './routes/api-reports.js';
 import { registerApiRealizationsRoute } from './routes/api-realizations.js';
+import { registerApiDealRoute } from './routes/api-deal.js';
 import { registerPlacementSalesReportRoute } from './routes/placement-sales-report.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
@@ -95,6 +96,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerApiQuicksaleRoute(app);
 	registerApiReportsRoute(app);
 	registerApiRealizationsRoute(app);
+	registerApiDealRoute(app);
 	registerPlacementSalesReportRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
