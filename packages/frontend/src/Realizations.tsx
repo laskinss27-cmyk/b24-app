@@ -4,6 +4,7 @@ import {
 	fetchCurrentUserId,
 	fetchRealizations,
 	openDeal,
+	openRealization,
 	isPortalAdmin,
 	withTimeout,
 	BETA_USER_IDS,
@@ -144,7 +145,7 @@ export function Realizations({ onBack }: { onBack?: (() => void) | undefined }):
 							<tbody>
 								{view.map((r) => (
 									<tr key={r.shipmentId}>
-										<td><b>Реализация #{r.account}</b></td>
+										<td><button className="link-btn" title="Открыть реализацию" onClick={() => openRealization(r.shipmentId)}><b>Реализация #{r.account}</b></button></td>
 										<td><span className="status-ok">Проведён</span></td>
 										<td className="muted nowrap">{ruDateTime(r.date)}</td>
 										<td>{r.responsible || '—'}</td>
