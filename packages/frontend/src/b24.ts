@@ -815,12 +815,13 @@ export interface RealizationRow {
 	deal: { id: number; title: string } | null;
 }
 
-/** Список реализаций со сделками (сборка на бэкенде; цепочка отгрузка→заказ→crm_pr_→сделка). */
-export async function fetchRealizations(force = false): Promise<{ rows: RealizationRow[]; generatedAt: string; truncated: boolean }> {
+/** Список реализаций со сделками (сборка на бэкенде; цепочка отгрузка→заказ→crm_pr_→сделка).
+ *  from/to — YYYY-MM-DD, фильтр по дате проведения реализации (пусто = последние). */
+export async function fetchRealizations(opts: { from?: string | undefined; to?: string | undefined; force?: boolean | undefined } = {}): Promise<{ rows: RealizationRow[]; generatedAt: string; truncated: boolean }> {
 	const res = await fetch('/api/realizations/list', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), force }),
+		body: JSON.stringify({ ...bx24Auth(), force: opts.force ?? false, from: opts.from, to: opts.to }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; rows?: RealizationRow[]; generatedAt?: string; truncated?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать реализации');

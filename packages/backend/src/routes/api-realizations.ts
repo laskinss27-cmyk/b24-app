@@ -17,11 +17,15 @@ interface AuthBody {
 	domain?: string;
 	accessToken?: string;
 	force?: boolean;
+	from?: string;
+	to?: string;
 }
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 interface CacheEntry {
@@ -42,7 +46,10 @@ export function registerApiRealizationsRoute(app: FastifyInstance): void {
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
-		const cacheKey = normalizeDomain(body.domain ?? '');
+		const from = body.from && DATE_RE.test(body.from) ? body.from : undefined;
+		const to = body.to && DATE_RE.test(body.to) ? body.to : undefined;
+
+		const cacheKey = `${normalizeDomain(body.domain ?? '')}|${from ?? ''}|${to ?? ''}`;
 		const now = Date.now();
 		const hit = cache.get(cacheKey);
 		if (!body.force && hit && hit.expires > now) {
@@ -52,7 +59,7 @@ export function registerApiRealizationsRoute(app: FastifyInstance): void {
 
 		const t0 = Date.now();
 		try {
-			const data = await buildRealizations(client);
+			const data = await buildRealizations(client, { from, to });
 			cache.set(cacheKey, { data, expires: now + CACHE_TTL_MS });
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached: false }, '[api/realizations/list] ok');
 			return { ok: true, rows: data.rows, generatedAt: data.generatedAt, truncated: data.truncated, cached: false };

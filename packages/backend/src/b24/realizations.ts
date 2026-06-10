@@ -47,6 +47,13 @@ export interface RealizationsData {
 	truncated: boolean;
 }
 
+export interface RealizationsParams {
+	/** YYYY-MM-DD, включительно (фильтр по дате проведения реализации). */
+	from?: string | undefined;
+	/** YYYY-MM-DD, включительно. */
+	to?: string | undefined;
+}
+
 const CRM_PR_RE = /^crm_pr_(\d+)$/;
 
 /** Достаёт rowId товарной строки CRM из xmlId корзины («crm_pr_8080» → 8080). */
@@ -73,7 +80,13 @@ async function batch(client: B24Client, calls: Record<string, BatchCall>): Promi
 	return res.result;
 }
 
-export async function buildRealizations(client: B24Client): Promise<RealizationsData> {
+export async function buildRealizations(client: B24Client, params: RealizationsParams = {}): Promise<RealizationsData> {
+	// Фильтр по дате проведения. ВАЖНО: «<=YYYY-MM-DD» без времени = «до 00:00» (отрезает весь
+	// день) — поэтому верхней границе добавляем конец дня T23:59:59 (проверено разведкой).
+	const filter: Record<string, unknown> = { deducted: 'Y', system: 'N' };
+	if (params.from) filter['>=dateDeducted'] = `${params.from}T00:00:00`;
+	if (params.to) filter['<=dateDeducted'] = `${params.to}T23:59:59`;
+
 	// 1) Отгрузки: проведённые, не системные, новые сверху, с капом.
 	const shipments: Array<Record<string, unknown>> = [];
 	let truncated = false;
@@ -81,7 +94,7 @@ export async function buildRealizations(client: B24Client): Promise<Realizations
 	for (let i = 0; i < 20; i++) {
 		const page = await client.call<{ shipments?: Array<Record<string, unknown>> }>('sale.shipment.list', {
 			select: ['id', 'orderId', 'accountNumber', 'deducted', 'dateInsert', 'dateDeducted', 'responsibleId', 'system'],
-			filter: { deducted: 'Y', system: 'N' },
+			filter,
 			order: { id: 'DESC' },
 			start,
 		});

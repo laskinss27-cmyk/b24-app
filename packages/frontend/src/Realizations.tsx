@@ -52,9 +52,12 @@ export function Realizations({ onBack }: { onBack?: (() => void) | undefined }):
 	const [refreshing, setRefreshing] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 	const [q, setQ] = useState('');
+	const [from, setFrom] = useState('');
+	const [to, setTo] = useState('');
 
 	async function load(force: boolean): Promise<void> {
 		setErr(null);
+		if (from && to && from > to) { setErr('Дата «с» позже даты «по».'); return; }
 		if (ctx.__mock) {
 			setRows(MOCK_ROWS);
 			setMeta({ generatedAt: new Date().toISOString(), truncated: false });
@@ -62,7 +65,7 @@ export function Realizations({ onBack }: { onBack?: (() => void) | undefined }):
 		}
 		(force ? setRefreshing : setLoading)(true);
 		try {
-			const data = await withTimeout(fetchRealizations(force), 90000, 'realizations/list');
+			const data = await withTimeout(fetchRealizations({ from: from || undefined, to: to || undefined, force }), 90000, 'realizations/list');
 			setRows(data.rows);
 			setMeta({ generatedAt: data.generatedAt, truncated: data.truncated });
 		} catch (e: unknown) {
@@ -124,6 +127,14 @@ export function Realizations({ onBack }: { onBack?: (() => void) | undefined }):
 					<label className="tb-field tb-search">Поиск (реализация · клиент · сделка · менеджер)
 						<input type="search" value={q} placeholder="930, медведев, СКД, кабардин…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 					</label>
+					<label className="tb-field">Период с
+						<input type="date" className="inv-date" value={from} onChange={(e) => setFrom(e.target.value)} />
+					</label>
+					<label className="tb-field">по
+						<input type="date" className="inv-date" value={to} onChange={(e) => setTo(e.target.value)} />
+					</label>
+					<button className="btn-primary" onClick={() => void load(false)} disabled={loading || refreshing} title="Показать реализации за период">{loading ? 'Гружу…' : 'Показать'}</button>
+					{(from || to) && <button className="btn-secondary" onClick={() => { setFrom(''); setTo(''); }} title="Сбросить период (последние реализации)">✕ период</button>}
 					<div className="tb-spacer" />
 					<button className="btn-secondary" onClick={() => void load(true)} disabled={refreshing || loading} title="Пересобрать список из Битрикса">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				</div>
