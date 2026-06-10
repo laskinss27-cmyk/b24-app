@@ -74,6 +74,38 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
+	// Добавить НЕСКОЛЬКО товарных строк в сделку за раз (корзина из пикера «Готово»).
+	app.post('/api/deal/add-products', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const items = Array.isArray(b.items) ? b.items : [];
+		const clean = items
+			.map((it) => it as { productId?: unknown; quantity?: unknown; price?: unknown })
+			.map((it) => ({ productId: Number(it.productId), quantity: Number(it.quantity), price: Number(it.price) }))
+			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.quantity) && it.quantity > 0);
+		if (!clean.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
+
+		try {
+			// Цены, которых нет в запросе, добираем из BASE одним батчем.
+			const need = clean.filter((it) => !Number.isFinite(it.price) || it.price < 0).map((it) => it.productId);
+			const basePrices = need.length ? await fetchBasePrices(client, need) : new Map<number, number>();
+			let added = 0;
+			for (const it of clean) {
+				const price = Number.isFinite(it.price) && it.price >= 0 ? it.price : (basePrices.get(it.productId) ?? 0);
+				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price, quantity: it.quantity } });
+				added++;
+			}
+			app.log.info({ dealId, added }, '[api/deal/add-products] ok');
+			return { ok: true, added };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/add-products] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
 	// Добавить одну товарную строку в сделку (не перезаписывая существующие).
 	app.post('/api/deal/add-product', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; productId?: unknown; quantity?: unknown; price?: unknown };

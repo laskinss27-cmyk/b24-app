@@ -90,7 +90,17 @@ function QtyInput({ value, onChange }: { value: number; onChange: (n: number) =>
 	);
 }
 
-export function ProductBase(): JSX.Element {
+/** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
+export interface ProductPickItem { productId: number; name: string; quantity: number; price: number }
+export interface ProductPicker {
+	onDone: (items: ProductPickItem[]) => Promise<void>;
+	onCancel: () => void;
+	title?: string | undefined;
+}
+
+export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.Element {
+	const pickMode = !!picker;
+	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [gate, setGate] = useState<Gate>('checking');
 	const [errMsg, setErrMsg] = useState<string>('');
@@ -274,6 +284,23 @@ export function ProductBase(): JSX.Element {
 		}
 	}
 
+	// Режим пикера: «Готово» — отдать выбранные товары (корзину) родителю (вкладке сделки).
+	async function handleDone(): Promise<void> {
+		if (!picker) return;
+		setSaleErr(null);
+		const items: ProductPickItem[] = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0 }));
+		if (!items.length) { picker.onCancel(); return; }
+		setDone(true);
+		try {
+			await picker.onDone(items);
+			clearCart();
+		} catch (e) {
+			setSaleErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setDone(false);
+		}
+	}
+
 	const storeName = (id: number): string => shortStore(stores.find((s) => s.id === id)?.title ?? `#${id}`);
 	const sumPurchase = useMemo(() => view.reduce((s, r) => s + r.qty * (r.d.purchase ?? 0), 0), [view]);
 
@@ -318,10 +345,12 @@ export function ProductBase(): JSX.Element {
 		<div className="base">
 			<header>
 				<div className="base-head-row">
-					<h1>База товаров</h1>
-					<button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>
+					<h1>{pickMode ? (picker?.title ?? 'Добавить товар в сделку') : 'База товаров'}</h1>
+					{pickMode
+						? <button className="btn-secondary" onClick={() => picker?.onCancel()}>← Отмена</button>
+						: <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
 				</div>
-				<p className="subtitle">Найти товар, посмотреть остатки/цены, запустить инвентаризацию.{ctx.__mock ? ' · dev-мок' : ''}</p>
+				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем «Готово» внизу — они добавятся в сделку.' : `Найти товар, посмотреть остатки/цены, запустить инвентаризацию.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
 			</header>
 
 			<div className="base-toolbar">
@@ -336,12 +365,12 @@ export function ProductBase(): JSX.Element {
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				<div className="tb-spacer" />
-				{canQuickSale && cart.size > 0 && (
+				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
-				<button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>
-				<button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>
+				{!pickMode && <button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>}
+				{!pickMode && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
 
 			<div className="base-tablewrap">
@@ -358,7 +387,7 @@ export function ProductBase(): JSX.Element {
 							<th className="num" onClick={() => toggleSort('purchase')}>Закупка ₽{sortMark('purchase')}</th>
 							<th className="num c-store" onClick={() => toggleSort('stock')}>Остаток{sortMark('stock')}</th>
 							<th onClick={() => toggleSort('total')}>Остатки по складам{sortMark('total')}</th>
-							{canQuickSale && <th className="sale-col">В продажу</th>}
+							{(canQuickSale || pickMode) && <th className="sale-col">{pickMode ? 'Кол-во' : 'В продажу'}</th>}
 						</tr>
 					</thead>
 					<tbody>
@@ -384,7 +413,7 @@ export function ProductBase(): JSX.Element {
 											{others.length ? others.map((o) => <span className="wh" key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
 										</div>
 									</td>
-									{canQuickSale && (
+									{(canQuickSale || pickMode) && (
 										<td className="sale-col" onClick={(e) => e.stopPropagation()}>
 											{cart.has(d.id) ? (
 												<div className="qty-stepper">
@@ -399,7 +428,7 @@ export function ProductBase(): JSX.Element {
 									)}
 								</tr>
 							);
-						}) : <tr><td colSpan={canQuickSale ? 11 : 10} className="base-empty">Ничего не найдено</td></tr>}
+						}) : <tr><td colSpan={(canQuickSale || pickMode) ? 11 : 10} className="base-empty">Ничего не найдено</td></tr>}
 					</tbody>
 				</table>
 			</div>
@@ -409,7 +438,17 @@ export function ProductBase(): JSX.Element {
 				<span>Сумма по закупке (видимое): {fmt(sumPurchase)} ₽</span>
 			</div>
 
-			{showCart && (
+			{pickMode && (
+					<div className="pick-bar">
+						<span className="pick-count">Выбрано: <b>{cart.size}</b>{cart.size > 0 ? ` товаров` : ''}</span>
+						{saleErr && <span className="cart-err">⛔ {saleErr}</span>}
+						<div className="tb-spacer" />
+						<button className="btn-secondary" onClick={() => picker?.onCancel()}>Отмена</button>
+						<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
+					</div>
+				)}
+
+				{!pickMode && showCart && (
 				<div className="cart-overlay" onClick={() => setShowCart(false)}>
 					<div className="cart-modal" onClick={(e) => e.stopPropagation()}>
 						<h2>🛒 Быстрая продажа</h2>

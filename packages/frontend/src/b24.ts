@@ -548,6 +548,18 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 	return json.products ?? [];
 }
 
+/** Добавить НЕСКОЛЬКО товаров в сделку за раз (корзина пикера → «Готово»). Возвращает кол-во добавленных. */
+export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number }[]): Promise<number> {
+	const res = await fetch('/api/deal/add-products', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, items }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
+	return json.added ?? 0;
+}
+
 /** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */
 export async function addProductToDeal(dealId: number, productId: number, quantity: number, price?: number): Promise<{ id: number; name: string; price: number; quantity: number }> {
 	const res = await fetch('/api/deal/add-product', {
