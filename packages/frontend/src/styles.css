@@ -496,6 +496,15 @@ h2.inv-h2 {
 	text-decoration: underline;
 }
 
+/* Шапка Базы: заголовок слева, кнопка «Реализации» справа в той же строке. */
+.base-head-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
 /* ── Окно «Реализации ↔ сделки» ─────────────────────────────── */
 .nowrap { white-space: nowrap; }
 .status-ok {

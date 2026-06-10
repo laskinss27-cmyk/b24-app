@@ -317,7 +317,10 @@ export function ProductBase(): JSX.Element {
 	return (
 		<div className="base">
 			<header>
-				<h1>База товаров</h1>
+				<div className="base-head-row">
+					<h1>База товаров</h1>
+					<button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>
+				</div>
 				<p className="subtitle">Найти товар, посмотреть остатки/цены, запустить инвентаризацию.{ctx.__mock ? ' · dev-мок' : ''}</p>
 			</header>
 
@@ -333,7 +336,6 @@ export function ProductBase(): JSX.Element {
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				<div className="tb-spacer" />
-				<button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>
 				{canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
