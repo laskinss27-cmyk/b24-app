@@ -25,7 +25,12 @@
 - **Сверка Б24 ↔ ERPNext: 0 расхождений** (`erp-migrate-catalog.ts --check`).
 - ✅ **POC модели пройден** (`erp-poc-realization.ts`): custom-поле `b24_deal_id` на Delivery Note → черновик → проводка → остаток списался с нужного склада точно → «партии сделки» читаются одним запросом по `b24_deal_id`.
 
-⏳ **Дальше (домашний этап 2):** слой операций в бэкенде (партия→Delivery Note, списание/перемещение→Stock Entry, приход→Purchase Receipt), туннель ноутбук→облако + `ERPNEXT_URL` в env + фича-флаг юзера 1858 (остатки/партии в нашем UI из ERPNext, мягкий фолбэк на Б24), свой механизм снабжения, синк чужих нативных движений Б24→ERPNext на переходный период, ежедневная сверка, бэкапы тома.
+✅ **Операционный слой написан и прогнан на песочнице** (`packages/backend/src/erp/`):
+- `client.ts` — ErpClient (env `ERPNEXT_URL`/`ERPNEXT_TOKEN`; submit = PUT docstatus с проверкой; ошибки из `_server_messages`);
+- `operations.ts` — домен: `fetchErpStocks` (весь каталог одним запросом Bin, имена складов Б24), `createRealizationDraft`/`submitRealization`/`listDealRealizations` (Delivery Note + `b24_deal_id`), `createTransferDraft`/`createWriteOffDraft` (Stock Entry), `createReceiptDraft` (Purchase Receipt, технический поставщик), `ensureErpSetup` (custom-поля/контрагенты, идемпотентно), company везде явно;
+- смоук `scripts/erp-ops-smoke.ts`: все операции, списания/остатки сходятся в точные значения.
+
+⏳ **Дальше (домашний этап 2):** туннель ноутбук→облако + env прод-бэкенда + фича-флаг юзера 1858 (остатки/партии в нашем UI из ERPNext через модуль erp/, мягкий фолбэк на Б24), свой механизм снабжения, синк чужих нативных движений Б24→ERPNext на переходный период, ежедневная сверка, бэкапы тома.
 
 ## Скрипт миграции: `scripts/erp-migrate-catalog.ts`
 
