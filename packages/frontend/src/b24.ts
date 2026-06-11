@@ -593,11 +593,19 @@ export interface DealShipment {
 	stores?: Record<string, string>;
 }
 
+export interface SupplyCard {
+	id: number;
+	title: string;
+	stageId: string;
+}
+
 export interface DealShippedInfo {
 	orderId: number | null;
 	/** rowId строки сделки → суммарно отгружено партиями (черновики + проведённые). */
 	shipped: Record<string, number>;
 	shipments: DealShipment[];
+	/** Заявки снабжения сделки (смарт-процесс «Снабжение»). */
+	supply: SupplyCard[];
 }
 
 /** Что уже отгружено по строкам сделки (партии заказа, привязанного через crm.orderentity). */
@@ -609,7 +617,30 @@ export async function fetchDealShipped(dealId: number): Promise<DealShippedInfo>
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<DealShippedInfo>;
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить отгрузки сделки');
-	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, shipments: json.shipments ?? [] };
+	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, shipments: json.shipments ?? [], supply: json.supply ?? [] };
+}
+
+/** Товар «нет на складах» → заявка снабжения (создаёт карточку «Поставка № …» или дополняет открытую). */
+export async function requestSupply(dealId: number, items: { name: string; quantity: number; measure?: string }[]): Promise<{ mode: 'created' | 'appended'; cardId: number; title: string }> {
+	const res = await fetch('/api/deal/supply-request', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, items }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; mode?: 'created' | 'appended'; cardId?: number; title?: string };
+	if (!json.ok || !json.cardId) throw new Error(json.error ?? 'не удалось создать заявку снабжения');
+	return { mode: json.mode ?? 'created', cardId: json.cardId, title: json.title ?? '' };
+}
+
+/** Открыть карточку заявки снабжения (смарт-процесс 1110) слайдером. */
+export function openSupplyCard(cardId: number): void {
+	const path = `/crm/type/1110/details/${cardId}/`;
+	const bx = window.BX24;
+	if (bx && typeof bx.openPath === 'function') bx.openPath(path);
+	else {
+		const a = bx ? bx.getAuth() : false;
+		window.open(`https://${a ? (a.domain ?? '') : ''}${path}`, '_blank');
+	}
 }
 
 /** Черновик РЕАЛИЗАЦИИ по отмеченным строкам сделки (склад НЕ списывается — проводит менеджер). */

@@ -10,6 +10,8 @@ import {
 	realizeDeal,
 	openRealization,
 	fetchDealShipped,
+	requestSupply,
+	openSupplyCard,
 	withTimeout,
 	call,
 	ROW_TYPE_GOODS,
@@ -20,6 +22,7 @@ import {
 	type ProductEnrichment,
 	type RealizeItem,
 	type DealShipment,
+	type SupplyCard,
 } from './b24.js';
 
 interface EnrichedRow extends DealProductRow {
@@ -33,6 +36,8 @@ interface TableData {
 	coef: number;
 	/** Партии (отгрузки) заказа сделки — для списка под таблицей. */
 	shipments: DealShipment[];
+	/** Заявки снабжения сделки. */
+	supply: SupplyCard[];
 }
 
 type State =
@@ -46,6 +51,7 @@ type State =
 const MOCK_DATA: TableData = {
 	coef: 0.5,
 	shipments: [{ id: 0, accountNumber: '922/2 (мок)', deducted: false, items: { '1': 20 }, stores: { '1': 'Измайловский 18Д' } }],
+	supply: [{ id: 0, title: 'Поставка № 92_32592_мок', stageId: 'DT1110_114:NEW' }],
 	rows: [
 		{ id: '1', productId: 18062, name: 'Гофротруба ПВХ 16 мм', type: 1, price: 15, quantity: 80, discountSum: 0, measure: 'шт', purchasingPrice: 8, shipped: 20, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 200 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 23 }] },
 	{ id: '2', productId: 18108, name: 'IP-видеокамера iFLOW F-IC-1321M', type: 1, price: 2200, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
@@ -62,7 +68,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
-		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): { orderId: number | null; shipped: Record<string, number>; shipments: DealShipment[] } => ({ orderId: null, shipped: {}, shipments: [] })),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): { orderId: number | null; shipped: Record<string, number>; shipments: DealShipment[]; supply: SupplyCard[] } => ({ orderId: null, shipped: {}, shipments: [], supply: [] })),
 	]);
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
 	const goodsIds = [...new Set(rows.filter((r) => r.type === ROW_TYPE_GOODS).map((r) => r.productId).filter((id) => id > 0))];
@@ -79,10 +85,20 @@ async function loadAll(dealId: number): Promise<TableData> {
 			shipped: Number(shippedInfo.shipped[r.id] ?? 0),
 		};
 	});
-	return { rows: enriched, coef, shipments: shippedInfo.shipments };
+	return { rows: enriched, coef, shipments: shippedInfo.shipments, supply: shippedInfo.supply };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
+
+/** Человеческая подпись стадии заявки снабжения (DT1110_114:NEW → «новая»). */
+const stageLabel = (stageId: string): string => {
+	const tail = stageId.split(':')[1] ?? stageId;
+	if (tail === 'NEW') return 'новая';
+	if (tail === 'PREPARATION') return 'подготовка';
+	if (tail === 'SUCCESS') return 'выполнена';
+	if (tail === 'FAIL') return 'провалена';
+	return 'в работе';
+};
 
 /** Русская плюрализация: plural(2,'строка','строки','строк') → 'строки'. */
 const plural = (n: number, one: string, few: string, many: string): string => {
@@ -210,6 +226,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 	// Склад партии прочитать из Б24 нельзя (стена 2) — помним то, что отправили сами,
 	// пока вкладка открыта. После перезагрузки партия видна без склада (он — в её карточке).
 	const [partStores, setPartStores] = useState<Record<number, string>>({});
+	/** id строки, уходящей в снабжение (кнопки блокируются разом). */
+	const [supplying, setSupplying] = useState<string | null>(null);
 
 	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - r.shipped);
 	const qtyOf = (r: EnrichedRow): number => Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.'));
@@ -241,6 +259,29 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
 		} finally {
 			setRealizing(null);
+		}
+	};
+
+	// Товар «нет на складах» → заявка снабжения с точным перечнем (создаёт «Поставку № …»
+	// или дополняет открытую заявку этой сделки).
+	const doSupply = async (r: EnrichedRow): Promise<void> => {
+		if (dealId == null || supplying != null || realizing != null) return;
+		setSupplying(r.id);
+		setNotice(null);
+		try {
+			const res = await requestSupply(dealId, [{ name: r.name, quantity: remaining(r), measure: r.measure }]);
+			setNotice({
+				kind: 'ok',
+				text: res.mode === 'created'
+					? `✅ Заявка снабжения «${res.title}» создана: ${r.name.slice(0, 30)} × ${remaining(r)}`
+					: `✅ Дополнил заявку «${res.title}»: ${r.name.slice(0, 30)} × ${remaining(r)}`,
+			});
+			openSupplyCard(res.cardId);
+			await onReload();
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setSupplying(null);
 		}
 	};
 
@@ -313,7 +354,17 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 								))}
 							</select>
 						) : (
-							<span className="none">нет на складах</span>
+							<span className="no-stock">
+								<span className="none">нет на складах</span>
+								<button
+									className="btn-supply"
+									disabled={dev || supplying != null || realizing != null}
+									onClick={() => void doSupply(r)}
+									title={dev ? 'dev-режим: запись недоступна' : `Заявка снабжению: ${r.name.slice(0, 30)} × ${remaining(r)} ${r.measure} (создаст или дополнит «Поставку № …»)`}
+								>
+									{supplying === r.id ? '…' : '→ в снабжение'}
+								</button>
+							</span>
 						)}
 					</td>
 					<td className="realize-cell">
@@ -402,6 +453,17 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				<div className="trow muted"><span>Скидка</span><span>{rub(discount)}</span></div>
 				<div className="trow grand"><span>Итого</span><span>{rub(total)}</span></div>
 			</div>
+
+			{data.supply.length > 0 && (
+				<div className="supply-line">
+					<span>📦 Снабжение:</span>
+					{data.supply.map((s) => (
+						<button key={s.id} className="supply-chip" onClick={() => s.id > 0 && openSupplyCard(s.id)} title={`стадия: ${stageLabel(s.stageId)}`}>
+							{s.title.slice(0, 48)} · {stageLabel(s.stageId)}
+						</button>
+					))}
+				</div>
+			)}
 
 			<div className="realize-bar">
 				<span className="hint">

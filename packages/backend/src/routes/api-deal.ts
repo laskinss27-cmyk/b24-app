@@ -14,7 +14,12 @@ import { normalizeDomain } from '../security.js';
  *    нет — sale.order.add + снос свежего дубль-сделки/контакта + crm.orderentity.add → корзина
  *    с xmlId=crm_pr_<rowId> и ПОЛНЫМ кол-вом строки → sale.shipment.add черновиком с ЧАСТИЧНЫМ
  *    кол-вом партии (deducted=N — СКЛАД НЕ ДВИГАЕМ). Проводит менеджер в нативном UI.
- *  - /api/deal/shipped — что уже отгружено по строкам сделки (по партиям заказа сделки).
+ *  - /api/deal/shipped — что уже отгружено по строкам сделки (по партиям заказа сделки)
+ *    + заявки снабжения сделки (смарт-процесс «Снабжение» 1110).
+ *  - /api/deal/supply-request — товар «нет на складах» → в снабжение: дополняет перечень
+ *    существующей заявки сделки или создаёт карточку 1110 «Поставка № N_<сделка>_<название>»
+ *    с ТОЧНЫМ перечнем (имя × кол-во) — лучше родного робота, который перечень не заполняет.
+ *    Робот на дубль не пойдёт: ставим на сделке галку «Заявка снабжения создана».
  *
  * ЗАПИСЬ в сделку, но безопасная и обратимая (менеджер удалит строку в карточке).
  * Токен — самого юзера (права Битрикса соблюдаются). Домен — allowlist. За канарейкой (фронт).
@@ -41,6 +46,30 @@ async function fetchBasePrices(client: B24Client, ids: number[]): Promise<Map<nu
 		if (pr) map.set(id, Number(pr['price'] ?? 0));
 	}
 	return map;
+}
+
+// ── Снабжение (смарт-процесс «Снабжение», разведка 2026-06-11) ────────────────────────────────
+// Карточки «Поставка № N_<сделка>_<название>», parentId2 = сделка, перечень — текстовое поле.
+const SUPPLY_TYPE_ID = 1110;
+const SUPPLY_CATEGORY_ID = 114;
+const SUPPLY_LIST_FIELD = 'ufCrm38_1777818101'; // перечень оборудования (текст)
+const SUPPLY_NUMBER_FIELD = 'ufCrm38_1777817940'; // номер поставки (счётчик в карточках)
+const DEAL_SUPPLY_CREATED_FLAG = 'UF_CRM_1777817683'; // галка сделки «Заявка снабжения создана»
+
+interface SupplyCard {
+	id: number;
+	title: string;
+	stageId: string;
+}
+
+async function listSupplyCards(client: B24Client, dealId: number): Promise<SupplyCard[]> {
+	const res = await client.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
+		entityTypeId: SUPPLY_TYPE_ID,
+		filter: { parentId2: dealId },
+		select: ['id', 'title', 'stageId'],
+		order: { id: 'desc' },
+	});
+	return (res?.items ?? []).map((i) => ({ id: Number(i['id']), title: String(i['title'] ?? ''), stageId: String(i['stageId'] ?? '') }));
 }
 
 /** Состояние «реализации» сделки: заказ (через crm.orderentity), корзина crm_pr_, отгружено по партиям. */
@@ -191,15 +220,88 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const info = await loadDealOrderInfo(client, dealId);
+			const [info, supply] = await Promise.all([
+				loadDealOrderInfo(client, dealId),
+				listSupplyCards(client, dealId).catch(() => [] as SupplyCard[]),
+			]);
 			return {
 				ok: true,
 				orderId: info.orderId,
 				shipped: Object.fromEntries(info.shipped),
 				shipments: info.shipments,
+				supply,
 			};
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/shipped] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Товар «нет на складах» → в снабжение. Дополняем перечень существующей заявки сделки
+	// или создаём карточку «Снабжение» с точным перечнем. Карточку создаём САМИ (робот портала
+	// триггерится не на поле — у сделки 36742 «Да» стоит, заявки нет), номер — следующий по
+	// счётчику карточек, ответственный — нажавший менеджер (как у ручных заявок).
+	app.post('/api/deal/supply-request', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const items = (Array.isArray(b.items) ? b.items : [])
+			.map((it) => it as { name?: unknown; quantity?: unknown; measure?: unknown })
+			.map((it) => ({ name: String(it.name ?? '').trim(), quantity: Number(it.quantity), measure: String(it.measure ?? 'шт') }))
+			.filter((it) => it.name && Number.isFinite(it.quantity) && it.quantity > 0);
+		if (!items.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
+
+		const listText = items.map((it) => `${it.name} — ${it.quantity} ${it.measure}`).join('\n');
+		try {
+			const existing = await listSupplyCards(client, dealId);
+			const open = existing.find((c) => !/SUCCESS|FAIL/i.test(c.stageId)) ?? existing[0];
+			if (open) {
+				// Дополняем перечень открытой заявки (только append, чужой текст не трогаем).
+				const card = await client.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: SUPPLY_TYPE_ID, id: open.id });
+				const current = String(card?.item?.[SUPPLY_LIST_FIELD] ?? '').trim();
+				const next = current ? `${current}\n\n+ из вкладки сделки:\n${listText}` : listText;
+				await client.call('crm.item.update', { entityTypeId: SUPPLY_TYPE_ID, id: open.id, fields: { [SUPPLY_LIST_FIELD]: next } });
+				app.log.info({ dealId, cardId: open.id }, '[api/deal/supply-request] appended');
+				return { ok: true, mode: 'appended', cardId: open.id, title: open.title };
+			}
+
+			// Новая заявка: номер = max(счётчик свежих карточек)+1, название как у автоматики.
+			const me = await client.call<{ ID?: string | number }>('user.current', {});
+			const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
+			const dealTitle = String(deal?.['TITLE'] ?? '').replace(/^\d+_/, '').slice(0, 60);
+			const recent = await client.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
+				entityTypeId: SUPPLY_TYPE_ID, order: { id: 'desc' }, select: ['id', 'title', SUPPLY_NUMBER_FIELD],
+			});
+			let maxNum = 0;
+			for (const i of (recent?.items ?? []).slice(0, 25)) {
+				const fromField = Number(i[SUPPLY_NUMBER_FIELD] ?? 0);
+				const fromTitle = Number(/Поставка № (\d+)/.exec(String(i['title'] ?? ''))?.[1] ?? 0);
+				maxNum = Math.max(maxNum, fromField, fromTitle);
+			}
+			const num = maxNum + 1;
+			const title = `Поставка № ${num}_${dealId}_${dealTitle}`;
+			const added = await client.call<{ item?: Record<string, unknown> }>('crm.item.add', {
+				entityTypeId: SUPPLY_TYPE_ID,
+				fields: {
+					title,
+					categoryId: SUPPLY_CATEGORY_ID,
+					parentId2: dealId,
+					assignedById: Number(me?.ID ?? 0) || undefined,
+					[SUPPLY_NUMBER_FIELD]: num,
+					[SUPPLY_LIST_FIELD]: listText,
+				},
+			});
+			const cardId = Number(added?.item?.['id']);
+			if (!cardId) throw new Error('crm.item.add (Снабжение) не вернул id');
+			// Галка «Заявка снабжения создана» — чтобы робот портала не создал дубль.
+			await client.call('crm.deal.update', { id: dealId, fields: { [DEAL_SUPPLY_CREATED_FLAG]: 1 } })
+				.catch((err) => app.log.warn({ dealId }, `[api/deal/supply-request] галка на сделке не встала (не критично) — ${errInfo(err)}`));
+			app.log.info({ dealId, cardId, num }, '[api/deal/supply-request] created');
+			return { ok: true, mode: 'created', cardId, title };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/supply-request] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
