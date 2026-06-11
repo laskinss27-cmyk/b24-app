@@ -563,7 +563,10 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 export interface RealizeItem {
 	rowId: number;
 	productId: number;
+	/** Кол-во ЭТОЙ партии (может быть меньше количества в строке сделки). */
 	quantity: number;
+	/** Полное кол-во строки сделки (таким создаётся строка корзины заказа). */
+	rowQuantity: number;
 	price: number;
 	name: string;
 	/** Склад из нашего селектора — пишется в crm-строку сделки (storeId) перед созданием черновика. */
@@ -572,9 +575,37 @@ export interface RealizeItem {
 
 export interface RealizeResult {
 	orderId: number;
+	orderReused: boolean;
 	shipmentId: number;
 	accountNumber: string;
 	dupRemoved: number | null;
+}
+
+export interface DealShipment {
+	id: number;
+	accountNumber: string;
+	deducted: boolean;
+	/** rowId строки сделки → кол-во в этой партии (для расщепления строк в таблице). */
+	items: Record<string, number>;
+}
+
+export interface DealShippedInfo {
+	orderId: number | null;
+	/** rowId строки сделки → суммарно отгружено партиями (черновики + проведённые). */
+	shipped: Record<string, number>;
+	shipments: DealShipment[];
+}
+
+/** Что уже отгружено по строкам сделки (партии заказа, привязанного через crm.orderentity). */
+export async function fetchDealShipped(dealId: number): Promise<DealShippedInfo> {
+	const res = await fetch('/api/deal/shipped', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<DealShippedInfo>;
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить отгрузки сделки');
+	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, shipments: json.shipments ?? [] };
 }
 
 /** Черновик РЕАЛИЗАЦИИ по отмеченным строкам сделки (склад НЕ списывается — проводит менеджер). */
@@ -586,7 +617,7 @@ export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<RealizeResult>;
 	if (!json.ok || !json.shipmentId) throw new Error(json.error ?? 'не удалось создать черновик реализации');
-	return { orderId: json.orderId ?? 0, shipmentId: json.shipmentId, accountNumber: json.accountNumber ?? '', dupRemoved: json.dupRemoved ?? null };
+	return { orderId: json.orderId ?? 0, orderReused: json.orderReused ?? false, shipmentId: json.shipmentId, accountNumber: json.accountNumber ?? '', dupRemoved: json.dupRemoved ?? null };
 }
 
 /** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */

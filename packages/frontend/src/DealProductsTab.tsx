@@ -9,6 +9,7 @@ import {
 	addProductsToDeal,
 	realizeDeal,
 	openRealization,
+	fetchDealShipped,
 	withTimeout,
 	call,
 	ROW_TYPE_GOODS,
@@ -18,15 +19,20 @@ import {
 	type StoreInfo,
 	type ProductEnrichment,
 	type RealizeItem,
+	type DealShipment,
 } from './b24.js';
 
 interface EnrichedRow extends DealProductRow {
 	stocks: Array<{ storeId: number; storeName: string; amount: number }>;
 	purchasingPrice: number | null;
+	/** Суммарно отгружено партиями (черновики + проведённые) по заказу сделки. */
+	shipped: number;
 }
 interface TableData {
 	rows: EnrichedRow[];
 	coef: number;
+	/** Партии (отгрузки) заказа сделки — для списка под таблицей. */
+	shipments: DealShipment[];
 }
 
 type State =
@@ -39,11 +45,12 @@ type State =
 // ── Mock для локального превью (BX24 в dev недоступен) ──────────────────────────
 const MOCK_DATA: TableData = {
 	coef: 0.5,
+	shipments: [{ id: 0, accountNumber: '922/2 (мок)', deducted: false, items: { '1': 20 } }],
 	rows: [
-		{ id: '1', productId: 18062, name: 'Гофротруба ПВХ 16 мм', type: 1, price: 15, quantity: 80, discountSum: 0, measure: 'шт', purchasingPrice: 8, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 200 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 23 }] },
-	{ id: '2', productId: 18108, name: 'IP-видеокамера iFLOW F-IC-1321M', type: 1, price: 2200, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, stocks: [] },
-		{ id: '3', productId: 9144, name: 'Установка и подключение видеокамеры', type: 7, price: 3000, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, stocks: [] },
-		{ id: '4', productId: 9200, name: 'Прокладка кабеля на высоте до 3м', type: 7, price: 150, quantity: 800, discountSum: 0, measure: 'шт', purchasingPrice: null, stocks: [] },
+		{ id: '1', productId: 18062, name: 'Гофротруба ПВХ 16 мм', type: 1, price: 15, quantity: 80, discountSum: 0, measure: 'шт', purchasingPrice: 8, shipped: 20, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 200 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 23 }] },
+	{ id: '2', productId: 18108, name: 'IP-видеокамера iFLOW F-IC-1321M', type: 1, price: 2200, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
+		{ id: '3', productId: 9144, name: 'Установка и подключение видеокамеры', type: 7, price: 3000, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
+		{ id: '4', productId: 9200, name: 'Прокладка кабеля на высоте до 3м', type: 7, price: 150, quantity: 800, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
 	],
 };
 
@@ -51,10 +58,11 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [rows, stores, coef] = await Promise.all([
+	const [rows, stores, coef, shippedInfo] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): { orderId: number | null; shipped: Record<string, number>; shipments: DealShipment[] } => ({ orderId: null, shipped: {}, shipments: [] })),
 	]);
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
 	const goodsIds = [...new Set(rows.filter((r) => r.type === ROW_TYPE_GOODS).map((r) => r.productId).filter((id) => id > 0))];
@@ -68,9 +76,10 @@ async function loadAll(dealId: number): Promise<TableData> {
 			...r,
 			stocks: (e?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` })),
 			purchasingPrice: e?.purchasingPrice ?? null,
+			shipped: Number(shippedInfo.shipped[r.id] ?? 0),
 		};
 	});
-	return { rows: enriched, coef };
+	return { rows: enriched, coef, shipments: shippedInfo.shipments };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -188,12 +197,51 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 
-	// «Реализовать»: выбор склада на строку + отметки. Кнопка создаёт ЧЕРНОВИК реализации
-	// (склад не списывается — менеджер проверяет и проводит в нативной карточке).
+	// «Реализовать» по строке: товарная строка РАСЩЕПЛЯЕТСЯ на партии (дизайн Сергея 2026-06-11).
+	// Реализованная часть застывает строкой-записью (кол-во, склад, документ-чип), под ней живёт
+	// строка остатка со своим селектором склада, полем кол-ва и кнопкой. Каждая партия = свой
+	// черновик реализации (нативная модель «один заказ → много отгрузок»; склад не списывается —
+	// менеджер проверяет и проводит в карточке). Мультисклад = несколько нажатий.
 	const [storeSel, setStoreSel] = useState<Record<string, number>>({});
-	const [checked, setChecked] = useState<Record<string, boolean>>({});
-	const [realizing, setRealizing] = useState(false);
+	const [batchQty, setBatchQty] = useState<Record<string, string>>({});
+	/** id строки, по которой сейчас идёт запись (кнопки блокируются все разом). */
+	const [realizing, setRealizing] = useState<string | null>(null);
 	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+	// Склад партии прочитать из Б24 нельзя (стена 2) — помним то, что отправили сами,
+	// пока вкладка открыта. После перезагрузки партия видна без склада (он — в её карточке).
+	const [partStores, setPartStores] = useState<Record<number, string>>({});
+
+	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - r.shipped);
+	const qtyOf = (r: EnrichedRow): number => Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.'));
+	const qtyValid = (r: EnrichedRow): boolean => qtyOf(r) > 0 && qtyOf(r) <= remaining(r) + 1e-9;
+
+	const doRealize = async (r: EnrichedRow): Promise<void> => {
+		if (dealId == null || realizing != null || !qtyValid(r)) return;
+		const qty = qtyOf(r);
+		setRealizing(r.id);
+		setNotice(null);
+		try {
+			const res = await realizeDeal(dealId, [{
+				rowId: Number(r.id),
+				productId: r.productId,
+				quantity: qty,
+				rowQuantity: r.quantity,
+				price: r.price,
+				name: r.name,
+				storeId: storeSel[r.id] || undefined,
+			}]);
+			const storeName = r.stocks.find((s) => s.storeId === storeSel[r.id])?.storeName;
+			if (storeName) setPartStores((m) => ({ ...m, [res.shipmentId]: storeName }));
+			setNotice({ kind: 'ok', text: `✅ Партия #${res.accountNumber}: ${r.name.slice(0, 30)} × ${qty}${storeName ? `, склад ${storeName}` : ''} — черновик создан, проверь и проведи` });
+			setBatchQty((m) => { const c = { ...m }; delete c[r.id]; return c; });
+			openRealization(res.shipmentId);
+			await onReload();
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setRealizing(null);
+		}
+	};
 
 	const goods = rows.filter((r) => r.type === ROW_TYPE_GOODS);
 	const works = rows.filter((r) => r.type === ROW_TYPE_WORK);
@@ -209,83 +257,95 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		else profitGoods += (r.price - r.purchasingPrice) * r.quantity;
 	}
 
-	const renderRow = (r: EnrichedRow): JSX.Element => {
-		const isGoods = r.type === ROW_TYPE_GOODS;
-		return (
-			<tr key={r.id}>
-				<td>{r.name}</td>
-				<td><span className={`type-badge ${isGoods ? 'goods' : 'work'}`}>{isGoods ? 'товар' : 'работа'}</span></td>
+	/** Партии этой строки — из отгрузок заказа сделки (черновики и проведённые). */
+	const partsOf = (r: EnrichedRow): Array<{ id: number; accountNumber: string; deducted: boolean; qty: number }> =>
+		data.shipments
+			.filter((s) => Number(s.items[r.id] ?? 0) > 0)
+			.map((s) => ({ id: s.id, accountNumber: s.accountNumber, deducted: s.deducted, qty: Number(s.items[r.id]) }));
+
+	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
+		<tr key={r.id}>
+			<td>{r.name}</td>
+			<td><span className="type-badge work">работа</span></td>
+			<td className="num">{rub(r.price)}</td>
+			<td className="num">{r.quantity} {r.measure}</td>
+			<td className="num">{rub(line(r))}</td>
+			<td><span className="none">—</span></td>
+			<td><span className="none">—</span></td>
+		</tr>
+	);
+
+	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
+	// под ними — строка остатка с селектором склада, полем кол-ва и кнопкой «Реализовать».
+	const renderGoodsRows = (r: EnrichedRow): JSX.Element[] => {
+		const parts = partsOf(r);
+		const left = remaining(r);
+		const out: JSX.Element[] = parts.map((p) => (
+			<tr key={`${r.id}-p${p.id}`} className="part-row">
+				<td className="part-name">↳ {r.name}</td>
+				<td><span className="type-badge part">{p.deducted ? 'реализовано' : 'партия'}</span></td>
 				<td className="num">{rub(r.price)}</td>
-				<td className="num">{r.quantity} {r.measure}</td>
-				<td className="num">{rub(line(r))}</td>
-				<td>
-					<span className="shipped" title="Что считать «отгруженным» — согласовываем с Володей (кандидат: проведённые списания со склада объекта). Пока не показываем угаданные числа.">
-						— / {r.quantity}
-					</span>
-				</td>
-				<td className="row-store">
-					{!isGoods ? (
-						<span className="none">—</span>
-					) : r.stocks.length ? (
-						<select
-							value={storeSel[r.id] ?? ''}
-							onChange={(e) => setStoreSel((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
-						>
-							<option value="" disabled>выбрать склад…</option>
-							{r.stocks.map((s) => (
-								<option key={s.storeId} value={s.storeId}>{s.storeName} — {s.amount} {r.measure}</option>
-							))}
-						</select>
-					) : (
-						<span className="none">нет на складах</span>
-					)}
-				</td>
-				<td>
-					{isGoods
-						? <input
-							type="checkbox"
-							checked={!!checked[r.id]}
-							disabled={realizing}
-							onChange={(e) => setChecked((m) => ({ ...m, [r.id]: e.target.checked }))}
-							title="Отметить строку для черновика реализации"
-						/>
-						: <span className="none">—</span>}
+				<td className="num">{p.qty} {r.measure}</td>
+				<td className="num">{rub(r.price * p.qty)}</td>
+				<td className="row-store part-store">{partStores[p.id] ?? <span className="none" title="Склад партии Битрикс наружу не отдаёт — он виден в карточке документа">склад — в карточке →</span>}</td>
+				<td className="realize-cell">
+					<button className="shipment-chip" onClick={() => p.id > 0 && openRealization(p.id)} title={p.deducted ? 'проведена (склад списан)' : 'черновик — открыть, проверить склад, провести'}>
+						#{p.accountNumber} {p.deducted ? '✓ проведена' : '✎ черновик'}
+					</button>
 				</td>
 			</tr>
-		);
-	};
-	const selectedGoods = goods.filter((r) => checked[r.id]);
-
-	const doRealize = async (): Promise<void> => {
-		if (dealId == null || !selectedGoods.length || realizing) return;
-		setRealizing(true);
-		setNotice(null);
-		try {
-			const items: RealizeItem[] = selectedGoods.map((r) => ({
-				rowId: Number(r.id),
-				productId: r.productId,
-				quantity: r.quantity,
-				price: r.price,
-				name: r.name,
-				storeId: storeSel[r.id] || undefined,
-			}));
-			const res = await realizeDeal(dealId, items);
-			setNotice({ kind: 'ok', text: `✅ Черновик реализации #${res.accountNumber} создан — открываю карточку (проверь склад и нажми «Провести»)` });
-			setChecked({});
-			openRealization(res.shipmentId);
-			await onReload();
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setRealizing(false);
+		));
+		if (left > 0) {
+			out.push(
+				<tr key={r.id}>
+					<td>{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}</td>
+					<td><span className="type-badge goods">товар</span></td>
+					<td className="num">{rub(r.price)}</td>
+					<td className="num">{left} {r.measure}{parts.length > 0 && <span className="of-total"> из {r.quantity}</span>}</td>
+					<td className="num">{rub(r.price * left)}</td>
+					<td className="row-store">
+						{r.stocks.length ? (
+							<select value={storeSel[r.id] ?? ''} onChange={(e) => setStoreSel((m) => ({ ...m, [r.id]: Number(e.target.value) }))}>
+								<option value="" disabled>выбрать склад…</option>
+								{r.stocks.map((s) => (
+									<option key={s.storeId} value={s.storeId}>{s.storeName} — {s.amount} {r.measure}</option>
+								))}
+							</select>
+						) : (
+							<span className="none">нет на складах</span>
+						)}
+					</td>
+					<td className="realize-cell">
+						<input
+							type="number"
+							className="qty-input"
+							min={0}
+							max={left}
+							step="any"
+							value={batchQty[r.id] ?? String(left)}
+							disabled={realizing != null}
+							onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))}
+							title={`Кол-во партии (остаток ${left} ${r.measure})`}
+						/>
+						<button
+							className="btn-realize"
+							disabled={dev || realizing != null || !qtyValid(r)}
+							onClick={() => void doRealize(r)}
+							title={dev ? 'dev-режим: запись недоступна' : `Создать черновик-партию: ${r.name.slice(0, 30)} × ${qtyOf(r)}`}
+						>
+							{realizing === r.id ? '…' : 'Реализовать'}
+						</button>
+					</td>
+				</tr>,
+			);
 		}
+		return out;
 	};
-
 	// Разделяем визуально: блок товаров и блок работ/услуг — полосой-заголовком, чтобы
 	// наглядно было видно, где что (раньше шли вперемешку одним списком).
 	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
 		<tr className="group-band">
-			<td colSpan={5}>{label} <span className="group-band-count">· {list.length}</span></td>
+			<td colSpan={4}>{label} <span className="group-band-count">· {list.length}</span></td>
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
@@ -315,16 +375,15 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 						<th className="num">Цена</th>
 						<th className="num">Кол-во</th>
 						<th className="num">Сумма</th>
-						<th>Отгружено</th>
 						<th>Склад (остаток &gt; 0)</th>
 						<th>Реализовать</th>
 					</tr>
 				</thead>
 				<tbody>
 					{goods.length > 0 && groupBand('🧰 Товары', goods, sumGoods)}
-					{goods.map(renderRow)}
+					{goods.flatMap(renderGoodsRows)}
 					{works.length > 0 && groupBand('🔧 Работы и услуги', works, sumWorks)}
-					{works.map(renderRow)}
+					{works.map(renderWorkRow)}
 				</tbody>
 			</table>
 			</div>
@@ -344,15 +403,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 			</div>
 
 			<div className="realize-bar">
-				<button disabled={dev || realizing || selectedGoods.length === 0} onClick={() => void doRealize()}>
-					{realizing ? 'Создаю черновик…' : `Реализовать выделенное${selectedGoods.length ? ` (${selectedGoods.length})` : ''}`}
-				</button>
 				<span className="hint">
 					{dev
-						? 'dev-режим: запись недоступна'
-						: selectedGoods.length === 0
-							? 'отметь товары галочкой (и выбери склад — подставим в строку сделки)'
-							: 'создаст ЧЕРНОВИК реализации — склад спишется только после «Провести» в открывшейся карточке'}
+						? 'dev-режим: запись недоступна (кнопки строк неактивны)'
+						: 'партия: кол-во + склад → «Реализовать» в строке товара. Склад спишется только после «Провести» в карточке партии.'}
 				</span>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>

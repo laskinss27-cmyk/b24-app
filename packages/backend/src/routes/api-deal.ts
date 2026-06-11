@@ -7,10 +7,13 @@ import { normalizeDomain } from '../security.js';
  *  - /api/deal/search-products — поиск товара по названию (iblock 24+26) + розничная цена (BASE).
  *  - /api/deal/add-product — добавить ОДНУ товарную строку в сделку (crm.item.productrow.add,
  *    ownerType='D'); существующие строки НЕ трогаются (не set-all). Проверено net-zero.
- *  - /api/deal/realize — ЧЕРНОВИК реализации по отмеченным строкам сделки (цикл пробит 2026-06-11):
- *    storeId в crm-строки → sale.order.add → снос свежего дубль-сделки/контакта (авто-рождение
- *    портала) → crm.orderentity.add к НАШЕЙ сделке → basketitem'ы с xmlId=crm_pr_<rowId> →
- *    sale.shipment.add черновиком (deducted=N — СКЛАД НЕ ДВИГАЕМ). Проводит менеджер в нативном UI.
+ *  - /api/deal/realize — ЧЕРНОВИК-ПАРТИЯ реализации по отмеченным строкам сделки (цикл пробит
+ *    2026-06-11, партии — по нативной модели «один заказ → много отгрузок», как #558/2,/3,/4):
+ *    storeId в crm-строки → заказ сделки ПЕРЕИСПОЛЬЗУЕМ (crm.orderentity.list по ownerId), если
+ *    нет — sale.order.add + снос свежего дубль-сделки/контакта + crm.orderentity.add → корзина
+ *    с xmlId=crm_pr_<rowId> и ПОЛНЫМ кол-вом строки → sale.shipment.add черновиком с ЧАСТИЧНЫМ
+ *    кол-вом партии (deducted=N — СКЛАД НЕ ДВИГАЕМ). Проводит менеджер в нативном UI.
+ *  - /api/deal/shipped — что уже отгружено по строкам сделки (по партиям заказа сделки).
  *
  * ЗАПИСЬ в сделку, но безопасная и обратимая (менеджер удалит строку в карточке).
  * Токен — самого юзера (права Битрикса соблюдаются). Домен — allowlist. За канарейкой (фронт).
@@ -37,6 +40,58 @@ async function fetchBasePrices(client: B24Client, ids: number[]): Promise<Map<nu
 		if (pr) map.set(id, Number(pr['price'] ?? 0));
 	}
 	return map;
+}
+
+/** Состояние «реализации» сделки: заказ (через crm.orderentity), корзина crm_pr_, отгружено по партиям. */
+interface DealOrderInfo {
+	orderId: number | null;
+	/** rowId (строка сделки) → строка корзины заказа. */
+	basket: Map<number, { basketId: number; quantity: number }>;
+	/** rowId → суммарно отгружено несистемными отгрузками (черновики + проведённые). */
+	shipped: Map<number, number>;
+	/** Партии: items = rowId → кол-во в ЭТОЙ партии (для расщепления строк на фронте). */
+	shipments: Array<{ id: number; accountNumber: string; deducted: boolean; items: Record<string, number> }>;
+}
+
+async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<DealOrderInfo> {
+	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), shipments: [] };
+	const bnd = await client.call<{ orderEntity?: Array<Record<string, unknown>> }>('crm.orderentity.list', {
+		filter: { ownerId: dealId, ownerTypeId: 2 }, select: ['*'],
+	});
+	const orderId = Number(bnd?.orderEntity?.[0]?.['orderId'] ?? 0);
+	if (!orderId) return info;
+	info.orderId = orderId;
+
+	const ord = await client.call<{ order?: { basketItems?: Array<Record<string, unknown>> } }>('sale.order.get', { id: orderId });
+	const basketIdToRow = new Map<number, number>();
+	for (const b of ord?.order?.basketItems ?? []) {
+		const m = /^crm_pr_(\d+)$/.exec(String(b['xmlId'] ?? ''));
+		if (!m) continue;
+		const rowId = Number(m[1]);
+		const basketId = Number(b['id']);
+		info.basket.set(rowId, { basketId, quantity: Number(b['quantity'] ?? 0) });
+		basketIdToRow.set(basketId, rowId);
+	}
+
+	const sh = await client.call<{ shipments?: Array<Record<string, unknown>> }>('sale.shipment.list', {
+		filter: { orderId, system: 'N' }, select: ['id', 'accountNumber', 'deducted'],
+	});
+	for (const s of sh?.shipments ?? []) {
+		const shipmentId = Number(s['id']);
+		const part = { id: shipmentId, accountNumber: String(s['accountNumber'] ?? ''), deducted: s['deducted'] === 'Y', items: {} as Record<string, number> };
+		info.shipments.push(part);
+		const si = await client.call<{ shipmentItems?: Array<Record<string, unknown>> }>('sale.shipmentitem.list', {
+			filter: { orderDeliveryId: shipmentId }, select: ['*'],
+		});
+		for (const it of si?.shipmentItems ?? []) {
+			const rowId = basketIdToRow.get(Number(it['basketId']));
+			if (rowId == null) continue;
+			const qty = Number(it['quantity'] ?? 0);
+			info.shipped.set(rowId, (info.shipped.get(rowId) ?? 0) + qty);
+			part.items[String(rowId)] = (part.items[String(rowId)] ?? 0) + qty;
+		}
+	}
+	return info;
 }
 
 export function registerApiDealRoute(app: FastifyInstance): void {
@@ -110,9 +165,31 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// ЧЕРНОВИК РЕАЛИЗАЦИИ по отмеченным строкам сделки. Полный цикл, проверенный 2026-06-11.
-	// При ошибке на полпути НИЧЕГО не откатываем — возвращаем createdIds для ручной зачистки
-	// (правило Сергея: сущности не удаляем; исключение — свежерождённый дубль, см. ниже).
+	// Что уже отгружено по строкам сделки (для колонки «Отгружено» и остатков к отгрузке).
+	app.post('/api/deal/shipped', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const info = await loadDealOrderInfo(client, dealId);
+			return {
+				ok: true,
+				orderId: info.orderId,
+				shipped: Object.fromEntries(info.shipped),
+				shipments: info.shipments,
+			};
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/shipped] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// ЧЕРНОВИК-ПАРТИЯ реализации по отмеченным строкам сделки. Нативная модель «один заказ →
+	// много отгрузок»: заказ сделки переиспользуем, каждая партия = новый черновик отгрузки
+	// с частичным количеством. При ошибке на полпути НИЧЕГО не откатываем — возвращаем createdIds
+	// для ручной зачистки (правило Сергея; исключение — свежерождённый дубль, см. ниже).
 	app.post('/api/deal/realize', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
 		const client = clientFrom(b);
@@ -120,20 +197,28 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const items = (Array.isArray(b.items) ? b.items : [])
-			.map((it) => it as { rowId?: unknown; productId?: unknown; quantity?: unknown; price?: unknown; name?: unknown; storeId?: unknown })
+			.map((it) => it as { rowId?: unknown; productId?: unknown; quantity?: unknown; rowQuantity?: unknown; price?: unknown; name?: unknown; storeId?: unknown })
 			.map((it) => ({
 				rowId: Number(it.rowId),
 				productId: Number(it.productId),
+				/** Кол-во ЭТОЙ партии (может быть меньше количества в строке сделки). */
 				quantity: Number(it.quantity),
+				/** Полное кол-во строки сделки — таким создаётся строка корзины заказа. */
+				rowQuantity: Number(it.rowQuantity ?? it.quantity),
 				price: Number(it.price),
 				name: String(it.name ?? ''),
 				storeId: Number(it.storeId ?? 0),
 			}))
-			.filter((it) => Number.isInteger(it.rowId) && it.rowId > 0 && Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.quantity) && it.quantity > 0 && Number.isFinite(it.price) && it.price >= 0);
+			.filter((it) =>
+				Number.isInteger(it.rowId) && it.rowId > 0 &&
+				Number.isInteger(it.productId) && it.productId > 0 &&
+				Number.isFinite(it.quantity) && it.quantity > 0 &&
+				Number.isFinite(it.rowQuantity) && it.rowQuantity >= it.quantity &&
+				Number.isFinite(it.price) && it.price >= 0);
 		if (!items.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
 
 		// Создаваемое по шагам — чтобы при ошибке вернуть Сергею точный список артефактов.
-		const created: { orderId?: number; shipmentId?: number; basketIds: number[]; dupDealId?: number; dupContactId?: number } = { basketIds: [] };
+		const created: { orderId?: number; orderReused?: boolean; shipmentId?: number; basketIds: number[]; dupDealId?: number; dupContactId?: number } = { basketIds: [] };
 		const step = (s: string): void => { app.log.info({ dealId }, `[api/deal/realize] ${s}`); };
 		try {
 			// 0) Менеджер (userId заказа у нативных реализаций = сотрудник, не клиент — разведка 2026-06-11).
@@ -154,76 +239,107 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				clientPhone = String(phones?.[0]?.VALUE ?? '');
 			}
 
-			// 2) Склад в строки сделки (crm.item.productrow.storeId — этим полем пользуется нативный
-			//    механизм реализации; кандидат-дверь стены 2). Только там, где склад выбран.
+			// 2) Склад ЭТОЙ партии в строки сделки (crm.item.productrow.storeId — этим полем пользуется
+			//    нативный механизм реализации). Пишем прямо перед созданием черновика, чтобы подстановка
+			//    (если работает) была верной для каждой партии. Только там, где склад выбран.
 			for (const it of items.filter((x) => Number.isInteger(x.storeId) && x.storeId > 0)) {
 				await client.call('crm.item.productrow.update', { id: it.rowId, fields: { storeId: it.storeId } });
 			}
 			step(`storeId записан в ${items.filter((x) => x.storeId > 0).length} строк`);
 
-			// 3) Заказ. ВАЖНО: поле currency (НЕ currencyId); externalOrder=Y от дубля не спасает, но не мешает.
-			const ord = await client.call<{ order?: { id?: number } }>('sale.order.add', {
-				fields: { lid: 's1', personTypeId: 6, currency, userId, externalOrder: 'Y' },
-			});
-			const orderId = Number(ord?.order?.id);
-			if (!orderId) throw new Error('sale.order.add не вернул id заказа');
-			created.orderId = orderId;
-			step(`заказ ${orderId}`);
+			// 3) Текущее состояние: заказ сделки, корзина crm_pr_, отгружено по партиям.
+			const info = await loadDealOrderInfo(client, dealId);
+			let orderId = info.orderId;
 
-			// 4) Портал авто-рождает дубль-сделку+контакт на каждый sale.order.add — сносим ИМЕННО их.
-			//    Гарантии: дубль берём только из авто-привязки этого заказа, чужие ID не трогаем,
-			//    и только если сделка создана в последние 15 минут (страховка от любого промаха).
-			const bnd = await client.call<{ orderEntity?: Array<Record<string, unknown>> }>('crm.orderentity.list', { filter: { orderId }, select: ['*'] }).catch(() => null);
-			const dup = (bnd?.orderEntity ?? []).find((x) => Number(x['ownerTypeId']) === 2 && Number(x['ownerId']) !== dealId);
-			if (dup) {
-				const dupId = Number(dup['ownerId']);
-				const dupDeal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dupId }).catch(() => null);
-				const bornMs = Date.parse(String(dupDeal?.['DATE_CREATE'] ?? ''));
-				const fresh = Number.isFinite(bornMs) && Date.now() - bornMs < 15 * 60 * 1000;
-				if (fresh) {
-					const dupContact = Number(dupDeal?.['CONTACT_ID'] ?? 0);
-					await client.call('crm.orderentity.deleteByFilter', { fields: { orderId, ownerId: dupId, ownerTypeId: 2 } }).catch(() => null);
-					await client.call('crm.deal.delete', { id: dupId });
-					created.dupDealId = dupId;
-					if (dupContact > 0 && dupContact !== contactId) {
-						await client.call('crm.contact.delete', { id: dupContact }).catch(() => null);
-						created.dupContactId = dupContact;
-					}
-					step(`дубль-сделка ${dupId} (+контакт ${dupContact || '—'}) снесена`);
-				} else {
-					app.log.warn({ dealId, dupId }, '[api/deal/realize] привязка к НЕ свежей сделке — не трогаю');
+			// 3а) Контроль остатков ДО любой записи: партия не должна превышать «строка − отгружено».
+			for (const it of items) {
+				const already = info.shipped.get(it.rowId) ?? 0;
+				if (already + it.quantity > it.rowQuantity + 1e-9) {
+					throw new Error(`строка «${it.name || it.rowId}»: к отгрузке ${it.quantity} + уже отгружено ${already} больше количества в сделке ${it.rowQuantity}`);
 				}
 			}
 
-			// 5) Привязка заказа к НАШЕЙ сделке (стена 1 пробита: метод скрыт из `methods`, но работает).
-			await client.call('crm.orderentity.add', { fields: { orderId, ownerId: dealId, ownerTypeId: 2 } });
-			step(`orderentity → сделка ${dealId}`);
+			if (orderId) {
+				created.orderReused = true;
+				step(`заказ сделки уже есть (${orderId}) — переиспользую, партия добавится отгрузкой`);
+			} else {
+				// 4) Заказ. ВАЖНО: поле currency (НЕ currencyId); externalOrder=Y от дубля не спасает, но не мешает.
+				const ord = await client.call<{ order?: { id?: number } }>('sale.order.add', {
+					fields: { lid: 's1', personTypeId: 6, currency, userId, externalOrder: 'Y' },
+				});
+				orderId = Number(ord?.order?.id);
+				if (!orderId) throw new Error('sale.order.add не вернул id заказа');
+				created.orderId = orderId;
+				step(`заказ ${orderId}`);
 
-			// 6) Свойства заказа (клиент в документе) — мягко: формат modify не подтверждён живым тестом,
-			//    при ошибке документ просто останется без «Имя Фамилия» (как у части нативных).
-			if (clientName || clientPhone) {
-				const propertyValues: Array<{ orderPropsId: number; value: string }> = [];
-				if (clientName) propertyValues.push({ orderPropsId: 40, value: clientName });
-				if (clientPhone) propertyValues.push({ orderPropsId: 44, value: clientPhone });
-				await client.call('sale.propertyvalue.modify', { fields: { order: { id: orderId, propertyValues } } })
-					.then(() => step('свойства клиента записаны'))
-					.catch((err) => app.log.warn({ orderId }, `[api/deal/realize] propertyvalue.modify не прошёл (не критично) — ${errInfo(err)}`));
+				// 5) Портал авто-рождает дубль-сделку+контакт на каждый sale.order.add — сносим ИМЕННО их.
+				//    Гарантии: дубль берём только из авто-привязки этого заказа, чужие ID не трогаем,
+				//    и только если сделка создана в последние 15 минут (страховка от любого промаха).
+				const bnd = await client.call<{ orderEntity?: Array<Record<string, unknown>> }>('crm.orderentity.list', { filter: { orderId }, select: ['*'] }).catch(() => null);
+				const dup = (bnd?.orderEntity ?? []).find((x) => Number(x['ownerTypeId']) === 2 && Number(x['ownerId']) !== dealId);
+				if (dup) {
+					const dupId = Number(dup['ownerId']);
+					const dupDeal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dupId }).catch(() => null);
+					const bornMs = Date.parse(String(dupDeal?.['DATE_CREATE'] ?? ''));
+					const fresh = Number.isFinite(bornMs) && Date.now() - bornMs < 15 * 60 * 1000;
+					if (fresh) {
+						const dupContact = Number(dupDeal?.['CONTACT_ID'] ?? 0);
+						await client.call('crm.orderentity.deleteByFilter', { fields: { orderId, ownerId: dupId, ownerTypeId: 2 } }).catch(() => null);
+						await client.call('crm.deal.delete', { id: dupId });
+						created.dupDealId = dupId;
+						if (dupContact > 0 && dupContact !== contactId) {
+							await client.call('crm.contact.delete', { id: dupContact }).catch(() => null);
+							created.dupContactId = dupContact;
+						}
+						step(`дубль-сделка ${dupId} (+контакт ${dupContact || '—'}) снесена`);
+					} else {
+						app.log.warn({ dealId, dupId }, '[api/deal/realize] привязка к НЕ свежей сделке — не трогаю');
+					}
+				}
+
+				// 6) Привязка заказа к НАШЕЙ сделке (стена 1 пробита: метод скрыт из `methods`, но работает).
+				await client.call('crm.orderentity.add', { fields: { orderId, ownerId: dealId, ownerTypeId: 2 } });
+				step(`orderentity → сделка ${dealId}`);
+
+				// 7) Свойства заказа (клиент в документе) — мягко: формат modify не подтверждён живым тестом,
+				//    при ошибке документ просто останется без «Имя Фамилия» (как у части нативных).
+				if (clientName || clientPhone) {
+					const propertyValues: Array<{ orderPropsId: number; value: string }> = [];
+					if (clientName) propertyValues.push({ orderPropsId: 40, value: clientName });
+					if (clientPhone) propertyValues.push({ orderPropsId: 44, value: clientPhone });
+					await client.call('sale.propertyvalue.modify', { fields: { order: { id: orderId, propertyValues } } })
+						.then(() => step('свойства клиента записаны'))
+						.catch((err) => app.log.warn({ orderId }, `[api/deal/realize] propertyvalue.modify не прошёл (не критично) — ${errInfo(err)}`));
+				}
 			}
 
-			// 7) Корзина: строки с xmlId=crm_pr_<rowId> — структура неотличима от нативной (тест 2026-06-11).
-			const basketByRow = new Map<number, { basketId: number; quantity: number }>();
+			// 8) Корзина: строка корзины несёт ПОЛНОЕ кол-во строки сделки (xmlId=crm_pr_<rowId>,
+			//    структура неотличима от нативной); партии разбирают её частями — остаток Битрикс
+			//    сам держит на системной отгрузке. Существующие строки переиспользуем.
+			const basketByRow = new Map<number, { basketId: number }>();
 			for (const it of items) {
+				const existing = info.basket.get(it.rowId);
+				if (existing) {
+					// Строка уже в заказе. Если её кол-ва не хватает на партию — дотягиваем.
+					const already = info.shipped.get(it.rowId) ?? 0;
+					if (already + it.quantity > existing.quantity + 1e-9) {
+						await client.call('sale.basketitem.update', { id: existing.basketId, fields: { quantity: already + it.quantity } });
+						step(`корзина ${existing.basketId}: кол-во увеличено до ${already + it.quantity}`);
+					}
+					basketByRow.set(it.rowId, { basketId: existing.basketId });
+					continue;
+				}
 				const bi = await client.call<{ basketItem?: { id?: number } }>('sale.basketitem.add', {
-					fields: { orderId, productId: it.productId, quantity: it.quantity, price: it.price, currency, name: it.name || `Товар ${it.productId}`, xmlId: `crm_pr_${it.rowId}` },
+					fields: { orderId, productId: it.productId, quantity: it.rowQuantity, price: it.price, currency, name: it.name || `Товар ${it.productId}`, xmlId: `crm_pr_${it.rowId}` },
 				});
 				const basketId = Number(bi?.basketItem?.id);
 				if (!basketId) throw new Error(`sale.basketitem.add не вернул id (строка ${it.rowId})`);
 				created.basketIds.push(basketId);
-				basketByRow.set(it.rowId, { basketId, quantity: it.quantity });
+				basketByRow.set(it.rowId, { basketId });
 			}
-			step(`корзина: ${created.basketIds.length} строк`);
+			step(`корзина: ${basketByRow.size} строк (новых ${created.basketIds.length})`);
 
-			// 8) Черновик отгрузки (deliveryId 6 = «Без доставки» на этом портале; deducted=N — склад не тронут).
+			// 9) Черновик-партия (deliveryId 6 = «Без доставки» на этом портале; deducted=N — склад не тронут).
 			const sh = await client.call<{ shipment?: Record<string, unknown> }>('sale.shipment.add', {
 				fields: { orderId, deliveryId: 6, allowDelivery: 'N', deducted: 'N' },
 			});
@@ -231,12 +347,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			if (!shipmentId) throw new Error('sale.shipment.add не вернул id');
 			created.shipmentId = shipmentId;
 			const accountNumber = String(sh?.shipment?.['accountNumber'] ?? '');
-			for (const { basketId, quantity } of basketByRow.values()) {
-				await client.call('sale.shipmentitem.add', { fields: { orderDeliveryId: shipmentId, basketId, quantity } });
+			for (const it of items) {
+				const basketId = basketByRow.get(it.rowId)?.basketId;
+				if (!basketId) continue;
+				await client.call('sale.shipmentitem.add', { fields: { orderDeliveryId: shipmentId, basketId, quantity: it.quantity } });
 			}
-			step(`черновик реализации #${accountNumber} (shipment ${shipmentId}) готов`);
+			step(`черновик-партия #${accountNumber} (shipment ${shipmentId}) готов`);
 
-			return { ok: true, orderId, shipmentId, accountNumber, dupRemoved: created.dupDealId ?? null };
+			return { ok: true, orderId, orderReused: created.orderReused ?? false, shipmentId, accountNumber, dupRemoved: created.dupDealId ?? null };
 		} catch (err) {
 			app.log.error({ dealId, created }, `[api/deal/realize] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err), created });
