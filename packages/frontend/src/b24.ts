@@ -571,6 +571,8 @@ export interface RealizeItem {
 	name: string;
 	/** Склад из нашего селектора — пишется в crm-строку сделки (storeId) перед созданием черновика. */
 	storeId?: number | undefined;
+	/** Имя склада — для памяти партий (Битрикс склад черновика наружу не отдаёт). */
+	storeName?: string | undefined;
 }
 
 export interface RealizeResult {
@@ -587,6 +589,8 @@ export interface DealShipment {
 	deducted: boolean;
 	/** rowId строки сделки → кол-во в этой партии (для расщепления строк в таблице). */
 	items: Record<string, number>;
+	/** rowId → имя склада партии из нашей памяти (entity); нет записи — склад смотреть в карточке. */
+	stores?: Record<string, string>;
 }
 
 export interface DealShippedInfo {

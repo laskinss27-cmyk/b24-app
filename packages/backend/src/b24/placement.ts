@@ -229,3 +229,30 @@ export async function ensureInventoryEntity(client: B24Client): Promise<{ status
 		return { status: String(err) };
 	}
 }
+
+/**
+ * Память складов партий реализации. Битрикс склад черновика наружу не отдаёт (стена 2:
+ * shipmentitemstore нет в REST) — храним то, что отправили сами: NAME=ship_<shipmentId>,
+ * DETAIL_TEXT=JSON {dealId, orderId, shipmentId, stores: {rowId: {storeId, storeName}}}.
+ */
+export const REALIZE_ENTITY = 'ctv_realize';
+
+let realizeEntityEnsured = false;
+
+export async function ensureRealizeEntity(client: B24Client): Promise<{ status: string }> {
+	if (realizeEntityEnsured) return { status: 'cached' };
+	try {
+		await client.call('entity.add', { ENTITY: REALIZE_ENTITY, NAME: 'CTV Партии реализаций (склады)', ACCESS: { AU: 'W' } });
+		realizeEntityEnsured = true;
+		return { status: 'created' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) {
+				realizeEntityEnsured = true;
+				return { status: 'exists' };
+			}
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}

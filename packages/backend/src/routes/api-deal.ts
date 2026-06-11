@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
+import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -49,8 +50,8 @@ interface DealOrderInfo {
 	basket: Map<number, { basketId: number; quantity: number }>;
 	/** rowId → суммарно отгружено несистемными отгрузками (черновики + проведённые). */
 	shipped: Map<number, number>;
-	/** Партии: items = rowId → кол-во в ЭТОЙ партии (для расщепления строк на фронте). */
-	shipments: Array<{ id: number; accountNumber: string; deducted: boolean; items: Record<string, number> }>;
+	/** Партии: items = rowId → кол-во в ЭТОЙ партии; stores = rowId → имя склада из нашей памяти. */
+	shipments: Array<{ id: number; accountNumber: string; deducted: boolean; items: Record<string, number>; stores?: Record<string, string> }>;
 }
 
 async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<DealOrderInfo> {
@@ -90,6 +91,23 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 			info.shipped.set(rowId, (info.shipped.get(rowId) ?? 0) + qty);
 			part.items[String(rowId)] = (part.items[String(rowId)] ?? 0) + qty;
 		}
+	}
+
+	// Склады партий — из нашей памяти (entity): Битрикс склад черновика наружу не отдаёт.
+	if (info.shipments.length) {
+		try {
+			const mem = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REALIZE_ENTITY });
+			for (const m of mem ?? []) {
+				let data: { shipmentId?: number; stores?: Record<string, { storeName?: string }> };
+				try { data = JSON.parse(String(m['DETAIL_TEXT'] ?? '{}')) as typeof data; } catch { continue; }
+				const part = info.shipments.find((s) => s.id === Number(data.shipmentId));
+				if (part && data.stores) {
+					part.stores = Object.fromEntries(
+						Object.entries(data.stores).map(([rowId, v]) => [rowId, String(v?.storeName ?? '')]).filter(([, n]) => n),
+					);
+				}
+			}
+		} catch { /* памяти нет/не читается — партии просто без склада */ }
 	}
 	return info;
 }
@@ -208,6 +226,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				price: Number(it.price),
 				name: String(it.name ?? ''),
 				storeId: Number(it.storeId ?? 0),
+				storeName: String((it as { storeName?: unknown }).storeName ?? ''),
 			}))
 			.filter((it) =>
 				Number.isInteger(it.rowId) && it.rowId > 0 &&
@@ -353,6 +372,23 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				await client.call('sale.shipmentitem.add', { fields: { orderDeliveryId: shipmentId, basketId, quantity: it.quantity } });
 			}
 			step(`черновик-партия #${accountNumber} (shipment ${shipmentId}) готов`);
+
+			// 10) Память складов партии (entity) — мягко: упадёт — партия живёт, просто без подписи склада.
+			const stores: Record<string, { storeId: number; storeName: string }> = {};
+			for (const it of items) if (it.storeId > 0) stores[String(it.rowId)] = { storeId: it.storeId, storeName: it.storeName };
+			if (Object.keys(stores).length) {
+				try {
+					await ensureRealizeEntity(client);
+					await client.call('entity.item.add', {
+						ENTITY: REALIZE_ENTITY,
+						NAME: `ship_${shipmentId}`,
+						DETAIL_TEXT: JSON.stringify({ dealId, orderId, shipmentId, stores }),
+					});
+					step('склады партии записаны в память приложения');
+				} catch (err) {
+					app.log.warn({ shipmentId }, `[api/deal/realize] память складов не записалась (не критично) — ${errInfo(err)}`);
+				}
+			}
 
 			return { ok: true, orderId, orderReused: created.orderReused ?? false, shipmentId, accountNumber, dupRemoved: created.dupDealId ?? null };
 		} catch (err) {
