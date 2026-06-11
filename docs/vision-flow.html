@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<!-- saved from url=(0031)http://localhost:5184/flow.html -->
+<html lang="ru"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<title>Схема: Битрикс ↔ Склад</title>
+<style>
+	* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+	body { background: #eef1f5; color: #1f2733; padding: 28px; }
+	.wrap { max-width: 1150px; margin: 0 auto; }
+	h1 { font-size: 23px; margin-bottom: 4px; }
+	.sub { color: #7a8694; font-size: 14px; margin-bottom: 22px; }
+
+	.manager {
+		text-align: center; margin: 0 auto 6px; max-width: 560px;
+		background: #fff; border: 2px solid #d7dde5; border-radius: 14px; padding: 14px 18px;
+	}
+	.manager .big { font-size: 18px; font-weight: 700; }
+	.manager .small { color: #6b7785; font-size: 13.5px; margin-top: 3px; }
+	.downarrow { text-align: center; font-size: 26px; color: #9aa6b4; margin: 4px 0; }
+
+	.row { display: flex; gap: 20px; align-items: stretch; }
+	.box { flex: 1; border-radius: 16px; padding: 18px 18px 16px; border: 2px solid; }
+	.bx { background: #eaf2fe; border-color: #9cc2f7; }
+	.wh { background: #e7f7ee; border-color: #95dcb4; }
+	.box h2 { font-size: 18px; margin-bottom: 2px; }
+	.box .role { font-size: 12.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; opacity: .7; margin-bottom: 12px; }
+	.bx h2, .bx .role { color: #1c5fc4; }
+	.wh h2, .wh .role { color: #169458; }
+	.owns { font-size: 13px; line-height: 1.7; }
+	.owns b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .3px; opacity: .6; margin-bottom: 4px; font-weight: 700; }
+	.chip { display: inline-block; background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: 7px; padding: 3px 9px; margin: 0 4px 5px 0; font-size: 12.5px; }
+	.panels { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(0,0,0,.18); font-size: 12.5px; }
+	.panels b { font-size: 12px; text-transform: uppercase; opacity: .6; }
+
+	/* центральная колонка стрелок */
+	.arrows { flex: 0 0 270px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+	.arr { background: #fff; border: 1px solid #d7dde5; border-radius: 10px; padding: 8px 10px; font-size: 12.8px; line-height: 1.4; }
+	.arr .dir { font-weight: 700; font-size: 13px; }
+	.to { border-left: 4px solid #4a90e2; }
+	.to .dir { color: #1c5fc4; }
+	.from { border-left: 4px solid #2bb673; }
+	.from .dir { color: #169458; }
+
+	.note { margin-top: 22px; background: #fff7e6; border: 1px solid #f5d98a; border-radius: 12px; padding: 14px 18px; font-size: 14px; line-height: 1.6; }
+	.note b { color: #b8860b; }
+	.legend { margin-top: 14px; font-size: 12.5px; color: #6b7785; display: flex; gap: 18px; flex-wrap: wrap; }
+	.legend span::before { content: "■ "; }
+	.lb::before { color: #4a90e2; } .lw::before { color: #2bb673; }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<h1>Как это устроено: Битрикс — лицо, Склад — мозг</h1>
+	<div class="sub">Менеджер сидит в одном окне (Битрикс). Тяжёлую складскую работу делает наш склад — незаметно.</div>
+
+	<div class="manager">
+		<div class="big">👤 Менеджер</div>
+		<div class="small">Работает ТОЛЬКО в Битриксе. Те же процессы, одно окно. Что под капотом — ему знать не надо.</div>
+	</div>
+	<div class="downarrow">▼</div>
+
+	<div class="row">
+		<!-- Битрикс -->
+		<div class="box bx">
+			<h2>БИТРИКС</h2>
+			<div class="role">Лицо + CRM</div>
+			<div class="owns">
+				<b>Хозяин этих данных:</b>
+				<span class="chip">Сделки</span><span class="chip">Лиды</span><span class="chip">Клиенты</span><span class="chip">Оплаты (Касса)</span><span class="chip">Задачи (монтаж)</span>
+			</div>
+			<div class="panels">
+				<b>Наши окна внутри Битрикса:</b><br>
+				Товары/Остатки · Реализации · Продажа — выглядят как часть Битрикса, а данные тянут из склада.
+			</div>
+		</div>
+
+		<!-- стрелки -->
+		<div class="arrows">
+			<div class="arr to"><span class="dir">Битрикс → Склад</span><br>«Покажи остаток по складам»<br>«Продали — спиши товар с точки»</div>
+			<div class="arr from"><span class="dir">Склад → Битрикс</span><br>«Вот ЖИВОЙ остаток» (в окно)<br>«Вот документ-зеркало: Реализация / Касса»</div>
+		</div>
+
+		<!-- Склад -->
+		<div class="box wh">
+			<h2>НАШ СКЛАД</h2>
+			<div class="role">Мозг + точные остатки</div>
+			<div class="owns">
+				<b>Хозяин этих данных:</b>
+				<span class="chip">Остатки по складам</span><span class="chip">Приход</span><span class="chip">Перемещение</span><span class="chip">Списание</span><span class="chip">Реализация</span><span class="chip">Себестоимость</span>
+			</div>
+			<div class="panels">
+				<b>Тут живёт точность:</b><br>
+				одна цифра остатка, транзакции, без рассинхрона. Это то, чего Битрикс не умеет.
+			</div>
+		</div>
+	</div>
+
+	<div class="note">
+		<b>Почему нет «ада синхронизации»:</b> остаток — это <b>ОДНА цифра</b>, и живёт она <b>только в складе</b>. Битрикс её не копирует, а <b>показывает живьём</b> по запросу. Туда-сюда летают <b>события</b> («спиши», «оприходуй»), а не два разных остатка, которые надо сверять. У каждого типа данных — один хозяин.
+	</div>
+
+	<div class="legend">
+		<span class="lb">синее — данные, которыми владеет Битрикс</span>
+		<span class="lw">зелёное — данные, которыми владеет склад</span>
+	</div>
+</div>
+
+
+</body></html>
