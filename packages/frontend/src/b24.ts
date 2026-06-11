@@ -606,6 +606,8 @@ export interface DealShippedInfo {
 	orderId: number | null;
 	/** rowId строки сделки → суммарно отгружено партиями (черновики + проведённые). */
 	shipped: Record<string, number>;
+	/** rowId → склады из резервов корзины (склад, выбранный в ЧЕРНОВИКЕ — живьём из документа). */
+	reserves: Record<string, number[]>;
 	shipments: DealShipment[];
 	/** Заявки снабжения сделки (смарт-процесс «Снабжение»). */
 	supply: SupplyCard[];
@@ -622,7 +624,7 @@ export async function fetchDealShipped(dealId: number): Promise<DealShippedInfo>
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<DealShippedInfo>;
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить отгрузки сделки');
-	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, shipments: json.shipments ?? [], supply: json.supply ?? [], rows: json.rows ?? null };
+	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, reserves: json.reserves ?? {}, shipments: json.shipments ?? [], supply: json.supply ?? [], rows: json.rows ?? null };
 }
 
 /** Повторитель для флапающих BX24-вызовов: каждая попытка со своим таймаутом. */

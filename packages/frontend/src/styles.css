@@ -266,6 +266,16 @@ body {
 .part-store {
 	font-size: 12px;
 }
+.part-reserve {
+	color: #15803d;
+	font-size: 12px;
+	font-weight: 600;
+}
+.part-nostore {
+	color: #c2410c;
+	font-size: 12px;
+	font-weight: 600;
+}
 .shipment-chip {
 	background: #f0fdf4;
 	color: #15803d;

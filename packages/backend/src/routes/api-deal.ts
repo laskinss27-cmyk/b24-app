@@ -103,12 +103,15 @@ interface DealOrderInfo {
 	basket: Map<number, { basketId: number; quantity: number }>;
 	/** rowId → суммарно отгружено несистемными отгрузками (черновики + проведённые). */
 	shipped: Map<number, number>;
+	/** rowId → склады из РЕЗЕРВОВ корзины: склад, выбранный менеджером в черновике, живьём
+	 *  из документа (после проведения резерв съедается — для проведённых пусто). */
+	reserves: Map<number, number[]>;
 	/** Партии: items = rowId → кол-во в ЭТОЙ партии; stores = rowId → имя склада из нашей памяти. */
 	shipments: Array<{ id: number; accountNumber: string; deducted: boolean; items: Record<string, number>; stores?: Record<string, string> }>;
 }
 
 async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<DealOrderInfo> {
-	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), shipments: [] };
+	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), reserves: new Map(), shipments: [] };
 	const bnd = await client.call<{ orderEntity?: Array<Record<string, unknown>> }>('crm.orderentity.list', {
 		filter: { ownerId: dealId, ownerTypeId: 2 }, select: ['*'],
 	});
@@ -125,6 +128,10 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 		const basketId = Number(b['id']);
 		info.basket.set(rowId, { basketId, quantity: Number(b['quantity'] ?? 0) });
 		basketIdToRow.set(basketId, rowId);
+		// Резервы строки = склад, выбранный в черновике (живое чтение из документа).
+		const stores = [...new Set(((b['reservations'] as Array<Record<string, unknown>>) ?? [])
+			.map((r) => Number(r['storeId'] ?? 0)).filter((s) => s > 0))];
+		if (stores.length) info.reserves.set(rowId, stores);
 	}
 
 	const sh = await client.call<{ shipments?: Array<Record<string, unknown>> }>('sale.shipment.list', {
@@ -266,6 +273,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				ok: true,
 				orderId: info.orderId,
 				shipped: Object.fromEntries(info.shipped),
+				reserves: Object.fromEntries(info.reserves),
 				shipments: info.shipments,
 				supply,
 				rows,

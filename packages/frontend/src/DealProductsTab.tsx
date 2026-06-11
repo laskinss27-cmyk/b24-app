@@ -21,6 +21,7 @@ import {
 	type ProductEnrichment,
 	type RealizeItem,
 	type DealShipment,
+	type DealShippedInfo,
 	type SupplyCard,
 } from './b24.js';
 
@@ -29,6 +30,8 @@ interface EnrichedRow extends DealProductRow {
 	purchasingPrice: number | null;
 	/** Суммарно отгружено партиями (черновики + проведённые) по заказу сделки. */
 	shipped: number;
+	/** Склады из РЕЗЕРВОВ корзины — склад, выбранный в черновике (живое чтение из документа). */
+	reserveStores: string[];
 }
 interface TableData {
 	rows: EnrichedRow[];
@@ -51,14 +54,14 @@ type State =
 // ── Mock для локального превью (BX24 в dev недоступен) ──────────────────────────
 const MOCK_DATA: TableData = {
 	coef: 0.5,
-	shipments: [{ id: 0, accountNumber: '922/2 (мок)', deducted: false, items: { '1': 20 }, stores: { '1': 'Измайловский 18Д' } }],
+	shipments: [{ id: 0, accountNumber: '922/2 (мок)', deducted: false, items: { '1': 20 } }],
 	supply: [{ id: 0, title: 'Поставка № 92_32592_мок', stageId: 'DT1110_114:NEW' }],
 	stores: [{ id: 4, title: 'Измайловский 18Д', active: true }, { id: 8, title: 'Максидом Дунайский 64', active: true }],
 	rows: [
-		{ id: '1', productId: 18062, name: 'Гофротруба ПВХ 16 мм', type: 1, price: 15, quantity: 80, discountSum: 0, measure: 'шт', purchasingPrice: 8, shipped: 20, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 200 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 23 }] },
-	{ id: '2', productId: 18108, name: 'IP-видеокамера iFLOW F-IC-1321M', type: 1, price: 2200, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
-		{ id: '3', productId: 9144, name: 'Установка и подключение видеокамеры', type: 7, price: 3000, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
-		{ id: '4', productId: 9200, name: 'Прокладка кабеля на высоте до 3м', type: 7, price: 150, quantity: 800, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
+		{ id: '1', productId: 18062, name: 'Гофротруба ПВХ 16 мм', type: 1, price: 15, quantity: 80, discountSum: 0, measure: 'шт', purchasingPrice: 8, shipped: 20, reserveStores: ['Измайловский 18Д'], stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 200 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 23 }] },
+	{ id: '2', productId: 18108, name: 'IP-видеокамера iFLOW F-IC-1321M', type: 1, price: 2200, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, reserveStores: [], stocks: [] },
+		{ id: '3', productId: 9144, name: 'Установка и подключение видеокамеры', type: 7, price: 3000, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, reserveStores: [], stocks: [] },
+		{ id: '4', productId: 9200, name: 'Прокладка кабеля на высоте до 3м', type: 7, price: 150, quantity: 800, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, reserveStores: [], stocks: [] },
 	],
 };
 
@@ -70,7 +73,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
-		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): { orderId: number | null; shipped: Record<string, number>; shipments: DealShipment[]; supply: SupplyCard[]; rows: DealProductRow[] | null } => ({ orderId: null, shipped: {}, shipments: [], supply: [], rows: null })),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], supply: [], rows: null })),
 	]);
 	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
 	// если бэкенд их не отдал — берём BX24-результат.
@@ -88,6 +91,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			stocks: (e?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` })),
 			purchasingPrice: e?.purchasingPrice ?? null,
 			shipped: Number(shippedInfo.shipped[r.id] ?? 0),
+			reserveStores: (shippedInfo.reserves[r.id] ?? []).map((sid) => storeMap.get(sid) ?? `Склад #${sid}`),
 		};
 	});
 	return { rows: enriched, coef, shipments: shippedInfo.shipments, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
@@ -334,7 +338,15 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				<td className="num">{rub(r.price)}</td>
 				<td className="num">{p.qty} {r.measure}</td>
 				<td className="num">{rub(r.price * p.qty)}</td>
-				<td className="row-store part-store"><span className="none" title="Склад наружу Битрикс не отдаёт и менеджер мог его сменить в документе — смотри в карточке (клик по чипу справа)">склад — в карточке →</span></td>
+				<td className="row-store part-store">
+					{p.deducted ? (
+						<span className="none" title="Склад проведённой реализации Битрикс наружу не отдаёт — смотри в карточке (клик по чипу справа)">склад — в карточке →</span>
+					) : r.reserveStores.length ? (
+						<span className="part-reserve" title="Склад из резерва документа — живое чтение, обновляется при каждой загрузке вкладки">{r.reserveStores.join(', ')}</span>
+					) : (
+						<span className="part-nostore" title="В черновике склад ещё не выбран — открой документ (чип справа) и укажи склад">⚠ склад не выбран</span>
+					)}
+				</td>
 				<td className="realize-cell">
 					<button className="shipment-chip" onClick={() => p.id > 0 && openRealization(p.id)} title={p.deducted ? 'проведена (склад списан)' : 'черновик — открыть, проверить склад, провести'}>
 						#{p.accountNumber} {p.deducted ? '✓ проведена' : '✎ черновик'}
