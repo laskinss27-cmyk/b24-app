@@ -16,7 +16,8 @@
   },
   "devDependencies": {
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "undici": "^8.4.1"
   },
   "engines": {
     "node": ">=20"
