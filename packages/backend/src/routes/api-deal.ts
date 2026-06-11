@@ -375,13 +375,21 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				clientPhone = String(phones?.[0]?.VALUE ?? '');
 			}
 
-			// 2) Склад ЭТОЙ партии в строки сделки (crm.item.productrow.storeId — этим полем пользуется
-			//    нативный механизм реализации). Пишем прямо перед созданием черновика, чтобы подстановка
-			//    (если работает) была верной для каждой партии. Только там, где склад выбран.
+			// 2) Склад ЭТОЙ партии в строки сделки — МЯГКО: живой тест 2026-06-11 показал, что
+			//    crm.item.productrow.update поле storeId НЕ принимает (INVALID_ARG_VALUE: Field
+			//    'storeId' not available for update) — нативный механизм пишет его изнутри.
+			//    Пробуем на каждый случай (вдруг откроют), но кнопка от этого НЕ падает:
+			//    склад партии живёт в нашей памяти (entity), а в черновике его выбирает менеджер.
+			let storesWritten = 0;
 			for (const it of items.filter((x) => Number.isInteger(x.storeId) && x.storeId > 0)) {
-				await client.call('crm.item.productrow.update', { id: it.rowId, fields: { storeId: it.storeId } });
+				try {
+					await client.call('crm.item.productrow.update', { id: it.rowId, fields: { storeId: it.storeId } });
+					storesWritten++;
+				} catch (err) {
+					app.log.warn({ rowId: it.rowId }, `[api/deal/realize] storeId в строку не записался (ожидаемо, поле read-only) — ${errInfo(err)}`);
+				}
 			}
-			step(`storeId записан в ${items.filter((x) => x.storeId > 0).length} строк`);
+			if (storesWritten > 0) step(`storeId записан в ${storesWritten} строк`);
 
 			// 3) Текущее состояние: заказ сделки, корзина crm_pr_, отгружено по партиям.
 			const info = await loadDealOrderInfo(client, dealId);
