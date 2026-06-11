@@ -116,6 +116,31 @@ const propVal = (v: unknown): string => {
 	return raw == null ? '' : String(raw).trim();
 };
 
+/** ЦВЕТ вариации (property358): HL-справочник, REST его не отдаёт — словарь добыт из
+ *  рендера страниц вариаций браузером Сергея (2026-06-11). Хэш = xmlId элемента HL. */
+const COLOR_BY_HASH: Record<string, string> = {
+	'1eff65b3f347398a0d5902bab36db070': 'Бежевый',
+	'acf5a9db51ebfa52ee2fa27bceede570': 'Алюминевый',
+	'7bd07acd8ae362d197671e2fa68d1fa6': 'Антрацит',
+	'e8537837e50eb70f276924da9186014c': 'Белый',
+	'c22f761aa8d751e7fec6b109ce3983e8': 'Молочный',
+	'1e86d55001bec44be3ef73dfef337279': 'Титан',
+	'cA1i1w2t': 'Металлик',
+	'4e450c83a63e2d29745c258b0e68e025': 'Графит',
+	'q5n36u4D': 'Черный',
+	'ScLYqY10': 'Фиолетовый',
+	'OStRGTHN': 'Серебро',
+	'kgB6lI71': 'Красный',
+	'z4QHCqVa': 'Голубой',
+	'3999cdc59b1ec591294b7cb2b8e42c7d': 'Серый',
+	'458b94d5413a44c54b4cfedf196471d4': 'Медь',
+	'9a13a88e6c981a9be004f93aa6a68510': 'Гавана',
+	'31e253e5a7e4972828b5dacf3a78d996': 'Бронза',
+	'c3be063e7b92af1f4a58cc0505b890aa': 'Бронза Атик',
+	'93bdd632899f1bceefb03da3ae5195bf': 'Серебро Атик',
+	'2eb11622335f204174117a83cb574882': 'Золото',
+};
+
 async function readB24Catalog(): Promise<B24Product[]> {
 	// Справочник значений вариация-свойства (property360, enum): id → текст («белая», «12В»…).
 	const enumMap = new Map<number, string>();
@@ -129,10 +154,11 @@ async function readB24Catalog(): Promise<B24Product[]> {
 
 	const products: B24Product[] = [];
 	for (const iblockId of [24, 26]) {
-		// У вариаций (26): property360 — отличительный признак (enum: цвет/исполнение),
-		// property350 — поставщик (на портале есть «вариации по поставщику» с одинаковым 360!).
+		// У вариаций (26): property358 — ЦВЕТ (HL-хэш → COLOR_BY_HASH), property360 — артикул
+		// вариации (enum), property350 — поставщик («вариации по поставщику» с одинаковым 360!).
+		// Приоритет отличительного признака в имени: цвет → артикул → (для тёзок) поставщик/#id.
 		const select = iblockId === 26
-			? ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property360', 'property350']
+			? ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property358', 'property360', 'property350']
 			: ['id', 'iblockId', 'name', 'type', 'purchasingPrice'];
 		const rows = await b24Page('catalog.product.list',
 			{ filter: { iblockId }, select, order: { id: 'ASC' } },
@@ -141,8 +167,11 @@ async function readB24Catalog(): Promise<B24Product[]> {
 			let name = String(p['name'] ?? '').trim();
 			let supplier = '';
 			if (iblockId === 26) {
+				const colorHash = propVal(p['property358']);
+				const color = colorHash && colorHash !== '0' ? COLOR_BY_HASH[colorHash] : undefined;
 				const raw = propVal(p['property360']);
-				const label = /^\d+$/.test(raw) ? (enumMap.get(Number(raw)) ?? raw) : raw;
+				const art = /^\d+$/.test(raw) ? (enumMap.get(Number(raw)) ?? raw) : raw;
+				const label = color ?? art;
 				if (label && !name.toLowerCase().includes(label.toLowerCase())) name = `${name} [${label}]`;
 				supplier = propVal(p['property350']).split(';')[0]?.trim() ?? '';
 			}
