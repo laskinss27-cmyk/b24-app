@@ -1,24 +1,25 @@
 # b24-app
 
-Bitrix24-приложение, заменяющее стандартные вкладки в карточках Б24 (Товары сделки, Поставка, Инвентаризация) для портала `umniydom.bitrix24.ru`.
+Bitrix24-приложение для портала `umniydom.bitrix24.ru`: свои вкладки и окна поверх Б24 — товары сделки с партиями реализации, База товаров, инвентаризация (+мобильный QR-подсчёт), окно «Реализации ↔ сделки», отчёт по продажам, заявки снабжения. Стратегически — «покрывало»: складской учёт выезжает в headless ERPNext, люди продолжают работать в наших кнопках внутри Б24.
 
-Постановка: `D:\Projects\b24-extension-handoff.md`.
+**📚 Документация: [docs/](docs/README.md)** — архитектура, фичи, роуты, runbook деплоя и энциклопедия граблей Б24 REST. Начинать оттуда.
 
 ## Стек
 
-- **Backend**: Node.js + TypeScript + Fastify, деплой на Vercel (serverless)
-- **Frontend**: React + Vite + TypeScript, грузится в iframe через placement-API Б24
-- **Shared**: общие типы (доменные модели + сгенерированные из `crm.*.fields`)
+- **Backend**: Node.js + TypeScript + Fastify; хостинг — **Yandex Cloud Serverless Containers** (контейнер `b24-app`)
+- **Frontend**: React + Vite + TypeScript, один бандл в iframe через placement-API Б24
+- **Shared**: общие типы
+- **Складское ядро (в работе)**: ERPNext (headless), см. [docs/sklad-vynos.md](docs/sklad-vynos.md)
 
 ## Структура
 
 ```
 packages/
-  backend/   — Fastify-сервер: OAuth, placement-endpoints, прокси к Б24 REST
-  frontend/  — React SPA: то, что Битрикс показывает в iframe
-  shared/    — TS-типы, доменные модели
-scripts/
-  gen-types.ts — генератор типов из crm.*.fields
+  backend/   — Fastify: OAuth, placement-роуты, /api/* (серверные походы в Б24 REST)
+  frontend/  — React SPA (то, что Битрикс показывает в iframe)
+  shared/    — TS-типы
+scripts/     — разведки/тесты/миграции (см. docs/scripts.md)
+docs/        — документация
 ```
 
 ## Команды
@@ -26,11 +27,16 @@ scripts/
 ```bash
 npm install
 npm run dev:backend   # Fastify на :3000
-npm run dev:frontend  # Vite на :5173
-npm run gen:types     # перегенерить b24-types.ts из портала (нужен webhook)
-npm run typecheck     # проверка типов во всех пакетах
+npm run dev:frontend  # Vite на :5173 (dev-мок без BX24)
+npm run typecheck     # все пакеты
+npm run build         # все пакеты (фронт → packages/frontend/dist)
 ```
 
-## Sprint 1
+Деплой и откат — [docs/runbook.md](docs/runbook.md).
 
-Только вкладка «Товары» сделки: своя таблица с N/M отгружено, селектор склада с фильтром остаток>0, чекбоксы «Реализовать», свой блок итогов, кнопка массовой реализации.
+## Правила проекта
+
+1. Не писать код без обсуждения и явного «добро».
+2. Не удалять сущности портала — зачистка тестов за Сергеем.
+3. Новые фичи — за канарейкой (`BETA_USER_IDS`), прод ≠ виден всем.
+4. Меняешь поведение — правишь `docs/` в том же коммите.
