@@ -9,6 +9,7 @@ import {
 	openDeal,
 	photoFullUrl,
 	withTimeout,
+	withRetry,
 	BETA_USER_IDS,
 	QUICKSALE_USER_IDS,
 	type BaseRow,
@@ -143,14 +144,16 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 		}
 		bx.init(() => {
 			void (async () => {
-				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
+				// BX24-вызовы на фронте флапают (особенно при возврате во вкладку из нативного окна —
+				// Сергей ловил «таймаут 15с» в пикере) → каждому по 2 попытки со своим таймаутом.
+				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
 				if (!BETA_USER_IDS.includes(uid)) {
 					setGate('plain'); // не бета — отдаём текущий GA-модуль инвентаризации
 					return;
 				}
 				setGate('beta');
 				setUid(uid);
-				const sts = await withTimeout(fetchStores(), 15000, 'catalog.store.list');
+				const sts = await withRetry(() => fetchStores(), 2, 15000, 'catalog.store.list');
 				setStores(sts.filter((s) => s.active));
 				const base = await withTimeout(fetchProductBase(), 90000, 'catalog/browse');
 				setRows(base.rows);

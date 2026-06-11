@@ -14,8 +14,7 @@ import {
 	openSupplyCard,
 	withTimeout,
 	call,
-	ROW_TYPE_GOODS,
-	ROW_TYPE_WORK,
+	isWorkRow,
 	BETA_USER_IDS,
 	type DealProductRow,
 	type StoreInfo,
@@ -64,14 +63,17 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [rows, stores, coef, shippedInfo] = await Promise.all([
+	const [bxRows, stores, coef, shippedInfo] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
-		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): { orderId: number | null; shipped: Record<string, number>; shipments: DealShipment[]; supply: SupplyCard[] } => ({ orderId: null, shipped: {}, shipments: [], supply: [] })),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): { orderId: number | null; shipped: Record<string, number>; shipments: DealShipment[]; supply: SupplyCard[]; rows: DealProductRow[] | null } => ({ orderId: null, shipped: {}, shipments: [], supply: [], rows: null })),
 	]);
+	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
+	// если бэкенд их не отдал — берём BX24-результат.
+	const rows = shippedInfo.rows ?? bxRows;
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
-	const goodsIds = [...new Set(rows.filter((r) => r.type === ROW_TYPE_GOODS).map((r) => r.productId).filter((id) => id > 0))];
+	const goodsIds = [...new Set(rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0))];
 	// Остатки/закупки тянем только если есть товары (на пустой сделке — сразу пусто, без лишнего вызова).
 	const enrich: Record<number, ProductEnrichment> = goodsIds.length
 		? await withTimeout(fetchStockAndPurchasing(goodsIds), 25000, 'stock/purchasing').catch(() => ({}))
@@ -285,8 +287,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		}
 	};
 
-	const goods = rows.filter((r) => r.type === ROW_TYPE_GOODS);
-	const works = rows.filter((r) => r.type === ROW_TYPE_WORK);
+	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
+	// монитор-вариация выпадал из «только TYPE 1» и был невидим при видимой сумме).
+	const goods = rows.filter((r) => !isWorkRow(r.type));
+	const works = rows.filter((r) => isWorkRow(r.type));
 	const sumGoods = goods.reduce((a, r) => a + line(r), 0);
 	const sumWorks = works.reduce((a, r) => a + line(r), 0);
 	const discount = rows.reduce((a, r) => a + r.discountSum, 0);

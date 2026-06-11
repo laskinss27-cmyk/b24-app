@@ -87,9 +87,12 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 
 // ── Доменные типы ─────────────────────────────────────────────────────────────
 
-/** TYPE строки: 1 = товар, 7 = работа/услуга (подтверждено разведкой портала). */
+/** TYPE строки: 1 = товар, 4 = торговое предложение (вариация, ТОЖЕ товар!), 7 = работа/услуга.
+ *  Подтверждено живой сделкой 36766: монитор-вариация пришёл с TYPE=4 и выпадал из фильтра
+ *  «только TYPE 1». Правило: РАБОТА = TYPE 7, всё остальное = товар. */
 export const ROW_TYPE_GOODS = 1;
 export const ROW_TYPE_WORK = 7;
+export const isWorkRow = (type: number): boolean => type === ROW_TYPE_WORK;
 
 export interface DealProductRow {
 	id: string;
@@ -606,6 +609,8 @@ export interface DealShippedInfo {
 	shipments: DealShipment[];
 	/** Заявки снабжения сделки (смарт-процесс «Снабжение»). */
 	supply: SupplyCard[];
+	/** Строки сделки серверным клиентом (BX24 на фронте флапает). null — бэкенд не отдал, фолбэк на BX24. */
+	rows: DealProductRow[] | null;
 }
 
 /** Что уже отгружено по строкам сделки (партии заказа, привязанного через crm.orderentity). */
@@ -617,7 +622,17 @@ export async function fetchDealShipped(dealId: number): Promise<DealShippedInfo>
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<DealShippedInfo>;
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить отгрузки сделки');
-	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, shipments: json.shipments ?? [], supply: json.supply ?? [] };
+	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, shipments: json.shipments ?? [], supply: json.supply ?? [], rows: json.rows ?? null };
+}
+
+/** Повторитель для флапающих BX24-вызовов: каждая попытка со своим таймаутом. */
+export async function withRetry<T>(fn: () => Promise<T>, attempts: number, ms: number, label: string): Promise<T> {
+	let last: unknown;
+	for (let a = 1; a <= attempts; a++) {
+		try { return await withTimeout(fn(), ms, label); }
+		catch (e) { last = e; }
+	}
+	throw last;
 }
 
 /** Товар «нет на складах» → заявка снабжения (создаёт карточку «Поставка № …» или дополняет открытую). */

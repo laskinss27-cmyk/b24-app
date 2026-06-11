@@ -220,9 +220,23 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const [info, supply] = await Promise.all([
+			const [info, supply, rows] = await Promise.all([
 				loadDealOrderInfo(client, dealId),
 				listSupplyCards(client, dealId).catch(() => [] as SupplyCard[]),
+				// Строки сделки серверным клиентом: фронтовый BX24 флапает (пустая вкладка после
+				// «Добавить товар»), чистый JSON-REST стабилен. null → фронт падает на BX24-фолбэк.
+				client.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', {
+					filter: { '=ownerType': 'D', ownerId: dealId },
+				}).then((res) => (res?.productRows ?? []).map((r) => ({
+					id: String(r['id']),
+					productId: Number(r['productId'] ?? 0),
+					name: String(r['productName'] ?? ''),
+					type: Number(r['type'] ?? 0),
+					price: Number(r['price'] ?? 0),
+					quantity: Number(r['quantity'] ?? 0),
+					discountSum: Number(r['discountSum'] ?? 0),
+					measure: String(r['measureName'] ?? ''),
+				}))).catch((err) => { app.log.warn({ dealId }, `[api/deal/shipped] productrow.list не отдался — ${errInfo(err)}`); return null; }),
 			]);
 			return {
 				ok: true,
@@ -230,6 +244,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				shipped: Object.fromEntries(info.shipped),
 				shipments: info.shipments,
 				supply,
+				rows,
 			};
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/shipped] failed — ${errInfo(err)}`);
