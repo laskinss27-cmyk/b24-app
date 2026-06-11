@@ -560,6 +560,35 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 	return json.added ?? 0;
 }
 
+export interface RealizeItem {
+	rowId: number;
+	productId: number;
+	quantity: number;
+	price: number;
+	name: string;
+	/** Склад из нашего селектора — пишется в crm-строку сделки (storeId) перед созданием черновика. */
+	storeId?: number | undefined;
+}
+
+export interface RealizeResult {
+	orderId: number;
+	shipmentId: number;
+	accountNumber: string;
+	dupRemoved: number | null;
+}
+
+/** Черновик РЕАЛИЗАЦИИ по отмеченным строкам сделки (склад НЕ списывается — проводит менеджер). */
+export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise<RealizeResult> {
+	const res = await fetch('/api/deal/realize', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, items }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<RealizeResult>;
+	if (!json.ok || !json.shipmentId) throw new Error(json.error ?? 'не удалось создать черновик реализации');
+	return { orderId: json.orderId ?? 0, shipmentId: json.shipmentId, accountNumber: json.accountNumber ?? '', dupRemoved: json.dupRemoved ?? null };
+}
+
 /** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */
 export async function addProductToDeal(dealId: number, productId: number, quantity: number, price?: number): Promise<{ id: number; name: string; price: number; quantity: number }> {
 	const res = await fetch('/api/deal/add-product', {

@@ -188,18 +188,33 @@ body {
 	align-items: center;
 	gap: 12px;
 }
-.realize-bar button[disabled] {
-	background: #e5e7eb;
-	color: #9ca3af;
+.realize-bar button {
+	background: #16a34a;
+	color: #fff;
 	border: none;
 	padding: 8px 16px;
 	border-radius: 8px;
-	cursor: not-allowed;
+	cursor: pointer;
 	font-size: 13px;
+	font-weight: 600;
+}
+.realize-bar button:hover:not([disabled]) {
+	background: #15803d;
+}
+.realize-bar button[disabled] {
+	background: #e5e7eb;
+	color: #9ca3af;
+	cursor: not-allowed;
+	font-weight: 400;
 }
 .realize-bar .hint {
 	color: #9ca3af;
 	font-size: 12px;
+}
+.realize-bar .realize-ok {
+	color: #15803d;
+	font-size: 12px;
+	font-weight: 600;
 }
 
 .stub-calm {

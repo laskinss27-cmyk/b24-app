@@ -7,6 +7,8 @@ import {
 	fetchProfitCoef,
 	fetchStockAndPurchasing,
 	addProductsToDeal,
+	realizeDeal,
+	openRealization,
 	withTimeout,
 	call,
 	ROW_TYPE_GOODS,
@@ -15,6 +17,7 @@ import {
 	type DealProductRow,
 	type StoreInfo,
 	type ProductEnrichment,
+	type RealizeItem,
 } from './b24.js';
 
 interface EnrichedRow extends DealProductRow {
@@ -178,12 +181,19 @@ export function DealProductsTab(): JSX.Element {
 		);
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} onAdd={() => setAdding(true)} />;
+	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} onAdd={() => setAdding(true)} onReload={reload} />;
 }
 
-function RealTable({ data, viewer, dev, dealId, onAdd }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void }): JSX.Element {
+function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
+
+	// «Реализовать»: выбор склада на строку + отметки. Кнопка создаёт ЧЕРНОВИК реализации
+	// (склад не списывается — менеджер проверяет и проводит в нативной карточке).
+	const [storeSel, setStoreSel] = useState<Record<string, number>>({});
+	const [checked, setChecked] = useState<Record<string, boolean>>({});
+	const [realizing, setRealizing] = useState(false);
+	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
 	const goods = rows.filter((r) => r.type === ROW_TYPE_GOODS);
 	const works = rows.filter((r) => r.type === ROW_TYPE_WORK);
@@ -217,7 +227,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd }: { data: TableData; view
 					{!isGoods ? (
 						<span className="none">—</span>
 					) : r.stocks.length ? (
-						<select defaultValue="">
+						<select
+							value={storeSel[r.id] ?? ''}
+							onChange={(e) => setStoreSel((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
+						>
 							<option value="" disabled>выбрать склад…</option>
 							{r.stocks.map((s) => (
 								<option key={s.storeId} value={s.storeId}>{s.storeName} — {s.amount} {r.measure}</option>
@@ -229,12 +242,45 @@ function RealTable({ data, viewer, dev, dealId, onAdd }: { data: TableData; view
 				</td>
 				<td>
 					{isGoods
-						? <input type="checkbox" disabled title="Реализация товаров — в работе" />
+						? <input
+							type="checkbox"
+							checked={!!checked[r.id]}
+							disabled={realizing}
+							onChange={(e) => setChecked((m) => ({ ...m, [r.id]: e.target.checked }))}
+							title="Отметить строку для черновика реализации"
+						/>
 						: <span className="none">—</span>}
 				</td>
 			</tr>
 		);
 	};
+	const selectedGoods = goods.filter((r) => checked[r.id]);
+
+	const doRealize = async (): Promise<void> => {
+		if (dealId == null || !selectedGoods.length || realizing) return;
+		setRealizing(true);
+		setNotice(null);
+		try {
+			const items: RealizeItem[] = selectedGoods.map((r) => ({
+				rowId: Number(r.id),
+				productId: r.productId,
+				quantity: r.quantity,
+				price: r.price,
+				name: r.name,
+				storeId: storeSel[r.id] || undefined,
+			}));
+			const res = await realizeDeal(dealId, items);
+			setNotice({ kind: 'ok', text: `✅ Черновик реализации #${res.accountNumber} создан — открываю карточку (проверь склад и нажми «Провести»)` });
+			setChecked({});
+			openRealization(res.shipmentId);
+			await onReload();
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setRealizing(false);
+		}
+	};
+
 	// Разделяем визуально: блок товаров и блок работ/услуг — полосой-заголовком, чтобы
 	// наглядно было видно, где что (раньше шли вперемешку одним списком).
 	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
@@ -298,8 +344,17 @@ function RealTable({ data, viewer, dev, dealId, onAdd }: { data: TableData; view
 			</div>
 
 			<div className="realize-bar">
-				<button disabled>Реализовать выделенное</button>
-				<span className="hint">запись документов — следующая фаза (тест только на сделке 32592)</span>
+				<button disabled={dev || realizing || selectedGoods.length === 0} onClick={() => void doRealize()}>
+					{realizing ? 'Создаю черновик…' : `Реализовать выделенное${selectedGoods.length ? ` (${selectedGoods.length})` : ''}`}
+				</button>
+				<span className="hint">
+					{dev
+						? 'dev-режим: запись недоступна'
+						: selectedGoods.length === 0
+							? 'отметь товары галочкой (и выбери склад — подставим в строку сделки)'
+							: 'создаст ЧЕРНОВИК реализации — склад спишется только после «Провести» в открывшейся карточке'}
+				</span>
+				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>
 
 		</div>
