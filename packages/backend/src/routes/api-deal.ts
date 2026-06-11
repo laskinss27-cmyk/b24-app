@@ -52,9 +52,33 @@ async function fetchBasePrices(client: B24Client, ids: number[]): Promise<Map<nu
 // Карточки «Поставка № N_<сделка>_<название>», parentId2 = сделка, перечень — текстовое поле.
 const SUPPLY_TYPE_ID = 1110;
 const SUPPLY_CATEGORY_ID = 114;
-const SUPPLY_LIST_FIELD = 'ufCrm38_1777818101'; // перечень оборудования (текст)
+const SUPPLY_LIST_FIELD = 'ufCrm38_1777818101'; // перечень оборудования (текст, «Комментарий»)
 const SUPPLY_NUMBER_FIELD = 'ufCrm38_1777817940'; // номер поставки (счётчик в карточках)
+const SUPPLY_STORE_FIELD = 'ufCrm38_1778141770'; // «Склад поставки (приход)» — элемент iblock 60
+const SUPPLY_STORE_IBLOCK = 60;
 const DEAL_SUPPLY_CREATED_FLAG = 'UF_CRM_1777817683'; // галка сделки «Заявка снабжения создана»
+
+/** Элемент справочника складов процесса (iblock 60) по имени склада каталога.
+ *  lists-scope может отсутствовать у токена — тогда null (склад уедет строкой в перечень). */
+async function resolveSupplyStore(client: B24Client, storeName: string): Promise<number | null> {
+	if (!storeName) return null;
+	try {
+		const els = await client.call<Array<Record<string, unknown>>>('lists.element.get', {
+			IBLOCK_TYPE_ID: 'lists', IBLOCK_ID: SUPPLY_STORE_IBLOCK,
+		});
+		const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+		const want = norm(storeName);
+		const exact = (els ?? []).find((e) => norm(String(e['NAME'] ?? '')) === want);
+		if (exact) return Number(exact['ID']);
+		const partial = (els ?? []).find((e) => {
+			const n = norm(String(e['NAME'] ?? ''));
+			return n.includes(want) || want.includes(n);
+		});
+		return partial ? Number(partial['ID']) : null;
+	} catch {
+		return null;
+	}
+}
 
 interface SupplyCard {
 	id: number;
@@ -257,7 +281,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	// триггерится не на поле — у сделки 36742 «Да» стоит, заявки нет), номер — следующий по
 	// счётчику карточек, ответственный — нажавший менеджер (как у ручных заявок).
 	app.post('/api/deal/supply-request', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; storeToName?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(b.dealId);
@@ -267,8 +291,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			.map((it) => ({ name: String(it.name ?? '').trim(), quantity: Number(it.quantity), measure: String(it.measure ?? 'шт') }))
 			.filter((it) => it.name && Number.isFinite(it.quantity) && it.quantity > 0);
 		if (!items.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
+		const storeToName = String(b.storeToName ?? '').trim();
 
-		const listText = items.map((it) => `${it.name} — ${it.quantity} ${it.measure}`).join('\n');
+		let listText = items.map((it) => `${it.name} — ${it.quantity} ${it.measure}`).join('\n');
+		if (storeToName) listText += `\nПривезти на: ${storeToName}`;
 		try {
 			const existing = await listSupplyCards(client, dealId);
 			const open = existing.find((c) => !/SUCCESS|FAIL/i.test(c.stageId)) ?? existing[0];
@@ -277,7 +303,13 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const card = await client.call<{ item?: Record<string, unknown> }>('crm.item.get', { entityTypeId: SUPPLY_TYPE_ID, id: open.id });
 				const current = String(card?.item?.[SUPPLY_LIST_FIELD] ?? '').trim();
 				const next = current ? `${current}\n\n+ из вкладки сделки:\n${listText}` : listText;
-				await client.call('crm.item.update', { entityTypeId: SUPPLY_TYPE_ID, id: open.id, fields: { [SUPPLY_LIST_FIELD]: next } });
+				const fields: Record<string, unknown> = { [SUPPLY_LIST_FIELD]: next };
+				// Склад поставки — только если у заявки он ещё не указан (чужой выбор не трогаем).
+				if (storeToName && !Number(card?.item?.[SUPPLY_STORE_FIELD] ?? 0)) {
+					const el = await resolveSupplyStore(client, storeToName);
+					if (el) fields[SUPPLY_STORE_FIELD] = el;
+				}
+				await client.call('crm.item.update', { entityTypeId: SUPPLY_TYPE_ID, id: open.id, fields });
 				app.log.info({ dealId, cardId: open.id }, '[api/deal/supply-request] appended');
 				return { ok: true, mode: 'appended', cardId: open.id, title: open.title };
 			}
@@ -297,6 +329,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			}
 			const num = maxNum + 1;
 			const title = `Поставка № ${num}_${dealId}_${dealTitle}`;
+			const storeEl = storeToName ? await resolveSupplyStore(client, storeToName) : null;
 			const added = await client.call<{ item?: Record<string, unknown> }>('crm.item.add', {
 				entityTypeId: SUPPLY_TYPE_ID,
 				fields: {
@@ -306,6 +339,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					assignedById: Number(me?.ID ?? 0) || undefined,
 					[SUPPLY_NUMBER_FIELD]: num,
 					[SUPPLY_LIST_FIELD]: listText,
+					...(storeEl ? { [SUPPLY_STORE_FIELD]: storeEl } : {}),
 				},
 			});
 			const cardId = Number(added?.item?.['id']);

@@ -283,6 +283,31 @@ body {
 	align-items: center;
 	gap: 8px;
 }
+.stock-chips {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.stock-chip {
+	background: #f1f5f9;
+	color: #475569;
+	border: 1px solid #e2e8f0;
+	border-radius: 999px;
+	padding: 1px 8px;
+	font-size: 11px;
+	white-space: nowrap;
+}
+.stock-chip b {
+	color: #0f172a;
+}
+.supply-to {
+	max-width: 150px;
+	font-size: 12px;
+	padding: 2px 4px;
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
+	color: #6b7280;
+}
 .btn-supply {
 	background: #fff7ed;
 	color: #c2410c;

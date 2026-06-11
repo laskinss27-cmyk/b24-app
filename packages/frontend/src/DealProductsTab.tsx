@@ -37,6 +37,8 @@ interface TableData {
 	shipments: DealShipment[];
 	/** Заявки снабжения сделки. */
 	supply: SupplyCard[];
+	/** Активные склады каталога — для «куда привезти» в снабжении. */
+	stores: StoreInfo[];
 }
 
 type State =
@@ -51,6 +53,7 @@ const MOCK_DATA: TableData = {
 	coef: 0.5,
 	shipments: [{ id: 0, accountNumber: '922/2 (мок)', deducted: false, items: { '1': 20 }, stores: { '1': 'Измайловский 18Д' } }],
 	supply: [{ id: 0, title: 'Поставка № 92_32592_мок', stageId: 'DT1110_114:NEW' }],
+	stores: [{ id: 4, title: 'Измайловский 18Д', active: true }, { id: 8, title: 'Максидом Дунайский 64', active: true }],
 	rows: [
 		{ id: '1', productId: 18062, name: 'Гофротруба ПВХ 16 мм', type: 1, price: 15, quantity: 80, discountSum: 0, measure: 'шт', purchasingPrice: 8, shipped: 20, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 200 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 23 }] },
 	{ id: '2', productId: 18108, name: 'IP-видеокамера iFLOW F-IC-1321M', type: 1, price: 2200, quantity: 23, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, stocks: [] },
@@ -87,7 +90,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			shipped: Number(shippedInfo.shipped[r.id] ?? 0),
 		};
 	});
-	return { rows: enriched, coef, shipments: shippedInfo.shipments, supply: shippedInfo.supply };
+	return { rows: enriched, coef, shipments: shippedInfo.shipments, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -220,16 +223,17 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 	// строка остатка со своим селектором склада, полем кол-ва и кнопкой. Каждая партия = свой
 	// черновик реализации (нативная модель «один заказ → много отгрузок»; склад не списывается —
 	// менеджер проверяет и проводит в карточке). Мультисклад = несколько нажатий.
-	const [storeSel, setStoreSel] = useState<Record<string, number>>({});
+	// Селектора склада НЕТ намеренно (решение Сергея 2026-06-11): склад выбирается в карточке
+	// черновика, а прочитать его обратно нельзя (стена 2) — любая наша «память» могла бы врать,
+	// если менеджер передумал в документе. Показываем только честные остатки чипами.
 	const [batchQty, setBatchQty] = useState<Record<string, string>>({});
 	/** id строки, по которой сейчас идёт запись (кнопки блокируются все разом). */
 	const [realizing, setRealizing] = useState<string | null>(null);
 	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-	// Склад партии прочитать из Б24 нельзя (стена 2) — помним то, что отправили сами,
-	// пока вкладка открыта. После перезагрузки партия видна без склада (он — в её карточке).
-	const [partStores, setPartStores] = useState<Record<number, string>>({});
 	/** id строки, уходящей в снабжение (кнопки блокируются разом). */
 	const [supplying, setSupplying] = useState<string | null>(null);
+	/** «Куда привезти» для заявки снабжения (id склада каталога), по строкам. */
+	const [supplyTo, setSupplyTo] = useState<Record<string, number>>({});
 
 	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - r.shipped);
 	const qtyOf = (r: EnrichedRow): number => Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.'));
@@ -241,7 +245,6 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		setRealizing(r.id);
 		setNotice(null);
 		try {
-			const storeName = r.stocks.find((s) => s.storeId === storeSel[r.id])?.storeName;
 			const res = await realizeDeal(dealId, [{
 				rowId: Number(r.id),
 				productId: r.productId,
@@ -249,11 +252,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				rowQuantity: r.quantity,
 				price: r.price,
 				name: r.name,
-				storeId: storeSel[r.id] || undefined,
-				storeName,
 			}]);
-			if (storeName) setPartStores((m) => ({ ...m, [res.shipmentId]: storeName }));
-			setNotice({ kind: 'ok', text: `✅ Партия #${res.accountNumber}: ${r.name.slice(0, 30)} × ${qty}${storeName ? `, склад ${storeName}` : ''} — черновик создан, проверь и проведи` });
+			setNotice({ kind: 'ok', text: `✅ Партия #${res.accountNumber}: ${r.name.slice(0, 30)} × ${qty} — черновик создан, выбери склад в карточке и проведи` });
 			setBatchQty((m) => { const c = { ...m }; delete c[r.id]; return c; });
 			openRealization(res.shipmentId);
 			await onReload();
@@ -271,7 +271,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		setSupplying(r.id);
 		setNotice(null);
 		try {
-			const res = await requestSupply(dealId, [{ name: r.name, quantity: remaining(r), measure: r.measure }]);
+			const storeToName = data.stores.find((s) => s.id === supplyTo[r.id])?.title;
+			const res = await requestSupply(dealId, [{ name: r.name, quantity: remaining(r), measure: r.measure }], storeToName);
 			setNotice({
 				kind: 'ok',
 				text: res.mode === 'created'
@@ -304,10 +305,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 	}
 
 	/** Партии этой строки — из отгрузок заказа сделки (черновики и проведённые). */
-	const partsOf = (r: EnrichedRow): Array<{ id: number; accountNumber: string; deducted: boolean; qty: number; storeName?: string | undefined }> =>
+	const partsOf = (r: EnrichedRow): Array<{ id: number; accountNumber: string; deducted: boolean; qty: number }> =>
 		data.shipments
 			.filter((s) => Number(s.items[r.id] ?? 0) > 0)
-			.map((s) => ({ id: s.id, accountNumber: s.accountNumber, deducted: s.deducted, qty: Number(s.items[r.id]), storeName: s.stores?.[r.id] }));
+			.map((s) => ({ id: s.id, accountNumber: s.accountNumber, deducted: s.deducted, qty: Number(s.items[r.id]) }));
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>
@@ -333,7 +334,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				<td className="num">{rub(r.price)}</td>
 				<td className="num">{p.qty} {r.measure}</td>
 				<td className="num">{rub(r.price * p.qty)}</td>
-				<td className="row-store part-store">{p.storeName ?? partStores[p.id] ?? <span className="none" title="Партия создана не нашей кнопкой — склад виден в карточке документа">склад — в карточке →</span>}</td>
+				<td className="row-store part-store"><span className="none" title="Склад наружу Битрикс не отдаёт и менеджер мог его сменить в документе — смотри в карточке (клик по чипу справа)">склад — в карточке →</span></td>
 				<td className="realize-cell">
 					<button className="shipment-chip" onClick={() => p.id > 0 && openRealization(p.id)} title={p.deducted ? 'проведена (склад списан)' : 'черновик — открыть, проверить склад, провести'}>
 						#{p.accountNumber} {p.deducted ? '✓ проведена' : '✎ черновик'}
@@ -351,15 +352,26 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 					<td className="num">{rub(r.price * left)}</td>
 					<td className="row-store">
 						{r.stocks.length ? (
-							<select value={storeSel[r.id] ?? ''} onChange={(e) => setStoreSel((m) => ({ ...m, [r.id]: Number(e.target.value) }))}>
-								<option value="" disabled>выбрать склад…</option>
+							<span className="stock-chips" title="Остатки по складам — справочно. Склад списания выбирается в карточке черновика.">
 								{r.stocks.map((s) => (
-									<option key={s.storeId} value={s.storeId}>{s.storeName} — {s.amount} {r.measure}</option>
+									<span key={s.storeId} className="stock-chip">{s.storeName}: <b>{s.amount}</b></span>
 								))}
-							</select>
+							</span>
 						) : (
 							<span className="no-stock">
 								<span className="none">нет на складах</span>
+								<select
+									className="supply-to"
+									value={supplyTo[r.id] ?? ''}
+									disabled={dev || supplying != null}
+									onChange={(e) => setSupplyTo((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
+									title="Куда привезти (склад поставки в заявке) — необязательно"
+								>
+									<option value="">куда привезти…</option>
+									{data.stores.map((s) => (
+										<option key={s.id} value={s.id}>{s.title}</option>
+									))}
+								</select>
 								<button
 									className="btn-supply"
 									disabled={dev || supplying != null || realizing != null}
@@ -431,7 +443,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 						<th className="num">Цена</th>
 						<th className="num">Кол-во</th>
 						<th className="num">Сумма</th>
-						<th>Склад (остаток &gt; 0)</th>
+						<th>Остатки по складам</th>
 						<th>Реализовать</th>
 					</tr>
 				</thead>
@@ -473,7 +485,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				<span className="hint">
 					{dev
 						? 'dev-режим: запись недоступна (кнопки строк неактивны)'
-						: 'партия: кол-во + склад → «Реализовать» в строке товара. Склад спишется только после «Провести» в карточке партии.'}
+						: 'партия: кол-во → «Реализовать» в строке товара. Склад выбирается и списывается в карточке партии («Провести»).'}
 				</span>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>
