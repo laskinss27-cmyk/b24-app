@@ -30,11 +30,24 @@
 - `operations.ts` — домен: `fetchErpStocks` (весь каталог одним запросом Bin, имена складов Б24), `createRealizationDraft`/`submitRealization`/`listDealRealizations` (Delivery Note + `b24_deal_id`), `createTransferDraft`/`createWriteOffDraft` (Stock Entry), `createReceiptDraft` (Purchase Receipt, технический поставщик), `ensureErpSetup` (custom-поля/контрагенты, идемпотентно), company везде явно;
 - смоук `scripts/erp-ops-smoke.ts`: все операции, списания/остатки сходятся в точные значения.
 
+✅ **Клиенты перенесены, сверка в ноль (2026-06-12,** `erp-migrate-clients.ts --check`**):**
+- **269/269 компаний → Customer** (Company), **7 794/7 794 контактов → Contact** (телефоны/почты child-таблицами; контакт с компанией прилинкован к её Customer), **7 651 физлицо (контакт без компании) → свой Customer** (Individual) — под будущие Delivery Note.
+- **Лиды НЕ переносим** (решение Сергея 2026-06-12): складским документам не нужны; 15 403 шт перенесём отдельной фазой, когда появится потребитель (exit / своя воронка).
+- Идемпотентный ключ: custom-поле `b24_id` (`company_<id>` / `contact_<id>`, unique) на Customer и Contact, создаётся в `--setup`. Дельта-синк доказан: контакты, добавленные в Б24 прямо во время переноса, догнаны повторным запуском.
+
 ⏳ **Дальше (домашний этап 2):** туннель ноутбук→облако + env прод-бэкенда + фича-флаг юзера 1858 (остатки/партии в нашем UI из ERPNext через модуль erp/, мягкий фолбэк на Б24), свой механизм снабжения, синк чужих нативных движений Б24→ERPNext на переходный период, ежедневная сверка, бэкапы тома.
 
 ## Скрипт миграции: `scripts/erp-migrate-catalog.ts`
 
 Идемпотентный (повторный запуск догоняет дельту). Фазы: `--dry` (посчитать) / `--stores` / `--items` / `--stock` / `--check`. env: `ERPNEXT_URL`, `ERPNEXT_TOKEN`, `LOCAL_PROXY`. На новой площадке: прогнать фазы по порядку → `--check` до нуля.
+
+## Скрипт миграции клиентов: `scripts/erp-migrate-clients.ts`
+
+Идемпотентный, тот же каркас. Фазы: `--dry` / `--setup` (custom-поля `b24_id` + Customer Group «Клиенты Б24» + **нумерация Customer серией** `Selling Settings.cust_master_name='Naming Series'` — иначе тёзки падают дублем имени) / `--companies` / `--contacts` / `--check`. Грабли в нём:
+- frappe запрещает `<>` в именах → имена чистим;
+- кривые email валятся на `validate_email_address` → фильтр-сито + ретрай создания Contact без контактных данных;
+- ERPNext-вызовы: сетевые сбои ретраим (3×, headersTimeout/bodyTimeout 60с), HTTP-ошибки — НЕТ (повторный POST после фактического 2xx = дубли);
+- 🔴 **долгие прогоны НЕ запускать фоном из Claude-сессии** — на ноутбуке Сергея такие процессы дважды умирали молча через ~20–40 мин (без stderr, журнал Windows чист, причина не найдена). Запускать отвязанно: `Start-Process cmd '/c npx tsx scripts\erp-migrate-clients.ts --contacts > scripts\migrate-clients.log 2>&1 & echo EXITCODE %ERRORLEVEL% >> ...'` и следить за логом.
 
 ## Грабли ERPNext (выстраданы 2026-06-11)
 
