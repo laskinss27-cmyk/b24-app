@@ -486,17 +486,20 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				// 6) Привязка заказа к НАШЕЙ сделке (стена 1 пробита: метод скрыт из `methods`, но работает).
 				await client.call('crm.orderentity.add', { fields: { orderId, ownerId: dealId, ownerTypeId: 2 } });
 				step(`orderentity → сделка ${dealId}`);
+			}
 
-				// 7) Свойства заказа (клиент в документе) — мягко: формат modify не подтверждён живым тестом,
-				//    при ошибке документ просто останется без «Имя Фамилия» (как у части нативных).
-				if (clientName || clientPhone) {
-					const propertyValues: Array<{ orderPropsId: number; value: string }> = [];
-					if (clientName) propertyValues.push({ orderPropsId: 40, value: clientName });
-					if (clientPhone) propertyValues.push({ orderPropsId: 44, value: clientPhone });
-					await client.call('sale.propertyvalue.modify', { fields: { order: { id: orderId, propertyValues } } })
-						.then(() => step('свойства клиента записаны'))
-						.catch((err) => app.log.warn({ orderId }, `[api/deal/realize] propertyvalue.modify не прошёл (не критично) — ${errInfo(err)}`));
-				}
+			// 7) Свойства заказа (клиент в документе) — ПРИ КАЖДОЙ партии, а не только при создании
+			//    заказа: контакт сделки мог появиться/смениться ПОСЛЕ рождения заказа (живой баг
+			//    2026-06-12 «клиент = CONTACT_16332»: заказ родился у сделки без контакта, сегодняшняя
+			//    партия его переиспользовала — блок в ветке создания не выполнялся). Источник правды —
+			//    контакт сделки. Формат подтверждён живьём (test-propertyvalue-modify.ts, заказ 966).
+			if (clientName || clientPhone) {
+				const propertyValues: Array<{ orderPropsId: number; value: string }> = [];
+				if (clientName) propertyValues.push({ orderPropsId: 40, value: clientName });
+				if (clientPhone) propertyValues.push({ orderPropsId: 44, value: clientPhone });
+				await client.call('sale.propertyvalue.modify', { fields: { order: { id: orderId, propertyValues } } })
+					.then(() => step('свойства клиента записаны'))
+					.catch((err) => app.log.warn({ orderId }, `[api/deal/realize] propertyvalue.modify не прошёл (не критично) — ${errInfo(err)}`));
 			}
 
 			// 8) Корзина: строка корзины несёт ПОЛНОЕ кол-во строки сделки (xmlId=crm_pr_<rowId>,
