@@ -644,7 +644,7 @@ function ErpDocModal(props: {
 		if (props.mock) { setLines([]); setErr('dev-мок: документ ядра доступен только с подключённым ERPNext.'); return; }
 		let alive = true;
 		withTimeout(previewErpDoc(props.invId, props.storeId), 20000, 'erp-doc-preview')
-			.then((r) => { if (alive) { setLines(r.lines); setDoc(r.doc); } })
+			.then((r) => { if (alive) { setLines(r.lines); setDoc(r.doc); setMirrors(r.docs); } })
 			.catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)); });
 		return () => { alive = false; };
 	}, [props.invId, props.storeId, props.mock]);
@@ -661,14 +661,19 @@ function ErpDocModal(props: {
 
 	async function doSubmit(): Promise<void> {
 		if (!doc) return;
-		if (!window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки, в Б24 будут созданы ЧЕРНОВИКИ-зеркала (их проводишь сам).`)) return;
+		// дозавершение уже проведённого (зеркала после таймаута) — без устрашающего confirm
+		if (doc.status !== 'submitted' && !window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки, в Б24 будут созданы ЧЕРНОВИКИ-зеркала (их проводишь сам).`)) return;
 		setBusy(true); setErr(null);
 		try {
-			const r = await withTimeout(submitErpDoc(props.invId, props.storeId, props.userId), 30000, 'erp-doc-submit');
+			// проведение в ядре + зеркала идут через мост и могут быть небыстрыми; serverless-кап 60с
+			const r = await withTimeout(submitErpDoc(props.invId, props.storeId, props.userId), 55000, 'erp-doc-submit');
 			setDoc(r.doc);
 			setMirrors(r.docs);
 			props.onChanged();
-		} catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); }
+		} catch (e: unknown) {
+			const msg = String(e instanceof Error ? e.message : e);
+			setErr(msg.includes('таймаут') ? `${msg} — нажми «Провести» ещё раз: продолжу с места обрыва, дублей не будет` : msg);
+		}
 		finally { setBusy(false); }
 	}
 
@@ -727,6 +732,9 @@ function ErpDocModal(props: {
 							<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести'}</button>
 							<button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать от свежей болванки</button>
 						</>
+					)}
+					{submitted && mirrors.length === 0 && (
+						<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Дозавершаю…' : 'Дозавершить зеркала в Б24'}</button>
 					)}
 					<button className="btn-secondary" onClick={props.onClose}>Закрыть</button>
 				</div>

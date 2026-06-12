@@ -35,6 +35,9 @@ type InvDocRef = { type: string; id: number; lines: number };
 /**
  * ЗЕРКАЛА в Б24: черновики списания (D) / оприходования (S) по расхождениям точки
  * (catalog.document.add, status N — проводятся вручную в Б24, живые остатки не трогаем).
+ * Перед созданием ищем уже существующий черновик с тем же заголовком — entity-запись
+ * может опоздать за таймаутом фронта, и повторное «Провести» не должно плодить дубли
+ * (живой случай 2026-06-12: черновики 676+678 от двойного клика).
  */
 async function createB24MirrorDocs(
 	client: B24Client,
@@ -45,11 +48,19 @@ async function createB24MirrorDocs(
 	const docs: InvDocRef[] = [];
 	const buildDoc = async (docType: 'D' | 'S', group: Array<{ productId: number; diff: number }>, label: string): Promise<void> => {
 		if (!group.length) return;
+		const title = `Инвентаризация «${args.invTitle}»: ${label} — ${args.storeName}`;
+		const existing = await client.call<{ documents?: Array<{ id?: number }> }>('catalog.document.list', {
+			filter: { docType, status: 'N', title },
+			select: ['id'],
+			order: { id: 'DESC' },
+		}).catch(() => null);
+		const existingId = Number(existing?.documents?.[0]?.id ?? 0);
+		if (existingId) { docs.push({ type: docType, id: existingId, lines: group.length }); return; }
 		const add = await client.call<{ document?: { id?: number }; id?: number }>('catalog.document.add', {
 			fields: {
 				docType,
 				currency: 'RUB',
-				title: `Инвентаризация «${args.invTitle}»: ${label} — ${args.storeName}`,
+				title,
 				...(args.responsibleId ? { responsibleId: args.responsibleId } : {}),
 			},
 		});
@@ -433,7 +444,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
 				const { lines, storeName } = await computeRecoLines(erp, pt);
 				app.log.info({ storeId: b.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
-				return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null };
+				return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null, docs: Array.isArray(pt['documents']) ? pt['documents'] : [] };
 			} catch (err) {
 				app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-preview] failed — ${errInfo(err)}`);
 				return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -488,9 +499,18 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				const { item, data, points, pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
 				const doc = pt['erpDoc'] as { name?: string; status?: string; lines?: number } | undefined;
 				if (!doc?.name) return reply.code(200).send({ ok: false, error: 'сначала «Записать» (черновика ядра нет)' });
-				if (doc.status === 'submitted') return reply.code(200).send({ ok: false, error: `${doc.name} уже проведён`, doc });
-				await submitInventoryReco(erp, doc.name);
+				// ИДЕМПОТЕНТНО: проведение в ядре может пережить таймаут фронта, а entity-запись — нет.
+				// Повторное «Провести» ДОЗАВЕРШАЕТ (живой случай 2026-06-12): уже проведённый reco не
+				// проводим заново, идём дальше к зеркалам и записи статуса.
+				const live = await erp.get('Stock Reconciliation', doc.name);
+				if (!live) return reply.code(200).send({ ok: false, error: `${doc.name} не найден в ядре — пересоздай через «Записать»` });
+				if (Number(live['docstatus'] ?? 0) !== 1) await submitInventoryReco(erp, doc.name);
+				else app.log.info({ name: doc.name }, '[api/inventory/erp-doc-submit] reco уже проведён — дозавершаю');
 				pt['erpDoc'] = { ...doc, status: 'submitted', submittedAt: new Date().toISOString() };
+				// статус — в entity СРАЗУ (до зеркал): если зеркала не уложатся в таймаут,
+				// повторный клик увидит submitted и пойдёт только дозаканчивать зеркала
+				data['points'] = points;
+				await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 
 				// зеркала в Б24 — по расхождениям против книги Б24 (result.lines), если ещё не делали
 				let mirrors: InvDocRef[] = Array.isArray(pt['documents']) ? (pt['documents'] as InvDocRef[]) : [];

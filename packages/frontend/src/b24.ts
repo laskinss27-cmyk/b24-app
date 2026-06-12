@@ -932,9 +932,9 @@ async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Pr
 }
 
 /** Болванка: строки документа ядра, ничего не записано (1С: «не сохранил — пропала»). */
-export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[]; doc: ErpInvDoc | null }> {
-	const j = await postErpDoc<{ lines?: ErpRecoLine[]; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
-	return { lines: j.lines ?? [], doc: j.doc ?? null };
+export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[]; doc: ErpInvDoc | null; docs: BuiltDoc[] }> {
+	const j = await postErpDoc<{ lines?: ErpRecoLine[]; doc?: ErpInvDoc | null; docs?: BuiltDoc[] }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
+	return { lines: j.lines ?? [], doc: j.doc ?? null, docs: j.docs ?? [] };
 }
 
 /** «Записать»: черновик Stock Reconciliation в ядре (остатки не двигаются). */
