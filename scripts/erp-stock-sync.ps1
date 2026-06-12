@@ -7,6 +7,8 @@
 
 $repo = 'D:\Projects\b24-app'
 $log = Join-Path $repo 'scripts\stock-sync.log'
+# вывод npx — UTF-8; без этого кириллица итогов («ИТОГ», «СОШЛОСЬ») приходит кашей и фильтр строк слепнет
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 function Stamp { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
 
 # ERPNext жив? (докер после ребута не автостартует — тогда тихо пропускаем час)
