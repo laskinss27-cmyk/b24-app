@@ -3,6 +3,15 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
 import { fetchStoreStock } from '../b24/catalog.js';
 import { normalizeDomain } from '../security.js';
+import { ErpClient } from '../erp/client.js';
+import {
+	createInventoryRecoDraft,
+	deleteInventoryRecoDraft,
+	fetchErpItemNames,
+	fetchErpStoreStock,
+	submitInventoryReco,
+	type InventoryRecoLine,
+} from '../erp/operations.js';
 
 /**
  * API инвентаризации для фронта. Фронтовый BX24 ВИСНЕТ на entity.* — поэтому
@@ -19,6 +28,49 @@ interface AuthBody {
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+}
+
+type InvDocRef = { type: string; id: number; lines: number };
+
+/**
+ * ЗЕРКАЛА в Б24: черновики списания (D) / оприходования (S) по расхождениям точки
+ * (catalog.document.add, status N — проводятся вручную в Б24, живые остатки не трогаем).
+ */
+async function createB24MirrorDocs(
+	client: B24Client,
+	args: { storeId: number; storeName: string; invTitle: string; responsibleId?: number | undefined; lines: Array<{ productId: number; diff: number }> },
+): Promise<InvDocRef[]> {
+	const shortages = args.lines.filter((l) => Number(l.diff) < 0);
+	const surpluses = args.lines.filter((l) => Number(l.diff) > 0);
+	const docs: InvDocRef[] = [];
+	const buildDoc = async (docType: 'D' | 'S', group: Array<{ productId: number; diff: number }>, label: string): Promise<void> => {
+		if (!group.length) return;
+		const add = await client.call<{ document?: { id?: number }; id?: number }>('catalog.document.add', {
+			fields: {
+				docType,
+				currency: 'RUB',
+				title: `Инвентаризация «${args.invTitle}»: ${label} — ${args.storeName}`,
+				...(args.responsibleId ? { responsibleId: args.responsibleId } : {}),
+			},
+		});
+		const docId = Number(add?.document?.id ?? add?.id ?? 0);
+		if (!docId) throw new Error('catalog.document.add: документ не создан (нет id)');
+		for (const l of group) {
+			await client.call('catalog.document.element.add', {
+				fields: {
+					docId,
+					elementId: Number(l.productId),
+					amount: Math.abs(Number(l.diff)),
+					purchasingPrice: 0,
+					...(docType === 'D' ? { storeFrom: args.storeId } : { storeTo: args.storeId }),
+				},
+			});
+		}
+		docs.push({ type: docType, id: docId, lines: group.length });
+	};
+	await buildDoc('D', shortages, 'списание');
+	await buildDoc('S', surpluses, 'оприходование');
+	return docs;
 }
 
 export function registerApiInventoryRoute(app: FastifyInstance): void {
@@ -304,41 +356,13 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 					return { ok: true, docs: [] as Array<{ type: string; id: number; lines: number }>, message: 'расхождений нет — документы не нужны' };
 				}
 
-				const storeName = String(pt['storeName'] ?? `склад ${b.storeId}`);
-				const invTitle = String(item['NAME'] ?? '');
-				const responsibleId = Number(b.userId ?? pt['responsibleId'] ?? 0) || undefined;
-				const docs: Array<{ type: string; id: number; lines: number }> = [];
-
-				// ЧЕРНОВИКИ (catalog.document.add создаёт неуведённый документ, status N — проводит Сергей сам в Б24).
-				// Только расхождения охвата, построчно: D = storeFrom (списываем со склада точки), S = storeTo (приходуем на склад).
-				const buildDoc = async (docType: 'D' | 'S', group: Array<{ productId: number; diff: number }>, label: string): Promise<void> => {
-					if (!group.length) return;
-					const add = await client.call<{ document?: { id?: number }; id?: number }>('catalog.document.add', {
-						fields: {
-							docType,
-							currency: 'RUB',
-							title: `Инвентаризация «${invTitle}»: ${label} — ${storeName}`,
-							...(responsibleId ? { responsibleId } : {}),
-						},
-					});
-					const docId = Number(add?.document?.id ?? add?.id ?? 0);
-					if (!docId) throw new Error('catalog.document.add: документ не создан (нет id)');
-					for (const l of group) {
-						await client.call('catalog.document.element.add', {
-							fields: {
-								docId,
-								elementId: Number(l.productId),
-								amount: Math.abs(Number(l.diff)),
-								purchasingPrice: 0,
-								...(docType === 'D' ? { storeFrom: Number(b.storeId) } : { storeTo: Number(b.storeId) }),
-							},
-						});
-					}
-					docs.push({ type: docType, id: docId, lines: group.length });
-				};
-
-				await buildDoc('D', shortages, 'списание');
-				await buildDoc('S', surpluses, 'оприходование');
+				const docs = await createB24MirrorDocs(client, {
+					storeId: Number(b.storeId),
+					storeName: String(pt['storeName'] ?? `склад ${b.storeId}`),
+					invTitle: String(item['NAME'] ?? ''),
+					responsibleId: Number(b.userId ?? pt['responsibleId'] ?? 0) || undefined,
+					lines: [...shortages, ...surpluses],
+				});
 
 				// ссылки на документы — в точку (защита от дублей + видно в сводке)
 				pt['documents'] = docs;
@@ -349,6 +373,147 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				return { ok: true, docs };
 			} catch (err) {
 				app.log.error({ storeId: b.storeId }, `[api/inventory/build-documents] failed — ${errInfo(err)}`);
+				return reply.code(200).send({ ok: false, error: errInfo(err) });
+			}
+		});
+
+		// ── ДОКУМЕНТ ЯДРА (Stock Reconciliation, 1С-модель «на основании») ──────────
+		// Болванка (preview, ничего не пишет) → «Записать» (черновик в ERPNext) →
+		// «Провести» (submit ядра + ЗЕРКАЛА D/S в Б24 черновиками). Гейт: env ERPNEXT_URL.
+		// Книга для документа ядра = остатки ЯДРА (факты выравнивают ERPNext, не Б24).
+
+		/** Точка инвентаризации по id+storeId (свежее чтение entity). */
+		const loadPoint = async (client: B24Client, inventoryId: string, storeId: number) => {
+			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
+			const item = (items ?? []).find((it) => String(it['ID']) === String(inventoryId));
+			if (!item) throw new Error('инвентаризация не найдена');
+			const data = item['DETAIL_TEXT'] ? (JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown>) : {};
+			const points = Array.isArray(data['points']) ? (data['points'] as Array<Record<string, unknown>>) : [];
+			const pt = points.find((p) => Number(p['storeId']) === Number(storeId));
+			if (!pt) throw new Error('точка не найдена');
+			return { item, data, points, pt };
+		};
+
+		/** Строки болванки: ВСЕ факты точки против книги ЯДРА (draft = полный набор фактов раунда). */
+		const computeRecoLines = async (erp: ErpClient, pt: Record<string, unknown>) => {
+			const facts = (pt['draft'] ?? {}) as Record<string, number>;
+			const factIds = Object.keys(facts).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+			if (!factIds.length) throw new Error('у точки нет фактов подсчёта (draft пуст)');
+			const storeName = String(pt['storeName'] ?? '');
+			const book = await fetchErpStoreStock(erp, storeName);
+			const resultLines = ((pt['result'] ?? {}) as { lines?: Array<{ productId: number; name?: string }> }).lines ?? [];
+			const nameByid = new Map(resultLines.map((l) => [Number(l.productId), String(l.name ?? '')]));
+			const lines: Array<{ productId: number; name: string; bookErp: number; fact: number; diff: number; valuation: number }> = [];
+			for (const productId of factIds) {
+				const fact = Number(facts[productId] ?? 0);
+				const b = book.get(productId);
+				const bookErp = b?.qty ?? 0;
+				if (Math.abs(fact - bookErp) < 1e-9) continue;
+				lines.push({ productId, name: nameByid.get(productId) ?? '', bookErp, fact, diff: fact - bookErp, valuation: b?.valuation ?? 0 });
+			}
+			const unnamed = lines.filter((l) => !l.name).map((l) => l.productId);
+			if (unnamed.length) {
+				const names = await fetchErpItemNames(erp, unnamed);
+				for (const l of lines) if (!l.name) l.name = names.get(l.productId) ?? `товар #${l.productId}`;
+			}
+			lines.sort((a, b2) => a.name.localeCompare(b2.name, 'ru'));
+			return { lines, storeName };
+		};
+
+		// Болванка: посчитать строки документа ядра, НИЧЕГО не записывая (1С: «не сохранил — пропала»).
+		app.post('/api/inventory/erp-doc-preview', async (req, reply) => {
+			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number };
+			const client = clientFrom(b);
+			if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+			if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
+			const erp = ErpClient.fromEnv();
+			if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
+			try {
+				const { pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
+				if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
+				const { lines, storeName } = await computeRecoLines(erp, pt);
+				app.log.info({ storeId: b.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
+				return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null };
+			} catch (err) {
+				app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-preview] failed — ${errInfo(err)}`);
+				return reply.code(200).send({ ok: false, error: errInfo(err) });
+			}
+		});
+
+		// «Записать»: создать ЧЕРНОВИК Stock Reconciliation в ядре (остатки НЕ двигаются).
+		app.post('/api/inventory/erp-doc-save', async (req, reply) => {
+			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number; recreate?: boolean };
+			const client = clientFrom(b);
+			if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+			if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
+			const erp = ErpClient.fromEnv();
+			if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
+			try {
+				const { item, data, points, pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
+				if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
+				const prev = pt['erpDoc'] as { name?: string; status?: string } | undefined;
+				if (prev?.name && prev.status === 'submitted') return reply.code(200).send({ ok: false, error: `документ ${prev.name} уже проведён`, doc: prev });
+				if (prev?.name && prev.status === 'draft') {
+					if (!b.recreate) return reply.code(200).send({ ok: false, error: `черновик ${prev.name} уже записан (recreate — пересоздать)`, doc: prev });
+					await deleteInventoryRecoDraft(erp, prev.name); // «передумал»: пересоздаём от свежей болванки
+				}
+				const { lines, storeName } = await computeRecoLines(erp, pt);
+				const recoLines: InventoryRecoLine[] = lines.map((l) => ({ productId: l.productId, qty: l.fact, valuation: l.valuation }));
+				const { name } = await createInventoryRecoDraft(erp, {
+					invRef: `inv${b.inventoryId}:store${b.storeId}`,
+					storeTitle: storeName,
+					lines: recoLines,
+				});
+				const doc = { name, status: 'draft', lines: lines.length, savedAt: new Date().toISOString() };
+				pt['erpDoc'] = doc;
+				data['points'] = points;
+				await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
+				app.log.info({ storeId: b.storeId, name }, '[api/inventory/erp-doc-save] ok');
+				return { ok: true, doc };
+			} catch (err) {
+				app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-save] failed — ${errInfo(err)}`);
+				return reply.code(200).send({ ok: false, error: errInfo(err) });
+			}
+		});
+
+		// «Провести»: submit ядра (двигает остатки ERPNext) + зеркала D/S в Б24 черновиками.
+		app.post('/api/inventory/erp-doc-submit', async (req, reply) => {
+			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number; userId?: string };
+			const client = clientFrom(b);
+			if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+			if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
+			const erp = ErpClient.fromEnv();
+			if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
+			try {
+				const { item, data, points, pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
+				const doc = pt['erpDoc'] as { name?: string; status?: string; lines?: number } | undefined;
+				if (!doc?.name) return reply.code(200).send({ ok: false, error: 'сначала «Записать» (черновика ядра нет)' });
+				if (doc.status === 'submitted') return reply.code(200).send({ ok: false, error: `${doc.name} уже проведён`, doc });
+				await submitInventoryReco(erp, doc.name);
+				pt['erpDoc'] = { ...doc, status: 'submitted', submittedAt: new Date().toISOString() };
+
+				// зеркала в Б24 — по расхождениям против книги Б24 (result.lines), если ещё не делали
+				let mirrors: InvDocRef[] = Array.isArray(pt['documents']) ? (pt['documents'] as InvDocRef[]) : [];
+				if (!mirrors.length) {
+					const lines = (((pt['result'] ?? {}) as { lines?: Array<{ productId: number; diff: number }> }).lines ?? [])
+						.filter((l) => Number(l.diff) !== 0);
+					if (lines.length) {
+						mirrors = await createB24MirrorDocs(client, {
+							storeId: Number(b.storeId),
+							storeName: String(pt['storeName'] ?? `склад ${b.storeId}`),
+							invTitle: String(item['NAME'] ?? ''),
+							responsibleId: Number(b.userId ?? pt['responsibleId'] ?? 0) || undefined,
+							lines,
+						});
+						pt['documents'] = mirrors;
+					}
+				}
+				data['points'] = points;
+				await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
+				app.log.info({ storeId: b.storeId, name: doc.name, mirrors: mirrors.length }, '[api/inventory/erp-doc-submit] ok');
+				return { ok: true, doc: pt['erpDoc'], docs: mirrors };
+			} catch (err) {
+				app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-submit] failed — ${errInfo(err)}`);
 				return reply.code(200).send({ ok: false, error: errInfo(err) });
 			}
 		});

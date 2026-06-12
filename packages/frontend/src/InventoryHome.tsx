@@ -16,6 +16,11 @@ import {
 	fetchCurrentUser,
 	isPortalAdmin,
 	withTimeout,
+	previewErpDoc,
+	saveErpDoc,
+	submitErpDoc,
+	type ErpInvDoc,
+	type ErpRecoLine,
 	type Inventory,
 	type InvPoint,
 	type BuiltDoc,
@@ -124,6 +129,8 @@ export function InventoryHome(): JSX.Element {
 	const [docResult, setDocResult] = useState<{ docs: BuiltDoc[]; text: string } | null>(null);
 	/** Открытая модалка QR точки (мобильный подсчёт): какую точку показываем. */
 	const [qrFor, setQrFor] = useState<{ invId: string; storeId: number; storeName: string } | null>(null);
+	/** Открытая модалка документа ЯДРА (Stock Reconciliation, 1С-цепочка Записать→Провести). */
+	const [erpFor, setErpFor] = useState<{ invId: string; storeId: number; storeName: string } | null>(null);
 
 	useEffect(() => {
 		if (ctx.__mock) {
@@ -143,6 +150,15 @@ export function InventoryHome(): JSX.Element {
 					points: [
 						{ storeId: 8, storeName: 'Максидом Дунайский 64', responsibleId: '18', responsibleName: 'Иванов Иван', status: 'in_progress', startedAt: '2026-06-01' },
 						{ storeId: 10, storeName: 'Максидом Богатырский 15', responsibleId: '', responsibleName: '', status: 'idle' },
+						{
+							storeId: 22, storeName: 'Максидом Фаворского 12', responsibleId: '34', responsibleName: 'Петров Пётр', status: 'reconciled',
+							submittedAt: '2026-06-02',
+							result: { counted: 41, total: 42, discrepancies: 2, lines: [
+								{ productId: 1924, name: 'IP камера купольная', book: 18, fact: 16, diff: -2 },
+								{ productId: 2050, name: 'Кабель UTP 5E (бухта)', book: 7, fact: 8, diff: 1 },
+							] },
+							draft: { 1924: 16, 2050: 8 },
+						},
 					],
 				},
 			]);
@@ -427,9 +443,15 @@ export function InventoryHome(): JSX.Element {
 			);
 		}
 		if (st === 'reconciled') {
+			const erpBadge = p.erpDoc ? (p.erpDoc.status === 'submitted' ? ' ✓' : ' ✎') : '';
 			return (
 				<>
-					{isInitiator && <button className="btn-mini" onClick={() => void buildDocs(inv, p)}>Сформировать документы</button>}
+					{isInitiator && (
+						<button className="btn-mini" onClick={() => setErpFor({ invId: inv.id, storeId: p.storeId, storeName: p.storeName })}>
+							Документ ядра{erpBadge}
+						</button>
+					)}
+					{isInitiator && !p.erpDoc && <button className="btn-mini ghost" onClick={() => void buildDocs(inv, p)}>Документы в Б24</button>}
 					{openBtn}
 					{reopenBtn}
 				</>
@@ -580,6 +602,135 @@ export function InventoryHome(): JSX.Element {
 			<h2 className="inv-h2">Инвентаризации</h2>
 			{inventories.length ? inventories.map(invCard) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
 			{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
+			{erpFor && (
+				<ErpDocModal
+					invId={erpFor.invId}
+					storeId={erpFor.storeId}
+					storeName={erpFor.storeName}
+					userId={me.id}
+					mock={Boolean(ctx.__mock)}
+					openDoc={openDoc}
+					onClose={() => setErpFor(null)}
+					onChanged={() => void reload()}
+				/>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Документ ЯДРА «на основании» точки (1С-модель): болванка (ничего не записано;
+ * закрыл — пропала) → «Записать» (черновик Stock Reconciliation в ERPNext) →
+ * «Провести» (остатки ядра двигаются + в Б24 создаются ЧЕРНОВИКИ-зеркала D/S).
+ * Книга здесь — остатки ЯДРА (ERPNext), не Б24: документ выравнивает ядро по фактам.
+ */
+function ErpDocModal(props: {
+	invId: string;
+	storeId: number;
+	storeName: string;
+	userId: string;
+	mock: boolean;
+	openDoc: (id: number) => void;
+	onClose: () => void;
+	onChanged: () => void;
+}): JSX.Element {
+	const [lines, setLines] = useState<ErpRecoLine[] | null>(null);
+	const [doc, setDoc] = useState<ErpInvDoc | null>(null);
+	const [mirrors, setMirrors] = useState<BuiltDoc[]>([]);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (props.mock) { setLines([]); setErr('dev-мок: документ ядра доступен только с подключённым ERPNext.'); return; }
+		let alive = true;
+		withTimeout(previewErpDoc(props.invId, props.storeId), 20000, 'erp-doc-preview')
+			.then((r) => { if (alive) { setLines(r.lines); setDoc(r.doc); } })
+			.catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)); });
+		return () => { alive = false; };
+	}, [props.invId, props.storeId, props.mock]);
+
+	async function doSave(recreate = false): Promise<void> {
+		setBusy(true); setErr(null);
+		try {
+			const d = await withTimeout(saveErpDoc(props.invId, props.storeId, recreate), 25000, 'erp-doc-save');
+			setDoc(d);
+			props.onChanged();
+		} catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); }
+		finally { setBusy(false); }
+	}
+
+	async function doSubmit(): Promise<void> {
+		if (!doc) return;
+		if (!window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки, в Б24 будут созданы ЧЕРНОВИКИ-зеркала (их проводишь сам).`)) return;
+		setBusy(true); setErr(null);
+		try {
+			const r = await withTimeout(submitErpDoc(props.invId, props.storeId, props.userId), 30000, 'erp-doc-submit');
+			setDoc(r.doc);
+			setMirrors(r.docs);
+			props.onChanged();
+		} catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); }
+		finally { setBusy(false); }
+	}
+
+	const submitted = doc?.status === 'submitted';
+	return (
+		<div className="qr-overlay" onClick={props.onClose}>
+			<div className="qr-modal erp-doc-modal" onClick={(e) => e.stopPropagation()}>
+				<div className="qr-head">
+					<strong>🧠 Документ ядра — {props.storeName}</strong>
+					<button className="btn-del" title="Закрыть" onClick={props.onClose}>✕</button>
+				</div>
+				{doc ? (
+					<p className="muted">
+						{submitted ? `✓ ${doc.name} ПРОВЕДЁН в ядре` : `✎ черновик ${doc.name} записан (остатки не тронуты)`} · строк {doc.lines}
+					</p>
+				) : (
+					<p className="muted">Болванка «на основании» точки: ничего не записано — закроешь, и она пропала. Учёт здесь — остатки ЯДРА.</p>
+				)}
+				{err && <p className="error">⛔ {err}</p>}
+				{lines === null && !err ? <p>Считаю болванку…</p> : null}
+				{lines !== null && !submitted && (
+					lines.length ? (
+						<table className="disc-table">
+							<thead>
+								<tr><th>Товар</th><th className="num">Учёт ядра</th><th className="num">Факт</th><th className="num">Разница</th></tr>
+							</thead>
+							<tbody>
+								{lines.map((l) => (
+									<tr key={l.productId}>
+										<td>{l.name}</td>
+										<td className="num">{l.bookErp}</td>
+										<td className="num">{l.fact}</td>
+										<td className={`num ${l.diff < 0 ? 'short' : 'over'}`}>{l.diff > 0 ? `+${l.diff}` : l.diff}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					) : !err ? <p className="muted">Факты сошлись с ядром — документ не нужен.</p> : null
+				)}
+				{submitted && mirrors.length > 0 && (
+					<div className="beta-banner ok">
+						Зеркала в Б24 (черновики — проверь и проведи сам):
+						{mirrors.map((d) => (
+							<button key={d.id} className="btn-mini doc-open" onClick={() => props.openDoc(d.id)}>
+								Открыть {d.type === 'D' ? 'списание' : 'оприходование'} #{d.id}
+							</button>
+						))}
+					</div>
+				)}
+				<div className="inv-actions">
+					{!doc && lines !== null && lines.length > 0 && (
+						<button className="btn-primary" disabled={busy} onClick={() => void doSave()}>{busy ? 'Записываю…' : 'Записать'}</button>
+					)}
+					{doc && !submitted && (
+						<>
+							<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести'}</button>
+							<button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать от свежей болванки</button>
+						</>
+					)}
+					<button className="btn-secondary" onClick={props.onClose}>Закрыть</button>
+				</div>
+			</div>
 		</div>
 	);
 }

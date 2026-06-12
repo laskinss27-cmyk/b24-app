@@ -787,6 +787,18 @@ export interface InvPoint {
 	result?: InvResult;
 	/** Промежуточный подсчёт (productId → факт), чтобы можно было вернуться позже. */
 	draft?: Record<number, number>;
+	/** Документ ЯДРА (Stock Reconciliation в ERPNext) по 1С-модели «Записать → Провести». */
+	erpDoc?: ErpInvDoc;
+	/** Б24-зеркала (черновики D/S) — создаются при проведении ядра или старой кнопкой. */
+	documents?: BuiltDoc[];
+}
+
+export interface ErpInvDoc {
+	name: string;
+	status: 'draft' | 'submitted';
+	lines: number;
+	savedAt?: string;
+	submittedAt?: string;
 }
 export interface Inventory {
 	id: string;
@@ -896,6 +908,47 @@ export async function buildPointDocuments(inventoryId: string, storeId: number, 
 	const json = (await res.json()) as { ok: boolean; error?: string; docs?: BuiltDoc[]; message?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сформировать документы');
 	return { docs: json.docs ?? [], message: json.message };
+}
+
+// ── Документ ядра (Stock Reconciliation, 1С-модель «на основании») ───────────
+
+export interface ErpRecoLine {
+	productId: number;
+	name: string;
+	bookErp: number;
+	fact: number;
+	diff: number;
+}
+
+async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Promise<T> {
+	const res = await fetch(path, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...payload }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string } & T;
+	if (!json.ok) throw new Error(json.error ?? 'ошибка документа ядра');
+	return json;
+}
+
+/** Болванка: строки документа ядра, ничего не записано (1С: «не сохранил — пропала»). */
+export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[]; doc: ErpInvDoc | null }> {
+	const j = await postErpDoc<{ lines?: ErpRecoLine[]; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
+	return { lines: j.lines ?? [], doc: j.doc ?? null };
+}
+
+/** «Записать»: черновик Stock Reconciliation в ядре (остатки не двигаются). */
+export async function saveErpDoc(inventoryId: string, storeId: number, recreate = false): Promise<ErpInvDoc> {
+	const j = await postErpDoc<{ doc?: ErpInvDoc }>('/api/inventory/erp-doc-save', { inventoryId, storeId, recreate });
+	if (!j.doc) throw new Error('бэкенд не вернул документ');
+	return j.doc;
+}
+
+/** «Провести»: submit ядра + Б24-зеркала черновиками. */
+export async function submitErpDoc(inventoryId: string, storeId: number, userId: string): Promise<{ doc: ErpInvDoc; docs: BuiltDoc[] }> {
+	const j = await postErpDoc<{ doc?: ErpInvDoc; docs?: BuiltDoc[] }>('/api/inventory/erp-doc-submit', { inventoryId, storeId, userId });
+	if (!j.doc) throw new Error('бэкенд не вернул документ');
+	return { doc: j.doc, docs: j.docs ?? [] };
 }
 
 export interface SimpleUser {
