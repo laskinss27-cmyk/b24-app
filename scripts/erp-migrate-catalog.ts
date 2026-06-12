@@ -333,6 +333,17 @@ async function main(): Promise<void> {
 				valuation_rate: Math.max(purch.get(s.productId) ?? 0, 0.01),
 			}))
 			.filter((r) => (haveQty.get(`${r.item_code}|${r.warehouse}`) ?? 0) !== r.qty);
+		// зануление: в ERPNext остаток есть, а в Б24 нулевой/пропал (движение после миграции)
+		const b24Qty = new Map(stock.filter((s) => storeName.has(s.storeId)).map((s) => [`${s.productId}|${storeName.get(s.storeId)}`, s.amount]));
+		const whSet = new Set(storeName.values());
+		const zeroRows = bins
+			.filter((b) => Number(b['actual_qty'] ?? 0) > 0
+				&& whSet.has(String(b['warehouse']))
+				&& itemSet.has(String(b['item_code']))
+				&& (b24Qty.get(`${b['item_code']}|${b['warehouse']}`) ?? 0) === 0)
+			.map((b) => ({ item_code: String(b['item_code']), warehouse: String(b['warehouse']), qty: 0, valuation_rate: 0.01 }));
+		if (zeroRows.length) console.log(`  зануление лишних в ERP: ${zeroRows.length} строк`);
+		rows.push(...zeroRows);
 		console.log(`  строк к загрузке: ${rows.length} (совпавшие с ERPNext пропущены)`);
 		const noPurch = rows.filter((r) => r.valuation_rate === 0.01).length;
 		if (noPurch) console.log(`  ⚠ без закупочной цены (valuation 0.01): ${noPurch} строк`);

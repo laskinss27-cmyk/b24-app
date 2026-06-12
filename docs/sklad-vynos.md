@@ -58,6 +58,9 @@
 5. **Сеть ноутбука**: включён VPN-клиент (socks `127.0.0.1:10808`, http `10809`) — напрямую Битрикс не отвечает, Node прокси не уважает, undici ProxyAgent давал необъяснимые таймауты → Б24 в скриптах читается **через `curl -x http://127.0.0.1:10809`**; ERPNext (localhost) — напрямую. На площадке без прокси работает как есть.
 6. Docker Hub из РФ рвёт большие образы — повторы + зеркало `cr.yandex/mirror/<img>`.
 7. ERPNext API: `Authorization: token <key>:<secret>` (ключ Administrator через bench console), список — `limit_page_length=0`, фильтры — `filters=[["f","=","v"]]`.
+8. **Снос демо-компании** (`scripts/erp-cleanup-demo.ts`, выполнено 2026-06-12): Transaction Deletion Record ПЕРЕД submit требует заполнить список «Для удаления» — по REST это `run_doc_method` с `generate_to_delete_list` (без него TDR молча падает Failed, ошибка только в поле error_log документа). Сама компания держится за **Global Defaults дважды**: `default_company` И скрытое поле `demo_company` — оба перевесить/обнулить, потом DELETE Company.
+9. **bash-curl с кириллицей в JSON-теле** ломает frappe («bytes-like object is required») — тела с кириллицей слать только через undici (tsx-скрипты); ASCII-тела через curl ок.
+10. `erp-migrate-catalog.ts --stock` теперь и ЗАНУЛЯЕТ лишнее в ERP (остаток в ERPNext > 0, в Б24 нулевой/пропал) — раньше только досыпал, расхождения после живых движений Б24 не сходились вниз.
 
 ## Обоснование для руководства
 
