@@ -83,6 +83,40 @@ export async function fetchErpStocks(erp: ErpClient): Promise<Map<number, Record
 	return out;
 }
 
+/** Остатки ТОЛЬКО запрошенных товаров: productId → { '<title склада Б24>': qty }. Фильтр item_code in —
+ *  мизерный ответ (vs весь Bin), критично через мост: полный каталог не лезет в 60с-бюджет контейнера. */
+export async function fetchErpStocksFor(erp: ErpClient, productIds: number[]): Promise<Map<number, Record<string, number>>> {
+	const ctx = await erpContext(erp);
+	const out = new Map<number, Record<string, number>>();
+	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200).map(String);
+		const bins = await erp.list('Bin', ['item_code', 'warehouse', 'actual_qty'], [['item_code', 'in', chunk]]);
+		for (const b of bins) {
+			const productId = Number(b['item_code']);
+			if (!Number.isInteger(productId) || productId <= 0) continue;
+			const store = b24StoreTitle(ctx, String(b['warehouse'] ?? ''));
+			const qty = Number(b['actual_qty'] ?? 0);
+			const e = out.get(productId) ?? {};
+			e[store] = (e[store] ?? 0) + qty;
+			out.set(productId, e);
+		}
+	}
+	return out;
+}
+
+/** Закупочная (valuation_rate ядра) пачкой: productId → rate. Для витрины остатков. */
+export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+	const out = new Map<number, number>();
+	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200).map(String);
+		const rows = await erp.list('Item', ['name', 'valuation_rate'], [['name', 'in', chunk]]);
+		for (const r of rows) out.set(Number(r['name']), Number(r['valuation_rate'] ?? 0));
+	}
+	return out;
+}
+
 export interface RealizationLine {
 	productId: number;
 	qty: number;

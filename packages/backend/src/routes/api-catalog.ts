@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
+import { ErpClient } from '../erp/client.js';
+import { fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -59,6 +61,37 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			return { ok: true, rows: data.rows, generatedAt: data.generatedAt, cached: false };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Остатки из ЯДРА (ERPNext) — payoff выноса склада: один запрос Bin вместо BX24 catalog.storeproduct.
+	// Ядро = зеркало остатков Б24 (сверка-в-ноль), поэтому подмена прозрачна; закупка — из valuation_rate.
+	// Гейт env ERPNEXT_URL: ядро не подключено → coreOff, фронт мягко падает на Б24 (fetchStockAndPurchasing).
+	// Склады отдаём ПО ИМЕНИ — фронт маппит в storeId по списку складов Б24.
+	app.post('/api/catalog/erp-stocks', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & { productIds?: unknown };
+		if (!body.domain || normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) {
+			return reply.code(403).send({ ok: false, error: 'bad domain' });
+		}
+		const ids = (Array.isArray(body.productIds) ? body.productIds : [])
+			.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+		if (!ids.length) return { ok: true, byProduct: {} };
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, coreOff: true, error: 'ядро не подключено (ERPNEXT_URL)' });
+		try {
+			// ТОЛЬКО запрошенные товары (item_code in) — полный Bin через мост не лезет в 60с (выстрадано 2026-06-15).
+			const [stocks, purchasing] = await Promise.all([
+				fetchErpStocksFor(erp, ids),
+				fetchErpPurchasing(erp, ids),
+			]);
+			// Возвращаем КАЖДЫЙ запрошенный товар (даже с нулём — чтобы не потерять закупку у бесстоковых).
+			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number }> = {};
+			for (const pid of ids) byProduct[pid] = { stocks: stocks.get(pid) ?? {}, purchasing: purchasing.get(pid) ?? 0 };
+			app.log.info({ products: Object.keys(byProduct).length }, '[api/catalog/erp-stocks] ok');
+			return { ok: true, byProduct };
+		} catch (err) {
+			app.log.error({}, `[api/catalog/erp-stocks] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

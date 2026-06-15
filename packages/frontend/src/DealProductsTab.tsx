@@ -5,7 +5,7 @@ import {
 	fetchProductRows,
 	fetchStores,
 	fetchProfitCoef,
-	fetchStockAndPurchasing,
+	fetchStockPreferCore,
 	addProductsToDeal,
 	realizeDeal,
 	openRealization,
@@ -82,7 +82,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	const goodsIds = [...new Set(rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0))];
 	// Остатки/закупки тянем только если есть товары (на пустой сделке — сразу пусто, без лишнего вызова).
 	const enrich: Record<number, ProductEnrichment> = goodsIds.length
-		? await withTimeout(fetchStockAndPurchasing(goodsIds), 25000, 'stock/purchasing').catch(() => ({}))
+		? await withTimeout(fetchStockPreferCore(goodsIds), 25000, 'stock/purchasing').catch(() => ({}))
 		: {};
 	const enriched: EnrichedRow[] = rows.map((r) => {
 		const e = enrich[r.productId];

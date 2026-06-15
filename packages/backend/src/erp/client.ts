@@ -53,10 +53,13 @@ export class ErpClient {
 	}
 
 	async request(method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+		// Таймаут: ядро за мостом (VPS→ноутбук) может быть недостижимо — без таймаута fetch висит
+		// до 60с-лимита контейнера. 25с < лимита: падаем с ошибкой, а не залипаем (выстрадано 2026-06-15).
 		const res = await fetch(`${this.cfg.url}${path}`, {
 			method,
 			headers: { Authorization: this.cfg.token, 'Content-Type': 'application/json' },
 			...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+			signal: AbortSignal.timeout(25000),
 		});
 		const text = await res.text();
 		let json: Record<string, unknown>;

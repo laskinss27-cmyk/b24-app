@@ -190,6 +190,47 @@ export async function fetchStockAndPurchasing(productIds: number[]): Promise<Rec
 	return out;
 }
 
+/** Кэш «название склада Б24 → storeId» (склады ядра отдаются по имени). */
+let _storeTitleToId: Map<string, number> | null = null;
+async function storeTitleToId(): Promise<Map<string, number>> {
+	if (_storeTitleToId) return _storeTitleToId;
+	const stores = await fetchStores();
+	_storeTitleToId = new Map(stores.map((s) => [s.title, s.id]));
+	return _storeTitleToId;
+}
+
+/**
+ * Остатки+закупка ПРЕДПОЧТИТЕЛЬНО из ЯДРА (ERPNext, /api/catalog/erp-stocks): один запрос мимо стен Б24.
+ * Ядро = зеркало остатков Б24 (сверка-в-ноль) → данные те же. Склады ядра приходят ПО ИМЕНИ → маппим в storeId.
+ * МЯГКИЙ ФОЛБЭК: ядро не подключено (coreOff)/упало/сеть → честно падаем на Б24 (fetchStockAndPurchasing).
+ */
+export async function fetchStockPreferCore(productIds: number[]): Promise<Record<number, ProductEnrichment>> {
+	const ids = productIds.filter((id) => id > 0);
+	if (!ids.length) return {};
+	try {
+		// Таймаут 5с: ядро может быть недоступно из прода — не виснем, быстро падаем на Б24-фолбэк.
+		const res = await fetch('/api/catalog/erp-stocks', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ ...bx24Auth(), productIds: ids }),
+			signal: AbortSignal.timeout(5000),
+		});
+		const j = (await res.json()) as { ok?: boolean; byProduct?: Record<string, { stocks: Record<string, number>; purchasing: number }> };
+		if (j?.ok && j.byProduct) {
+			const t2id = await storeTitleToId();
+			const out: Record<number, ProductEnrichment> = {};
+			for (const [pid, v] of Object.entries(j.byProduct)) {
+				const stocks = Object.entries(v.stocks ?? {})
+					.map(([title, amount]) => ({ storeId: t2id.get(title) ?? 0, amount: Number(amount) }))
+					.filter((s) => s.storeId > 0 && s.amount > 0);
+				out[Number(pid)] = { stocks, purchasingPrice: v.purchasing > 0 ? v.purchasing : null };
+			}
+			return out;
+		}
+	} catch { /* ядро недоступно — мягкий фолбэк ниже */ }
+	return fetchStockAndPurchasing(ids);
+}
+
 /** Канареечный доступ к новым экранам: Сергей Ласкин (1858) + Игорь Бекасов (986, рук. розницы)
  *  + Владимир Дранишников (1, владелец — видит всё) + Константин Ласкин (1246, менеджер ТТ). */
 export const BETA_USER_IDS = ['1858', '986', '1', '1246'];
