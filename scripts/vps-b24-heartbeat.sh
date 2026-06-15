@@ -18,8 +18,10 @@ DOWN_STRIKES=2                          # сколько подряд неуда
 now() { date '+%Y-%m-%d %H:%M:%S'; }
 
 notify() {
-	curl -s --max-time 20 -d "USER_ID=$USER_ID" --data-urlencode "MESSAGE=$1" \
-		"$WH/im.notify.personal.json" >/dev/null 2>&1
+	# im.notify (to/message) — системное уведомление. im.notify.personal на этом портале
+	# не существует (проверено 2026-06-15); нужен scope im у вебхука.
+	curl -s --max-time 20 -d "to=$USER_ID" --data-urlencode "message=$1" \
+		"$WH/im.notify.json" >/dev/null 2>&1
 }
 
 ping=$(curl -s --connect-timeout 8 --max-time 15 "$PROBE" 2>/dev/null)
