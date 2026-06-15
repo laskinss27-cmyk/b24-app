@@ -1,6 +1,9 @@
 ﻿# Авто-синк остатков Б24 -> ERPNext (домашний этап выноса склада, 2026-06-12).
 # Гоняется планировщиком Windows раз в час (задача b24-erp-stock-sync):
-#   erp-migrate-catalog --stock (досыпает И зануляет) + --check (сверка) -> stock-sync.log.
+#   erp-migrate-catalog --items (заводит/переименовывает новые товары) +
+#   --stock (досыпает И зануляет остатки) + --check (сверка) -> stock-sync.log.
+# ⚠ --items обязателен ПЕРЕД --stock: без него новый товар из Б24 валит проводку
+#   остатков (Stock Reconciliation HTTP 417 «не найден код продукта»). Поймало 2026-06-15.
 # Пока Б24 — источник правды, инвариант синка: ядро = зеркало остатков Б24.
 # ⚠ Следствие: после «Провести» документа ядра инвентаризации проводи зеркала
 #   в Б24 СРАЗУ — иначе ближайший синк честно вернёт ядро к книге Б24.
@@ -18,6 +21,9 @@ if ($ping -notmatch 'pong') { Add-Content $log "[$(Stamp)] SKIP: ERPNext не о
 Add-Content $log "[$(Stamp)] синк начат"
 Set-Location $repo
 try {
+	$items = & npx tsx scripts/erp-migrate-catalog.ts --items 2>&1 | Out-String
+	$itm = ($items -split "`n" | Where-Object { $_ -match 'ИТОГ товаров|FATAL' }) -join ' | '
+	Add-Content $log "[$(Stamp)] items: $($itm.Trim())"
 	$stock = & npx tsx scripts/erp-migrate-catalog.ts --stock 2>&1 | Out-String
 	$loaded = ($stock -split "`n" | Where-Object { $_ -match 'строк к загрузке|зануление|Stock Reconciliation|FATAL' }) -join ' | '
 	Add-Content $log "[$(Stamp)] stock: $($loaded.Trim())"

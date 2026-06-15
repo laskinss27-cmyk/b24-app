@@ -241,7 +241,11 @@ async function main(): Promise<void> {
 	for (const p of catalog) byType.set(p.type, (byType.get(p.type) ?? 0) + 1);
 	console.log(`  каталог: ${catalog.length} позиций; типы: ${[...byType.entries()].map(([t, n]) => `type${t}=${n}`).join(', ')}`);
 	console.log(`  склады: ${stores.length} (${stores.filter((s) => s.active).length} активных)`);
-	const stockPos = stock.filter((s) => s.amount > 0);
+	// Порог 1e-6 (а не >0): апстрим иногда отдаёт машинный эпсилон (2.22e-16 = 2⁻⁵²) вместо чистого нуля.
+	// Без допуска эта «пыль» проходит в проводку (qty≈0), а ERPNext её отвергает «нет движения» (HTTP 417,
+	// валило синк 2026-06-12..15). Тот же допуск, что и в --check ниже — иначе пыль невидима для сверки.
+	const EPS = 1e-6;
+	const stockPos = stock.filter((s) => s.amount > EPS);
 	console.log(`  остатки: ${stock.length} записей, из них >0: ${stockPos.length}; суммарно ${stockPos.reduce((a, s) => a + s.amount, 0)} ед.`);
 
 	// Товары для переноса: всё, кроме SKU-родителей (type 3 — контейнеры вариаций без остатков).
