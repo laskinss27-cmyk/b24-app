@@ -20,7 +20,9 @@ docker push cr.yandex/crpj8ipjmjimigbf8dq7/b24-app:latest   # запомнить
 # 2. Ревизия — спека 1:1, env переносим из ПРОШЛОЙ ревизии (не наследуются сами!)
 $prev = yc serverless container revision get <ПРОШЛАЯ_РЕВИЗИЯ> --format json | ConvertFrom-Json
 $e = $prev.image.environment
-$envStr = "APP_CLIENT_ID=$($e.APP_CLIENT_ID),APP_CLIENT_SECRET=$($e.APP_CLIENT_SECRET),APP_SECTION_URL=$($e.APP_SECTION_URL),INVENTORY_NOTIFY=$($e.INVENTORY_NOTIFY)"
+# ВСЕ ключи динамически (их 6: APP_CLIENT_ID/SECRET, APP_SECTION_URL, ERPNEXT_URL, ERPNEXT_TOKEN, INVENTORY_NOTIFY).
+# НЕ хардкодить подсписок — потеряешь ERPNEXT_* и отвалишь ядро (выстрадано 2026-06-15).
+$envStr = (($e.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ',')
 yc serverless container revision deploy --container-name b24-app `
   --image "cr.yandex/crpj8ipjmjimigbf8dq7/b24-app@sha256:<DIGEST>" `
   --memory 256MB --cores 1 --concurrency 4 --execution-timeout 60s `

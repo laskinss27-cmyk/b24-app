@@ -191,8 +191,8 @@ export async function fetchStockAndPurchasing(productIds: number[]): Promise<Rec
 }
 
 /** Канареечный доступ к новым экранам: Сергей Ласкин (1858) + Игорь Бекасов (986, рук. розницы)
- *  + Владимир Дранишников (1, владелец — видит всё). */
-export const BETA_USER_IDS = ['1858', '986', '1'];
+ *  + Владимир Дранишников (1, владелец — видит всё) + Константин Ласкин (1246, менеджер ТТ). */
+export const BETA_USER_IDS = ['1858', '986', '1', '1246'];
 
 /** ID текущего пользователя, который смотрит (для канареечного гейта). */
 export async function fetchCurrentUserId(): Promise<string> {
