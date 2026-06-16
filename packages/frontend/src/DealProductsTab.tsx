@@ -7,9 +7,10 @@ import {
 	fetchProfitCoef,
 	fetchStockPreferCore,
 	addProductsToDeal,
-	realizeDeal,
-	openRealization,
 	fetchDealShipped,
+	fetchDealRealizationsCore,
+	realizeCoreDraft,
+	realizeCoreSubmit,
 	requestSupply,
 	openSupplyCard,
 	withTimeout,
@@ -19,8 +20,8 @@ import {
 	type DealProductRow,
 	type StoreInfo,
 	type ProductEnrichment,
-	type RealizeItem,
-	type DealShipment,
+	type CoreRealization,
+	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type SupplyCard,
 } from './b24.js';
@@ -28,19 +29,15 @@ import {
 interface EnrichedRow extends DealProductRow {
 	stocks: Array<{ storeId: number; storeName: string; amount: number }>;
 	purchasingPrice: number | null;
-	/** Суммарно отгружено партиями (черновики + проведённые) по заказу сделки. */
-	shipped: number;
-	/** Склады из РЕЗЕРВОВ корзины — склад, выбранный в черновике (живое чтение из документа). */
-	reserveStores: string[];
 }
 interface TableData {
 	rows: EnrichedRow[];
 	coef: number;
-	/** Партии (отгрузки) заказа сделки — для списка под таблицей. */
-	shipments: DealShipment[];
+	/** Реализации сделки ИЗ ЯДРА (Delivery Note по b24_deal_id): черновики + проведённые. */
+	coreReals: CoreRealization[];
 	/** Заявки снабжения сделки. */
 	supply: SupplyCard[];
-	/** Активные склады каталога — для «куда привезти» в снабжении. */
+	/** Активные склады каталога. */
 	stores: StoreInfo[];
 }
 
@@ -54,7 +51,7 @@ type State =
 // ── Mock для локального превью (BX24 в dev недоступен) ──────────────────────────
 const MOCK_DATA: TableData = {
 	coef: 0.5,
-	shipments: [],   // чистый мок: прошлых реализаций нет
+	coreReals: [],   // чистый мок: прошлых реализаций нет (реализация считается на проде через ядро)
 	supply: [],
 	stores: [
 		{ id: 4, title: 'Измайловский 18Д', active: true },
@@ -62,12 +59,12 @@ const MOCK_DATA: TableData = {
 	],
 	rows: [
 		// всего хватает на ОБОИХ складах — все строки «✓ хватит», крути склады/кол-ва как хочешь
-		{ id: '1', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 2400, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: 1500, shipped: 0, reserveStores: [], stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
-		{ id: '2', productId: 102, name: 'Кабель UTP cat5e, бухта 305 м', type: 1, price: 5200, quantity: 6, discountSum: 0, measure: 'шт', purchasingPrice: 3800, shipped: 0, reserveStores: [], stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 30 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 40 }] },
-		{ id: '3', productId: 103, name: 'Видеорегистратор 8-канальный', type: 1, price: 8900, quantity: 2, discountSum: 0, measure: 'шт', purchasingPrice: 6000, shipped: 0, reserveStores: [], stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 15 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 12 }] },
-		{ id: '4', productId: 104, name: 'Блок питания 12В 5А', type: 1, price: 650, quantity: 10, discountSum: 0, measure: 'шт', purchasingPrice: 320, shipped: 0, reserveStores: [], stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 100 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 80 }] },
+		{ id: '1', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 2400, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: 1500, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
+		{ id: '2', productId: 102, name: 'Кабель UTP cat5e, бухта 305 м', type: 1, price: 5200, quantity: 6, discountSum: 0, measure: 'шт', purchasingPrice: 3800, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 30 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 40 }] },
+		{ id: '3', productId: 103, name: 'Видеорегистратор 8-канальный', type: 1, price: 8900, quantity: 2, discountSum: 0, measure: 'шт', purchasingPrice: 6000, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 15 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 12 }] },
+		{ id: '4', productId: 104, name: 'Блок питания 12В 5А', type: 1, price: 650, quantity: 10, discountSum: 0, measure: 'шт', purchasingPrice: 320, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 100 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 80 }] },
 		// работа (type 7) — без склада и реализации
-		{ id: '5', productId: 105, name: 'Монтаж и настройка камеры', type: 7, price: 1800, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: null, shipped: 0, reserveStores: [], stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 0 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 0 }] },
+		{ id: '5', productId: 105, name: 'Монтаж и настройка камеры', type: 7, price: 1800, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: null, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 0 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 0 }] },
 	],
 };
 
@@ -75,11 +72,14 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [bxRows, stores, coef, shippedInfo] = await Promise.all([
+	const [bxRows, stores, coef, shippedInfo, coreReals] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
+		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
 		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], supply: [], rows: null })),
+		// Что уже реализовано — из ЯДРА (Delivery Note по сделке). Ядро не подключено → [].
+		withTimeout(fetchDealRealizationsCore(dealId), 25000, 'deal/realize-core list').catch(() => [] as CoreRealization[]),
 	]);
 	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
 	// если бэкенд их не отдал — берём BX24-результат.
@@ -96,11 +96,9 @@ async function loadAll(dealId: number): Promise<TableData> {
 			...r,
 			stocks: (e?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` })),
 			purchasingPrice: e?.purchasingPrice ?? null,
-			shipped: Number(shippedInfo.shipped[r.id] ?? 0),
-			reserveStores: (shippedInfo.reserves[r.id] ?? []).map((sid) => storeMap.get(sid) ?? `Склад #${sid}`),
 		};
 	});
-	return { rows: enriched, coef, shipments: shippedInfo.shipments, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
+	return { rows: enriched, coef, coreReals, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -228,38 +226,35 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 
-	// «Реализовать» по строке: товарная строка РАСЩЕПЛЯЕТСЯ на партии (дизайн Сергея 2026-06-11).
-	// Реализованная часть застывает строкой-записью (кол-во, склад, документ-чип), под ней живёт
-	// строка остатка со своим селектором склада, полем кол-ва и кнопкой. Каждая партия = свой
-	// черновик реализации (нативная модель «один заказ → много отгрузок»; склад не списывается —
-	// менеджер проверяет и проводит в карточке). Мультисклад = несколько нажатий.
-	// Селектора склада НЕТ намеренно (решение Сергея 2026-06-11): склад выбирается в карточке
-	// черновика, а прочитать его обратно нельзя (стена 2) — любая наша «память» могла бы врать,
-	// если менеджер передумал в документе. Показываем только честные остатки чипами.
+	// Реализация — документ В ЯДРЕ (Delivery Note), а не в Битриксе (уходим от всех стен sale.order/
+	// shipment). Склад теперь НАШ: выбирается на каждой строке (селектор), пишется прямо в документ
+	// ядра. Реализация группируется ПО СКЛАДАМ — один Delivery Note на склад. Что уже реализовано
+	// (черновики + проведённые) читаем из ядра по b24_deal_id. Реализованная часть застывает
+	// строкой-записью, под ней живёт остаток со своим складом, полем кол-ва и кнопкой.
 	const [batchQty, setBatchQty] = useState<Record<string, string>>({});
-	/** id строки, по которой сейчас идёт запись (кнопки блокируются все разом). */
-	const [realizing, setRealizing] = useState<string | null>(null);
 	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	/** id строки, уходящей в снабжение (кнопки блокируются разом). */
 	const [supplying, setSupplying] = useState<string | null>(null);
-	/** «Куда привезти» для заявки снабжения (id склада каталога), по строкам. */
-	const [supplyTo, setSupplyTo] = useState<Record<string, number>>({});
-	/** Склад на КАЖДОЙ строке (новая модель: реализация группируется по складу). */
+	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
 	const [rowStore, setRowStore] = useState<Record<string, number>>({});
-	/** Фаза общей реализации: idle → drafted (черновики по складам созданы, ждут «Провести»). */
+	/** Фаза реализации: idle → drafted (черновики ядра созданы по складам, ждут «Провести»). */
 	const [realizePhase, setRealizePhase] = useState<'idle' | 'drafted'>('idle');
-	/** МОК: проведённые партии (в проде это придёт из ядра). rowId→склад/кол-во. */
-	const [mockParts, setMockParts] = useState<Array<{ id: number; accountNumber: string; deducted: boolean; rowId: string; qty: number; storeName: string }>>([]);
+	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
+	const [busy, setBusy] = useState(false);
+	/** Имена черновиков ядра, ожидающих проведения (между «Реализация» и «Провести»). */
+	const [draftNames, setDraftNames] = useState<string[]>([]);
 
-	const extraShipped = (r: EnrichedRow): number => mockParts.filter((p) => p.rowId === r.id).reduce((a, p) => a + p.qty, 0);
-	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - r.shipped - extraShipped(r));
+	// Сколько уже реализовано по товару — из ЯДРА (черновики + проведённые). Связь — по productId:
+	// документ ядра хранит item_code=productId без rowId, а в типичной сделке товар уникален по строкам.
+	const realizedOf = (productId: number): number =>
+		data.coreReals.reduce((a, rz) => a + rz.items.filter((it) => it.productId === productId).reduce((s, it) => s + it.qty, 0), 0);
+	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - realizedOf(r.productId));
 	const qtyOf = (r: EnrichedRow): number => {
 		const v = Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.')) || 0;
 		return Math.min(Math.max(0, v), remaining(r)); // нельзя реализовать больше, чем осталось в строке
 	};
-	const qtyValid = (r: EnrichedRow): boolean => qtyOf(r) > 0 && qtyOf(r) <= remaining(r) + 1e-9;
 
-	// ── Новая модель: склад на строке → статус → группировка по складам ──
+	// ── Склад на строке → статус → группировка по складам ──
 	const firstStore = data.stores[0]?.id ?? 0;
 	const storeOf = (r: EnrichedRow): number => rowStore[r.id] ?? firstStore;
 	const amountAt = (r: EnrichedRow, storeId: number): number => r.stocks.find((s) => s.storeId === storeId)?.amount ?? 0;
@@ -272,40 +267,15 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 	};
 	const storeName = (id: number): string => data.stores.find((s) => s.id === id)?.title ?? `Склад #${id}`;
 
-	const doRealize = async (r: EnrichedRow): Promise<void> => {
-		if (dealId == null || realizing != null || !qtyValid(r)) return;
-		const qty = qtyOf(r);
-		setRealizing(r.id);
-		setNotice(null);
-		try {
-			const res = await realizeDeal(dealId, [{
-				rowId: Number(r.id),
-				productId: r.productId,
-				quantity: qty,
-				rowQuantity: r.quantity,
-				price: r.price,
-				name: r.name,
-			}]);
-			setNotice({ kind: 'ok', text: `✅ Партия #${res.accountNumber}: ${r.name.slice(0, 30)} × ${qty} — черновик создан, выбери склад в карточке и проведи` });
-			setBatchQty((m) => { const c = { ...m }; delete c[r.id]; return c; });
-			openRealization(res.shipmentId);
-			await onReload();
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setRealizing(null);
-		}
-	};
-
 	// Товар «нет на складах» → заявка снабжения с точным перечнем (создаёт «Поставку № …»
-	// или дополняет открытую заявку этой сделки).
+	// или дополняет открытую заявку этой сделки). Фича снабжения не менялась — только перевешена
+	// на кнопку «+ Заказ» (раньше была заглушкой).
 	const doSupply = async (r: EnrichedRow): Promise<void> => {
-		if (dealId == null || supplying != null || realizing != null) return;
+		if (dealId == null || supplying != null || busy) return;
 		setSupplying(r.id);
 		setNotice(null);
 		try {
-			const storeToName = data.stores.find((s) => s.id === supplyTo[r.id])?.title;
-			const res = await requestSupply(dealId, [{ name: r.name, quantity: remaining(r), measure: r.measure }], storeToName);
+			const res = await requestSupply(dealId, [{ name: r.name, quantity: remaining(r), measure: r.measure }]);
 			setNotice({
 				kind: 'ok',
 				text: res.mode === 'created'
@@ -337,13 +307,16 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		else profitGoods += (r.price - r.purchasingPrice) * r.quantity;
 	}
 
-	/** Партии этой строки — из отгрузок заказа сделки (черновики и проведённые). */
-	const partsOf = (r: EnrichedRow): Array<{ id: number; accountNumber: string; deducted: boolean; qty: number; storeName: string }> => [
-		...data.shipments
-			.filter((s) => Number(s.items[r.id] ?? 0) > 0)
-			.map((s) => ({ id: s.id, accountNumber: s.accountNumber, deducted: s.deducted, qty: Number(s.items[r.id]), storeName: '' })),
-		...mockParts.filter((p) => p.rowId === r.id).map((p) => ({ id: p.id, accountNumber: p.accountNumber, deducted: p.deducted, qty: p.qty, storeName: p.storeName })),
-	];
+	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
+	type Part = { name: string; submitted: boolean; qty: number; storeName: string };
+	const partsOf = (r: EnrichedRow): Part[] =>
+		data.coreReals
+			.map((rz): Part | null => {
+				const its = rz.items.filter((it) => it.productId === r.productId);
+				if (!its.length) return null;
+				return { name: rz.name, submitted: rz.submitted, qty: its.reduce((s, it) => s + it.qty, 0), storeName: its[0]!.storeTitle };
+			})
+			.filter((p): p is Part => p != null);
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>
@@ -363,27 +336,19 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		const parts = partsOf(r);
 		const left = remaining(r);
 		const out: JSX.Element[] = parts.map((p) => (
-			<tr key={`${r.id}-p${p.id}`} className="part-row">
+			<tr key={`${r.id}-${p.name}`} className="part-row">
 				<td className="part-name">↳ {r.name}</td>
-				<td><span className="type-badge part">{p.deducted ? 'реализовано' : 'партия'}</span></td>
+				<td><span className="type-badge part">{p.submitted ? 'реализовано' : 'черновик'}</span></td>
 				<td className="num">{rub(r.price)}</td>
 				<td className="num">{p.qty} {r.measure}</td>
 				<td className="num">{rub(r.price * p.qty)}</td>
 				<td className="row-store part-store">
-					{p.storeName ? (
-						<span className="part-reserve" title="Склад, с которого списано в ядре">{p.storeName}</span>
-					) : p.deducted ? (
-						<span className="none" title="Склад проведённой реализации Битрикс наружу не отдаёт — смотри в карточке (клик по чипу справа)">склад — в карточке →</span>
-					) : r.reserveStores.length ? (
-						<span className="part-reserve" title="Склад из резерва документа — живое чтение, обновляется при каждой загрузке вкладки">{r.reserveStores.join(', ')}</span>
-					) : (
-						<span className="part-nostore" title="В черновике склад ещё не выбран — открой документ (чип справа) и укажи склад">⚠ склад не выбран</span>
-					)}
+					<span className="part-reserve" title="Склад списания в ядре">{p.storeName}</span>
 				</td>
 				<td className="realize-cell">
-					<button className="shipment-chip" onClick={() => p.id > 0 && openRealization(p.id)} title={p.deducted ? 'проведена (склад списан)' : 'черновик — открыть, проверить склад, провести'}>
-						#{p.accountNumber} {p.deducted ? '✓ проведена' : '✎ черновик'}
-					</button>
+					<span className="shipment-chip" title={p.submitted ? 'проведена в ядре — остаток списан' : 'черновик в ядре — проверь и нажми «Провести»'}>
+						{p.name} {p.submitted ? '✓ проведена' : '✎ черновик'}
+					</span>
 				</td>
 			</tr>
 		));
@@ -397,7 +362,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 					<td className="num">
 						<input
 							type="number" className="qty-input" min={0} max={left} step="any"
-							value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle'}
+							value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy}
 							onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))}
 							title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`}
 						/>
@@ -415,7 +380,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 					</td>
 					<td className="realize-cell">
 						<select
-							className="store-select" value={storeOf(r)} disabled={realizePhase !== 'idle'}
+							className="store-select" value={storeOf(r)} disabled={realizePhase !== 'idle' || busy}
 							onChange={(e) => setRowStore((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
 							title="Склад, с которого отгружаем эту строку"
 						>
@@ -430,9 +395,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 						{status === 'order' && (
 							<button
 								className="st-badge order"
-								onClick={() => setNotice({ kind: 'ok', text: `📝 Заказ: ${r.name.slice(0, 30)} — создастся задача на закупку (заглушка, подключим)` })}
-								title="Нет нигде — создать заказ (задача закупки)"
-							>+ Заказ</button>
+								disabled={busy || supplying != null}
+								onClick={() => void doSupply(r)}
+								title="Нет нигде — создать/дополнить заявку снабжения с точным перечнем"
+							>{supplying === r.id ? '…' : '+ Заказ'}</button>
 						)}
 					</td>
 				</tr>,
@@ -457,6 +423,47 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 		if (!realizeGroups.has(s)) realizeGroups.set(s, []);
 		realizeGroups.get(s)!.push(r);
 	}
+
+	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре (по одному на склад);
+	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
+	const doDraft = async (): Promise<void> => {
+		if (dealId == null || busy || !realizeGroups.size) return;
+		const groups: RealizeCoreGroup[] = [...realizeGroups.entries()].map(([sid, rs]) => ({
+			storeTitle: storeName(sid),
+			lines: rs.map((r) => ({ productId: r.productId, qty: qtyOf(r), rate: r.price })),
+		}));
+		setBusy(true);
+		setNotice(null);
+		try {
+			const drafts = await realizeCoreDraft(dealId, groups);
+			setDraftNames(drafts.map((d) => d.name));
+			setRealizePhase('drafted');
+			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length} (по складам). Проверь партии и нажми «Провести».` });
+			await onReload(); // черновики появятся строками-партиями (остаток уменьшится)
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setBusy(false);
+		}
+	};
+	const doSubmit = async (): Promise<void> => {
+		if (busy || !draftNames.length) return;
+		setBusy(true);
+		setNotice(null);
+		try {
+			const submitted = await realizeCoreSubmit(draftNames);
+			setBatchQty({}); // поля кол-ва сбрасываем — встанут новые остатки
+			setDraftNames([]);
+			setRealizePhase('idle');
+			setNotice({ kind: 'ok', text: `✅ Проведено документов: ${submitted.length}. Остаток ядра списан, реализованное застыло записью.` });
+			await onReload();
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setBusy(false);
+		}
+	};
+	const doCancelDraft = (): void => { setRealizePhase('idle'); setDraftNames([]); setNotice(null); };
 
 	return (
 		<div className="deal-products-tab">
@@ -522,7 +529,12 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 			)}
 
 			<div className="realize-bar">
-				{readyGoods.length > 0 ? (
+				{realizePhase === 'drafted' ? (
+					<div className="realize-plan">
+						<b>Черновики в ядре: {draftNames.length} — проверь партии выше и проведи.</b>
+						<span className="hint">«Провести» спишет остаток ядра. «Отмена» оставит черновики (можно провести/удалить позже).</span>
+					</div>
+				) : readyGoods.length > 0 ? (
 					<div className="realize-plan">
 						<b>К реализации — {realizeGroups.size} {plural(realizeGroups.size, 'документ', 'документа', 'документов')} (по складам):</b>
 						{[...realizeGroups.entries()].map(([sid, rs]) => (
@@ -535,28 +547,14 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				<div className="realize-actions">
 					<button
 						className={`btn-realize-all${realizePhase === 'drafted' ? ' submit' : ''}`}
-						disabled={readyGoods.length === 0}
-						onClick={() => {
-							if (realizePhase === 'idle') {
-								setRealizePhase('drafted');
-								setNotice({ kind: 'ok', text: `✅ Черновиков создано: ${realizeGroups.size}. Проверь склады и нажми «Провести».` });
-							} else {
-								const created = readyGoods.map((r, i) => ({
-									id: 9000 + mockParts.length + i,
-									accountNumber: `${mockParts.length + i + 1}/1`,
-									deducted: true, rowId: r.id, qty: qtyOf(r), storeName: storeName(storeOf(r)),
-								}));
-								setMockParts((p) => [...p, ...created]);
-								setBatchQty((m) => { const c = { ...m }; created.forEach((p) => { delete c[p.rowId]; }); return c; }); // сброс поля → встанет новый остаток
-								setRealizePhase('idle');
-								setNotice({ kind: 'ok', text: `✅ Проведено: ${created.length} ${plural(created.length, 'строка', 'строки', 'строк')}. Остаток уменьшился, реализованное застыло записью.` });
-							}
-						}}
+						disabled={dev || busy || (realizePhase === 'idle' ? realizeGroups.size === 0 : draftNames.length === 0)}
+						title={dev ? 'В dev-режиме недоступно — реализация считается на проде через ядро' : undefined}
+						onClick={() => void (realizePhase === 'idle' ? doDraft() : doSubmit())}
 					>
-						{realizePhase === 'idle' ? `Реализация${realizeGroups.size ? ` (${realizeGroups.size})` : ''}` : '✓ Провести'}
+						{busy ? '…' : realizePhase === 'idle' ? `Реализация${realizeGroups.size ? ` (${realizeGroups.size})` : ''}` : '✓ Провести'}
 					</button>
 					{realizePhase === 'drafted' && (
-						<button className="btn-cancel-draft" onClick={() => { setRealizePhase('idle'); setNotice(null); }}>Отмена</button>
+						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
 					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}

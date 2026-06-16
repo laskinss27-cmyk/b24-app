@@ -3,7 +3,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { createRealizationDraft, submitRealization } from '../erp/operations.js';
+import { createRealizationDraft, submitRealization, listDealRealizations } from '../erp/operations.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -182,6 +182,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	};
 
 	// РЕАЛИЗАЦИЯ В ЯДРЕ (Delivery Note) — «покрывало»: складской документ живёт в ERPNext, не в Б24.
+	// action='list': что уже реализовано по сделке (из ядра по b24_deal_id) — черновики + проведённые;
 	// action='draft': по каждому складу-группе создаём черновик Delivery Note (b24_deal_id, реальный склад);
 	// action='submit': проводим переданные черновики (docstatus 1) → остаток ядра реально списывается.
 	// Один документ на склад (группировка на фронте). «День X» (синк перестаёт затирать) — отдельно.
@@ -193,6 +194,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		const action = String(b.action ?? '');
 		try {
+			if (action === 'list') {
+				// Что уже реализовано по сделке — из ЯДРА (Delivery Note по b24_deal_id), а не из
+				// битриксовых отгрузок. Возвращает и черновики (docstatus 0), и проведённые (1).
+				const dealId = Number(b.dealId);
+				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				const realizations = await listDealRealizations(erp, dealId);
+				return { ok: true, realizations };
+			}
 			if (action === 'draft') {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });

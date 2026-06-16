@@ -715,6 +715,69 @@ export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise
 	return { orderId: json.orderId ?? 0, orderReused: json.orderReused ?? false, shipmentId: json.shipmentId, accountNumber: json.accountNumber ?? '', dupRemoved: json.dupRemoved ?? null };
 }
 
+// ── Реализация В ЯДРЕ (Delivery Note) — новая модель «покрывала» ───────────────
+// Реализация — документ ERPNext (мимо битриксовых стен sale.order/shipment). Связь со
+// сделкой = поле b24_deal_id. Склад выбирается у нас и пишется в документ (warehouse).
+
+export interface CoreRealizationItem {
+	productId: number;
+	itemName: string;
+	qty: number;
+	/** Склад списания — название склада Б24 (наш UI оперирует ими). */
+	storeTitle: string;
+}
+export interface CoreRealization {
+	/** Имя документа ядра (напр. MAT-DN-2026-00270). */
+	name: string;
+	postingDate: string;
+	/** true = проведён (остаток ядра списан), false = черновик. */
+	submitted: boolean;
+	grandTotal: number;
+	items: CoreRealizationItem[];
+}
+
+/** Что уже реализовано по сделке — из ЯДРА (черновики + проведённые). Ядро не подключено → []. */
+export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRealization[]> {
+	const res = await fetch('/api/deal/realize-core', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), action: 'list', dealId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; realizations?: CoreRealization[] };
+	if (!json.ok) return []; // ядро не подключено / read-only фолбэк — вкладка работает без партий
+	return json.realizations ?? [];
+}
+
+export interface RealizeCoreGroup {
+	/** Название склада Б24 — один Delivery Note на склад. */
+	storeTitle: string;
+	lines: Array<{ productId: number; qty: number; rate: number }>;
+}
+
+/** Создать черновики реализации в ядре — по одному Delivery Note на склад. */
+export async function realizeCoreDraft(dealId: number, groups: RealizeCoreGroup[]): Promise<Array<{ name: string; storeTitle: string }>> {
+	const res = await fetch('/api/deal/realize-core', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), action: 'draft', dealId, groups }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; drafts?: Array<{ name: string; storeTitle: string }> };
+	if (!json.ok || !json.drafts) throw new Error(json.error ?? 'не удалось создать черновики реализации');
+	return json.drafts;
+}
+
+/** Провести черновики реализации в ядре (submit → остаток ядра списывается). */
+export async function realizeCoreSubmit(names: string[]): Promise<string[]> {
+	const res = await fetch('/api/deal/realize-core', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), action: 'submit', names }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; submitted?: string[] };
+	if (!json.ok || !json.submitted) throw new Error(json.error ?? 'не удалось провести реализацию');
+	return json.submitted;
+}
+
 /** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */
 export async function addProductToDeal(dealId: number, productId: number, quantity: number, price?: number): Promise<{ id: number; name: string; price: number; quantity: number }> {
 	const res = await fetch('/api/deal/add-product', {
