@@ -18,7 +18,10 @@ import { promisify } from 'node:util';
 // напрямую Битрикс не отвечает, а через undici ProxyAgent — необъяснимые connect-таймауты
 // (час проб, см. test-proxy.ts). Поэтому Битрикс читаем ЧЕРЕЗ CURL с -x прокси (работает
 // стабильно, проверено), а локальный ERPNext — undici.request с прямым Agent.
-const PROXY_URL = process.env['LOCAL_PROXY'] ?? 'http://127.0.0.1:10809';
+// Windows-ноут Сергея ходит в Б24 через локальный прокси (кривой VPN мешает прямому коннекту).
+// Linux (спейр/VPS) достаёт Б24 НАПРЯМУЮ (миф про «RU-блок» опровергнут) → прокси не нужен.
+const CURL = process.platform === 'win32' ? 'curl.exe' : 'curl';
+const PROXY_URL = process.env['LOCAL_PROXY'] ?? (process.platform === 'win32' ? 'http://127.0.0.1:10809' : '');
 const localAgent = new Agent();
 const execFileP = promisify(execFile);
 const WEBHOOK = (process.env['DEV_WEBHOOK'] ?? '').replace(/\/$/, '');
@@ -29,8 +32,8 @@ async function b24call<T>(method: string, params: Record<string, unknown>): Prom
 	let last: unknown;
 	for (let a = 1; a <= 5; a++) {
 		try {
-			const { stdout } = await execFileP('curl.exe', [
-				'-s', '-x', PROXY_URL, '--connect-timeout', '15', '--max-time', '60',
+			const { stdout } = await execFileP(CURL, [
+				'-s', ...(PROXY_URL ? ['-x', PROXY_URL] : []), '--connect-timeout', '15', '--max-time', '60',
 				'-H', 'Content-Type: application/json',
 				'-d', JSON.stringify(params),
 				`${WEBHOOK}/${method}.json`,

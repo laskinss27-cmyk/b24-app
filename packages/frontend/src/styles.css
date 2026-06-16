@@ -216,9 +216,58 @@ body {
 	font-size: 12px;
 	font-weight: 600;
 }
-.realize-cell {
-	white-space: nowrap;
+.realize-bar {
+	flex-wrap: wrap;
+	align-items: flex-start;
 }
+.realize-plan {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	font-size: 12px;
+}
+.realize-plan b { font-size: 13px; color: #0f172a; }
+.plan-group { color: #475569; }
+.realize-actions { display: flex; gap: 8px; align-items: center; }
+.btn-realize-all.submit { background: #2563eb; }
+.btn-realize-all.submit:hover:not([disabled]) { background: #1d4ed8; }
+.btn-cancel-draft {
+	background: #eef0f3 !important;
+	color: #4b5563 !important;
+	font-weight: 500 !important;
+}
+.realize-cell {
+	white-space: normal;
+}
+.products-table .qty-input {
+	width: 58px;
+	height: auto;
+	padding: 3px 6px;
+	border: 1px solid #9aa3af;
+	border-radius: 6px;
+	font-size: 12px;
+	text-align: right;
+}
+.store-select {
+	display: block;
+	max-width: 165px;
+	margin-bottom: 5px;
+	font-size: 12px;
+	padding: 3px 6px;
+	border: 1px solid #ccc;
+	border-radius: 6px;
+}
+.st-badge {
+	display: inline-block;
+	font-size: 12px;
+	font-weight: 600;
+	padding: 3px 9px;
+	border-radius: 6px;
+	border: 1px solid transparent;
+}
+.st-badge.ready { color: #16a34a; }
+.st-badge.transfer { background: #fff7ed; color: #c2410c; border-color: #fed7aa; cursor: not-allowed; }
+.st-badge.order { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; cursor: pointer; }
 .realize-cell .qty-input {
 	width: 64px;
 	margin-right: 6px;

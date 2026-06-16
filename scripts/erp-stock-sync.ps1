@@ -1,4 +1,5 @@
 ﻿# Авто-синк остатков Б24 -> ERPNext (домашний этап выноса склада, 2026-06-12).
+# ЦЕЛЬ С 2026-06-16: ядро СПЕЙРА (192.168.0.69) — после переезда приложение читает его, не основное.
 # Гоняется планировщиком Windows раз в час (задача b24-erp-stock-sync):
 #   erp-migrate-catalog --items (заводит/переименовывает новые товары) +
 #   --stock (досыпает И зануляет остатки) + --check (сверка) -> stock-sync.log.
@@ -14,9 +15,14 @@ $log = Join-Path $repo 'scripts\stock-sync.log'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 function Stamp { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
 
-# ERPNext жив? (докер после ребута не автостартует — тогда тихо пропускаем час)
-$ping = & curl.exe -s --noproxy localhost --connect-timeout 5 http://localhost:8080/api/method/ping 2>$null
-if ($ping -notmatch 'pong') { Add-Content $log "[$(Stamp)] SKIP: ERPNext не отвечает (докер спит?)"; exit 0 }
+# Цель синка — ЯДРО СПЕЙРА (192.168.0.69:8080), его читает приложение. Б24 читаем как раньше
+# (прокси на этом ноуте); ПИШЕМ в ядро спейра по локалке (undici прокси не уважает -> идёт напрямую).
+$env:ERPNEXT_URL = 'http://192.168.0.69:8080'
+$env:ERPNEXT_TOKEN = 'token 75a1085fa14560a:10fd22965d81d29'
+
+# Ядро спейра живо? (ноут спейра выключен/недоступен — тихо пропускаем час)
+$ping = & curl.exe -s --noproxy 192.168.0.69 --connect-timeout 5 http://192.168.0.69:8080/api/method/ping 2>$null
+if ($ping -notmatch 'pong') { Add-Content $log "[$(Stamp)] SKIP: ядро спейра (192.168.0.69) не отвечает"; exit 0 }
 
 Add-Content $log "[$(Stamp)] синк начат"
 Set-Location $repo
