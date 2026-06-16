@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
+import { ErpClient } from '../erp/client.js';
+import { createRealizationDraft, submitRealization } from '../erp/operations.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -178,6 +180,53 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
+
+	// РЕАЛИЗАЦИЯ В ЯДРЕ (Delivery Note) — «покрывало»: складской документ живёт в ERPNext, не в Б24.
+	// action='draft': по каждому складу-группе создаём черновик Delivery Note (b24_deal_id, реальный склад);
+	// action='submit': проводим переданные черновики (docstatus 1) → остаток ядра реально списывается.
+	// Один документ на склад (группировка на фронте). «День X» (синк перестаёт затирать) — отдельно.
+	app.post('/api/deal/realize-core', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; action?: unknown; groups?: unknown; names?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
+		const action = String(b.action ?? '');
+		try {
+			if (action === 'draft') {
+				const dealId = Number(b.dealId);
+				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				const groups = Array.isArray(b.groups) ? b.groups : [];
+				const drafts: Array<{ name: string; storeTitle: string }> = [];
+				for (const g of groups) {
+					const gg = g as { storeTitle?: unknown; lines?: unknown };
+					const storeTitle = String(gg.storeTitle ?? '').trim();
+					const lines = (Array.isArray(gg.lines) ? gg.lines : [])
+						.map((l) => l as { productId?: unknown; qty?: unknown; rate?: unknown })
+						.map((l) => ({ productId: Number(l.productId), qty: Number(l.qty), rate: Number(l.rate) || 0, storeTitle }))
+						.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
+					if (!storeTitle || !lines.length) continue;
+					const { name } = await createRealizationDraft(erp, { dealId, lines });
+					drafts.push({ name, storeTitle });
+				}
+				if (!drafts.length) return reply.code(400).send({ ok: false, error: 'нет валидных строк для реализации' });
+				app.log.info({ dealId, drafts: drafts.length }, '[api/deal/realize-core] drafts created');
+				return { ok: true, drafts };
+			}
+			if (action === 'submit') {
+				const names = (Array.isArray(b.names) ? b.names : []).map(String).filter((n) => n && n !== 'undefined');
+				if (!names.length) return reply.code(400).send({ ok: false, error: 'нет документов для проведения' });
+				const submitted: string[] = [];
+				for (const name of names) { await submitRealization(erp, name); submitted.push(name); }
+				app.log.info({ submitted: submitted.length }, '[api/deal/realize-core] submitted');
+				return { ok: true, submitted };
+			}
+			return reply.code(400).send({ ok: false, error: 'bad action' });
+		} catch (err) {
+			app.log.error({ action }, `[api/deal/realize-core] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
 
 	// Поиск товара по названию + розничная цена (для пикера «Добавить товар»).
 	app.post('/api/deal/search-products', async (req, reply) => {
