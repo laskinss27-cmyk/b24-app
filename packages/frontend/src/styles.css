@@ -1423,6 +1423,13 @@ html, body, #root { height: 100%; }
 .base-table .wh b {
 	color: #1a2231;
 }
+.base-table .wh.sel {
+	background: #dcfce7;
+	color: #166534;
+	font-weight: 600;
+	box-shadow: inset 0 0 0 1px #86efac;
+}
+.base-table .wh.sel b { color: #14532d; }
 .base-empty {
 	padding: 30px;
 	text-align: center;

@@ -173,9 +173,11 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 		const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
 		let list = rows.map((d) => {
 			const qty = isAll ? d.total : (d.stockByStore[sid as number] ?? 0);
+			// Показываем ВСЕ склады с остатком, включая выбранный (его подсветим) — чтобы не было
+			// «остаток 1, а по складам прочерк», когда товар лежит только на выбранном складе.
 			const others = Object.entries(d.stockByStore)
 				.map(([s, n]) => ({ id: Number(s), qty: n }))
-				.filter((o) => o.qty > 0 && (isAll || o.id !== sid))
+				.filter((o) => o.qty > 0)
 				.sort((a, b) => b.qty - a.qty);
 			return { d, qty, others };
 		});
@@ -413,7 +415,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 									<td className="num c-store"><span className={`stock${qty > 0 ? '' : ' zero'}`}>{isAll ? '' : qty}</span></td>
 									<td>
 										<div className="whs">
-											{others.length ? others.map((o) => <span className="wh" key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
+											{others.length ? others.map((o) => <span className={`wh${o.id === sid ? ' sel' : ''}`} key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
 										</div>
 									</td>
 									{(canQuickSale || pickMode) && (
