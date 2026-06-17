@@ -69,8 +69,8 @@ export function extractInstallAuth(body: PlacementBody, query: PlacementQuery): 
 export interface PlacementContext {
 	dealId: number | null;
 	taskId: number | null;
-	/** 'inventory' — модуль инвентаризации (левое меню); 'salesReport' — отчёт по продажам (меню списка сделок). */
-	view?: 'inventory' | 'salesReport';
+	/** 'inventory' — модуль инвентаризации (левое меню); 'salesReport' — отчёт по продажам; 'repairs' — ремонты (левое меню). */
+	view?: 'inventory' | 'salesReport' | 'repairs';
 	domain: string | null;
 	memberId: string | null;
 	placement: string | null;
@@ -137,6 +137,18 @@ export function buildSalesReportContext(body: PlacementBody): PlacementContext {
 		dealId: null,
 		taskId: null,
 		view: 'salesReport',
+		domain: body.DOMAIN ?? null,
+		memberId: body.member_id ?? null,
+		placement: body.PLACEMENT ?? null,
+	};
+}
+
+/** Контекст для placement левого меню — модуль ремонтов (view='repairs'). */
+export function buildRepairsContext(body: PlacementBody): PlacementContext {
+	return {
+		dealId: null,
+		taskId: null,
+		view: 'repairs',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,
 		placement: body.PLACEMENT ?? null,

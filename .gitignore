@@ -17,3 +17,6 @@ coverage/
 secrets.local.json
 
 .vercel
+
+# Локальные настройки Claude Code (содержат токены в allowlist) — НЕ коммитить
+.claude/settings.local.json

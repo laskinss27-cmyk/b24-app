@@ -20,6 +20,8 @@ import { registerApiReportsRoute } from './routes/api-reports.js';
 import { registerApiRealizationsRoute } from './routes/api-realizations.js';
 import { registerApiDealRoute } from './routes/api-deal.js';
 import { registerPlacementSalesReportRoute } from './routes/placement-sales-report.js';
+import { registerPlacementRepairsRoute } from './routes/placement-repairs.js';
+import { registerApiRepairsRoute } from './routes/api-repairs.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
 
@@ -38,6 +40,10 @@ export interface AppOptions {
 
 export async function buildApp({ config }: AppOptions): Promise<FastifyInstance> {
 	const app = Fastify({
+		// Фото ремонтов едут data-URL'ами в JSON (превью ужимается на клиенте), поэтому поднимаем
+		// лимит тела с дефолтных 1МБ. Документы (Word/Excel/PDF) грузятся на Диск Б24 ссылкой
+		// (scope disk выдан приложению 2026-06-17), в JSON только ссылка — тело не раздувают.
+		bodyLimit: 12 * 1024 * 1024,
 		logger: {
 			level: config.nodeEnv === 'production' ? 'info' : 'debug',
 			// Подстраховка: даже если что-то залогируем вместе с телом запроса —
@@ -98,6 +104,8 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerApiRealizationsRoute(app);
 	registerApiDealRoute(app);
 	registerPlacementSalesReportRoute(app);
+	registerPlacementRepairsRoute(app);
+	registerApiRepairsRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
 

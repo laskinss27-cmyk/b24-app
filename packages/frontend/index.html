@@ -14,8 +14,12 @@
 			// На локальном dev контекст не приходит от Битрикса — подставляем мок.
 			// ?inv в URL → мок задачи (инвентаризация), иначе → мок сделки (товары).
 			if (!window.__B24_CONTEXT__) {
-				var __inv = new URLSearchParams(location.search).has('inv');
-				window.__B24_CONTEXT__ = __inv
+				var __sp = new URLSearchParams(location.search);
+				var __inv = __sp.has('inv');
+				var __rep = __sp.has('repairs');
+				window.__B24_CONTEXT__ = __rep
+					? { view: 'repairs', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }
+					: __inv
 					? { view: 'inventory', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }
 					: { dealId: 32592, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true };
 			}

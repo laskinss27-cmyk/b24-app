@@ -110,10 +110,12 @@ interface DealOrderInfo {
 	reserves: Map<number, number[]>;
 	/** Партии: items = rowId → кол-во в ЭТОЙ партии; stores = rowId → имя склада из нашей памяти. */
 	shipments: Array<{ id: number; accountNumber: string; deducted: boolean; items: Record<string, number>; stores?: Record<string, string> }>;
+	/** Оплата заказа сделки: total = сумма заказа, paid = сумма платежей с paid='Y'. null — заказа нет. */
+	payment: { total: number; paid: number } | null;
 }
 
 async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<DealOrderInfo> {
-	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), reserves: new Map(), shipments: [] };
+	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), reserves: new Map(), shipments: [], payment: null };
 	const bnd = await client.call<{ orderEntity?: Array<Record<string, unknown>> }>('crm.orderentity.list', {
 		filter: { ownerId: dealId, ownerTypeId: 2 }, select: ['*'],
 	});
@@ -121,7 +123,11 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 	if (!orderId) return info;
 	info.orderId = orderId;
 
-	const ord = await client.call<{ order?: { basketItems?: Array<Record<string, unknown>> } }>('sale.order.get', { id: orderId });
+	const ord = await client.call<{ order?: { basketItems?: Array<Record<string, unknown>>; payments?: Array<Record<string, unknown>>; price?: unknown } }>('sale.order.get', { id: orderId });
+	// Оплата: итого = price заказа, оплачено = сумма платежей с paid='Y'.
+	const payTotal = Number(ord?.order?.price ?? 0);
+	const payPaid = (ord?.order?.payments ?? []).filter((p) => p['paid'] === 'Y').reduce((a, p) => a + Number(p['sum'] ?? 0), 0);
+	info.payment = { total: payTotal, paid: payPaid };
 	const basketIdToRow = new Map<number, number>();
 	for (const b of ord?.order?.basketItems ?? []) {
 		const m = /^crm_pr_(\d+)$/.exec(String(b['xmlId'] ?? ''));
@@ -301,6 +307,67 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
+	// Данные для КП (коммерческого предложения) из сделки: клиент, менеджер, товары/работы,
+	// артикулы, итоги. Фото товаров добавятся позже (read из ядра Item.image). Документ собирает фронт.
+	app.post('/api/deal/kp', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
+			const contactId = Number(deal?.['CONTACT_ID'] ?? 0);
+			const assignedId = Number(deal?.['ASSIGNED_BY_ID'] ?? 0);
+			const [contact, mgrRaw, rowsRes] = await Promise.all([
+				contactId ? client.call<Record<string, unknown>>('crm.contact.get', { id: contactId }).catch(() => null) : Promise.resolve(null),
+				assignedId ? client.call<unknown>('user.get', { ID: assignedId }).then((r) => (Array.isArray(r) ? r[0] : r) as Record<string, unknown> | null).catch(() => null) : Promise.resolve(null),
+				client.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', { filter: { '=ownerType': 'D', ownerId: dealId } }).catch(() => ({ productRows: [] as Array<Record<string, unknown>> })),
+			]);
+			const clientName = contact ? [contact['NAME'], contact['LAST_NAME']].filter(Boolean).join(' ').trim() : '';
+			const phones = contact?.['PHONE'] as Array<{ VALUE?: string }> | undefined;
+			const clientPhone = String(phones?.[0]?.VALUE ?? '');
+			const mgrName = mgrRaw ? [mgrRaw['NAME'], mgrRaw['LAST_NAME']].filter(Boolean).join(' ').trim() : '';
+			const mgrPhone = mgrRaw ? String(mgrRaw['PERSONAL_MOBILE'] ?? mgrRaw['WORK_PHONE'] ?? '') : '';
+			// Артикул из хвоста названия (Eltis B-21, Lock-E01) — простой regex, только если в нём есть цифра.
+			const articleOf = (name: string): string => {
+				const m = /([A-Za-zА-Яа-я0-9][A-Za-z0-9\-/.]{3,})\s*$/.exec(name.trim());
+				return m && m[1] && /\d/.test(m[1]) ? m[1] : '';
+			};
+			// Новый API (crm.item.productrow.list) у ЧАСТИ сделок пуст — тогда фолбэк на старый
+			// (crm.deal.productrows.get), как во вкладке сделки. Поля старого: PRODUCT_NAME/TYPE/PRICE/QUANTITY.
+			let raw = (rowsRes?.productRows ?? []).map((r) => ({
+				productId: Number(r['productId'] ?? 0), name: String(r['productName'] ?? ''),
+				type: Number(r['type'] ?? 0), qty: Number(r['quantity'] ?? 0), price: Number(r['price'] ?? 0),
+			}));
+			if (!raw.length) {
+				const old = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId }).catch(() => [] as Array<Record<string, unknown>>);
+				raw = (old ?? []).map((r) => ({
+					productId: Number(r['PRODUCT_ID'] ?? 0), name: String(r['PRODUCT_NAME'] ?? ''),
+					type: Number(r['TYPE'] ?? 0), qty: Number(r['QUANTITY'] ?? 0), price: Number(r['PRICE'] ?? 0),
+				}));
+			}
+			const rows = raw.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7 }));
+			const goods = rows.filter((r) => !r.isWork);
+			const works = rows.filter((r) => r.isWork);
+			const sumGoods = goods.reduce((a, r) => a + r.sum, 0);
+			const sumWorks = works.reduce((a, r) => a + r.sum, 0);
+			app.log.info({ dealId, goods: goods.length, works: works.length }, '[api/deal/kp] ok');
+			return {
+				ok: true,
+				kp: {
+					number: dealId, date: String(deal?.['DATE_CREATE'] ?? ''), title: String(deal?.['TITLE'] ?? ''),
+					client: { name: clientName, phone: clientPhone },
+					manager: { name: mgrName, phone: mgrPhone },
+					goods, works, sumGoods, sumWorks, total: sumGoods + sumWorks,
+				},
+			};
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/kp] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
 	// Что уже отгружено по строкам сделки (для колонки «Отгружено» и остатков к отгрузке).
 	app.post('/api/deal/shipped', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
@@ -333,6 +400,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				shipped: Object.fromEntries(info.shipped),
 				reserves: Object.fromEntries(info.reserves),
 				shipments: info.shipments,
+				payment: info.payment,
 				supply,
 				rows,
 			};

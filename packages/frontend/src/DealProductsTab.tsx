@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
+import { KpDocument } from './Kp.js';
 import {
 	fetchProductRows,
 	fetchStores,
@@ -35,6 +36,8 @@ interface TableData {
 	coef: number;
 	/** Реализации сделки ИЗ ЯДРА (Delivery Note по b24_deal_id): черновики + проведённые. */
 	coreReals: CoreRealization[];
+	/** Оплата заказа сделки (из Б24): total/paid. null — заказа/оплаты нет. */
+	payment: { total: number; paid: number } | null;
 	/** Заявки снабжения сделки. */
 	supply: SupplyCard[];
 	/** Активные склады каталога. */
@@ -52,6 +55,7 @@ type State =
 const MOCK_DATA: TableData = {
 	coef: 0.5,
 	coreReals: [],   // чистый мок: прошлых реализаций нет (реализация считается на проде через ядро)
+	payment: { total: 103500, paid: 50000 },   // мок: частичная оплата для демонстрации баннера
 	supply: [],
 	stores: [
 		{ id: 4, title: 'Измайловский 18Д', active: true },
@@ -77,7 +81,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
-		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], supply: [], rows: null })),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, supply: [], rows: null })),
 		// Что уже реализовано — из ЯДРА (Delivery Note по сделке). Ядро не подключено → [].
 		withTimeout(fetchDealRealizationsCore(dealId), 25000, 'deal/realize-core list').catch(() => [] as CoreRealization[]),
 	]);
@@ -98,7 +102,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			purchasingPrice: e?.purchasingPrice ?? null,
 		};
 	});
-	return { rows: enriched, coef, coreReals, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
+	return { rows: enriched, coef, coreReals, payment: shippedInfo.payment, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -126,6 +130,7 @@ export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [state, setState] = useState<State>({ phase: 'init' });
 	const [adding, setAdding] = useState(false);
+	const [showKp, setShowKp] = useState(false);
 
 	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
@@ -219,10 +224,14 @@ export function DealProductsTab(): JSX.Element {
 		);
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} onAdd={() => setAdding(true)} onReload={reload} />;
+	if (showKp) {
+		return <KpDocument dealId={ctx.dealId} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
+	}
+
+	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} onAdd={() => setAdding(true)} onKp={() => setShowKp(true)} onReload={reload} />;
 }
 
-function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 
@@ -476,9 +485,23 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onReload }: { data: Table
 				? <div className="dev-banner">dev-режим: данные мок (BX24 недоступен локально). В проде — реальные из Битрикса.</div>
 				: <div className="beta-banner">⚙️ Бета-доступ: эту таблицу пока видишь только ты. Остальные работают в стандартной вкладке «Товары».</div>}
 
+			{data.payment && data.payment.total > 0 && (() => {
+				const { total, paid } = data.payment;
+				const rem = Math.max(0, total - paid);
+				const full = paid >= total - 0.01;
+				const cls = full ? 'pay-full' : paid > 0 ? 'pay-partial' : 'pay-none';
+				const text = full
+					? `✅ Оплачено 100% (${rub(total)})`
+					: paid > 0
+						? `🟡 Частичная оплата: оплачено ${rub(paid)} · остаток ${rub(rem)}`
+						: `⚪ Не оплачено · к оплате ${rub(total)}`;
+				return <div className={`deal-pay ${cls}`}>{text}</div>;
+			})()}
+
 			<div className="deal-addbar">
 				<button className="btn-primary" onClick={onAdd}>➕ Добавить товар</button>
-				<span className="hint">откроется каталог как «Товары» — отметишь позиции и «Готово»</span>
+				<button className="btn-secondary" onClick={onKp}>📄 КП</button>
+				<span className="hint">«Добавить» — каталог-пикер; «КП» — коммерческое предложение из сделки</span>
 			</div>
 
 			<div className="table-wrap">

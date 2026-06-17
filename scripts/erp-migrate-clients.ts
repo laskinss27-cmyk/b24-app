@@ -57,7 +57,7 @@ async function b24Page<T>(method: string, params: Record<string, unknown>, pick:
 }
 
 const ERP = process.env['ERPNEXT_URL'] ?? 'http://localhost:8080';
-const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token 75a1085fa14560a:df3408f48a7428f';
+const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token REDACTED';
 const CUSTOMER_GROUP = 'Клиенты Б24';
 
 const args = new Set(process.argv.slice(2));

@@ -11,7 +11,7 @@ import 'dotenv/config';
 import { request as undiciRequest, Agent } from 'undici';
 
 const ERP = process.env['ERPNEXT_URL'] ?? 'http://localhost:8080';
-const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token 75a1085fa14560a:df3408f48a7428f';
+const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token REDACTED';
 const DEMO = 'Умный дом (Demo)';
 const localAgent = new Agent();
 const APPLY = process.argv.includes('--apply');

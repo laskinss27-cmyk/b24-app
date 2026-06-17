@@ -199,6 +199,52 @@ export async function unbindCatalogExternalPlacement(opts: BindDealTabOptions): 
 }
 
 /**
+ * СВЕРКА ПРИВЯЗОК (one-shot per container). Лечит дубли пунктов приложения после смены URL
+ * приложения (флип Яндекс→спейр оставил старые хендлеры на yandexcloud-URL рядом с новыми на
+ * regru → «две Товары», «две b24-app» в сделке). placement.list отдаёт только КОДЫ типов, не
+ * привязки, поэтому различить по URL нельзя — снимаем ВСЕ хендлеры точки (placement.unbind с
+ * одним PLACEMENT убирает все) и СРАЗУ привязываем только актуальные (текущий publicBaseUrl).
+ *
+ * Раз на контейнер (флаг ставим оптимистично ДО работы — чтобы параллельный второй открыватель
+ * не повторил снятие). Снятие→привязка подряд, окно «пусто» минимально (не каждый-открытие — это
+ * и был инцидент гонки 2026-06-03; здесь однократно).
+ */
+let placementsReconciled = false;
+
+export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ status: string }> {
+	if (placementsReconciled) return { status: 'skipped (already reconciled this container)' };
+	const base = opts.publicBaseUrl.replace(/\/$/, '');
+	const log: string[] = [];
+	// Не-админ (напр. снабженец) не имеет прав на placement.bind/unbind → ACCESS_DENIED.
+	// В этом случае НЕ ставим флаг (чтобы сверку потом доделал админ) и не спамим: сверка
+	// рассчитана на админа. denied=true → ранний выход без записи флага.
+	let denied = false;
+	const isDenied = (err: unknown): boolean => err instanceof B24ApiError && /ACCESS_DENIED|access\s*denied/i.test(`${err.code} ${err.description ?? ''}`);
+	const unbindAll = async (placement: string): Promise<void> => {
+		if (denied) return;
+		try { await opts.client.call('placement.unbind', { PLACEMENT: placement }); log.push(`✂ ${placement}`); }
+		catch (err) { if (isDenied(err)) denied = true; log.push(`✂ ${placement} FAIL ${err instanceof B24ApiError ? err.code : String(err)}`); }
+	};
+	const bind = async (placement: string, path: string, title: string, titleEn: string): Promise<void> => {
+		if (denied) return;
+		try {
+			await opts.client.call('placement.bind', { PLACEMENT: placement, HANDLER: `${base}${path}`, TITLE: title, LANG_ALL: { ru: { TITLE: title }, en: { TITLE: titleEn } } });
+			log.push(`+ ${placement}${path}`);
+		} catch (err) { if (isDenied(err)) denied = true; log.push(`+ ${placement}${path} FAIL ${err instanceof B24ApiError ? err.code : String(err)}`); }
+	};
+	await unbindAll(DEAL_TAB_PLACEMENT);
+	await bind(DEAL_TAB_PLACEMENT, '/placement/deal-tab', DEAL_TAB_TITLE, DEAL_TAB_TITLE);
+	await unbindAll(INVENTORY_MENU_PLACEMENT);
+	await bind(INVENTORY_MENU_PLACEMENT, '/placement/inventory', INVENTORY_MENU_TITLE, 'Products');
+	await bind(INVENTORY_MENU_PLACEMENT, '/placement/repairs', REPAIRS_MENU_TITLE, 'Repairs');
+	await unbindAll(DEAL_LIST_REPORT_PLACEMENT);
+	await bind(DEAL_LIST_REPORT_PLACEMENT, '/placement/sales-report', DEAL_LIST_REPORT_TITLE, 'Sales report');
+	// Флаг «сделано» — только если НЕ упёрлись в ACCESS_DENIED (т.е. это был админ и сверка прошла).
+	if (!denied) placementsReconciled = true;
+	return { status: denied ? 'skip: ACCESS_DENIED (не-админ) — флаг не ставлю' : log.join('; ') };
+}
+
+/**
  * Хранилище инвентаризации (entity). Создаётся с бэкенда (чистый JSON + app-контекст),
  * т.к. entity.add — админская операция и фронтовый BX24 кривит вложенный ACCESS.
  * Идемпотентно: уже существует → 'exists'. Создавать может только админ (Володя).
@@ -251,6 +297,62 @@ export async function ensureRealizeEntity(client: B24Client): Promise<{ status: 
 				realizeEntityEnsured = true;
 				return { status: 'exists' };
 			}
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
+/**
+ * Хранилище РЕМОНТОВ (RMA) — всё наше: карточки ремонтов в entity-store, не в нативной
+ * сущности Б24 (решение Сергея 2026-06-16). От Б24 берём только клиента и (фаза 2) оплату.
+ * NAME = человеческий заголовок (для поиска), DETAIL_TEXT = JSON карточки ремонта.
+ */
+export const REPAIRS_ENTITY = 'ctv_repairs';
+
+let repairsEntityEnsured = false;
+
+export async function ensureRepairsEntity(client: B24Client): Promise<{ status: string }> {
+	if (repairsEntityEnsured) return { status: 'cached' };
+	try {
+		await client.call('entity.add', { ENTITY: REPAIRS_ENTITY, NAME: 'CTV Ремонты (приём оборудования)', ACCESS: { AU: 'W' } });
+		repairsEntityEnsured = true;
+		return { status: 'created' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) {
+				repairsEntityEnsured = true;
+				return { status: 'exists' };
+			}
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
+/**
+ * Пункт ЛЕВОГО МЕНЮ «Ремонты» — вход в наш модуль приёма оборудования (view='repairs').
+ * Обработчик /placement/repairs. LEFT_MENU допускает несколько привязок с разными HANDLER —
+ * этот пункт живёт рядом с «Товары». Только идемпотентный bind (без unbind — см. инцидент гонки 2026-06-03).
+ */
+export const REPAIRS_MENU_TITLE = 'Ремонты';
+
+export async function bindRepairsMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/repairs`;
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: INVENTORY_MENU_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: REPAIRS_MENU_TITLE,
+			LANG_ALL: {
+				ru: { TITLE: REPAIRS_MENU_TITLE },
+				en: { TITLE: 'Repairs' },
+			},
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
 			return { status: `${err.code}: ${err.description ?? ''}` };
 		}
 		return { status: String(err) };

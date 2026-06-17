@@ -650,6 +650,8 @@ export interface DealShippedInfo {
 	/** rowId → склады из резервов корзины (склад, выбранный в ЧЕРНОВИКЕ — живьём из документа). */
 	reserves: Record<string, number[]>;
 	shipments: DealShipment[];
+	/** Оплата заказа сделки: total = сумма, paid = оплачено (платежи paid='Y'). null — заказа/оплаты нет. */
+	payment: { total: number; paid: number } | null;
 	/** Заявки снабжения сделки (смарт-процесс «Снабжение»). */
 	supply: SupplyCard[];
 	/** Строки сделки серверным клиентом (BX24 на фронте флапает). null — бэкенд не отдал, фолбэк на BX24. */
@@ -665,7 +667,7 @@ export async function fetchDealShipped(dealId: number): Promise<DealShippedInfo>
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<DealShippedInfo>;
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить отгрузки сделки');
-	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, reserves: json.reserves ?? {}, shipments: json.shipments ?? [], supply: json.supply ?? [], rows: json.rows ?? null };
+	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, reserves: json.reserves ?? {}, shipments: json.shipments ?? [], payment: json.payment ?? null, supply: json.supply ?? [], rows: json.rows ?? null };
 }
 
 /** Повторитель для флапающих BX24-вызовов: каждая попытка со своим таймаутом. */
@@ -790,6 +792,41 @@ export async function addProductToDeal(dealId: number, productId: number, quanti
 	return json.row;
 }
 
+// ── КП (коммерческое предложение) из сделки ───────────────────────────────────
+export interface KpRow {
+	productId: number;
+	name: string;
+	article: string;
+	qty: number;
+	price: number;
+	sum: number;
+	isWork: boolean;
+	/** data-URL фото (подключим из ядра позже); пока пусто → рамка-заглушка. */
+	photo?: string;
+}
+export interface KpData {
+	number: number;
+	date: string;
+	title: string;
+	client: { name: string; phone: string };
+	manager: { name: string; phone: string };
+	goods: KpRow[];
+	works: KpRow[];
+	sumGoods: number;
+	sumWorks: number;
+	total: number;
+}
+
+export async function fetchDealKp(dealId: number): Promise<KpData> {
+	const res = await fetch('/api/deal/kp', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; kp?: KpData };
+	if (!json.ok || !json.kp) throw new Error(json.error ?? 'не удалось собрать КП');
+	return json.kp;
+}
+
 /** Открыть карточку сделки в Б24 (слайдером). */
 export function openDeal(dealId: number): void {
 	const path = `/crm/deal/details/${dealId}/`;
@@ -838,6 +875,157 @@ function bx24Auth(): { domain: string; accessToken: string } {
 	const ctx = window.__B24_CONTEXT__;
 	if (ctx?.accessToken && ctx.domain) return { domain: ctx.domain, accessToken: ctx.accessToken };
 	throw new Error('нет авторизации (ни BX24 getAuth, ни мобильный контекст)');
+}
+
+// ── Ремонты (RMA) — всё наше: карточки в нашем store, клиент/фото из Б24 ───────
+
+export type RepairStatus = 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued';
+export interface RepairPhoto { id: number; name: string; url: string }
+/** Прикреплённый документ (Word/Excel/PDF) — лежит на Диске Б24, в карточке ссылка. */
+export interface RepairFile { id: number; name: string; url: string; type: string }
+export interface Repair {
+	id: number;
+	name: string;
+	status: RepairStatus;
+	/** Свой номер ремонта (со 100), независимый от технического ID хранилища. */
+	repairNo: number;
+	client: { contactId: number | null; name: string; phone: string };
+	device: string;
+	model: string;
+	serial: string;
+	/** Торговая точка приёма (название склада Б24). */
+	point: string;
+	appearance: string;
+	defect: string;
+	payType: 'warranty' | 'paid';
+	/** Стоимость ремонта (только у платных; у гарантийных null). */
+	cost: number | null;
+	/** Комментарий сервисного центра (диагностика/итог) — заполняется после возврата. */
+	comment: string;
+	photos: RepairPhoto[];
+	files: RepairFile[];
+	createdAt: string;
+	createdById: string;
+	createdByName: string;
+	/** Лог: смена статуса (note пуст) либо изменение вида/цены (note описывает). byName — кто. */
+	history: Array<{ at: string; status: RepairStatus; byId: string; byName?: string; note?: string }>;
+}
+export interface RepairContact { id: number; name: string; phone: string }
+export interface NewRepairInput {
+	client: { contactId: number | null; name: string; phone: string };
+	device: string;
+	model: string;
+	serial: string;
+	point: string;
+	appearance: string;
+	defect: string;
+	payType: 'warranty' | 'paid';
+	cost: number | null;
+	comment: string;
+	photos: RepairPhoto[];
+	files: RepairFile[];
+}
+
+export async function fetchRepairs(): Promise<{ repairs: Repair[]; canEditPrice: boolean }> {
+	const res = await fetch('/api/repairs/list', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth() }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repairs?: Repair[]; canEditPrice?: boolean };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить список ремонтов');
+	return { repairs: json.repairs ?? [], canEditPrice: Boolean(json.canEditPrice) };
+}
+
+export async function createRepair(input: NewRepairInput): Promise<Repair> {
+	const res = await fetch('/api/repairs/create', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось принять в ремонт');
+	return json.repair;
+}
+
+export async function updateRepair(id: number, input: NewRepairInput): Promise<Repair> {
+	const res = await fetch('/api/repairs/update', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось сохранить ремонт');
+	return json.repair;
+}
+
+export async function deleteRepair(id: number): Promise<void> {
+	const res = await fetch('/api/repairs/delete', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить ремонт');
+}
+
+export async function updateRepairStatus(id: number, status: RepairStatus): Promise<void> {
+	const res = await fetch('/api/repairs/update-status', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, status }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сменить статус');
+}
+
+export async function searchRepairContacts(q: string): Promise<RepairContact[]> {
+	if (q.trim().length < 2) return [];
+	const res = await fetch('/api/repairs/search-contacts', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), q }),
+	});
+	const json = (await res.json()) as { ok: boolean; contacts?: RepairContact[] };
+	return json.contacts ?? [];
+}
+
+/** Загрузить фото на Б24 Диск. Best-effort: вернёт null, если Диск недоступен. */
+export async function uploadRepairPhoto(file: File): Promise<RepairPhoto | null> {
+	const content = await new Promise<string>((resolve, reject) => {
+		const r = new FileReader();
+		r.onload = () => resolve(String(r.result ?? '').replace(/^data:[^,]*,/, ''));
+		r.onerror = () => reject(new Error('не прочитать файл'));
+		r.readAsDataURL(file);
+	});
+	const res = await fetch('/api/repairs/upload-photo', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), fileName: file.name, content }),
+	});
+	const json = (await res.json()) as { ok: boolean; photo?: RepairPhoto };
+	return json.ok && json.photo ? json.photo : null;
+}
+
+/** Загрузить документ (Word/Excel/PDF) на Б24 Диск. Best-effort: null если Диск недоступен. */
+export async function uploadRepairFile(file: File): Promise<RepairFile | null> {
+	const content = await new Promise<string>((resolve, reject) => {
+		const r = new FileReader();
+		r.onload = () => resolve(String(r.result ?? '').replace(/^data:[^,]*,/, ''));
+		r.onerror = () => reject(new Error('не прочитать файл'));
+		r.readAsDataURL(file);
+	});
+	const res = await fetch('/api/repairs/upload-photo', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), fileName: file.name, content }),
+	});
+	const json = (await res.json()) as { ok: boolean; photo?: RepairPhoto };
+	if (!json.ok || !json.photo) return null;
+	return { ...json.photo, type: file.type || '' };
+}
+
+/** Быстрая смена вида ремонта платный↔гарантийный (+ стоимость при платном). */
+export async function setRepairPayType(id: number, payType: 'warranty' | 'paid', cost: number | null): Promise<{ payType: 'warranty' | 'paid'; cost: number | null }> {
+	const res = await fetch('/api/repairs/set-pay', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, payType, cost }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; payType?: 'warranty' | 'paid'; cost?: number | null };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сменить вид ремонта');
+	return { payType: json.payType ?? payType, cost: json.cost ?? null };
 }
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */

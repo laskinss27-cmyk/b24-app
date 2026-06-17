@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, ensureRepairsEntity, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -112,6 +112,10 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 		if (auth) {
 			const client = new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken } });
 
+			// СВЕРКА ПРИВЯЗОК С UNBIND УБРАНА (2026-06-17): её unbind-all→rebind создавал окно «нет
+			// привязки» → «приложение не найдено» (инцидент гонки 2026-06-03 повторился). Дубли уже
+			// почищены ранее; дальше держим привязки ТОЛЬКО идемпотентными bind ниже (без unbind, без окна).
+
 			// 1) Вкладка сделки
 			try {
 				const result = await bindDealTabPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
@@ -149,6 +153,15 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			const st = await ensureInventoryEntity(client);
 			storageInfo = st.status === 'created' ? '✅ создано' : st.status === 'exists' ? '✅ уже есть' : `⛔ ${st.status}`;
 			app.log.info({ status: st.status }, '[app/handler] inventory entity');
+
+			// 3.5) Пункт «Ремонты» (левое меню) + хранилище ctv_repairs — независимо, не ломает остальное.
+			try {
+				const rep = await bindRepairsMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				const repEnt = await ensureRepairsEntity(client);
+				app.log.info({ menu: rep.status, entity: repEnt.status }, '[app/handler] repairs menu + entity');
+			} catch (err) {
+				app.log.error({}, `[app/handler] repairs bind failed — ${err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err)}`);
+			}
 
 			// 4.5) ЧИСТКА эксперимента: снимаем временную привязку CATALOG_EXTERNAL_PRODUCT.
 			// Проверили — каталог/складской учёт приложениям зацепки не даёт; вход остаётся

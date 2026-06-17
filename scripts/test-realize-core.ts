@@ -4,7 +4,7 @@
  * ОТМЕНЯЕТ документ (возвращает остаток) → проверяет возврат. Net-zero.
  *
  * Запуск (против ядра спейра):
- *   ERPNEXT_URL=http://192.168.0.69:8080 ERPNEXT_TOKEN="token 75a1085fa14560a:10fd22965d81d29" \
+ *   ERPNEXT_URL=http://192.168.0.69:8080 ERPNEXT_TOKEN="token REDACTED" \
  *   TEST_STORE="Измайловский 18Д" npx tsx scripts/test-realize-core.ts
  */
 import { ErpClient } from '../packages/backend/src/erp/client.js';

@@ -5,7 +5,7 @@
  */
 import 'dotenv/config';
 process.env['ERPNEXT_URL'] ??= 'http://localhost:8080';
-process.env['ERPNEXT_TOKEN'] ??= 'token 75a1085fa14560a:df3408f48a7428f';
+process.env['ERPNEXT_TOKEN'] ??= 'token REDACTED';
 
 import { ErpClient } from '../packages/backend/src/erp/client.js';
 import {

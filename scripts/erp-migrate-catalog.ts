@@ -47,7 +47,7 @@ async function b24call<T>(method: string, params: Record<string, unknown>): Prom
 }
 
 const ERP = process.env['ERPNEXT_URL'] ?? 'http://localhost:8080';
-const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token 75a1085fa14560a:df3408f48a7428f';
+const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token REDACTED';
 const ITEM_GROUP = 'Каталог Б24';
 const UOM = 'шт';
 

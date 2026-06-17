@@ -18,7 +18,7 @@ function Stamp { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
 # Цель синка — ЯДРО СПЕЙРА (192.168.0.69:8080), его читает приложение. Б24 читаем как раньше
 # (прокси на этом ноуте); ПИШЕМ в ядро спейра по локалке (undici прокси не уважает -> идёт напрямую).
 $env:ERPNEXT_URL = 'http://192.168.0.69:8080'
-$env:ERPNEXT_TOKEN = 'token 75a1085fa14560a:10fd22965d81d29'
+$env:ERPNEXT_TOKEN = 'token REDACTED'
 
 # Ядро спейра живо? (ноут спейра выключен/недоступен — тихо пропускаем час)
 $ping = & curl.exe -s --noproxy 192.168.0.69 --connect-timeout 5 http://192.168.0.69:8080/api/method/ping 2>$null

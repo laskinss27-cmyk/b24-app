@@ -97,7 +97,7 @@ async function b24batch(calls: Record<string, { method: string; params?: Record<
 
 // ── ERPNext REST (undici, localhost напрямую) ───────────────────────────────────
 const ERP = process.env['ERPNEXT_URL'] ?? 'http://localhost:8080';
-const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token 75a1085fa14560a:df3408f48a7428f';
+const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token REDACTED';
 
 async function erp(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
 	const res = await undiciRequest(`${ERP}${path}`, {
