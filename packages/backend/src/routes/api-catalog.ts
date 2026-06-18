@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
-import { fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
+import { fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -56,8 +56,38 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const t0 = Date.now();
 		try {
 			const data = await buildProductBase(client);
+			// Остатки из ЯДРА (как во вкладке сделки): подменяем Б24-остатки ядерными, если ядро подключено.
+			// Один Bin-запрос на весь каталог + список складов Б24 для карты «имя склада → storeId».
+			// Ядро недоступно/ошибка → молча оставляем остатки Б24 (мягкий фолбэк). Радиус — только «База» (канарейка).
+			let stockSource = 'b24';
+			const erp = ErpClient.fromEnv();
+			if (erp) {
+				try {
+					const [coreStocks, storeRes] = await Promise.all([
+						fetchErpStocks(erp),
+						client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] }),
+					]);
+					const titleToId = new Map<string, number>();
+					for (const s of storeRes?.stores ?? []) titleToId.set(String(s['title'] ?? ''), Number(s['id']));
+					for (const r of data.rows) {
+						const byTitle = coreStocks.get(r.id);
+						const byStore: Record<number, number> = {};
+						if (byTitle) {
+							for (const [title, qty] of Object.entries(byTitle)) {
+								const sid = titleToId.get(title);
+								if (sid) byStore[sid] = (byStore[sid] ?? 0) + qty;
+							}
+						}
+						r.stockByStore = byStore;
+						r.total = Object.values(byStore).reduce((a, b) => a + b, 0);
+					}
+					stockSource = 'core';
+				} catch (e) {
+					app.log.warn({}, `[api/catalog/browse] ядро недоступно — остатки из Б24 (фолбэк): ${errInfo(e)}`);
+				}
+			}
 			baseCache.set(cacheKey, { data, expires: now + CACHE_TTL_MS });
-			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached: false }, '[api/catalog/browse] ok');
+			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached: false, stock: stockSource }, '[api/catalog/browse] ok');
 			return { ok: true, rows: data.rows, generatedAt: data.generatedAt, cached: false };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
