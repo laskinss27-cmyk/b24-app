@@ -48,7 +48,15 @@ docs/        — ты здесь
 
 ## Хостинг
 
-Yandex Cloud Serverless Containers: контейнер `b24-app` (id `bba0fouaqgab742ohki8`), образы в `cr.yandex/crpj8ipjmjimigbf8dq7/b24-app`. Спека ревизии: 256MB / 1 core / concurrency 4 / timeout 60s / SA `ajeprv5aiiqimilfrbv6`. env: `APP_CLIENT_ID`, `APP_CLIENT_SECRET`, `APP_SECTION_URL`, `INVENTORY_NOTIFY` — **не наследуются автоматически**, при деплое переносить из прошлой ревизии (готовая команда — в runbook.md).
+**Своя инфра (ушли с Yandex Cloud 2026-06-16).** Приложение — docker-контейнер `b24-backend` на
+**домашнем сервере (спейр-ноут, `192.168.0.69`)**: один контейнер, бэкенд раздаёт собранный фронт из
+`../frontend/dist`, в одной docker-сети с ядром ERPNext (общаются по localhost — без туннелей/undici-боли).
+Наружу для Битрикса контейнер выставляет **VPS reg.ru `194.226.97.154`** через обратный ssh-туннель +
+nginx (валидный LE-сертификат на `194-226-97-154.regru.cloud`). env — в `~/erpnext/backend.env` на спейре.
+Деплой и откат — см. runbook.md; здоровье системы — команда `status` и `docs/SOS.md`.
+
+Яндекс-ревизия `bba5gk4...` (`cr.yandex/crpj8ipjmjimigbf8dq7/b24-app`) **оставлена как холодный фолбэк**:
+если своя инфра ляжет — откат = вернуть URL приложения в Б24 на неё. В обычной работе Yandex НЕ участвует.
 
 ## Кэши
 

@@ -6,7 +6,7 @@ Bitrix24-приложение для портала `umniydom.bitrix24.ru`: св
 
 ## Стек
 
-- **Backend**: Node.js + TypeScript + Fastify; хостинг — **Yandex Cloud Serverless Containers** (контейнер `b24-app`)
+- **Backend**: Node.js + TypeScript + Fastify; хостинг — **свой домашний сервер** (docker-контейнер на спейр-ноуте; наружу через VPS reg.ru). С Yandex Cloud ушли 2026-06-16 — см. docs/architecture.md
 - **Frontend**: React + Vite + TypeScript, один бандл в iframe через placement-API Б24
 - **Shared**: общие типы
 - **Складское ядро (в работе)**: ERPNext (headless), см. [docs/sklad-vynos.md](docs/sklad-vynos.md)
