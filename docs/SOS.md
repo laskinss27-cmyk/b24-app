@@ -35,6 +35,21 @@ status
 
 > `status` — только чтение, ничего не ломает. Запускай сколько угодно.
 
+### Что такое `status` и где он живёт
+
+- Это **настоящая команда** на спейре: `/usr/local/bin/status` (доступна из любой папки, под любым входом). НЕ алиас — алиас однажды записался криво и ломался, поэтому сделали командой.
+- Исходник — в репозитории: **`scripts/sos-status.sh`** (версионируется в git).
+- Делает только чтение: дёргает ping ядра, health backend, публичную дверь, `systemctl is-active b24-tunnel`, `docker ps`, последний прогон синка (`~/sync/sync.log`), `df`/`free`. Токен ядра для счётчика товаров берёт из `~/sync/.env` (`ERPNEXT_TOKEN`).
+
+### Если `status` вдруг «command not found» / показывает чушь
+
+```bash
+# Переустановить команду из репо-скрипта (с рабочего ноута):
+scp -i ~/.ssh/b24_homeserver D:/Projects/b24-app/scripts/sos-status.sh rey@192.168.0.69:~/status.sh
+ssh -i ~/.ssh/b24_homeserver rey@192.168.0.69 'sed -i "s/\r$//" ~/status.sh && sudo cp ~/status.sh /usr/local/bin/status && sudo chmod +x /usr/local/bin/status && status | head -3'
+```
+Если сам на консоли сервера и команда «висит» от старой сессии — `unalias status` или перелогиниться (`exit` → войти заново).
+
 ---
 
 ## 2. ⛔ «Контейнер упал» / приложение (backend) не отвечает
