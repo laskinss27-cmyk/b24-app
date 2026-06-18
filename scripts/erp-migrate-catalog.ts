@@ -131,12 +131,19 @@ async function b24Page<T>(method: string, params: Record<string, unknown>, pick:
 
 interface B24Product { id: number; name: string; type: number; purchasing: number | null; iblockId: number; supplier?: string; model: string; article: string; brand: string; section: string }
 
+/** Раскодировка HTML-сущностей (Б24 хранит дюймы/кавычки как &quot; и т.п.) — иначе в имена лезет мусор. */
+const decodeHtml = (s: string): string => s
+	.replace(/&quot;/gi, '"').replace(/&laquo;/gi, '«').replace(/&raquo;/gi, '»')
+	.replace(/&ndash;/gi, '–').replace(/&mdash;/gi, '—').replace(/&nbsp;/gi, ' ')
+	.replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(Number(n)); } catch { return ''; } })
+	.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&amp;/gi, '&');
+
 /** Значение свойства Б24: enum отдаёт текст в valueEnum (id в value) — предпочитаем valueEnum
- *  (иначе бренд/вариация приедут числом-id). Приходит как {value,valueEnum} или плоско. */
+ *  (иначе бренд/вариация приедут числом-id). Приходит как {value,valueEnum} или плоско. HTML раскодируем. */
 const propVal = (v: unknown): string => {
 	const o = v && typeof v === 'object' ? (v as { value?: unknown; valueEnum?: unknown }) : null;
 	const raw = o ? (o.valueEnum ?? o.value) : v;
-	return raw == null ? '' : String(raw).trim();
+	return raw == null ? '' : decodeHtml(String(raw)).trim();
 };
 
 /** ЦВЕТ вариации (property358): HL-справочник, REST его не отдаёт — словарь добыт из
@@ -206,7 +213,7 @@ async function readB24Catalog(): Promise<B24Product[]> {
 			(r) => ((r as { products?: Array<Record<string, unknown>> })?.products ?? []));
 		for (const p of rows) {
 			const id = Number(p['id']);
-			let name = String(p['name'] ?? '').trim();
+			let name = decodeHtml(String(p['name'] ?? '')).trim();
 			let supplier = '';
 			let article = '';
 			if (iblockId === 26) {
@@ -215,7 +222,8 @@ async function readB24Catalog(): Promise<B24Product[]> {
 				const raw = propVal(p['property360']);
 				article = /^\d+$/.test(raw) ? (enumMap.get(Number(raw)) ?? raw) : raw;
 				const label = color ?? article;
-				if (label && !name.toLowerCase().includes(label.toLowerCase())) name = `${name} [${label}]`;
+				// Лейбл лепим, только если в нём есть буква/цифра (иначе мусор: одна кавычка/пунктуация → [&quot]-артефакт).
+				if (label && /[\p{L}\p{N}]/u.test(label) && !name.toLowerCase().includes(label.toLowerCase())) name = `${name} [${label}]`;
 				supplier = propVal(p['property350']).split(';')[0]?.trim() ?? '';
 			}
 			let brand = propVal(p['property334']);
