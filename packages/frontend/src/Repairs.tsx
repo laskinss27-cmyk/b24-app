@@ -238,14 +238,16 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 	onAdd: () => void; onOpen: (r: Repair) => void; onReload: () => void;
 }): JSX.Element {
 	const [q, setQ] = useState('');
+	const [st, setSt] = useState<RepairStatus | 'all'>('all');
 	const view = useMemo(() => {
 		const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-		if (!words.length) return repairs;
 		return repairs.filter((r) => {
+			if (st !== 'all' && r.status !== st) return false;
+			if (!words.length) return true;
 			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment}`.toLowerCase();
 			return words.every((w) => hay.includes(w));
 		});
-	}, [repairs, q]);
+	}, [repairs, q, st]);
 	const active = view.filter((r) => r.status !== 'issued').length;
 
 	return (
@@ -257,6 +259,12 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 					disabled
 					title="Заработает, когда наш склад переедет в ядро на всех: товар с точки уйдёт в ремонт со списанием остатка (склад «В ремонте» — у нас, Битрикс не трогаем). Возврат годного — на выбранную точку."
 				>🛠 Предпродажный ремонт · скоро</button>
+				<label className="tb-field">Статус
+					<select value={st} onChange={(e) => setSt(e.target.value as RepairStatus | 'all')}>
+						<option value="all">Все статусы</option>
+						{STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+					</select>
+				</label>
 				<label className="tb-field tb-search">Поиск (№ · клиент · серийник · модель · неисправность)
 					<input type="search" value={q} placeholder="1042, иванов, M5702…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 				</label>
@@ -268,7 +276,7 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 			{loading && repairs.length === 0 && <p className="muted">Загружаю ремонты…</p>}
 
 			{!loading && view.length === 0 ? (
-				<p className="stub-calm">{q ? 'Ничего не найдено.' : 'Ремонтов пока нет. Нажми «Принять в ремонт».'}</p>
+				<p className="stub-calm">{(q || st !== 'all') ? 'Ничего не найдено.' : 'Ремонтов пока нет. Нажми «Принять в ремонт».'}</p>
 			) : (
 				<div className="table-wrap">
 					<table className="products-table report-table">
