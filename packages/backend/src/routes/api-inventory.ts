@@ -152,6 +152,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 						article: l.article || undefined,
 						model: (l.article || l.model) || undefined,
 						manufacturer: l.brand || undefined,
+						sectionName: l.section || undefined,
 						photoPath: l.image ? `/api/inventory/erp-image?p=${encodeURIComponent(l.image)}` : undefined,
 					}));
 					app.log.info({ storeId: b.storeId, count: lines.length, source: 'core' }, '[api/inventory/stock] ok');

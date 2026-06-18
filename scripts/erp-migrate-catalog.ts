@@ -104,6 +104,7 @@ async function ensureItemMetaFields(): Promise<void> {
 		{ fieldname: 'b24_model', label: 'B24 Модель' },
 		{ fieldname: 'b24_article', label: 'B24 Артикул' },
 		{ fieldname: 'b24_brand', label: 'B24 Бренд' },
+		{ fieldname: 'b24_section', label: 'B24 Раздел' },
 	];
 	for (const f of fields) {
 		if (await erpExists('Custom Field', `Item-${f.fieldname}`)) continue;
@@ -128,11 +129,13 @@ async function b24Page<T>(method: string, params: Record<string, unknown>, pick:
 	return out;
 }
 
-interface B24Product { id: number; name: string; type: number; purchasing: number | null; iblockId: number; supplier?: string; model: string; article: string; brand: string }
+interface B24Product { id: number; name: string; type: number; purchasing: number | null; iblockId: number; supplier?: string; model: string; article: string; brand: string; section: string }
 
-/** Значение свойства Б24: приходит как {value: …} или плоско. */
+/** Значение свойства Б24: enum отдаёт текст в valueEnum (id в value) — предпочитаем valueEnum
+ *  (иначе бренд/вариация приедут числом-id). Приходит как {value,valueEnum} или плоско. */
 const propVal = (v: unknown): string => {
-	const raw = v && typeof v === 'object' ? (v as { value?: unknown }).value : v;
+	const o = v && typeof v === 'object' ? (v as { value?: unknown; valueEnum?: unknown }) : null;
+	const raw = o ? (o.valueEnum ?? o.value) : v;
 	return raw == null ? '' : String(raw).trim();
 };
 
@@ -172,19 +175,37 @@ async function readB24Catalog(): Promise<B24Product[]> {
 		console.log(`  справочник вариаций (property360): ${enumMap.size} значений`);
 	} catch { console.log('  ⚠ справочник вариаций не прочитался — лейблы будут числами'); }
 
+	// Имена разделов (id→name) каталожных iblock'ов — для b24_section.
+	const sectionNames = new Map<number, string>();
+	for (const iblockId of [24, 26]) {
+		try {
+			const secs = await b24Page('catalog.section.list',
+				{ filter: { iblockId }, select: ['id', 'name'], order: { id: 'ASC' } },
+				(r) => ((r as { sections?: Array<Record<string, unknown>> })?.sections ?? []));
+			for (const s of secs) sectionNames.set(Number(s['id']), String(s['name'] ?? '').trim());
+		} catch { /* раздел опционален */ }
+	}
+	console.log(`  разделов каталога: ${sectionNames.size}`);
+	const idOf = (v: unknown): number | undefined => {
+		const raw = v && typeof v === 'object' ? (v as { value?: unknown }).value : v;
+		const n = Number(raw); return Number.isFinite(n) && n > 0 ? n : undefined;
+	};
+	// бренд/модель/раздел основных товаров (iblock 24) — для наследования вариациями (офферы 26).
+	const mainBrand = new Map<number, string>(); const mainModel = new Map<number, string>(); const mainSection = new Map<number, string>();
+
 	const products: B24Product[] = [];
 	for (const iblockId of [24, 26]) {
 		// У вариаций (26): property358 — ЦВЕТ (HL-хэш → COLOR_BY_HASH), property360 — артикул
-		// вариации (enum), property350 — поставщик («вариации по поставщику» с одинаковым 360!).
-		// Приоритет отличительного признака в имени: цвет → артикул → (для тёзок) поставщик/#id.
-		// property330 — модель (основные), property360 — артикул вариации (офферы), property334 — бренд.
+		// вариации (enum), property350 — поставщик, parentId — родитель (с него наследуем бренд/модель/раздел).
+		// property330 — модель (основные), property334 — бренд, iblockSectionId — раздел.
 		const select = iblockId === 26
-			? ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property358', 'property360', 'property350', 'property334', 'property330']
-			: ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property330', 'property334'];
+			? ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property358', 'property360', 'property350', 'property334', 'property330', 'iblockSectionId', 'parentId']
+			: ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property330', 'property334', 'iblockSectionId'];
 		const rows = await b24Page('catalog.product.list',
 			{ filter: { iblockId }, select, order: { id: 'ASC' } },
 			(r) => ((r as { products?: Array<Record<string, unknown>> })?.products ?? []));
 		for (const p of rows) {
+			const id = Number(p['id']);
 			let name = String(p['name'] ?? '').trim();
 			let supplier = '';
 			let article = '';
@@ -197,16 +218,31 @@ async function readB24Catalog(): Promise<B24Product[]> {
 				if (label && !name.toLowerCase().includes(label.toLowerCase())) name = `${name} [${label}]`;
 				supplier = propVal(p['property350']).split(';')[0]?.trim() ?? '';
 			}
+			let brand = propVal(p['property334']);
+			let model = propVal(p['property330']);
+			const sid = idOf(p['iblockSectionId']);
+			let section = sid ? (sectionNames.get(sid) ?? '') : '';
+			if (iblockId === 24) {
+				mainBrand.set(id, brand); mainModel.set(id, model); if (section) mainSection.set(id, section);
+			} else {
+				const par = idOf(p['parentId']);
+				if (par) {
+					if (!brand) brand = mainBrand.get(par) ?? '';
+					if (!model) model = mainModel.get(par) ?? '';
+					if (!section) section = mainSection.get(par) ?? '';
+				}
+			}
 			products.push({
-				id: Number(p['id']),
+				id,
 				name,
 				type: Number(p['type'] ?? 0),
 				purchasing: p['purchasingPrice'] != null ? Number(p['purchasingPrice']) : null,
 				iblockId,
 				supplier,
-				model: propVal(p['property330']),
+				model,
 				article,
-				brand: propVal(p['property334']),
+				brand,
+				section,
 			});
 		}
 	}
@@ -302,15 +338,16 @@ async function main(): Promise<void> {
 		await ensureItemMetaFields();
 		// заполненность исходника (что реально есть в Б24 для переноса)
 		const cov = (sel: (p: B24Product) => string): number => items.filter((p) => sel(p)).length;
-		console.log(`  из Б24 есть: модель ${cov((p) => p.model)}, артикул ${cov((p) => p.article)}, бренд ${cov((p) => p.brand)} (из ${items.length})`);
-		interface ExItem { item_name: string; model: string; article: string; brand: string }
+		console.log(`  из Б24 есть: модель ${cov((p) => p.model)}, артикул ${cov((p) => p.article)}, бренд ${cov((p) => p.brand)}, раздел ${cov((p) => p.section)} (из ${items.length})`);
+		interface ExItem { item_name: string; model: string; article: string; brand: string; section: string }
 		const existing = new Map<string, ExItem>(
-			(await erpList('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand'], [['item_group', '=', ITEM_GROUP]]))
+			(await erpList('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand', 'b24_section'], [['item_group', '=', ITEM_GROUP]]))
 				.map((i) => [String(i['name']), {
 					item_name: String(i['item_name'] ?? ''),
 					model: String(i['b24_model'] ?? ''),
 					article: String(i['b24_article'] ?? ''),
 					brand: String(i['b24_brand'] ?? ''),
+					section: String(i['b24_section'] ?? ''),
 				}]),
 		);
 		console.log(`  в ERPNext уже: ${existing.size}`);
@@ -326,6 +363,7 @@ async function main(): Promise<void> {
 				if (ex.model !== p.model) patch['b24_model'] = p.model;
 				if (ex.article !== p.article) patch['b24_article'] = p.article;
 				if (ex.brand !== p.brand) patch['b24_brand'] = p.brand;
+				if (ex.section !== p.section) patch['b24_section'] = p.section;
 				if (Object.keys(patch).length) {
 					try {
 						const r = await erp('PUT', `/api/resource/Item/${encodeURIComponent(code)}`, patch);
@@ -351,6 +389,7 @@ async function main(): Promise<void> {
 					b24_model: p.model,
 					b24_article: p.article,
 					b24_brand: p.brand,
+					b24_section: p.section,
 					...(p.purchasing != null && p.purchasing > 0 ? { valuation_rate: p.purchasing } : {}),
 				});
 				created++;

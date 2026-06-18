@@ -295,6 +295,7 @@ export interface ErpStoreLine {
 	article: string;
 	model: string;
 	brand: string;
+	section: string;
 	/** Путь файла в ядре ('/files/...') — фронт показывает через прокси /api/inventory/erp-image. */
 	image: string;
 }
@@ -309,7 +310,7 @@ export async function fetchErpStoreStockFull(erp: ErpClient, storeTitle: string)
 	const itemById = new Map<string, Record<string, unknown>>();
 	for (let i = 0; i < ids.length; i += 200) {
 		const chunk = ids.slice(i, i + 200);
-		const rows = await erp.list('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand', 'image'], [['name', 'in', chunk]]);
+		const rows = await erp.list('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand', 'b24_section', 'image'], [['name', 'in', chunk]]);
 		for (const r of rows) itemById.set(String(r['name']), r);
 	}
 	const out: ErpStoreLine[] = [];
@@ -324,6 +325,7 @@ export async function fetchErpStoreStockFull(erp: ErpClient, storeTitle: string)
 			article: String(it?.['b24_article'] ?? ''),
 			model: String(it?.['b24_model'] ?? ''),
 			brand: String(it?.['b24_brand'] ?? ''),
+			section: String(it?.['b24_section'] ?? ''),
 			image: String(it?.['image'] ?? ''),
 		});
 	}

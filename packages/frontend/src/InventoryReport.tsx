@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-	fetchStoreInventory,
 	fetchStoreStock,
 	fetchActLines,
 	saveDraftPoint,
@@ -93,7 +92,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 					? Promise.resolve(MOCK_STOCK[storeId] ?? [])
 					: mobile
 						? fetchStoreStock(storeId, sectionIds)
-						: fetchStoreInventory(storeId, sectionIds);
+						: fetchStoreStock(storeId, sectionIds); // десктоп тоже → наш backend (остатки из ЯДРА, фолбэк Б24)
 		load
 			.then((rows) => {
 				if (!alive) return;
