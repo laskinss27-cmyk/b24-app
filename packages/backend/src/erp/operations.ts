@@ -288,6 +288,48 @@ export async function fetchErpStoreStock(erp: ErpClient, storeTitle: string): Pr
 	return out;
 }
 
+export interface ErpStoreLine {
+	productId: number;
+	name: string;
+	book: number;
+	article: string;
+	model: string;
+	brand: string;
+	/** Путь файла в ядре ('/files/...') — фронт показывает через прокси /api/inventory/erp-image. */
+	image: string;
+}
+
+/** Полная строка склада из ЯДРА для подсчёта: остаток (Bin>0) + карточка (Item: имя/модель/артикул/бренд/фото).
+ *  Заменяет Б24-источник в инвентаризации (всё из ядра, без кусков от Б24). */
+export async function fetchErpStoreStockFull(erp: ErpClient, storeTitle: string): Promise<ErpStoreLine[]> {
+	const ctx = await erpContext(erp);
+	const bins = await erp.list('Bin', ['item_code', 'actual_qty'], [['warehouse', '=', erpWarehouse(ctx, storeTitle)], ['actual_qty', '>', 0]]);
+	const ids = [...new Set(bins.map((b) => String(b['item_code'])).filter((c) => /^\d+$/.test(c)))];
+	if (!ids.length) return [];
+	const itemById = new Map<string, Record<string, unknown>>();
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200);
+		const rows = await erp.list('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand', 'image'], [['name', 'in', chunk]]);
+		for (const r of rows) itemById.set(String(r['name']), r);
+	}
+	const out: ErpStoreLine[] = [];
+	for (const b of bins) {
+		const productId = Number(b['item_code']);
+		if (!Number.isInteger(productId) || productId <= 0) continue;
+		const it = itemById.get(String(productId));
+		out.push({
+			productId,
+			name: String(it?.['item_name'] ?? `#${productId}`),
+			book: Number(b['actual_qty'] ?? 0),
+			article: String(it?.['b24_article'] ?? ''),
+			model: String(it?.['b24_model'] ?? ''),
+			brand: String(it?.['b24_brand'] ?? ''),
+			image: String(it?.['image'] ?? ''),
+		});
+	}
+	return out;
+}
+
 /** Имена товаров ядра пачкой (для болванки): productId → item_name. */
 export async function fetchErpItemNames(erp: ErpClient, productIds: number[]): Promise<Map<number, string>> {
 	const out = new Map<number, string>();

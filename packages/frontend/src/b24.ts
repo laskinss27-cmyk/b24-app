@@ -489,6 +489,8 @@ export async function fetchActLines(lines: InvResult['lines']): Promise<InvLine[
  * TODO: для прода аккуратнее — проксировать картинку через наш бэкенд, не светить токен в DOM.
  */
 export function photoFullUrl(photoPath: string): string | null {
+	// Уже готовый URL (наш прокси фото ядра /api/… или абсолютный http) — отдаём как есть, без Б24-домена/токена.
+	if (/^(https?:\/\/|\/api\/)/.test(photoPath)) return photoPath;
 	let domain: string | undefined;
 	let token: string | undefined;
 	const a = window.BX24 ? window.BX24.getAuth() : false;

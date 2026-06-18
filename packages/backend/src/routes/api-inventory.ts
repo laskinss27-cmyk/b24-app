@@ -9,6 +9,7 @@ import {
 	deleteInventoryRecoDraft,
 	fetchErpItemNames,
 	fetchErpStoreStock,
+	fetchErpStoreStockFull,
 	submitInventoryReco,
 	type InventoryRecoLine,
 } from '../erp/operations.js';
@@ -134,13 +135,58 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		if (b.storeId == null) return reply.code(400).send({ ok: false, error: 'storeId required' });
 		const sectionIds = Array.isArray(b.sectionIds) ? b.sectionIds.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : undefined;
+		// Учёт ИЗ ЯДРА (имя/модель/артикул/бренд/фото/остаток) — целиком, без кусков от Б24.
+		// Ядро не подключено/ошибка → мягкий фолбэк на Б24 (fetchStoreStock). Разделы охвата ядро
+		// не различает (item_group единый) → ядро-путь отдаёт весь склад; sectionIds — только в Б24-фолбэке.
+		const erp = ErpClient.fromEnv();
+		if (erp) {
+			try {
+				const storeRes = await client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] });
+				const storeTitle = String((storeRes?.stores ?? []).find((s) => Number(s['id']) === Number(b.storeId))?.['title'] ?? '');
+				if (storeTitle) {
+					const core = await fetchErpStoreStockFull(erp, storeTitle);
+					const lines = core.map((l) => ({
+						productId: l.productId,
+						name: l.name,
+						book: l.book,
+						article: l.article || undefined,
+						model: (l.article || l.model) || undefined,
+						manufacturer: l.brand || undefined,
+						photoPath: l.image ? `/api/inventory/erp-image?p=${encodeURIComponent(l.image)}` : undefined,
+					}));
+					app.log.info({ storeId: b.storeId, count: lines.length, source: 'core' }, '[api/inventory/stock] ok');
+					return { ok: true, lines };
+				}
+			} catch (e) {
+				app.log.warn({ storeId: b.storeId }, `[api/inventory/stock] ядро недоступно — Б24 фолбэк: ${errInfo(e)}`);
+			}
+		}
 		try {
 			const lines = await fetchStoreStock(client, Number(b.storeId), sectionIds);
-			app.log.info({ storeId: b.storeId, count: lines.length }, '[api/inventory/stock] ok');
+			app.log.info({ storeId: b.storeId, count: lines.length, source: 'b24' }, '[api/inventory/stock] ok');
 			return { ok: true, lines };
 		} catch (err) {
 			app.log.error({ storeId: b.storeId }, `[api/inventory/stock] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Прокси фото товара из ЯДРА: ERPNext отдаёт /files/... (публично, но URL ядра наружу не торчит).
+	// GET для <img src>. Путь жёстко валидируем (только /files/<имя>) — не дать произвольный fetch.
+	app.get('/api/inventory/erp-image', async (req, reply) => {
+		const p = String((req.query as Record<string, unknown> | undefined)?.['p'] ?? '');
+		if (!/^\/files\/[\w.\-]+$/.test(p)) return reply.code(400).send('bad path');
+		const base = process.env['ERPNEXT_URL'];
+		if (!base) return reply.code(404).send('core off');
+		try {
+			const r = await fetch(`${base.replace(/\/$/, '')}${p}`, { signal: AbortSignal.timeout(8000) });
+			if (!r.ok) return reply.code(r.status).send('not found');
+			const buf = Buffer.from(await r.arrayBuffer());
+			reply.header('Content-Type', r.headers.get('content-type') ?? 'image/jpeg');
+			reply.header('Cache-Control', 'public, max-age=86400');
+			return reply.send(buf);
+		} catch {
+			return reply.code(502).send('image fetch failed');
 		}
 	});
 
