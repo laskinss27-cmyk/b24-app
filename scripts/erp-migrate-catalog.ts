@@ -98,6 +98,23 @@ async function erpSubmit(doctype: string, name: string): Promise<void> {
 	if (after !== 1) throw new Error(`${doctype} ${name}: submit прошёл без ошибки, но docstatus=${after}`);
 }
 
+/** Идемпотентно заводит кастомные поля Item для модели/артикула/бренда из Б24. */
+async function ensureItemMetaFields(): Promise<void> {
+	const fields = [
+		{ fieldname: 'b24_model', label: 'B24 Модель' },
+		{ fieldname: 'b24_article', label: 'B24 Артикул' },
+		{ fieldname: 'b24_brand', label: 'B24 Бренд' },
+	];
+	for (const f of fields) {
+		if (await erpExists('Custom Field', `Item-${f.fieldname}`)) continue;
+		await erpCreate('Custom Field', {
+			dt: 'Item', fieldname: f.fieldname, label: f.label, fieldtype: 'Data',
+			insert_after: 'item_name', in_standard_filter: 1,
+		});
+		console.log(`  + Custom Field Item.${f.fieldname}`);
+	}
+}
+
 // ── Б24 чтение (постранично) ──────────────────────────────────────────────────
 async function b24Page<T>(method: string, params: Record<string, unknown>, pick: (r: unknown) => T[]): Promise<T[]> {
 	const out: T[] = [];
@@ -111,7 +128,7 @@ async function b24Page<T>(method: string, params: Record<string, unknown>, pick:
 	return out;
 }
 
-interface B24Product { id: number; name: string; type: number; purchasing: number | null; iblockId: number; supplier?: string }
+interface B24Product { id: number; name: string; type: number; purchasing: number | null; iblockId: number; supplier?: string; model: string; article: string; brand: string }
 
 /** Значение свойства Б24: приходит как {value: …} или плоско. */
 const propVal = (v: unknown): string => {
@@ -160,21 +177,23 @@ async function readB24Catalog(): Promise<B24Product[]> {
 		// У вариаций (26): property358 — ЦВЕТ (HL-хэш → COLOR_BY_HASH), property360 — артикул
 		// вариации (enum), property350 — поставщик («вариации по поставщику» с одинаковым 360!).
 		// Приоритет отличительного признака в имени: цвет → артикул → (для тёзок) поставщик/#id.
+		// property330 — модель (основные), property360 — артикул вариации (офферы), property334 — бренд.
 		const select = iblockId === 26
-			? ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property358', 'property360', 'property350']
-			: ['id', 'iblockId', 'name', 'type', 'purchasingPrice'];
+			? ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property358', 'property360', 'property350', 'property334', 'property330']
+			: ['id', 'iblockId', 'name', 'type', 'purchasingPrice', 'property330', 'property334'];
 		const rows = await b24Page('catalog.product.list',
 			{ filter: { iblockId }, select, order: { id: 'ASC' } },
 			(r) => ((r as { products?: Array<Record<string, unknown>> })?.products ?? []));
 		for (const p of rows) {
 			let name = String(p['name'] ?? '').trim();
 			let supplier = '';
+			let article = '';
 			if (iblockId === 26) {
 				const colorHash = propVal(p['property358']);
 				const color = colorHash && colorHash !== '0' ? COLOR_BY_HASH[colorHash] : undefined;
 				const raw = propVal(p['property360']);
-				const art = /^\d+$/.test(raw) ? (enumMap.get(Number(raw)) ?? raw) : raw;
-				const label = color ?? art;
+				article = /^\d+$/.test(raw) ? (enumMap.get(Number(raw)) ?? raw) : raw;
+				const label = color ?? article;
 				if (label && !name.toLowerCase().includes(label.toLowerCase())) name = `${name} [${label}]`;
 				supplier = propVal(p['property350']).split(';')[0]?.trim() ?? '';
 			}
@@ -185,6 +204,9 @@ async function readB24Catalog(): Promise<B24Product[]> {
 				purchasing: p['purchasingPrice'] != null ? Number(p['purchasingPrice']) : null,
 				iblockId,
 				supplier,
+				model: propVal(p['property330']),
+				article,
+				brand: propVal(p['property334']),
 			});
 		}
 	}
@@ -277,26 +299,42 @@ async function main(): Promise<void> {
 			await erpCreate('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
 			console.log(`  + Item Group «${ITEM_GROUP}»`);
 		}
-		const existing = new Map(
-			(await erpList('Item', ['name', 'item_name'], [['item_group', '=', ITEM_GROUP]]))
-				.map((i) => [String(i['name']), String(i['item_name'] ?? '')]),
+		await ensureItemMetaFields();
+		// заполненность исходника (что реально есть в Б24 для переноса)
+		const cov = (sel: (p: B24Product) => string): number => items.filter((p) => sel(p)).length;
+		console.log(`  из Б24 есть: модель ${cov((p) => p.model)}, артикул ${cov((p) => p.article)}, бренд ${cov((p) => p.brand)} (из ${items.length})`);
+		interface ExItem { item_name: string; model: string; article: string; brand: string }
+		const existing = new Map<string, ExItem>(
+			(await erpList('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand'], [['item_group', '=', ITEM_GROUP]]))
+				.map((i) => [String(i['name']), {
+					item_name: String(i['item_name'] ?? ''),
+					model: String(i['b24_model'] ?? ''),
+					article: String(i['b24_article'] ?? ''),
+					brand: String(i['b24_brand'] ?? ''),
+				}]),
 		);
 		console.log(`  в ERPNext уже: ${existing.size}`);
-		let created = 0, renamed = 0, failed = 0;
+		let created = 0, updated = 0, failed = 0;
 		for (const p of items) {
 			const code = String(p.id);
 			const wantName = p.name.slice(0, 140);
-			if (existing.has(code)) {
-				// Идемпотентное переименование: имя в Б24 (с обогащением вариаций) — истина.
-				if (existing.get(code) !== wantName) {
+			const ex = existing.get(code);
+			if (ex) {
+				// Идемпотентный апдейт: имя/модель/артикул/бренд из Б24 — истина. Шлём только изменившиеся.
+				const patch: Record<string, unknown> = {};
+				if (ex.item_name !== wantName) patch['item_name'] = wantName;
+				if (ex.model !== p.model) patch['b24_model'] = p.model;
+				if (ex.article !== p.article) patch['b24_article'] = p.article;
+				if (ex.brand !== p.brand) patch['b24_brand'] = p.brand;
+				if (Object.keys(patch).length) {
 					try {
-						const r = await erp('PUT', `/api/resource/Item/${encodeURIComponent(code)}`, { item_name: wantName });
+						const r = await erp('PUT', `/api/resource/Item/${encodeURIComponent(code)}`, patch);
 						if (r.status >= 300) throw new Error(erpErr(r));
-						renamed++;
-						if (renamed % 50 === 0) console.log(`  …переименовано ${renamed}`);
+						updated++;
+						if (updated % 50 === 0) console.log(`  …обновлено ${updated}`);
 					} catch (e) {
 						failed++;
-						if (failed <= 10) console.log(`  ⛔ rename ${code}: ${String(e).slice(0, 140)}`);
+						if (failed <= 10) console.log(`  ⛔ update ${code}: ${String(e).slice(0, 140)}`);
 					}
 				}
 				continue;
@@ -310,6 +348,9 @@ async function main(): Promise<void> {
 					// type 7 = услуги Б24 — позиции без складского учёта; товары (1) и вариации (4) — складские.
 					is_stock_item: p.type === 7 ? 0 : 1,
 					description: `Б24 productId=${p.id} (iblock ${p.iblockId}, type ${p.type})`,
+					b24_model: p.model,
+					b24_article: p.article,
+					b24_brand: p.brand,
 					...(p.purchasing != null && p.purchasing > 0 ? { valuation_rate: p.purchasing } : {}),
 				});
 				created++;
@@ -319,7 +360,7 @@ async function main(): Promise<void> {
 				if (failed <= 10) console.log(`  ⛔ ${code} «${p.name.slice(0, 40)}»: ${String(e).slice(0, 160)}`);
 			}
 		}
-		console.log(`  ИТОГ товаров: +${created}, переименовано ${renamed}, ошибок ${failed}, было ${existing.size}`);
+		console.log(`  ИТОГ товаров: +${created}, обновлено ${updated}, ошибок ${failed}, было ${existing.size}`);
 	}
 
 	// ── остатки (Opening Stock через Stock Reconciliation) ──
