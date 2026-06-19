@@ -46,10 +46,32 @@ interface TransferData {
 	history: Array<{ at: string; status: TransferStatus; byId: string; byName?: string; note?: string }>;
 }
 
-interface CurrentUser { id: string; name: string }
+/** Закупка = отдел Снабжение (UF_DEPARTMENT 10) + главные админы поимённо (как в ремонтах).
+ *  Только они двигают статусы перемещения (В пути/Получено). */
+const SUPPLY_DEPT = 10;
+const SUPPLY_ADMIN_IDS = new Set(['1', '1858', '986']);
+
+interface CurrentUser { id: string; name: string; isSupply: boolean }
 async function currentUser(client: B24Client): Promise<CurrentUser> {
-	const me = await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current', {}).catch(() => null);
-	return { id: String(me?.ID ?? ''), name: `${me?.NAME ?? ''} ${me?.LAST_NAME ?? ''}`.trim() };
+	const me = await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
+	const id = String(me?.ID ?? '');
+	const depts = Array.isArray(me?.UF_DEPARTMENT) ? (me?.UF_DEPARTMENT as unknown[]).map(Number) : [];
+	const isSupply = SUPPLY_ADMIN_IDS.has(id) || depts.includes(SUPPLY_DEPT);
+	return { id, name: `${me?.NAME ?? ''} ${me?.LAST_NAME ?? ''}`.trim(), isSupply };
+}
+
+/** Кому ставить задачу: глава отдела Снабжения (department.get UF_HEAD), либо env, либо инициатор. Кэш на процесс. */
+let supplyHeadCache: number | null = null;
+async function supplyHead(client: B24Client): Promise<number> {
+	if (supplyHeadCache !== null) return supplyHeadCache;
+	const env = Number(process.env['TRANSFER_PURCHASER_ID'] ?? 0) || 0;
+	if (env) { supplyHeadCache = env; return env; }
+	try {
+		const deps = await client.call<Array<{ UF_HEAD?: unknown }>>('department.get', { ID: SUPPLY_DEPT });
+		const head = Number((Array.isArray(deps) ? deps[0] : undefined)?.UF_HEAD ?? 0) || 0;
+		supplyHeadCache = head;
+		return head;
+	} catch { supplyHeadCache = 0; return 0; }
 }
 
 /** entity.item → {id, name, ...data}. */
@@ -109,7 +131,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const me = await currentUser(client);
 			const now = new Date().toISOString();
-			const purchaserEnv = Number(process.env['TRANSFER_PURCHASER_ID'] ?? 0) || 0;
+			const head = await supplyHead(client);
 			const created: Array<TransferData & { id: number; name: string }> = [];
 
 			for (const g of groups) {
@@ -135,8 +157,8 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 
 				// Задача Б24: ответственный — закупка (env), иначе инициатор; инициатор — соисполнитель.
 				try {
-					const responsible = purchaserEnv || Number(me.id);
-					const accomplices = purchaserEnv && me.id ? [Number(me.id)] : [];
+					const responsible = head || Number(me.id);
+					const accomplices = head && me.id && head !== Number(me.id) ? [Number(me.id)] : [];
 					const listText = lines.map((l) => `• ${l.name || '#' + l.productId} × ${l.qty}`).join('\n');
 					const task = await client.call<{ task?: { id?: number | string } }>('tasks.task.add', {
 						fields: {
@@ -174,7 +196,8 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			let transfers = (items ?? []).map(parseItem).filter((t): t is TransferData & { id: number; name: string } => t != null);
 			const dealId = String(b.dealId ?? '').trim();
 			if (dealId) transfers = transfers.filter((t) => t.dealId === dealId);
-			return { ok: true, transfers };
+			const me = await currentUser(client);
+			return { ok: true, transfers, isSupply: me.isSupply };
 		} catch (err) {
 			app.log.error({}, `[api/transfers/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -195,6 +218,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (doc.status !== 'requested') return reply.code(409).send({ ok: false, error: `нельзя «в пути» из статуса ${doc.status}` });
 			const me = await currentUser(client);
+			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'двигать статус может только снабжение (закупка)' });
 			const did = Number(doc.dealId) || 0;
 			const { name: entryName } = await shipTransferToTransit(erp, {
 				...(did ? { dealId: did } : {}),
@@ -228,6 +252,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (doc.status !== 'in_transit') return reply.code(409).send({ ok: false, error: `нельзя «получено» из статуса ${doc.status}` });
 			const me = await currentUser(client);
+			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'двигать статус может только снабжение (закупка)' });
 			const did = Number(doc.dealId) || 0;
 			const { name: entryName } = await receiveTransferFromTransit(erp, {
 				...(did ? { dealId: did } : {}),
