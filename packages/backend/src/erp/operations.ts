@@ -211,6 +211,63 @@ export async function createTransferDraft(
 	return { name: String(doc['name']) };
 }
 
+/** Транзитный склад «товар в пути» (warehouse_type=Transit в ядре) — для честного двухфазного перемещения. */
+const TRANSIT_STORE = 'Goods In Transit';
+
+/**
+ * «Отгрузил» (закупка): Material Transfer со склада-источника НА транзит — создаёт и СРАЗУ проводит.
+ * Товар уходит с А и повисает «в пути» (из учёта не пропадает). Возвращает имя проведённого Stock Entry.
+ */
+export async function shipTransferToTransit(
+	erp: ErpClient,
+	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number },
+): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	if (!args.lines.length) throw new Error('пустая отгрузка');
+	const doc = await erp.create('Stock Entry', {
+		company: ctx.company,
+		stock_entry_type: 'Material Transfer',
+		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		items: args.lines.map((l) => ({
+			item_code: String(l.productId),
+			qty: l.qty,
+			s_warehouse: erpWarehouse(ctx, l.fromStore),
+			t_warehouse: erpWarehouse(ctx, TRANSIT_STORE),
+		})),
+	});
+	const name = String(doc['name']);
+	await erp.submit('Stock Entry', name);
+	return { name };
+}
+
+/**
+ * «Получил» (закупка): Material Transfer С транзита на склад-получатель — создаёт и СРАЗУ проводит.
+ * Товар приземляется на Б. Возвращает имя проведённого Stock Entry.
+ */
+export async function receiveTransferFromTransit(
+	erp: ErpClient,
+	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; dealId?: number },
+): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	if (!args.lines.length) throw new Error('пустая приёмка');
+	const doc = await erp.create('Stock Entry', {
+		company: ctx.company,
+		stock_entry_type: 'Material Transfer',
+		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		items: args.lines.map((l) => ({
+			item_code: String(l.productId),
+			qty: l.qty,
+			s_warehouse: erpWarehouse(ctx, TRANSIT_STORE),
+			t_warehouse: erpWarehouse(ctx, l.toStore),
+		})),
+	});
+	const name = String(doc['name']);
+	await erp.submit('Stock Entry', name);
+	return { name };
+}
+
 /** Списание со склада (Stock Entry: Material Issue). */
 export async function createWriteOffDraft(
 	erp: ErpClient,
