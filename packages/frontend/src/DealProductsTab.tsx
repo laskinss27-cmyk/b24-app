@@ -14,6 +14,8 @@ import {
 	realizeCoreSubmit,
 	requestSupply,
 	openSupplyCard,
+	createTransfers,
+	listTransfers,
 	withTimeout,
 	call,
 	isWorkRow,
@@ -25,6 +27,7 @@ import {
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type SupplyCard,
+	type TransferDoc,
 } from './b24.js';
 
 interface EnrichedRow extends DealProductRow {
@@ -60,6 +63,8 @@ const MOCK_DATA: TableData = {
 	stores: [
 		{ id: 4, title: 'Измайловский 18Д', active: true },
 		{ id: 8, title: 'Максидом Дунайский 64', active: true },
+		// Склад без остатков по товарам сделки — чтобы в dev видеть статус «↪ Переместить».
+		{ id: 12, title: 'Максидом Богатырский 15', active: true },
 	],
 	rows: [
 		// всего хватает на ОБОИХ складах — все строки «✓ хватит», крути склады/кол-ва как хочешь
@@ -252,6 +257,16 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	const [busy, setBusy] = useState(false);
 	/** Имена черновиков ядра, ожидающих проведения (между «Реализация» и «Провести»). */
 	const [draftNames, setDraftNames] = useState<string[]>([]);
+	/** id строки, по которой создаётся перемещение. */
+	const [transferring, setTransferring] = useState<string | null>(null);
+	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
+	const [dealTransfers, setDealTransfers] = useState<TransferDoc[]>([]);
+	useEffect(() => {
+		if (dealId == null) { setDealTransfers([]); return; }
+		let alive = true;
+		listTransfers(dealId).then((r) => { if (alive) setDealTransfers(r.transfers); }).catch(() => { if (alive) setDealTransfers([]); });
+		return () => { alive = false; };
+	}, [dealId]);
 
 	// Сколько уже реализовано по товару — из ЯДРА (черновики + проведённые). Связь — по productId:
 	// документ ядра хранит item_code=productId без rowId, а в типичной сделке товар уникален по строкам.
@@ -275,6 +290,9 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 		return 'order';                                                          // нет нигде
 	};
 	const storeName = (id: number): string => data.stores.find((s) => s.id === id)?.title ?? `Склад #${id}`;
+	/** Незакрытое перемещение по этому товару (запрошено/в пути) — чтобы показать статус вместо кнопки. */
+	const activeTransferOf = (r: EnrichedRow): TransferDoc | null =>
+		dealTransfers.find((t) => (t.status === 'requested' || t.status === 'in_transit') && t.lines.some((l) => l.productId === r.productId)) ?? null;
 
 	// Товар «нет на складах» → заявка снабжения с точным перечнем (создаёт «Поставку № …»
 	// или дополняет открытую заявку этой сделки). Фича снабжения не менялась — только перевешена
@@ -297,6 +315,32 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
 		} finally {
 			setSupplying(null);
+		}
+	};
+
+	// Перемещение: получатель = выбранный на строке склад (там 0), источник = склад с бо́льшим остатком.
+	// Создаёт документ «Запрошено» + задачу снабжению. Статусы дальше двигает снабжение (окно склад-учёта).
+	const doTransfer = async (r: EnrichedRow): Promise<void> => {
+		if (dealId == null || transferring != null || busy) return;
+		const dest = storeOf(r);
+		const need = remaining(r);
+		const src = r.stocks.filter((s) => s.amount > 0 && s.storeId !== dest).sort((a, b) => b.amount - a.amount)[0];
+		if (!src) { setNotice({ kind: 'err', text: '⛔ нет склада-источника с остатком' }); return; }
+		setTransferring(r.id);
+		setNotice(null);
+		try {
+			await createTransfers({
+				dealId,
+				toStore: storeName(dest),
+				groups: [{ fromStore: src.storeName, lines: [{ productId: r.productId, name: r.name, qty: need }] }],
+			});
+			setNotice({ kind: 'ok', text: `✅ Перемещение запрошено: ${src.storeName} → ${storeName(dest)} · ${r.name.slice(0, 30)} × ${need}. Задача ушла снабжению.` });
+			const fresh = await listTransfers(dealId).catch(() => null);
+			if (fresh) setDealTransfers(fresh.transfers);
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setTransferring(null);
 		}
 	};
 
@@ -398,9 +442,22 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 							))}
 						</select>
 						{status === 'ready' && <span className="st-badge ready">✓ хватит</span>}
-						{status === 'transfer' && (
-							<button className="st-badge transfer" disabled title="0 на выбранном складе, но есть на других — создать перемещение (скоро)">↪ Перемещение</button>
-						)}
+						{status === 'transfer' && (() => {
+							const active = activeTransferOf(r);
+							if (active) return (
+								<span className={`st-badge ${active.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${active.fromStore} → ${active.toStore}`}>
+									{active.status === 'in_transit' ? '🚚 в пути' : '⏳ запрошено'}
+								</span>
+							);
+							return (
+								<button
+									className="st-badge transfer"
+									disabled={busy || transferring != null}
+									onClick={() => void doTransfer(r)}
+									title="0 на выбранном складе, но есть на других — запросить перемещение (источник = склад с остатком)"
+								>{transferring === r.id ? '…' : '↪ Переместить'}</button>
+							);
+						})()}
 						{status === 'order' && (
 							<button
 								className="st-badge order"
