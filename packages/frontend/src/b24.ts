@@ -721,6 +721,70 @@ export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise
 	return { orderId: json.orderId ?? 0, orderReused: json.orderReused ?? false, shipmentId: json.shipmentId, accountNumber: json.accountNumber ?? '', dupRemoved: json.dupRemoved ?? null };
 }
 
+// ── Перемещения (складской учёт) ─────────────────────────────────────────────
+export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'canceled';
+export interface TransferLineDto { productId: number; name: string; qty: number }
+export interface TransferDoc {
+	id: number;
+	name: string;
+	dealId: string;
+	toStore: string;
+	fromStore: string;
+	status: TransferStatus;
+	lines: TransferLineDto[];
+	taskId: number | null;
+	shipEntry: string | null;
+	receiveEntry: string | null;
+	createdAt: string;
+	createdById: string;
+	createdByName: string;
+	history: Array<{ at: string; status: TransferStatus; byId: string; byName?: string; note?: string }>;
+}
+
+/** Создать перемещение(я) из сделки: глобальный склад-получатель + группы по складам-источникам. */
+export async function createTransfers(args: { dealId: number; toStore: string; groups: Array<{ fromStore: string; lines: TransferLineDto[] }> }): Promise<TransferDoc[]> {
+	const res = await fetch('/api/transfers/create', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...args }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfers?: TransferDoc[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось создать перемещение');
+	return json.transfers ?? [];
+}
+
+/** Список перемещений: по сделке (вкладка) или все (окно закупки). isSupply — может ли текущий юзер двигать статусы. */
+export async function listTransfers(dealId?: number): Promise<{ transfers: TransferDoc[]; isSupply: boolean }> {
+	const res = await fetch('/api/transfers/list', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...(dealId ? { dealId } : {}) }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfers?: TransferDoc[]; isSupply?: boolean };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить перемещения');
+	return { transfers: json.transfers ?? [], isSupply: Boolean(json.isSupply) };
+}
+
+/** Закупка: «В пути» (проводка А→транзит). */
+export async function shipTransfer(id: number): Promise<TransferDoc> {
+	const res = await fetch('/api/transfers/ship', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
+	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось отгрузить');
+	return json.transfer;
+}
+
+/** Закупка: «Получено» (проводка транзит→Б). */
+export async function receiveTransfer(id: number): Promise<TransferDoc> {
+	const res = await fetch('/api/transfers/receive', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
+	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось принять');
+	return json.transfer;
+}
+
 // ── Реализация В ЯДРЕ (Delivery Note) — новая модель «покрывала» ───────────────
 // Реализация — документ ERPNext (мимо битриксовых стен sale.order/shipment). Связь со
 // сделкой = поле b24_deal_id. Склад выбирается у нас и пишется в документ (warehouse).
