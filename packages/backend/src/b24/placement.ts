@@ -331,6 +331,33 @@ export async function ensureRepairsEntity(client: B24Client): Promise<{ status: 
 }
 
 /**
+ * Хранилище ПЕРЕМЕЩЕНИЙ (складской учёт) — всё наше: документ перемещения в entity-store.
+ * Один документ = один склад-источник → склад-получатель (несколько источников = несколько
+ * документов). Честный транзит через Goods In Transit, статусы двигает закупка. См. спеку.
+ */
+export const TRANSFERS_ENTITY = 'ctv_transfers';
+
+let transfersEntityEnsured = false;
+
+export async function ensureTransfersEntity(client: B24Client): Promise<{ status: string }> {
+	if (transfersEntityEnsured) return { status: 'cached' };
+	try {
+		await client.call('entity.add', { ENTITY: TRANSFERS_ENTITY, NAME: 'CTV Перемещения (складской учёт)', ACCESS: { AU: 'W' } });
+		transfersEntityEnsured = true;
+		return { status: 'created' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) {
+				transfersEntityEnsured = true;
+				return { status: 'exists' };
+			}
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
+/**
  * Пункт ЛЕВОГО МЕНЮ «Ремонты» — вход в наш модуль приёма оборудования (view='repairs').
  * Обработчик /placement/repairs. LEFT_MENU допускает несколько привязок с разными HANDLER —
  * этот пункт живёт рядом с «Товары». Только идемпотентный bind (без unbind — см. инцидент гонки 2026-06-03).

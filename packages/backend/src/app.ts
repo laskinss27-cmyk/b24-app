@@ -22,6 +22,7 @@ import { registerApiDealRoute } from './routes/api-deal.js';
 import { registerPlacementSalesReportRoute } from './routes/placement-sales-report.js';
 import { registerPlacementRepairsRoute } from './routes/placement-repairs.js';
 import { registerApiRepairsRoute } from './routes/api-repairs.js';
+import { registerApiTransfersRoute } from './routes/api-transfers.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
 
@@ -106,6 +107,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerPlacementSalesReportRoute(app);
 	registerPlacementRepairsRoute(app);
 	registerApiRepairsRoute(app);
+	registerApiTransfersRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
 
