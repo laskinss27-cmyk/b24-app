@@ -267,6 +267,9 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 		listTransfers(dealId).then((r) => { if (alive) setDealTransfers(r.transfers); }).catch(() => { if (alive) setDealTransfers([]); });
 		return () => { alive = false; };
 	}, [dealId]);
+	/** Глобальный «Склад реализации» = склад, с которого продаём. Дефолт для всех строк;
+	 *  где его не хватает — строка идёт в перемещение НА него. Per-row селектор может переопределить. */
+	const [realizeStore, setRealizeStore] = useState<number>(() => data.stores[0]?.id ?? 0);
 
 	// Сколько уже реализовано по товару — из ЯДРА (черновики + проведённые). Связь — по productId:
 	// документ ядра хранит item_code=productId без rowId, а в типичной сделке товар уникален по строкам.
@@ -279,8 +282,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	};
 
 	// ── Склад на строке → статус → группировка по складам ──
-	const firstStore = data.stores[0]?.id ?? 0;
-	const storeOf = (r: EnrichedRow): number => rowStore[r.id] ?? firstStore;
+	const storeOf = (r: EnrichedRow): number => rowStore[r.id] ?? realizeStore;
 	const amountAt = (r: EnrichedRow, storeId: number): number => r.stocks.find((s) => s.storeId === storeId)?.amount ?? 0;
 	const totalStock = (r: EnrichedRow): number => r.stocks.reduce((a, s) => a + s.amount, 0);
 	type RowStatus = 'ready' | 'transfer' | 'order';
@@ -558,6 +560,19 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			<div className="deal-addbar">
 				<button className="btn-primary" onClick={onAdd}>➕ Добавить товар</button>
 				<button className="btn-secondary" onClick={onKp}>📄 КП</button>
+				<label className="global-store" title="Склад, с которого продаём. Где его не хватает — строку можно переместить НА него.">
+					🏬 Склад реализации:&nbsp;
+					<select
+						className="store-select"
+						value={realizeStore}
+						disabled={realizePhase !== 'idle' || busy}
+						onChange={(e) => setRealizeStore(Number(e.target.value))}
+					>
+						{data.stores.map((s) => (
+							<option key={s.id} value={s.id}>{s.title}</option>
+						))}
+					</select>
+				</label>
 				<span className="hint">«Добавить» — каталог-пикер; «КП» — коммерческое предложение из сделки</span>
 			</div>
 
