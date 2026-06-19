@@ -1790,7 +1790,9 @@ html, body, #root { height: 100%; }
 
 @media print {
 	body * { visibility: hidden; }
-	.repair-blank, .repair-blank *, .kp-doc, .kp-doc * { visibility: visible; }
+	/* .inv добавлен: этот глобальный `body * {hidden}` (для Ремонтов/КП) иначе прячет
+	   и печать инвентаризации → пустые листы. Хром .inv скрыт display:none в 1-м @media print. */
+	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv * { visibility: visible; }
 	.repair-blank { position: absolute; left: 0; top: 0; width: 100%; }
 	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
 	.no-print { display: none !important; }
