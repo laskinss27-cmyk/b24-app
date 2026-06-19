@@ -27,8 +27,8 @@ const execFileP = promisify(execFile);
 const WEBHOOK = (process.env['DEV_WEBHOOK'] ?? '').replace(/\/$/, '');
 if (!WEBHOOK) { console.error('DEV_WEBHOOK нет'); process.exit(1); }
 
-/** Вызов Б24 через curl (системный прокси), с ретраями. */
-async function b24call<T>(method: string, params: Record<string, unknown>): Promise<T> {
+/** Вызов Б24 через curl (системный прокси), с ретраями. Отдаёт полный конверт (result + пагинация next/total). */
+async function b24envelope(method: string, params: Record<string, unknown>): Promise<{ result: unknown; next?: number; total?: number }> {
 	let last: unknown;
 	for (let a = 1; a <= 5; a++) {
 		try {
@@ -38,12 +38,17 @@ async function b24call<T>(method: string, params: Record<string, unknown>): Prom
 				'-d', JSON.stringify(params),
 				`${WEBHOOK}/${method}.json`,
 			], { maxBuffer: 64 * 1024 * 1024 });
-			const json = JSON.parse(stdout) as { result?: T; error?: string; error_description?: string };
+			const json = JSON.parse(stdout) as { result?: unknown; next?: number; total?: number; error?: string; error_description?: string };
 			if (json.error) throw new Error(`${json.error}: ${json.error_description ?? ''}`);
-			return json.result as T;
+			return { result: json.result, next: json.next, total: json.total };
 		} catch (e) { last = e; await new Promise((r) => setTimeout(r, a * 700)); }
 	}
 	throw last;
+}
+
+/** Одиночный вызов Б24 (без пагинации) — только result. */
+async function b24call<T>(method: string, params: Record<string, unknown>): Promise<T> {
+	return (await b24envelope(method, params)).result as T;
 }
 
 const ERP = process.env['ERPNEXT_URL'] ?? 'http://localhost:8080';
@@ -121,10 +126,12 @@ async function b24Page<T>(method: string, params: Record<string, unknown>, pick:
 	const out: T[] = [];
 	let start: number | undefined = 0;
 	while (start !== undefined) {
-		const raw = await b24call<unknown>(method, { ...params, start });
-		const page = pick(raw);
-		out.push(...page);
-		start = page.length === 50 ? (start as number) + 50 : undefined;
+		const env = await b24envelope(method, { ...params, start });
+		out.push(...pick(env.result));
+		// Стоп по `next` от Б24 (индекс след. страницы; на последней — отсутствует).
+		// Старое `length===50` зацикливалось, когда total кратно 50: Б24 зажимает start
+		// в диапазон и вечно отдаёт последние 50 (баг: catalog.section.list, 100 разделов).
+		start = typeof env.next === 'number' ? env.next : undefined;
 	}
 	return out;
 }
