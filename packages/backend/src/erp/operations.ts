@@ -15,6 +15,7 @@ const DEAL_FIELD = 'b24_deal_id';
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 const TECH_CUSTOMER = 'Б24 Розница';
 const TECH_SUPPLIER = 'Б24 Снабжение';
+const ITEM_GROUP = 'Каталог Б24';
 
 export interface ErpContext {
 	company: string;
@@ -449,4 +450,69 @@ export async function deleteInventoryRecoDraft(erp: ErpClient, name: string): Pr
 	if (!doc) return;
 	if (Number(doc['docstatus'] ?? 0) !== 0) throw new Error(`${name} уже проведён — удалять нельзя`);
 	await erp.request('DELETE', `/api/resource/Stock%20Reconciliation/${encodeURIComponent(name)}`);
+}
+
+// ── Инструмент коррекции остатков (личный) ────────────────────────────────────
+
+/** Поиск товаров в ядре: по id (item_code), имени или артикулу. Для экрана коррекции. */
+export async function searchErpItems(erp: ErpClient, q: string, limit = 25): Promise<Array<{ productId: number; name: string; article: string; brand: string }>> {
+	const term = q.trim();
+	if (!term) return [];
+	const seen = new Map<number, { productId: number; name: string; article: string; brand: string }>();
+	const fields = ['name', 'item_name', 'b24_article', 'b24_brand'];
+	const grp: unknown[] = [['item_group', '=', ITEM_GROUP]];
+	const add = (rows: Array<Record<string, unknown>>): void => {
+		for (const r of rows) {
+			const pid = Number(r['name']);
+			if (Number.isInteger(pid) && pid > 0 && !seen.has(pid)) {
+				seen.set(pid, { productId: pid, name: String(r['item_name'] ?? ''), article: String(r['b24_article'] ?? ''), brand: String(r['b24_brand'] ?? '') });
+			}
+		}
+	};
+	if (/^\d+$/.test(term)) add(await erp.list('Item', fields, [...grp, ['name', '=', term]], 1));
+	add(await erp.list('Item', fields, [...grp, ['item_name', 'like', `%${term}%`]], limit));
+	if (seen.size < limit) add(await erp.list('Item', fields, [...grp, ['b24_article', 'like', `%${term}%`]], limit));
+	return [...seen.values()].slice(0, limit);
+}
+
+/** Текущий остаток товара по складам (название склада Б24 → qty). Только где есть Bin. */
+export async function itemStockAllStores(erp: ErpClient, productId: number): Promise<Array<{ storeTitle: string; qty: number }>> {
+	const ctx = await erpContext(erp);
+	const bins = await erp.list('Bin', ['warehouse', 'actual_qty'], [['item_code', '=', String(productId)]]);
+	return bins.map((b) => ({ storeTitle: b24StoreTitle(ctx, String(b['warehouse'] ?? '')), qty: Number(b['actual_qty'] ?? 0) }));
+}
+
+/** Список активных складов (названия Б24) — для выбора в коррекции (вкл. где остатка ещё нет). */
+export async function listActiveStoreTitles(erp: ErpClient): Promise<string[]> {
+	const ctx = await erpContext(erp);
+	const whs = await erp.list('Warehouse', ['name', 'warehouse_type'], [['is_group', '=', 0], ['disabled', '=', 0]]);
+	const sys = new Set(['Goods In Transit', 'Stores', 'Finished Goods', 'Work In Progress']);
+	return whs
+		.filter((w) => String(w['warehouse_type'] ?? '') !== 'Transit')
+		.map((w) => b24StoreTitle(ctx, String(w['name'] ?? '')))
+		.filter((t) => t && !sys.has(t))
+		.sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+/** Коррекция остатка ОДНОЙ позиции: тихий Stock Reconciliation (абсолютный qty). Возвращает имя дока. */
+export async function createStockCorrection(erp: ErpClient, args: { productId: number; storeTitle: string; newQty: number; by?: string }): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensureInvField(erp);
+	const wh = erpWarehouse(ctx, args.storeTitle);
+	// Оценка для строки reco: текущая из Bin, иначе из Item, иначе минимальная.
+	let valuation = Number((await erp.list('Bin', ['valuation_rate'], [['item_code', '=', String(args.productId)], ['warehouse', '=', wh]]))[0]?.['valuation_rate'] ?? 0);
+	if (!valuation) valuation = Number((await erp.list('Item', ['valuation_rate'], [['name', '=', String(args.productId)]]))[0]?.['valuation_rate'] ?? 0);
+	const adj = (await erp.list('Account', ['name'], [['account_type', '=', 'Stock Adjustment'], ['company', '=', ctx.company]]))[0];
+	if (!adj) throw new Error(`нет счёта Stock Adjustment у компании «${ctx.company}»`);
+	const doc = await erp.create('Stock Reconciliation', {
+		company: ctx.company,
+		purpose: 'Stock Reconciliation',
+		set_posting_time: 1,
+		expense_account: String(adj['name']),
+		[INV_FIELD]: `correction${args.by ? ':' + args.by : ''}`,
+		items: [{ item_code: String(args.productId), warehouse: wh, qty: args.newQty, valuation_rate: Math.max(valuation, 0.01) }],
+	});
+	const name = String(doc['name']);
+	await erp.submit('Stock Reconciliation', name);
+	return { name };
 }
