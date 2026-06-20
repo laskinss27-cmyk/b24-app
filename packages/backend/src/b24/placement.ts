@@ -220,11 +220,6 @@ export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ s
 	// рассчитана на админа. denied=true → ранний выход без записи флага.
 	let denied = false;
 	const isDenied = (err: unknown): boolean => err instanceof B24ApiError && /ACCESS_DENIED|access\s*denied/i.test(`${err.code} ${err.description ?? ''}`);
-	const unbindAll = async (placement: string): Promise<void> => {
-		if (denied) return;
-		try { await opts.client.call('placement.unbind', { PLACEMENT: placement }); log.push(`✂ ${placement}`); }
-		catch (err) { if (isDenied(err)) denied = true; log.push(`✂ ${placement} FAIL ${err instanceof B24ApiError ? err.code : String(err)}`); }
-	};
 	const bind = async (placement: string, path: string, title: string, titleEn: string): Promise<void> => {
 		if (denied) return;
 		try {
@@ -232,13 +227,25 @@ export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ s
 			log.push(`+ ${placement}${path}`);
 		} catch (err) { if (isDenied(err)) denied = true; log.push(`+ ${placement}${path} FAIL ${err instanceof B24ApiError ? err.code : String(err)}`); }
 	};
-	await unbindAll(DEAL_TAB_PLACEMENT);
+	// Снять ВСЕ привязки управляемых placement'ов — поимённо по handler. placement.unbind по одному
+	// PLACEMENT (без HANDLER) снимает НЕ ВСЁ (зависал лишний пункт). Перечисляем реальные через placement.get.
+	const MANAGED = new Set<string>([DEAL_TAB_PLACEMENT, INVENTORY_MENU_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT_OLD]);
+	try {
+		const bound = await opts.client.call<Array<{ placement?: string; handler?: string }>>('placement.get', {});
+		for (const b of Array.isArray(bound) ? bound : []) {
+			const pl = String(b.placement ?? '');
+			const h = String(b.handler ?? '');
+			if (!MANAGED.has(pl) || !h) continue;
+			try { await opts.client.call('placement.unbind', { PLACEMENT: pl, HANDLER: h }); log.push(`✂ ${pl} ${h.replace(base, '')}`); }
+			catch (err) { if (isDenied(err)) { denied = true; break; } log.push(`✂ ${pl} FAIL ${err instanceof B24ApiError ? err.code : String(err)}`); }
+		}
+	} catch (err) {
+		if (isDenied(err)) denied = true; else log.push(`placement.get FAIL ${err instanceof B24ApiError ? err.code : String(err)}`);
+	}
 	await bind(DEAL_TAB_PLACEMENT, '/placement/deal-tab', DEAL_TAB_TITLE, DEAL_TAB_TITLE);
-	await unbindAll(INVENTORY_MENU_PLACEMENT);
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/inventory', INVENTORY_MENU_TITLE, 'Sales');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/repairs', REPAIRS_MENU_TITLE, 'Repairs');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/stock', STOCK_MENU_TITLE, 'Stock');
-	await unbindAll(DEAL_LIST_REPORT_PLACEMENT);
 	await bind(DEAL_LIST_REPORT_PLACEMENT, '/placement/sales-report', DEAL_LIST_REPORT_TITLE, 'Sales report');
 	// Флаг «сделано» — только если НЕ упёрлись в ACCESS_DENIED (т.е. это был админ и сверка прошла).
 	if (!denied) placementsReconciled = true;
