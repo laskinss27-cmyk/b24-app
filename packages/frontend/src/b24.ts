@@ -785,6 +785,18 @@ export async function receiveTransfer(id: number): Promise<TransferDoc> {
 	return json.transfer;
 }
 
+/** Журнал движений для окна «Складской учёт»: списания/оприходования/реализации. */
+export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string }
+export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery'): Promise<CoreMovement[]> {
+	const res = await fetch('/api/stock/movements', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), kind }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; movements?: CoreMovement[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить движения');
+	return json.movements ?? [];
+}
+
 // ── Реализация В ЯДРЕ (Delivery Note) — новая модель «покрывала» ───────────────
 // Реализация — документ ERPNext (мимо битриксовых стен sale.order/shipment). Связь со
 // сделкой = поле b24_deal_id. Склад выбирается у нас и пишется в документ (warehouse).

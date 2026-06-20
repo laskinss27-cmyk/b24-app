@@ -17,7 +17,10 @@
 				var __sp = new URLSearchParams(location.search);
 				var __inv = __sp.has('inv');
 				var __rep = __sp.has('repairs');
-				window.__B24_CONTEXT__ = __rep
+				var __stock = __sp.has('stock');
+				window.__B24_CONTEXT__ = __stock
+					? { view: 'stock', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }
+					: __rep
 					? { view: 'repairs', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }
 					: __inv
 					? { view: 'inventory', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }

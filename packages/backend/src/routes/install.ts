@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindStockMenuPlacement, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
@@ -76,6 +76,8 @@ export function registerInstallRoute(app: FastifyInstance): void {
 					'[install] placement bound');
 				const menuResult = await bindInventoryMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				app.log.info({ placement: 'LEFT_MENU', status: menuResult.status }, '[install] inventory menu bound');
+				const stockResult = await bindStockMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ placement: 'LEFT_MENU', status: stockResult.status }, '[install] stock menu bound');
 			} catch (err) {
 				const errInfo = err instanceof B24ApiError
 					? { code: err.code, description: err.description, httpStatus: err.httpStatus }

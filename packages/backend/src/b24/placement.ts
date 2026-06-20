@@ -77,7 +77,7 @@ export async function bindTaskInventoryPlacement(opts: BindDealTabOptions): Prom
  * легальное место входа: складской учёт/каталог Битрикс приложениям не отдаёт.
  */
 export const INVENTORY_MENU_PLACEMENT = 'LEFT_MENU';
-export const INVENTORY_MENU_TITLE = 'Товары';
+export const INVENTORY_MENU_TITLE = 'Продажа';
 
 export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/inventory`;
@@ -235,8 +235,9 @@ export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ s
 	await unbindAll(DEAL_TAB_PLACEMENT);
 	await bind(DEAL_TAB_PLACEMENT, '/placement/deal-tab', DEAL_TAB_TITLE, DEAL_TAB_TITLE);
 	await unbindAll(INVENTORY_MENU_PLACEMENT);
-	await bind(INVENTORY_MENU_PLACEMENT, '/placement/inventory', INVENTORY_MENU_TITLE, 'Products');
+	await bind(INVENTORY_MENU_PLACEMENT, '/placement/inventory', INVENTORY_MENU_TITLE, 'Sales');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/repairs', REPAIRS_MENU_TITLE, 'Repairs');
+	await bind(INVENTORY_MENU_PLACEMENT, '/placement/stock', STOCK_MENU_TITLE, 'Stock');
 	await unbindAll(DEAL_LIST_REPORT_PLACEMENT);
 	await bind(DEAL_LIST_REPORT_PLACEMENT, '/placement/sales-report', DEAL_LIST_REPORT_TITLE, 'Sales report');
 	// Флаг «сделано» — только если НЕ упёрлись в ACCESS_DENIED (т.е. это был админ и сверка прошла).
@@ -363,6 +364,29 @@ export async function ensureTransfersEntity(client: B24Client): Promise<{ status
  * этот пункт живёт рядом с «Товары». Только идемпотентный bind (без unbind — см. инцидент гонки 2026-06-03).
  */
 export const REPAIRS_MENU_TITLE = 'Ремонты';
+
+/** Пункт ЛЕВОГО МЕНЮ «Складской учёт» — окно перемещений/списаний/оприходований/реализаций (view='stock').
+ *  LEFT_MENU допускает несколько привязок; живёт рядом с «Продажа» и «Ремонты». Только идемпотентный bind. */
+export const STOCK_MENU_TITLE = 'Складской учёт';
+
+export async function bindStockMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/stock`;
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: INVENTORY_MENU_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: STOCK_MENU_TITLE,
+			LANG_ALL: { ru: { TITLE: STOCK_MENU_TITLE }, en: { TITLE: 'Stock' } },
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
 
 export async function bindRepairsMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/repairs`;

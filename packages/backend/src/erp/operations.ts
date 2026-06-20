@@ -452,6 +452,24 @@ export async function deleteInventoryRecoDraft(erp: ErpClient, name: string): Pr
 	await erp.request('DELETE', `/api/resource/Stock%20Reconciliation/${encodeURIComponent(name)}`);
 }
 
+// ── Складской учёт: журнал движений (read-only вкладки) ───────────────────────
+
+export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string }
+
+/** Последние документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация). */
+export async function listCoreMovements(erp: ErpClient, kind: 'issue' | 'receipt' | 'delivery', limit = 50): Promise<CoreMovement[]> {
+	if (kind === 'delivery') {
+		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus'], [['docstatus', '!=', 2]], limit);
+		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽` }));
+	}
+	if (kind === 'receipt') {
+		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus'], [['docstatus', '!=', 2]], limit);
+		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r['supplier'] ?? '') }));
+	}
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus'], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2]], limit);
+	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: 'списание' }));
+}
+
 // ── Инструмент коррекции остатков (личный) ────────────────────────────────────
 
 /** Поиск товаров в ядре: по id (item_code), имени или артикулу. Для экрана коррекции. */

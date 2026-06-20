@@ -374,7 +374,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
-				{!pickMode && <button className="btn-primary" onClick={() => setMode('inventory')}>＋ Создать инвентаризацию</button>}
+				{!pickMode && <button className="btn-primary" onClick={() => setMode('inventory')}>📋 Инвентаризации</button>}
 				{!pickMode && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
 
