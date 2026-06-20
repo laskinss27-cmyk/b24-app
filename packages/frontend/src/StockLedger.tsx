@@ -1,5 +1,16 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { listTransfers, shipTransfer, receiveTransfer, fetchMovements, type TransferDoc, type CoreMovement } from './b24.js';
+import { listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal, type TransferDoc, type CoreMovement } from './b24.js';
+
+/** Кликабельная ссылка на сделку + ФИО ответственного (общий вид для всех складских документов). */
+function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | undefined }): JSX.Element {
+	if (!dealId) return <span style={{ color: '#7a8699' }}>—</span>;
+	return (
+		<div>
+			<a href="#" onClick={(e) => { e.preventDefault(); openDeal(Number(dealId)); }} style={{ color: '#185fa5', textDecoration: 'none' }}>Сделка #{dealId}</a>
+			{ownerName ? <div style={{ color: '#7a8699', fontSize: 12 }}>{ownerName}</div> : null}
+		</div>
+	);
+}
 
 /**
  * Окно «Складской учёт» (левое меню, view='stock'). Вкладки:
@@ -65,7 +76,7 @@ function TransfersTab(): JSX.Element {
 				<tbody>
 					{list.map((t) => (
 						<tr key={t.id}>
-							<td style={TD}>#{t.dealId}<div style={{ color: '#7a8699', fontSize: 12 }}>{(t.createdAt || '').slice(0, 10)}</div></td>
+							<td style={TD}><DealCell dealId={t.dealId} ownerName={t.ownerName} /><div style={{ color: '#7a8699', fontSize: 12 }}>{(t.createdAt || '').slice(0, 10)}</div></td>
 							<td style={TD}>{t.fromStore} → {t.toStore}</td>
 							<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 							<td style={TD}>{STATUS[t.status] ?? t.status}</td>
@@ -94,10 +105,10 @@ function MovementsTab({ kind }: { kind: 'issue' | 'receipt' | 'delivery' }): JSX
 	if (!list.length) return <p className="empty">Документов нет.</p>;
 	return (
 		<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-			<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Инфо</th><th style={TH}>Статус</th></tr></thead>
+			<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Сделка / ответственный</th><th style={TH}>Инфо</th><th style={TH}>Статус</th></tr></thead>
 			<tbody>
 				{list.map((m) => (
-					<tr key={m.name}><td style={TD}>{m.name}</td><td style={TD}>{m.date}</td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td></tr>
+					<tr key={m.name}><td style={TD}>{m.name}</td><td style={TD}>{m.date}</td><td style={TD}><DealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td></tr>
 				))}
 			</tbody>
 		</table>

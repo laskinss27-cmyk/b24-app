@@ -3,6 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { listCoreMovements } from '../erp/operations.js';
+import { resolveDealOwners } from '../b24/deal-info.js';
 
 /**
  * API окна «Складской учёт» — read-only журнал движений для вкладок
@@ -31,7 +32,9 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			return { ok: true, kind, movements: await listCoreMovements(erp, kind) };
+			const movements = await listCoreMovements(erp, kind);
+			const owners = await resolveDealOwners(client, movements.map((m) => m.dealId));
+			return { ok: true, kind, movements: movements.map((m) => ({ ...m, ownerName: owners.get(m.dealId) ?? '' })) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/movements] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });

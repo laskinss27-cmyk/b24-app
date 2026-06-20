@@ -4,6 +4,7 @@ import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { shipTransferToTransit, receiveTransferFromTransit } from '../erp/operations.js';
+import { resolveDealOwners } from '../b24/deal-info.js';
 
 /**
  * API модуля «Перемещения» (складской учёт). Документ перемещения — в нашем entity-store
@@ -197,7 +198,8 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const dealId = String(b.dealId ?? '').trim();
 			if (dealId) transfers = transfers.filter((t) => t.dealId === dealId);
 			const me = await currentUser(client);
-			return { ok: true, transfers, isSupply: me.isSupply };
+			const owners = await resolveDealOwners(client, transfers.map((t) => t.dealId));
+			return { ok: true, transfers: transfers.map((t) => ({ ...t, ownerName: owners.get(t.dealId) ?? '' })), isSupply: me.isSupply };
 		} catch (err) {
 			app.log.error({}, `[api/transfers/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });

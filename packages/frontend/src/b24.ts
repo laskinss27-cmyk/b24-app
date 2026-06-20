@@ -738,6 +738,8 @@ export interface TransferDoc {
 	createdAt: string;
 	createdById: string;
 	createdByName: string;
+	/** ФИО ответственного по сделке (дорезолвлено бэкендом). */
+	ownerName?: string;
 	history: Array<{ at: string; status: TransferStatus; byId: string; byName?: string; note?: string }>;
 }
 
@@ -786,7 +788,7 @@ export async function receiveTransfer(id: number): Promise<TransferDoc> {
 }
 
 /** Журнал движений для окна «Складской учёт»: списания/оприходования/реализации. */
-export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string }
+export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string; dealId: string; ownerName: string }
 export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery'): Promise<CoreMovement[]> {
 	const res = await fetch('/api/stock/movements', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },

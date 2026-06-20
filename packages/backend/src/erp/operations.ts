@@ -454,20 +454,20 @@ export async function deleteInventoryRecoDraft(erp: ErpClient, name: string): Pr
 
 // ── Складской учёт: журнал движений (read-only вкладки) ───────────────────────
 
-export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string }
+export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string; dealId: string }
 
 /** Последние документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация). */
 export async function listCoreMovements(erp: ErpClient, kind: 'issue' | 'receipt' | 'delivery', limit = 50): Promise<CoreMovement[]> {
 	if (kind === 'delivery') {
-		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus'], [['docstatus', '!=', 2]], limit);
-		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽` }));
+		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2]], limit);
+		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`, dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
 	if (kind === 'receipt') {
-		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus'], [['docstatus', '!=', 2]], limit);
-		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r['supplier'] ?? '') }));
+		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2]], limit);
+		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r['supplier'] ?? ''), dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
-	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus'], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2]], limit);
-	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: 'списание' }));
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2]], limit);
+	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: 'списание', dealId: String(r[DEAL_FIELD] ?? '') }));
 }
 
 // ── Инструмент коррекции остатков (личный) ────────────────────────────────────
