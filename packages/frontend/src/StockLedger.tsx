@@ -322,17 +322,61 @@ function ItemPicker({ onPick }: { onPick: (it: StockItem) => void }): JSX.Elemen
 
 interface ReceiptLine { productId: number; name: string; qty: number; purchase: number; retail: number }
 
+/** Под-форma «Добавить товар» (логика 1С): поиск → выбор → кол-во (+цены для прихода) → «Добавить». */
+function AddItemModal({ withPrices, onAdd, onClose }: { withPrices: boolean; onAdd: (it: ReceiptLine) => void; onClose: () => void }): JSX.Element {
+	const [sel, setSel] = useState<StockItem | null>(null);
+	const [qty, setQty] = useState(1);
+	const [purchase, setPurchase] = useState(0);
+	const [retail, setRetail] = useState(0);
+	const [err, setErr] = useState<string | null>(null);
+	const confirm = (): void => {
+		if (!sel) { setErr('найди и выбери товар'); return; }
+		if (!(qty > 0)) { setErr('кол-во должно быть больше 0'); return; }
+		onAdd({ productId: sel.productId, name: sel.name || ('#' + sel.productId), qty, purchase, retail });
+		onClose();
+	};
+	return (
+		<div style={{ ...overlay, zIndex: 1100 }}>
+			<div style={modalCard}>
+				<h2 style={{ fontSize: 16, margin: '0 0 10px' }}>Добавить товар</h2>
+				{!sel ? <ItemPicker onPick={setSel} /> : (
+					<>
+						<div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 8px' }}>
+							<span>✅ <b>{sel.name || ('#' + sel.productId)}</b> <span style={{ color: '#7a8699', fontSize: 12 }}>id {sel.productId}</span></span>
+							<button style={btnGhost} onClick={() => setSel(null)}>сменить</button>
+						</div>
+						<label style={fieldLabel}>Количество</label>
+						<input type="number" min="0" step="any" autoFocus style={{ ...inp, width: 120 }} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
+						{withPrices && (
+							<div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+								<div><label style={fieldLabel}>Закупка ₽</label><input type="number" min="0" step="any" style={{ ...inp, width: 120 }} value={purchase} onChange={(e) => setPurchase(Number(e.target.value))} /></div>
+								<div><label style={fieldLabel}>Розница ₽ (необяз.)</label><input type="number" min="0" step="any" style={{ ...inp, width: 120 }} value={retail} onChange={(e) => setRetail(Number(e.target.value))} /></div>
+							</div>
+						)}
+					</>
+				)}
+				{err && <p className="error">⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+					<button style={btnGhost} onClick={onClose}>Отмена</button>
+					<button className="btn-primary" disabled={!sel} onClick={confirm}>Добавить</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () => void; onDone: () => void }): JSX.Element {
 	const [toStore, setToStore] = useState('');
 	const [supplier, setSupplier] = useState('');
 	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<ReceiptLine[]>([]);
+	const [addOpen, setAddOpen] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
-		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + 1 } : l)
-		: [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1, purchase: 0, retail: 0 }]);
+	const add = (it: ReceiptLine): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
+		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + it.qty, purchase: it.purchase || l.purchase, retail: it.retail || l.retail } : l)
+		: [...ls, it]);
 	const upd = (pid: number, patch: Partial<ReceiptLine>): void => setLines((ls) => ls.map((l) => l.productId === pid ? { ...l, ...patch } : l));
 	const del = (pid: number): void => setLines((ls) => ls.filter((l) => l.productId !== pid));
 
@@ -359,7 +403,7 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 				<datalist id="stock-suppliers">{form.suppliers.map((s) => <option key={s} value={s} />)}</datalist>
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '4px 0 0' }}>Список — контрагенты Б24 (воронка «Поставщики»). Нового можно вписать — заведём в ядре. Пусто → «Б24 Снабжение».</p>
 				<label style={fieldLabel}>Товары</label>
-				<ItemPicker onPick={add} />
+				<button style={btnGhost} onClick={() => setAddOpen(true)}>➕ Добавить товар</button>
 				{lines.length > 0 && (
 					<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
 						<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Закупка ₽</th><th style={TH}>Розница ₽</th><th style={TH}></th></tr></thead>
@@ -379,6 +423,7 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Розница (если заполнена) уйдёт в каталог Б24. Пусто — цену не трогаем.</p>
+				{addOpen && <AddItemModal withPrices onAdd={add} onClose={() => setAddOpen(false)} />}
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
@@ -396,12 +441,13 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 	const [reason, setReason] = useState('');
 	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<SimpleLine[]>([]);
+	const [addOpen, setAddOpen] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
-		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + 1 } : l)
-		: [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1 }]);
+	const add = (it: ReceiptLine): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
+		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + it.qty } : l)
+		: [...ls, { productId: it.productId, name: it.name, qty: it.qty }]);
 	const upd = (pid: number, qty: number): void => setLines((ls) => ls.map((l) => l.productId === pid ? { ...l, qty } : l));
 	const del = (pid: number): void => setLines((ls) => ls.filter((l) => l.productId !== pid));
 
@@ -424,10 +470,11 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 				{storeSelect(fromStore, setFromStore, form.stores, '— выберите склад —')}
 				<label style={fieldLabel}>Причина</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="например: брак, бой, недостача" value={reason} onChange={(e) => setReason(e.target.value)} />
+				{addOpen && <AddItemModal withPrices={false} onAdd={add} onClose={() => setAddOpen(false)} />}
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<label style={fieldLabel}>Товары</label>
-				<ItemPicker onPick={add} />
+				<button style={btnGhost} onClick={() => setAddOpen(true)}>➕ Добавить товар</button>
 				{lines.length > 0 && (
 					<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
 						<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}></th></tr></thead>
@@ -457,12 +504,13 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 	const [toStore, setToStore] = useState('');
 	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<SimpleLine[]>([]);
+	const [addOpen, setAddOpen] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
-		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + 1 } : l)
-		: [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1 }]);
+	const add = (it: ReceiptLine): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
+		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + it.qty } : l)
+		: [...ls, { productId: it.productId, name: it.name, qty: it.qty }]);
 	const upd = (pid: number, qty: number): void => setLines((ls) => ls.map((l) => l.productId === pid ? { ...l, qty } : l));
 	const del = (pid: number): void => setLines((ls) => ls.filter((l) => l.productId !== pid));
 
@@ -487,7 +535,7 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Куда</label>{storeSelect(toStore, setToStore, form.stores, '— склад-получатель —')}</div>
 				</div>
 				<label style={fieldLabel}>Товары</label>
-				<ItemPicker onPick={add} />
+				<button style={btnGhost} onClick={() => setAddOpen(true)}>➕ Добавить товар</button>
 				{lines.length > 0 && (
 					<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
 						<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}></th></tr></thead>
@@ -505,6 +553,7 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Создаётся статус «Запрошено». Снабжение проведёт «В пути» → «Получено» (честный транзит).</p>
+				{addOpen && <AddItemModal withPrices={false} onAdd={add} onClose={() => setAddOpen(false)} />}
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
