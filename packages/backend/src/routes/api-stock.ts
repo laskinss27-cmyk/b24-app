@@ -34,22 +34,6 @@ async function currentUserId(client: B24Client): Promise<string> {
 	return String(me?.ID ?? '');
 }
 
-/** Поставщики = CRM-компании Б24 с типом «Поставщик» (COMPANY_TYPE=SUPPLIER). Пагинация по start.
- *  Best-effort: нет прав/скоупа → []. Имя при приходе всё равно заведётся в ядре (ensureSupplier). */
-async function fetchB24Suppliers(client: B24Client, log: FastifyInstance['log']): Promise<string[]> {
-	const out: string[] = [];
-	try {
-		for (let start = 0; start < 2000; start += 50) {
-			const page = await client.call<Array<{ TITLE?: string }>>('crm.company.list', { filter: { COMPANY_TYPE: 'SUPPLIER' }, select: ['TITLE'], start });
-			if (!Array.isArray(page) || !page.length) break;
-			for (const c of page) { const t = String(c.TITLE ?? '').trim(); if (t) out.push(t); }
-			if (page.length < 50) break;
-		}
-	} catch (e) {
-		log.warn({}, `[api/stock] список поставщиков из Б24 недоступен — ${errInfo(e)}`);
-	}
-	return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'ru'));
-}
 
 /** Розничная цена в Б24 (тип «Розница» = catalogGroupId 2). Best-effort: обновляем, иначе добавляем; не бросаем. */
 async function pushRetailToB24(client: B24Client, productId: number, price: number, log: FastifyInstance['log']): Promise<void> {
@@ -109,10 +93,8 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			const [stores, suppliers, uid] = await Promise.all([
-				listActiveStoreTitles(erp), fetchB24Suppliers(client, app.log), currentUserId(client),
-			]);
-			return { ok: true, stores, suppliers, canCreate: STOCK_CREATE_IDS.has(uid) };
+			const [stores, uid] = await Promise.all([listActiveStoreTitles(erp), currentUserId(client)]);
+			return { ok: true, stores, canCreate: STOCK_CREATE_IDS.has(uid) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
@@ -130,6 +112,24 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 			return { ok: true, items: await searchErpItems(erp, String(b.q ?? '')) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/search-items] failed — ${errInfo(e)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(e) });
+		}
+	});
+
+	// Поиск контрагентов-поставщиков = CRM-компании Б24 (складские контрагенты приходят из CRM).
+	// Пикер поставщика в форме «Приход»; имя выбранного/введённого заводится в ядре при создании.
+	app.post('/api/stock/search-contractors', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { q?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const q = String(b.q ?? '').trim();
+		if (q.length < 2) return { ok: true, contractors: [] };
+		try {
+			const rows = await client.call<Array<{ ID?: string | number; TITLE?: string }>>('crm.company.list', { filter: { '%TITLE': q }, select: ['ID', 'TITLE'], order: { TITLE: 'ASC' } });
+			const contractors = (rows ?? []).map((c) => ({ id: String(c.ID ?? ''), name: String(c.TITLE ?? '').trim() })).filter((c) => c.name);
+			return { ok: true, contractors };
+		} catch (e) {
+			app.log.error({}, `[api/stock/search-contractors] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
 		}
 	});
@@ -155,8 +155,10 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 				if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
 				const supplierIn = String(b['supplier'] ?? '').trim();
 				const supplier = supplierIn ? await ensureSupplier(erp, supplierIn) : undefined;
+				const note = String(b['note'] ?? '').trim();
 				const { name } = await createReceiptDraft(erp, {
 					...(supplier ? { supplier } : {}),
+					...(note ? { note } : {}),
 					lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, toStore, rate: l.purchase })),
 				});
 				// Розница → Б24 (best-effort, только заполненные). Запись розницы как мастер в ядро — следующий шаг.
@@ -169,12 +171,14 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 			const fromStore = String(b['fromStore'] ?? '').trim();
 			if (!fromStore) return reply.code(400).send({ ok: false, error: 'не выбран склад списания' });
 			const reason = String(b['reason'] ?? '').trim();
+			const note = String(b['note'] ?? '').trim();
 			const lines: IssueLine[] = (Array.isArray(b['lines']) ? b['lines'] as Array<Record<string, unknown>> : [])
 				.map((l) => ({ productId: Number(l['productId']), qty: Number(l['qty']) }))
 				.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 			if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
 			const { name } = await createWriteOffDraft(erp, {
 				...(reason ? { reason } : {}),
+				...(note ? { note } : {}),
 				lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, fromStore })),
 			});
 			app.log.info({ name, lines: lines.length }, '[api/stock/create] issue draft');

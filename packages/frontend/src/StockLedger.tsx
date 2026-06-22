@@ -3,7 +3,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import {
 	listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
-	fetchStockFormData, searchStockItems, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
+	fetchStockFormData, searchStockItems, searchContractors, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	type TransferDoc, type CoreMovement, type StockItem,
 } from './b24.js';
 
@@ -45,8 +45,8 @@ const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', bo
 const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
 const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
 
-/** Справочники окна (склады/поставщики/право создавать). */
-interface StockForm { stores: string[]; suppliers: string[]; canCreate: boolean }
+/** Справочники окна (склады/право создавать). Поставщики — отдельным поиском (CRM-контрагенты). */
+interface StockForm { stores: string[]; canCreate: boolean }
 
 /** Общая панель фильтров: поиск+статус (мгновенно, на клиенте) и период (с/по → перезапрос в ядро). */
 function FilterBar(props: {
@@ -83,7 +83,7 @@ export function StockLedger(): JSX.Element {
 	// Канарейка: окно видит только BETA_USER_IDS / админ портала (как База/Реализации).
 	useEffect(() => {
 		if (ctx.__mock) {
-			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Б24 Снабжение', 'ООО Ромашка'], canCreate: true });
+			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], canCreate: true });
 			setPhase({ k: 'ready' });
 			return;
 		}
@@ -95,7 +95,7 @@ export function StockLedger(): JSX.Element {
 				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) { setPhase({ k: 'denied' }); return; }
 				setPhase({ k: 'ready' });
 				// Справочники форм — best-effort (ядро может быть недоступно: формы просто не покажут селекторы).
-				fetchStockFormData().then(setForm).catch(() => setForm({ stores: [], suppliers: [], canCreate: false }));
+				fetchStockFormData().then(setForm).catch(() => setForm({ stores: [], canCreate: false }));
 			})().catch(() => setPhase({ k: 'denied' }));
 		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,7 +179,7 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 						{shown.map((t) => (
 							<tr key={t.id}>
 								<td style={TD}><DealCell dealId={t.dealId} ownerName={t.ownerName} /><div style={{ color: '#7a8699', fontSize: 12 }}>{(t.createdAt || '').slice(0, 10)}</div></td>
-								<td style={TD}>{t.fromStore} → {t.toStore}</td>
+								<td style={TD}>{t.fromStore} → {t.toStore}{t.note ? <div style={{ color: '#7a8699', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{TRANSFER_STATUS[t.status] ?? t.status}</td>
 								<td style={TD}>
@@ -320,13 +320,38 @@ function ItemPicker({ onPick }: { onPick: (it: StockItem) => void }): JSX.Elemen
 	);
 }
 
+/** Пикер контрагента-поставщика: ввод имени → подсказки из CRM Б24; можно выбрать или вписать нового. */
+function ContractorPicker({ value, onChange }: { value: string; onChange: (v: string) => void }): JSX.Element {
+	const [res, setRes] = useState<Array<{ id: string; name: string }> | null>(null);
+	const [open, setOpen] = useState(false);
+	useEffect(() => {
+		const q = value.trim();
+		if (q.length < 2) { setRes(null); return; }
+		let alive = true;
+		const t = setTimeout(() => { searchContractors(q).then((r) => { if (alive) setRes(r); }).catch(() => { if (alive) setRes([]); }); }, 300);
+		return () => { alive = false; clearTimeout(t); };
+	}, [value]);
+	return (
+		<div style={{ position: 'relative' }}>
+			<input style={{ ...inp, width: '100%' }} placeholder="поставщик: начни вводить имя…" value={value}
+				onChange={(e) => { onChange(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} />
+			{open && res && res.length > 0 && (
+				<div style={{ position: 'absolute', zIndex: 5, left: 0, right: 0, background: '#fff', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: 160, overflow: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
+					{res.map((c) => (
+						<div key={c.id} onMouseDown={() => { onChange(c.name); setOpen(false); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>{c.name}</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
 interface ReceiptLine { productId: number; name: string; qty: number; purchase: number; retail: number }
 
 function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () => void; onDone: () => void }): JSX.Element {
 	const [toStore, setToStore] = useState('');
-	const [supMode, setSupMode] = useState<'existing' | 'new'>('existing');
 	const [supplier, setSupplier] = useState('');
-	const [newSupplier, setNewSupplier] = useState('');
+	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<ReceiptLine[]>([]);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
@@ -341,10 +366,10 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 		setErr(null);
 		if (!toStore) { setErr('выберите склад прихода'); return; }
 		if (!lines.length) { setErr('добавьте хотя бы одну позицию'); return; }
-		const sup = (supMode === 'new' ? newSupplier : supplier).trim();
+		const sup = supplier.trim();
 		setBusy(true);
 		try {
-			await createReceiptDoc({ toStore, ...(sup ? { supplier: sup } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, purchase: l.purchase, retail: l.retail })) });
+			await createReceiptDoc({ toStore, ...(sup ? { supplier: sup } : {}), ...(note.trim() ? { note: note.trim() } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, purchase: l.purchase, retail: l.retail })) });
 			onDone();
 		} catch (e) { setErr(errText(e)); } finally { setBusy(false); }
 	};
@@ -355,18 +380,9 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>➕ Приход (оприходование)</h2>
 				<label style={fieldLabel}>Склад прихода</label>
 				{storeSelect(toStore, setToStore, form.stores, '— выберите склад —')}
-				<label style={fieldLabel}>Поставщик</label>
-				<div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-					{supMode === 'existing' ? (
-						<select style={{ ...inp, flex: 1 }} value={supplier} onChange={(e) => setSupplier(e.target.value)}>
-							<option value="">— по умолчанию (Б24 Снабжение) —</option>
-							{form.suppliers.map((s) => <option key={s} value={s}>{s}</option>)}
-						</select>
-					) : (
-						<input style={{ ...inp, flex: 1 }} placeholder="имя нового поставщика" value={newSupplier} onChange={(e) => setNewSupplier(e.target.value)} />
-					)}
-					<button style={btnGhost} onClick={() => setSupMode((m) => m === 'existing' ? 'new' : 'existing')}>{supMode === 'existing' ? '+ новый' : '← из списка'}</button>
-				</div>
+				<label style={fieldLabel}>Поставщик (необязательно)</label>
+				<ContractorPicker value={supplier} onChange={setSupplier} />
+				<p style={{ fontSize: 12, color: '#7a8699', margin: '4px 0 0' }}>Выбери из подсказок (CRM-контрагенты Б24) или впиши нового — заведём в ядре. Пусто → «Б24 Снабжение».</p>
 				<label style={fieldLabel}>Товары</label>
 				<ItemPicker onPick={add} />
 				{lines.length > 0 && (
@@ -385,6 +401,8 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 						</tbody>
 					</table>
 				)}
+				<label style={fieldLabel}>Примечание (необязательно)</label>
+				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Розница (если заполнена) уйдёт в каталог Б24. Пусто — цену не трогаем.</p>
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
@@ -401,6 +419,7 @@ interface SimpleLine { productId: number; name: string; qty: number }
 function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => void; onDone: () => void }): JSX.Element {
 	const [fromStore, setFromStore] = useState('');
 	const [reason, setReason] = useState('');
+	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<SimpleLine[]>([]);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
@@ -417,7 +436,7 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 		if (!lines.length) { setErr('добавьте хотя бы одну позицию'); return; }
 		setBusy(true);
 		try {
-			await createIssueDoc({ fromStore, ...(reason.trim() ? { reason: reason.trim() } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty })) });
+			await createIssueDoc({ fromStore, ...(reason.trim() ? { reason: reason.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty })) });
 			onDone();
 		} catch (e) { setErr(errText(e)); } finally { setBusy(false); }
 	};
@@ -430,6 +449,8 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 				{storeSelect(fromStore, setFromStore, form.stores, '— выберите склад —')}
 				<label style={fieldLabel}>Причина</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="например: брак, бой, недостача" value={reason} onChange={(e) => setReason(e.target.value)} />
+				<label style={fieldLabel}>Примечание (необязательно)</label>
+				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<label style={fieldLabel}>Товары</label>
 				<ItemPicker onPick={add} />
 				{lines.length > 0 && (
@@ -459,6 +480,7 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () => void; onDone: () => void }): JSX.Element {
 	const [fromStore, setFromStore] = useState('');
 	const [toStore, setToStore] = useState('');
+	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<SimpleLine[]>([]);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
@@ -476,7 +498,7 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 		if (!lines.length) { setErr('добавьте хотя бы одну позицию'); return; }
 		setBusy(true);
 		try {
-			await createManualTransfer({ fromStore, toStore, lines: lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty })) });
+			await createManualTransfer({ fromStore, toStore, ...(note.trim() ? { note: note.trim() } : {}), lines: lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty })) });
 			onDone();
 		} catch (e) { setErr(errText(e)); } finally { setBusy(false); }
 	};
@@ -505,6 +527,8 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 						</tbody>
 					</table>
 				)}
+				<label style={fieldLabel}>Примечание (необязательно)</label>
+				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Создаётся статус «Запрошено». Снабжение проведёт «В пути» → «Получено» (честный транзит).</p>
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>

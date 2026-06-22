@@ -38,6 +38,8 @@ interface TransferData {
 	fromStore: string;
 	status: TransferStatus;
 	lines: TransferLine[];
+	/** Примечание (необязательное). */
+	note: string;
 	taskId: number | null;
 	/** Имена проведённых Stock Entry: отгрузка (А→транзит) и приёмка (транзит→Б). */
 	shipEntry: string | null;
@@ -90,6 +92,7 @@ function parseItem(it: Record<string, unknown>): (TransferData & { id: number; n
 		fromStore: String(data.fromStore ?? ''),
 		status: (['requested', 'in_transit', 'received', 'canceled'] as const).includes(data.status as TransferStatus) ? (data.status as TransferStatus) : 'requested',
 		lines: Array.isArray(data.lines) ? data.lines : [],
+		note: typeof data.note === 'string' ? data.note : '',
 		taskId: typeof data.taskId === 'number' ? data.taskId : null,
 		shipEntry: data.shipEntry ?? null,
 		receiveEntry: data.receiveEntry ?? null,
@@ -145,7 +148,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				if (!fromStore || fromStore === toStore || !lines.length) continue;
 
 				const data: TransferData = {
-					dealId, toStore, fromStore, status: 'requested', lines,
+					dealId, toStore, fromStore, status: 'requested', lines, note: '',
 					taskId: null, shipEntry: null, receiveEntry: null,
 					createdAt: now, createdById: me.id, createdByName: me.name,
 					history: [{ at: now, status: 'requested', byId: me.id, byName: me.name }],
@@ -196,6 +199,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const fromStore = String(b['fromStore'] ?? '').trim();
 		const toStore = String(b['toStore'] ?? '').trim();
+		const note = String(b['note'] ?? '').trim().slice(0, 140);
 		const rawLines = Array.isArray(b['lines']) ? (b['lines'] as Array<Record<string, unknown>>) : [];
 		const lines: TransferLine[] = rawLines
 			.map((l) => ({ productId: Number(l['productId']), name: String(l['name'] ?? ''), qty: Number(l['qty']) }))
@@ -208,7 +212,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!STOCK_CREATE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только канарейка' });
 			const now = new Date().toISOString();
 			const data: TransferData = {
-				dealId: '', toStore, fromStore, status: 'requested', lines,
+				dealId: '', toStore, fromStore, status: 'requested', lines, note,
 				taskId: null, shipEntry: null, receiveEntry: null,
 				createdAt: now, createdById: me.id, createdByName: me.name,
 				history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: 'создано вручную в окне' }],

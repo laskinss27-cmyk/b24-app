@@ -294,20 +294,37 @@ async function ensureWriteoffField(erp: ErpClient): Promise<void> {
 	writeoffFieldDone = true;
 }
 
-/** Списание со склада (Stock Entry: Material Issue). reason — причина (наше custom-поле). */
+/** Примечание (необязательное) — общее custom-поле b24_note на складских документах. */
+const NOTE_FIELD = 'b24_note';
+const noteFieldDone = new Set<string>();
+async function ensureNoteField(erp: ErpClient, doctype: string): Promise<void> {
+	if (noteFieldDone.has(doctype)) return;
+	const cfName = `${doctype}-${NOTE_FIELD}`;
+	if (!(await erp.get('Custom Field', cfName))) {
+		await erp.create('Custom Field', {
+			dt: doctype, fieldname: NOTE_FIELD, label: 'B24 Note',
+			fieldtype: 'Data', insert_after: 'company', in_list_view: 1,
+		});
+	}
+	noteFieldDone.add(doctype);
+}
+
+/** Списание со склада (Stock Entry: Material Issue). reason — причина, note — примечание (наши custom-поля). */
 export async function createWriteOffDraft(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; reason?: string },
+	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; reason?: string; note?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	if (!args.lines.length) throw new Error('пустое списание');
 	if (args.reason) await ensureWriteoffField(erp);
+	if (args.note) await ensureNoteField(erp, 'Stock Entry');
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Issue',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
 		...(args.reason ? { [WRITEOFF_REASON_FIELD]: args.reason.slice(0, 140) } : {}),
+		...(args.note ? { [NOTE_FIELD]: args.note.slice(0, 140) } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -317,18 +334,20 @@ export async function createWriteOffDraft(
 	return { name: String(doc['name']) };
 }
 
-/** Приход на склад (Purchase Receipt от технического поставщика). */
+/** Приход на склад (Purchase Receipt от технического поставщика). note — примечание (необязательное). */
 export async function createReceiptDraft(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; toStore: string; rate: number }>; dealId?: number; supplier?: string },
+	args: { lines: Array<{ productId: number; qty: number; toStore: string; rate: number }>; dealId?: number; supplier?: string; note?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
+	if (args.note) await ensureNoteField(erp, 'Purchase Receipt');
 	const doc = await erp.create('Purchase Receipt', {
 		company: ctx.company,
 		supplier: args.supplier ?? TECH_SUPPLIER,
 		set_posting_time: 1,
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		...(args.note ? { [NOTE_FIELD]: args.note.slice(0, 140) } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -503,13 +522,16 @@ export async function listCoreMovements(
 		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
 		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`, dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
+	const withNote = (base: string, note: string): string => note ? (base ? `${base} · ${note}` : note) : base;
 	if (kind === 'receipt') {
-		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
-		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r['supplier'] ?? ''), dealId: String(r[DEAL_FIELD] ?? '') }));
+		await ensureNoteField(erp, 'Purchase Receipt'); // поле может ещё не существовать — select упал бы
+		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
+		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r['supplier'] ?? ''), String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
 	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
-	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
-	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', dealId: String(r[DEAL_FIELD] ?? '') }));
+	await ensureNoteField(erp, 'Stock Entry');
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
+	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
 }
 
 // ── Инструмент коррекции остатков (личный) ────────────────────────────────────

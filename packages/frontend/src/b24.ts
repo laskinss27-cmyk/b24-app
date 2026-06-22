@@ -732,6 +732,7 @@ export interface TransferDoc {
 	fromStore: string;
 	status: TransferStatus;
 	lines: TransferLineDto[];
+	note?: string;
 	taskId: number | null;
 	shipEntry: string | null;
 	receiveEntry: string | null;
@@ -804,15 +805,26 @@ export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery', per
 /** Найденный в каталоге ядра товар (пикер позиций). */
 export interface StockItem { productId: number; name: string; article: string; brand: string }
 
-/** Справочники для форм: склады, поставщики, право создавать (канарейка). */
-export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean }> {
+/** Справочники для форм: склады, право создавать (канарейка). Поставщики — отдельным поиском. */
+export async function fetchStockFormData(): Promise<{ stores: string[]; canCreate: boolean }> {
 	const res = await fetch('/api/stock/form-data', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; canCreate?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить справочники');
-	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate) };
+	return { stores: json.stores ?? [], canCreate: Boolean(json.canCreate) };
+}
+
+/** Поиск контрагентов-поставщиков (CRM-компании Б24) для пикера в форме «Приход». */
+export async function searchContractors(q: string): Promise<Array<{ id: string; name: string }>> {
+	if (q.trim().length < 2) return [];
+	const res = await fetch('/api/stock/search-contractors', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), q }),
+	});
+	const json = (await res.json()) as { ok: boolean; contractors?: Array<{ id: string; name: string }> };
+	return json.contractors ?? [];
 }
 
 /** Поиск товаров каталога ядра (id / имя / артикул) — пикер позиций в формах. */
@@ -826,8 +838,8 @@ export async function searchStockItems(q: string): Promise<StockItem[]> {
 	return json.items ?? [];
 }
 
-export interface ReceiptDraftInput { toStore: string; supplier?: string; lines: Array<{ productId: number; qty: number; purchase: number; retail: number }> }
-export interface IssueDraftInput { fromStore: string; reason?: string; lines: Array<{ productId: number; qty: number }> }
+export interface ReceiptDraftInput { toStore: string; supplier?: string; note?: string; lines: Array<{ productId: number; qty: number; purchase: number; retail: number }> }
+export interface IssueDraftInput { fromStore: string; reason?: string; note?: string; lines: Array<{ productId: number; qty: number }> }
 
 /** Создать черновик прихода (Purchase Receipt). Возвращает имя документа ядра. */
 export async function createReceiptDoc(input: ReceiptDraftInput): Promise<string> {
@@ -862,7 +874,7 @@ export async function submitStockDoc(kind: 'receipt' | 'issue', name: string): P
 }
 
 /** Создать перемещение вручную из окна (без сделки) → документ «Запрошено». */
-export async function createManualTransfer(input: { fromStore: string; toStore: string; lines: TransferLineDto[] }): Promise<TransferDoc> {
+export async function createManualTransfer(input: { fromStore: string; toStore: string; note?: string; lines: TransferLineDto[] }): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/create-manual', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...input }),
