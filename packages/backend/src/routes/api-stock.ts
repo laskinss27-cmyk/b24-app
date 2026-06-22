@@ -5,6 +5,7 @@ import { ErpClient } from '../erp/client.js';
 import {
 	listCoreMovements, searchErpItems, listActiveStoreTitles,
 	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
+	fetchCoreDocDetail, itemStockLedger,
 } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 
@@ -102,15 +103,54 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-		const period: { from?: string; to?: string } = {};
+		const period: { from?: string; to?: string; productId?: number } = {};
 		if (isDate(b.from)) period.from = b.from;
 		if (isDate(b.to)) period.to = b.to;
+		const pid = Number((b as { productId?: unknown }).productId);
+		if (Number.isInteger(pid) && pid > 0) period.productId = pid;
 		try {
 			const movements = await listCoreMovements(erp, kind, period);
 			const owners = await resolveDealOwners(client, movements.map((m) => m.dealId));
 			return { ok: true, kind, movements: movements.map((m) => ({ ...m, ownerName: owners.get(m.dealId) ?? '' })) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/movements] failed — ${errInfo(e)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(e) });
+		}
+	});
+
+	// Содержимое одного документа (раскрытие строки журнала). body: { doctype, name }
+	app.post('/api/stock/doc', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { doctype?: unknown; name?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const doctype = String(b.doctype ?? '').trim();
+		const name = String(b.name ?? '').trim();
+		if (!doctype || !name) return reply.code(400).send({ ok: false, error: 'нужны doctype и name' });
+		try {
+			const detail = await fetchCoreDocDetail(erp, doctype, name);
+			const owners = await resolveDealOwners(client, [detail.dealId]);
+			return { ok: true, detail: { ...detail, ownerName: owners.get(detail.dealId) ?? '' } };
+		} catch (e) {
+			app.log.error({}, `[api/stock/doc] failed — ${errInfo(e)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(e) });
+		}
+	});
+
+	// История движений по товару (Stock Ledger Entry). body: { productId }
+	app.post('/api/stock/item-history', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { productId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const productId = Number(b.productId);
+		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'bad productId' });
+		try {
+			return { ok: true, movements: await itemStockLedger(erp, productId) };
+		} catch (e) {
+			app.log.error({}, `[api/stock/item-history] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
 		}
 	});

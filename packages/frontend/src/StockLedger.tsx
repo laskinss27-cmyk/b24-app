@@ -4,7 +4,8 @@ import {
 	listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
-	type TransferDoc, type CoreMovement, type StockItem,
+	fetchDocDetail, fetchItemHistory,
+	type TransferDoc, type CoreMovement, type StockItem, type CoreDocDetail, type ItemMovement,
 } from './b24.js';
 
 /** Кликабельная ссылка на сделку + ФИО ответственного (общий вид для всех складских документов). */
@@ -24,13 +25,16 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
  *  - Списания / Оприходования — журнал ядра + формы создания (черновик → «Провести»);
  *  - Реализации — read-only журнал (создаются из сделки).
  */
-type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery';
+type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery' | 'ledger';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'transfers', label: 'Перемещения' },
 	{ key: 'issue', label: 'Списания' },
 	{ key: 'receipt', label: 'Оприходования' },
 	{ key: 'delivery', label: 'Реализации' },
+	{ key: 'ledger', label: 'Отчёт по движению товара' },
 ];
+/** doctype ядра по типу вкладки (для раскрытия документа). */
+const KIND_DOCTYPE: Record<'issue' | 'receipt' | 'delivery', string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note' };
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 /** Период без явных undefined (exactOptionalPropertyTypes). */
 const mkPeriod = (from: string, to: string): { from?: string; to?: string } => ({ ...(from ? { from } : {}), ...(to ? { to } : {}) });
@@ -69,6 +73,149 @@ function FilterBar(props: {
 			<button style={btnGhost} onClick={onReset}>Сброс</button>
 			<span style={{ fontSize: 12, color: '#7a8699', marginLeft: 'auto' }}>{shown} из {total}</span>
 		</div>
+	);
+}
+
+/** Поиск+выбор товара (чип) — фильтр по позиции в журнале и выбор в отчёте. */
+function ProductFilter({ value, onChange, placeholder }: { value: StockItem | null; onChange: (v: StockItem | null) => void; placeholder?: string }): JSX.Element {
+	const [q, setQ] = useState('');
+	const [res, setRes] = useState<StockItem[] | null>(null);
+	const [busy, setBusy] = useState(false);
+	const search = async (): Promise<void> => {
+		if (q.trim().length < 1) return;
+		setBusy(true);
+		try { setRes(await searchStockItems(q)); } catch { setRes([]); } finally { setBusy(false); }
+	};
+	if (value) return (
+		<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: '#eef3fb', border: '1px solid #cdd9ee', borderRadius: 16, fontSize: 13 }}>
+			📦 {value.name || ('#' + value.productId)}
+			<a href="#" onClick={(e) => { e.preventDefault(); onChange(null); setQ(''); setRes(null); }} style={{ color: '#7a8699', textDecoration: 'none' }}>✕</a>
+		</span>
+	);
+	return (
+		<div style={{ position: 'relative', flex: '1 1 260px' }}>
+			<div style={{ display: 'flex', gap: 6 }}>
+				<input style={{ ...inp, flex: 1 }} placeholder={placeholder || '🔎 товар: id / название / артикул'} value={q}
+					onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void search(); } }} />
+				<button style={btnGhost} disabled={busy} onClick={() => void search()}>{busy ? '…' : 'Найти'}</button>
+			</div>
+			{res && (res.length ? (
+				<div style={{ position: 'absolute', zIndex: 5, left: 0, right: 0, background: '#fff', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: 200, overflow: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
+					{res.map((it) => (
+						<div key={it.productId} onClick={() => { onChange(it); setRes(null); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
+							{it.name || ('#' + it.productId)} <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
+						</div>
+					))}
+				</div>
+			) : <p className="empty" style={{ marginTop: 4 }}>Ничего не найдено.</p>)}
+		</div>
+	);
+}
+
+/** Раскрытие складского документа ядра (строки + шапка). */
+function DocDetailModal({ doctype, name, onClose }: { doctype: string; name: string; onClose: () => void }): JSX.Element {
+	const [d, setD] = useState<CoreDocDetail | null>(null);
+	const [err, setErr] = useState<string | null>(null);
+	useEffect(() => {
+		let alive = true;
+		fetchDocDetail(doctype, name).then((x) => { if (alive) setD(x); }).catch((e) => { if (alive) setErr(errText(e)); });
+		return () => { alive = false; };
+	}, [doctype, name]);
+	return (
+		<div style={{ ...overlay, zIndex: 1100 }}>
+			<div style={modalCard}>
+				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+					<h2 style={{ fontSize: 16, margin: 0 }}>{name}</h2>
+					<button style={btnGhost} onClick={onClose}>✕</button>
+				</div>
+				{err ? <p className="error">⛔ {err}</p> : !d ? <p>Загрузка…</p> : (
+					<>
+						<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>
+							{d.date} · {d.submitted ? 'проведён' : 'черновик'}{d.supplier ? ` · ${d.supplier}` : ''}{d.reason ? ` · ${d.reason}` : ''}{d.note ? ` · 📝 ${d.note}` : ''}
+						</div>
+						{d.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={d.dealId} ownerName={d.ownerName} /></div> : null}
+						<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+							<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>Цена ₽</th></tr></thead>
+							<tbody>
+								{d.items.map((it, i) => (
+									<tr key={i}><td style={TD}>{it.itemName || ('#' + it.productId)}</td><td style={TD}>{it.qty}</td><td style={TD}>{it.store || '—'}</td><td style={TD}>{it.rate ? it.rate.toLocaleString('ru-RU') : '—'}</td></tr>
+								))}
+							</tbody>
+						</table>
+					</>
+				)}
+			</div>
+		</div>
+	);
+}
+
+/** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
+function TransferDetailModal({ t, onClose }: { t: TransferDoc; onClose: () => void }): JSX.Element {
+	return (
+		<div style={{ ...overlay, zIndex: 1100 }}>
+			<div style={modalCard}>
+				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+					<h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2>
+					<button style={btnGhost} onClick={onClose}>✕</button>
+				</div>
+				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{t.fromStore} → {t.toStore} · {TRANSFER_STATUS[t.status] ?? t.status}{t.note ? ` · 📝 ${t.note}` : ''}</div>
+				{t.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
+				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+					<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th></tr></thead>
+					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{l.qty}</td></tr>)}</tbody>
+				</table>
+				{t.history && t.history.length > 0 ? (
+					<div style={{ marginTop: 10 }}>
+						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>История:</div>
+						{t.history.map((h, i) => <div key={i} style={{ fontSize: 13 }}>{(h.at || '').slice(0, 16).replace('T', ' ')} — {TRANSFER_STATUS[h.status] ?? h.status}{h.byName ? ` · ${h.byName}` : ''}{h.note ? ` (${h.note})` : ''}</div>)}
+					</div>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/** Вкладка «Отчёт по движению товара» — выбираешь товар, видишь всю его историю (Stock Ledger ядра). */
+function LedgerTab(): JSX.Element {
+	const [prod, setProd] = useState<StockItem | null>(null);
+	const [list, setList] = useState<ItemMovement[] | null>(null);
+	const [err, setErr] = useState<string | null>(null);
+	const [loading, setLoading] = useState(false);
+	const [openDoc, setOpenDoc] = useState<{ doctype: string; name: string } | null>(null);
+	useEffect(() => {
+		if (!prod) { setList(null); return; }
+		let alive = true; setLoading(true); setErr(null); setList(null);
+		fetchItemHistory(prod.productId).then((m) => { if (alive) setList(m); }).catch((e) => { if (alive) setErr(errText(e)); }).finally(() => { if (alive) setLoading(false); });
+		return () => { alive = false; };
+	}, [prod]);
+	return (
+		<>
+			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
+				<ProductFilter value={prod} onChange={setProd} />
+			</div>
+			{!prod ? <p className="empty">Выбери товар — покажу всю историю движений: приход, списание, перемещение, реализация, инвентаризация.</p>
+				: loading ? <p>Загрузка…</p>
+				: err ? <p className="error">⛔ {err}</p>
+				: !list || !list.length ? <p className="empty">Движений по этому товару нет.</p>
+				: (
+					<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+						<thead><tr><th style={TH}>Дата</th><th style={TH}>Тип</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>Документ</th></tr></thead>
+						<tbody>
+							{list.map((m, i) => (
+								<tr key={i}>
+									<td style={TD}>{m.date}</td>
+									<td style={TD}>{m.kind}</td>
+									<td style={{ ...TD, color: m.qty < 0 ? '#c0392b' : '#1a7f37', fontWeight: 600 }}>{m.qty > 0 ? '+' : ''}{m.qty}</td>
+									<td style={TD}>{m.store || '—'}</td>
+									<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ doctype: m.doctype, name: m.voucherNo }); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.voucherNo}</a></td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				)}
+			{openDoc && <DocDetailModal doctype={openDoc.doctype} name={openDoc.name} onClose={() => setOpenDoc(null)} />}
+		</>
 	);
 }
 
@@ -111,7 +258,9 @@ export function StockLedger(): JSX.Element {
 					<button key={t.key} style={tabStyle(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
 				))}
 			</div>
-			{tab === 'transfers' ? <TransfersTab form={form} /> : <MovementsTab kind={tab} form={form} />}
+			{tab === 'transfers' ? <TransfersTab form={form} />
+				: tab === 'ledger' ? <LedgerTab />
+				: <MovementsTab kind={tab} form={form} />}
 		</div>
 	);
 }
@@ -136,6 +285,8 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 	const [to, setTo] = useState('');
 	const [period, setPeriod] = useState<{ from?: string; to?: string }>({});
 	const [showForm, setShowForm] = useState(false);
+	const [prod, setProd] = useState<StockItem | null>(null);
+	const [openT, setOpenT] = useState<TransferDoc | null>(null);
 
 	const load = async (): Promise<void> => {
 		setLoading(true); setErr(null);
@@ -155,6 +306,7 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 
 	const shown = (list ?? []).filter((t) => {
 		if (status !== 'all' && t.status !== status) return false;
+		if (prod && !t.lines.some((l) => l.productId === prod.productId)) return false;
 		const q = search.trim().toLowerCase();
 		if (!q) return true;
 		const hay = `${t.dealId} ${t.ownerName ?? ''} ${t.fromStore} ${t.toStore} ${TRANSFER_STATUS[t.status] ?? t.status} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
@@ -168,6 +320,10 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 					<button className="btn-primary" onClick={() => setShowForm(true)}>➕ Создать перемещение</button>
 				</div>
 			)}
+			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
+				<ProductFilter value={prod} onChange={setProd} />
+			</div>
 			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={TRANSFER_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
@@ -179,7 +335,7 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 						{shown.map((t) => (
 							<tr key={t.id}>
 								<td style={TD}><DealCell dealId={t.dealId} ownerName={t.ownerName} /><div style={{ color: '#7a8699', fontSize: 12 }}>{(t.createdAt || '').slice(0, 10)}</div></td>
-								<td style={TD}>{t.fromStore} → {t.toStore}{t.note ? <div style={{ color: '#7a8699', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenT(t); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{t.fromStore} → {t.toStore}</a>{t.note ? <div style={{ color: '#7a8699', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{TRANSFER_STATUS[t.status] ?? t.status}</td>
 								<td style={TD}>
@@ -191,6 +347,7 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 					</tbody>
 				</table>
 			)}
+			{openT && <TransferDetailModal t={openT} onClose={() => setOpenT(null)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
 		</>
 	);
@@ -214,19 +371,21 @@ function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery'; 
 	const [bump, setBump] = useState(0);
 	const [showForm, setShowForm] = useState(false);
 	const [busyDoc, setBusyDoc] = useState<string | null>(null);
+	const [prod, setProd] = useState<StockItem | null>(null);
+	const [openDoc, setOpenDoc] = useState<string | null>(null);
 	const canPost = Boolean(form?.canCreate) && kind !== 'delivery';
 
 	useEffect(() => {
 		let alive = true; setList(null); setErr(null); setLoading(true);
-		fetchMovements(kind, period)
+		fetchMovements(kind, { ...period, ...(prod ? { productId: prod.productId } : {}) })
 			.then((m) => { if (alive) setList(m); })
 			.catch((e) => { if (alive) setErr(errText(e)); })
 			.finally(() => { if (alive) setLoading(false); });
 		return () => { alive = false; };
-	}, [kind, period, bump]);
+	}, [kind, period, bump, prod]);
 
 	// Сброс фильтров при смене вкладки.
-	useEffect(() => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); }, [kind]);
+	useEffect(() => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); setProd(null); }, [kind]);
 	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); };
 
 	const submit = async (m: CoreMovement): Promise<void> => {
@@ -255,6 +414,10 @@ function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery'; 
 					<button className="btn-primary" onClick={() => setShowForm(true)}>{createLabel}</button>
 				</div>
 			)}
+			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
+				<ProductFilter value={prod} onChange={setProd} />
+			</div>
 			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={MOVE_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
@@ -264,13 +427,14 @@ function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery'; 
 					<tbody>
 						{shown.map((m) => (
 							<tr key={m.name}>
-								<td style={TD}>{m.name}</td><td style={TD}>{m.date}</td><td style={TD}><DealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc(m.name); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><DealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
 								{canPost && <td style={TD}>{!m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}</td>}
 							</tr>
 						))}
 					</tbody>
 				</table>
 			)}
+			{openDoc && <DocDetailModal doctype={KIND_DOCTYPE[kind]} name={openDoc} onClose={() => setOpenDoc(null)} />}
 			{showForm && form && kind === 'receipt' && <ReceiptForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 			{showForm && form && kind === 'issue' && <IssueForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 		</>

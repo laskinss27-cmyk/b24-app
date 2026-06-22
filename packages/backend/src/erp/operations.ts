@@ -531,27 +531,99 @@ export interface CoreMovement { name: string; date: string; submitted: boolean; 
 export async function listCoreMovements(
 	erp: ErpClient,
 	kind: 'issue' | 'receipt' | 'delivery',
-	opts: { from?: string; to?: string } = {},
+	opts: { from?: string; to?: string; productId?: number } = {},
 ): Promise<CoreMovement[]> {
 	const dateFilters: unknown[] = [];
 	if (opts.from) dateFilters.push(['posting_date', '>=', opts.from]);
 	if (opts.to) dateFilters.push(['posting_date', '<=', opts.to]);
-	const limit = (opts.from || opts.to) ? 1000 : 50;
+	// Фильтр по товару = по дочерней таблице документа (frappe: [child_doctype, field, op, val]).
+	const child = (childDt: string): unknown[] => opts.productId ? [[childDt, 'item_code', '=', String(opts.productId)]] : [];
+	const limit = (opts.from || opts.to || opts.productId) ? 1000 : 50;
 	const ORDER = 'posting_date desc';
 	if (kind === 'delivery') {
-		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
+		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Delivery Note Item')], limit, ORDER);
 		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`, dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
 	const withNote = (base: string, note: string): string => note ? (base ? `${base} · ${note}` : note) : base;
 	if (kind === 'receipt') {
 		await ensureNoteField(erp, 'Purchase Receipt'); // поле может ещё не существовать — select упал бы
-		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
+		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER);
 		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r['supplier'] ?? ''), String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
 	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
 	await ensureNoteField(erp, 'Stock Entry');
-	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail')], limit, ORDER);
 	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
+}
+
+// ── Детали документа + история движений по товару (для окна «Складской учёт») ──
+
+export interface CoreDocItem { productId: number; itemName: string; qty: number; store: string; rate: number }
+export interface CoreDocDetail {
+	name: string; doctype: string; date: string; submitted: boolean; dealId: string;
+	supplier: string; reason: string; note: string; items: CoreDocItem[];
+}
+
+/** Допустимые типы документов для детального просмотра (защита от произвольного doctype). */
+const VIEWABLE_DOCTYPES = new Set(['Stock Entry', 'Purchase Receipt', 'Delivery Note', 'Stock Reconciliation']);
+
+/** Содержимое одного складского документа ядра (строки + шапка) — для раскрытия в журнале. */
+export async function fetchCoreDocDetail(erp: ErpClient, doctype: string, name: string): Promise<CoreDocDetail> {
+	if (!VIEWABLE_DOCTYPES.has(doctype)) throw new Error(`недопустимый тип документа: ${doctype}`);
+	const ctx = await erpContext(erp);
+	const doc = await erp.get(doctype, name);
+	if (!doc) throw new Error('документ не найден');
+	const raw = (doc['items'] as Array<Record<string, unknown>>) ?? [];
+	const items: CoreDocItem[] = raw.map((it) => {
+		const wh = String(it['warehouse'] ?? it['t_warehouse'] ?? it['s_warehouse'] ?? '');
+		return {
+			productId: Number(it['item_code']),
+			itemName: String(it['item_name'] ?? ''),
+			qty: Number(it['qty'] ?? 0),
+			store: wh ? b24StoreTitle(ctx, wh) : '',
+			rate: Number(it['rate'] ?? it['valuation_rate'] ?? 0),
+		};
+	});
+	return {
+		name: String(doc['name']), doctype, date: String(doc['posting_date'] ?? ''),
+		submitted: Number(doc['docstatus']) === 1, dealId: String(doc[DEAL_FIELD] ?? ''),
+		supplier: String(doc['supplier'] ?? ''), reason: String(doc[WRITEOFF_REASON_FIELD] ?? ''),
+		note: String(doc[NOTE_FIELD] ?? ''), items,
+	};
+}
+
+export interface ItemMovement { date: string; doctype: string; voucherNo: string; kind: string; qty: number; store: string }
+
+/** История движений ОДНОГО товара по всем типам — родной Stock Ledger Entry ядра.
+ *  kind: человекочитаемый тип (оприходование/списание/перемещение/реализация/инвентаризация). */
+export async function itemStockLedger(erp: ErpClient, productId: number, limit = 300): Promise<ItemMovement[]> {
+	const ctx = await erpContext(erp);
+	const rows = await erp.list('Stock Ledger Entry',
+		['posting_date', 'actual_qty', 'warehouse', 'voucher_type', 'voucher_no'],
+		[['item_code', '=', String(productId)], ['is_cancelled', '=', 0]], limit, 'posting_date desc, creation desc');
+	// Для Stock Entry уточняем тип (перемещение/списание/оприходование) пачкой по voucher_no.
+	const steNos = [...new Set(rows.filter((r) => String(r['voucher_type']) === 'Stock Entry').map((r) => String(r['voucher_no'])))];
+	const steType = new Map<string, string>();
+	for (let i = 0; i < steNos.length; i += 100) {
+		const chunk = steNos.slice(i, i + 100);
+		const ste = await erp.list('Stock Entry', ['name', 'stock_entry_type'], [['name', 'in', chunk]]);
+		for (const s of ste) steType.set(String(s['name']), String(s['stock_entry_type'] ?? ''));
+	}
+	const label = (vt: string, no: string): string => {
+		if (vt === 'Purchase Receipt') return 'оприходование';
+		if (vt === 'Delivery Note') return 'реализация';
+		if (vt === 'Stock Reconciliation') return 'инвентаризация/коррекция';
+		if (vt === 'Stock Entry') {
+			const t = steType.get(no) ?? '';
+			return t === 'Material Transfer' ? 'перемещение' : t === 'Material Receipt' ? 'оприходование' : 'списание';
+		}
+		return vt;
+	};
+	return rows.map((r) => {
+		const vt = String(r['voucher_type'] ?? '');
+		const no = String(r['voucher_no'] ?? '');
+		return { date: String(r['posting_date'] ?? ''), doctype: vt, voucherNo: no, kind: label(vt, no), qty: Number(r['actual_qty'] ?? 0), store: b24StoreTitle(ctx, String(r['warehouse'] ?? '')) };
+	});
 }
 
 // ── Инструмент коррекции остатков (личный) ────────────────────────────────────
