@@ -19,15 +19,6 @@ const ConfigSchema = z.object({
 	autozadachiWebhook: z.string().url().optional(),
 	devWebhook: z.string().url().optional(),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
-	// ── Инструмент коррекции остатков (личный, отдельная учётка, не связан с Б24-аккаунтами) ──
-	/** Логин для входа в /correction. Если пусто — инструмент ВЫКЛЮЧЕН (503). */
-	correctionUser: z.string().optional(),
-	/** SHA-256 (hex) пароля коррекции. Сравниваем с sha256(введённого). */
-	correctionPwSha256: z.string().optional(),
-	/** Секрет для шифра сессионного токена коррекции (fallback — appSecret). */
-	correctionSecret: z.string().optional(),
-	/** Отдельный токен ERPNext для коррекций (аудит под своим юзером ядра; fallback — общий ERPNEXT_TOKEN). */
-	correctionErpToken: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -46,10 +37,6 @@ export function loadConfig(): Config {
 		autozadachiWebhook: process.env['AUTOZADACHI_WEBHOOK'],
 		devWebhook: process.env['DEV_WEBHOOK'],
 		nodeEnv: process.env['NODE_ENV'],
-		correctionUser: process.env['CORRECTION_USER'],
-		correctionPwSha256: process.env['CORRECTION_PW_SHA256'],
-		correctionSecret: process.env['CORRECTION_SECRET'],
-		correctionErpToken: process.env['CORRECTION_ERP_TOKEN'],
 	});
 
 	if (!parsed.success) {
