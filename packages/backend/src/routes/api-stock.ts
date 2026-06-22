@@ -4,7 +4,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	listCoreMovements, searchErpItems, listActiveStoreTitles,
-	listSuppliers, ensureSupplier, createReceiptDraft, createWriteOffDraft, submitDoc,
+	ensureSupplier, createReceiptDraft, createWriteOffDraft, submitDoc,
 } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 
@@ -32,6 +32,23 @@ export const STOCK_CREATE_IDS = new Set(['1', '986', '1858']);
 async function currentUserId(client: B24Client): Promise<string> {
 	const me = await client.call<{ ID?: string | number }>('user.current', {}).catch(() => null);
 	return String(me?.ID ?? '');
+}
+
+/** Поставщики = CRM-компании Б24 с типом «Поставщик» (COMPANY_TYPE=SUPPLIER). Пагинация по start.
+ *  Best-effort: нет прав/скоупа → []. Имя при приходе всё равно заведётся в ядре (ensureSupplier). */
+async function fetchB24Suppliers(client: B24Client, log: FastifyInstance['log']): Promise<string[]> {
+	const out: string[] = [];
+	try {
+		for (let start = 0; start < 2000; start += 50) {
+			const page = await client.call<Array<{ TITLE?: string }>>('crm.company.list', { filter: { COMPANY_TYPE: 'SUPPLIER' }, select: ['TITLE'], start });
+			if (!Array.isArray(page) || !page.length) break;
+			for (const c of page) { const t = String(c.TITLE ?? '').trim(); if (t) out.push(t); }
+			if (page.length < 50) break;
+		}
+	} catch (e) {
+		log.warn({}, `[api/stock] список поставщиков из Б24 недоступен — ${errInfo(e)}`);
+	}
+	return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
 /** Розничная цена в Б24 (тип «Розница» = catalogGroupId 2). Best-effort: обновляем, иначе добавляем; не бросаем. */
@@ -93,7 +110,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
 			const [stores, suppliers, uid] = await Promise.all([
-				listActiveStoreTitles(erp), listSuppliers(erp), currentUserId(client),
+				listActiveStoreTitles(erp), fetchB24Suppliers(client, app.log), currentUserId(client),
 			]);
 			return { ok: true, stores, suppliers, canCreate: STOCK_CREATE_IDS.has(uid) };
 		} catch (e) {

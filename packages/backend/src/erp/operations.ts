@@ -56,14 +56,7 @@ export async function ensureErpSetup(erp: ErpClient): Promise<void> {
 	setupDone = true;
 }
 
-/** Список поставщиков ядра (для выбора в форме «Приход»). Технический «Б24 Снабжение» — первым. */
-export async function listSuppliers(erp: ErpClient): Promise<string[]> {
-	const rows = await erp.list('Supplier', ['name'], [['disabled', '=', 0]], 0, 'name asc');
-	const names = rows.map((r) => String(r['name'] ?? '')).filter(Boolean);
-	return [TECH_SUPPLIER, ...names.filter((n) => n !== TECH_SUPPLIER)];
-}
-
-/** Найти/создать поставщика по имени (ввод нового в форме «Приход»). Возвращает имя в ядре. */
+/** Найти/создать поставщика по имени (выбор из Б24-списка / ввод нового в форме «Приход»). Возвращает имя в ядре. */
 export async function ensureSupplier(erp: ErpClient, name: string): Promise<string> {
 	const clean = name.trim();
 	if (!clean) return TECH_SUPPLIER;

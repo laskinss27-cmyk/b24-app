@@ -331,7 +331,9 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId) ? ls : [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1, purchase: 0, retail: 0 }]);
+	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
+		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + 1 } : l)
+		: [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1, purchase: 0, retail: 0 }]);
 	const upd = (pid: number, patch: Partial<ReceiptLine>): void => setLines((ls) => ls.map((l) => l.productId === pid ? { ...l, ...patch } : l));
 	const del = (pid: number): void => setLines((ls) => ls.filter((l) => l.productId !== pid));
 
@@ -348,8 +350,8 @@ function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClose: () =
 	};
 
 	return (
-		<div style={overlay} onClick={onClose}>
-			<div style={modalCard} onClick={(e) => e.stopPropagation()}>
+		<div style={overlay}>
+			<div style={modalCard}>
 				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>➕ Приход (оприходование)</h2>
 				<label style={fieldLabel}>Склад прихода</label>
 				{storeSelect(toStore, setToStore, form.stores, '— выберите склад —')}
@@ -403,7 +405,9 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId) ? ls : [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1 }]);
+	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
+		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + 1 } : l)
+		: [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1 }]);
 	const upd = (pid: number, qty: number): void => setLines((ls) => ls.map((l) => l.productId === pid ? { ...l, qty } : l));
 	const del = (pid: number): void => setLines((ls) => ls.filter((l) => l.productId !== pid));
 
@@ -419,8 +423,8 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 	};
 
 	return (
-		<div style={overlay} onClick={onClose}>
-			<div style={modalCard} onClick={(e) => e.stopPropagation()}>
+		<div style={overlay}>
+			<div style={modalCard}>
 				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>➕ Списание</h2>
 				<label style={fieldLabel}>Склад списания</label>
 				{storeSelect(fromStore, setFromStore, form.stores, '— выберите склад —')}
@@ -459,7 +463,9 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId) ? ls : [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1 }]);
+	const add = (it: StockItem): void => setLines((ls) => ls.some((l) => l.productId === it.productId)
+		? ls.map((l) => l.productId === it.productId ? { ...l, qty: l.qty + 1 } : l)
+		: [...ls, { productId: it.productId, name: it.name || ('#' + it.productId), qty: 1 }]);
 	const upd = (pid: number, qty: number): void => setLines((ls) => ls.map((l) => l.productId === pid ? { ...l, qty } : l));
 	const del = (pid: number): void => setLines((ls) => ls.filter((l) => l.productId !== pid));
 
@@ -476,8 +482,8 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 	};
 
 	return (
-		<div style={overlay} onClick={onClose}>
-			<div style={modalCard} onClick={(e) => e.stopPropagation()}>
+		<div style={overlay}>
+			<div style={modalCard}>
 				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>➕ Перемещение</h2>
 				<div style={{ display: 'flex', gap: 12 }}>
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Откуда</label>{storeSelect(fromStore, setFromStore, form.stores, '— склад-источник —')}</div>
