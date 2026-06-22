@@ -4,7 +4,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	listCoreMovements, searchErpItems, listActiveStoreTitles,
-	ensureSupplier, createReceiptDraft, createWriteOffDraft, submitDoc,
+	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
 } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 
@@ -144,6 +144,31 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 			return { ok: true, items: await searchErpItems(erp, String(b.q ?? '')) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/search-items] failed — ${errInfo(e)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(e) });
+		}
+	});
+
+	// Создать НОВЫЙ товар (которого нет в каталоге): продукт в каталоге Б24 (iblock 24, простой, штуки)
+	// → productId → зеркало Item в ядре. Возвращает {productId, name} для добавления в приход. Гейт — канарейка.
+	app.post('/api/stock/create-product', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { name?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const name = String(b.name ?? '').trim();
+		if (name.length < 2) return reply.code(400).send({ ok: false, error: 'имя товара слишком короткое' });
+		try {
+			if (!STOCK_CREATE_IDS.has(await currentUserId(client))) return reply.code(403).send({ ok: false, error: 'создавать товар может только канарейка' });
+			// iblock 24 = базовый каталог CRM (productIblockId=null); type 1 = простой товар; measure 9 = штуки (дефолт портала).
+			const r = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', { fields: { iblockId: 24, name, type: 1, measure: 9, active: 'Y' } });
+			const productId = Number(r?.element?.id ?? 0) || 0;
+			if (!productId) throw new Error('catalog.product.add не вернул id');
+			await ensureCoreItem(erp, { productId, name });
+			app.log.info({ productId, name }, '[api/stock/create-product] ok');
+			return { ok: true, productId, name };
+		} catch (e) {
+			app.log.error({}, `[api/stock/create-product] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
 		}
 	});

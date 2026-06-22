@@ -56,6 +56,26 @@ export async function ensureErpSetup(erp: ErpClient): Promise<void> {
 	setupDone = true;
 }
 
+/** Единица измерения по умолчанию (как в миграции каталога). */
+const UOM = 'шт';
+
+/** Завести товар в ЯДРЕ — зеркало нового продукта Б24 (code = productId). Идемпотентно: уже есть → ничего.
+ *  Для «Создать товар» в форме прихода: продукт сперва создан в каталоге Б24 (получил productId), тут — Item ядра. */
+export async function ensureCoreItem(erp: ErpClient, args: { productId: number; name: string }): Promise<void> {
+	const code = String(args.productId);
+	if (await erp.get('Item', code)) return;
+	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
+	if (!(await erp.get('Item Group', ITEM_GROUP))) await erp.create('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
+	await erp.create('Item', {
+		item_code: code,
+		item_name: args.name || `#${code}`,
+		item_group: ITEM_GROUP,
+		stock_uom: UOM,
+		is_stock_item: 1,
+		description: `Б24 productId=${args.productId} (создан из приёмки)`,
+	});
+}
+
 /** Найти/создать поставщика по имени (выбор из списка Б24-контрагентов / ввод нового в форме «Приход»). Возвращает имя в ядре. */
 export async function ensureSupplier(erp: ErpClient, name: string): Promise<string> {
 	const clean = name.trim();

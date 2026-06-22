@@ -816,6 +816,17 @@ export async function fetchStockFormData(): Promise<{ stores: string[]; supplier
 	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate) };
 }
 
+/** Создать НОВЫЙ товар (нет в каталоге): заводим в каталоге Б24 + ядре, возвращаем как StockItem для прихода. */
+export async function createStockProduct(name: string): Promise<StockItem> {
+	const res = await fetch('/api/stock/create-product', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), name }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; productId?: number; name?: string };
+	if (!json.ok || !json.productId) throw new Error(json.error ?? 'не удалось создать товар');
+	return { productId: json.productId, name: json.name ?? name, article: '', brand: '' };
+}
+
 /** Поиск товаров каталога ядра (id / имя / артикул) — пикер позиций в формах. */
 export async function searchStockItems(q: string): Promise<StockItem[]> {
 	if (q.trim().length < 1) return [];

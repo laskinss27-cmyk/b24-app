@@ -3,7 +3,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import {
 	listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
-	fetchStockFormData, searchStockItems, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
+	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	type TransferDoc, type CoreMovement, type StockItem,
 } from './b24.js';
 
@@ -329,17 +329,42 @@ function AddItemModal({ withPrices, onAdd, onClose }: { withPrices: boolean; onA
 	const [purchase, setPurchase] = useState(0);
 	const [retail, setRetail] = useState(0);
 	const [err, setErr] = useState<string | null>(null);
+	const [creating, setCreating] = useState(false);
+	const [newName, setNewName] = useState('');
+	const [cbusy, setCbusy] = useState(false);
 	const confirm = (): void => {
 		if (!sel) { setErr('найди и выбери товар'); return; }
 		if (!(qty > 0)) { setErr('кол-во должно быть больше 0'); return; }
 		onAdd({ productId: sel.productId, name: sel.name || ('#' + sel.productId), qty, purchase, retail });
 		onClose();
 	};
+	const createNew = async (): Promise<void> => {
+		setErr(null);
+		if (newName.trim().length < 2) { setErr('введите название нового товара'); return; }
+		setCbusy(true);
+		try { const it = await createStockProduct(newName.trim()); setSel(it); setCreating(false); }
+		catch (e) { setErr(errText(e)); } finally { setCbusy(false); }
+	};
 	return (
 		<div style={{ ...overlay, zIndex: 1100 }}>
 			<div style={modalCard}>
 				<h2 style={{ fontSize: 16, margin: '0 0 10px' }}>Добавить товар</h2>
-				{!sel ? <ItemPicker onPick={setSel} /> : (
+				{!sel ? (creating ? (
+					<div>
+						<label style={fieldLabel}>Название нового товара</label>
+						<input autoFocus style={{ ...inp, width: '100%' }} placeholder="например: Видеорегистратор XYZ-8" value={newName} onChange={(e) => setNewName(e.target.value)} />
+						<p style={{ fontSize: 12, color: '#7a8699', margin: '4px 0 0' }}>Заведём в каталоге Б24 и в ядре. Цены укажешь в приходе.</p>
+						<div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+							<button style={btnGhost} onClick={() => setCreating(false)}>← назад к поиску</button>
+							<button className="btn-primary" disabled={cbusy} onClick={() => void createNew()}>{cbusy ? '…' : 'Создать товар'}</button>
+						</div>
+					</div>
+				) : (
+					<>
+						<ItemPicker onPick={setSel} />
+						<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Нет в базе? <a href="#" onClick={(e) => { e.preventDefault(); setCreating(true); }} style={{ color: '#185fa5' }}>Создать новый товар</a></p>
+					</>
+				)) : (
 					<>
 						<div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 8px' }}>
 							<span>✅ <b>{sel.name || ('#' + sel.productId)}</b> <span style={{ color: '#7a8699', fontSize: 12 }}>id {sel.productId}</span></span>
