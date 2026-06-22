@@ -56,6 +56,23 @@ export async function ensureErpSetup(erp: ErpClient): Promise<void> {
 	setupDone = true;
 }
 
+/** Список поставщиков ядра (для выбора в форме «Приход»). Технический «Б24 Снабжение» — первым. */
+export async function listSuppliers(erp: ErpClient): Promise<string[]> {
+	const rows = await erp.list('Supplier', ['name'], [['disabled', '=', 0]], 0, 'name asc');
+	const names = rows.map((r) => String(r['name'] ?? '')).filter(Boolean);
+	return [TECH_SUPPLIER, ...names.filter((n) => n !== TECH_SUPPLIER)];
+}
+
+/** Найти/создать поставщика по имени (ввод нового в форме «Приход»). Возвращает имя в ядре. */
+export async function ensureSupplier(erp: ErpClient, name: string): Promise<string> {
+	const clean = name.trim();
+	if (!clean) return TECH_SUPPLIER;
+	const existing = await erp.get('Supplier', clean);
+	if (existing) return String(existing['name']);
+	const doc = await erp.create('Supplier', { supplier_name: clean, supplier_type: 'Company' });
+	return String(doc['name']);
+}
+
 /** Имя склада ERPNext из названия склада Б24. */
 export function erpWarehouse(ctx: ErpContext, b24StoreTitle: string): string {
 	return `${b24StoreTitle} - ${ctx.abbr}`;
@@ -269,17 +286,35 @@ export async function receiveTransferFromTransit(
 	return { name };
 }
 
-/** Списание со склада (Stock Entry: Material Issue). */
+/** Причина списания — custom-поле на Stock Entry (показываем в журнале). */
+const WRITEOFF_REASON_FIELD = 'b24_reason';
+let writeoffFieldDone = false;
+async function ensureWriteoffField(erp: ErpClient): Promise<void> {
+	if (writeoffFieldDone) return;
+	const cfName = `Stock Entry-${WRITEOFF_REASON_FIELD}`;
+	if (!(await erp.get('Custom Field', cfName))) {
+		await erp.create('Custom Field', {
+			dt: 'Stock Entry', fieldname: WRITEOFF_REASON_FIELD, label: 'B24 Reason',
+			fieldtype: 'Data', insert_after: 'stock_entry_type', in_standard_filter: 1, in_list_view: 1,
+		});
+	}
+	writeoffFieldDone = true;
+}
+
+/** Списание со склада (Stock Entry: Material Issue). reason — причина (наше custom-поле). */
 export async function createWriteOffDraft(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number },
+	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; reason?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
+	if (!args.lines.length) throw new Error('пустое списание');
+	if (args.reason) await ensureWriteoffField(erp);
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Issue',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		...(args.reason ? { [WRITEOFF_REASON_FIELD]: args.reason.slice(0, 140) } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -479,8 +514,9 @@ export async function listCoreMovements(
 		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
 		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r['supplier'] ?? ''), dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
-	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
-	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: 'списание', dealId: String(r[DEAL_FIELD] ?? '') }));
+	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
+	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', dealId: String(r[DEAL_FIELD] ?? '') }));
 }
 
 // ── Инструмент коррекции остатков (личный) ────────────────────────────────────

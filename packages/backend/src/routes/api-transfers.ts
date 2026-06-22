@@ -5,6 +5,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { shipTransferToTransit, receiveTransferFromTransit } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
+import { STOCK_CREATE_IDS } from './api-stock.js';
 
 /**
  * API модуля «Перемещения» (складской учёт). Документ перемещения — в нашем entity-store
@@ -182,6 +183,46 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			return { ok: true, transfers: created };
 		} catch (err) {
 			app.log.error({}, `[api/transfers/create] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// ── Ручное перемещение из окна «Складской учёт» (без сделки) ────────────────
+	// body: { fromStore, toStore, lines: [{productId, name, qty}] } → один документ «Запрошено».
+	// Создаёт канарейка; дальше штатные «В пути»/«Получено» проводит снабжение. Задачи нет (ручной инструмент).
+	app.post('/api/transfers/create-manual', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const fromStore = String(b['fromStore'] ?? '').trim();
+		const toStore = String(b['toStore'] ?? '').trim();
+		const rawLines = Array.isArray(b['lines']) ? (b['lines'] as Array<Record<string, unknown>>) : [];
+		const lines: TransferLine[] = rawLines
+			.map((l) => ({ productId: Number(l['productId']), name: String(l['name'] ?? ''), qty: Number(l['qty']) }))
+			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
+		if (!fromStore || !toStore || fromStore === toStore) return reply.code(400).send({ ok: false, error: 'нужны разные склады «откуда» и «куда»' });
+		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
+		await ensureTransfersEntity(client);
+		try {
+			const me = await currentUser(client);
+			if (!STOCK_CREATE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только канарейка' });
+			const now = new Date().toISOString();
+			const data: TransferData = {
+				dealId: '', toStore, fromStore, status: 'requested', lines,
+				taskId: null, shipEntry: null, receiveEntry: null,
+				createdAt: now, createdById: me.id, createdByName: me.name,
+				history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: 'создано вручную в окне' }],
+			};
+			const itemName = `Перемещение: ${fromStore} → ${toStore}`;
+			const added = await client.call<number | { id?: number }>('entity.item.add', {
+				ENTITY: TRANSFERS_ENTITY, NAME: itemName, DETAIL_TEXT: JSON.stringify(data),
+			});
+			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+			if (!id) throw new Error('entity.item.add не вернул id');
+			app.log.info({ id, fromStore, toStore }, '[api/transfers/create-manual] ok');
+			return { ok: true, transfer: { id, name: itemName, ...data } };
+		} catch (err) {
+			app.log.error({}, `[api/transfers/create-manual] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
