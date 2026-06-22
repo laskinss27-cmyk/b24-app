@@ -34,6 +34,36 @@ async function currentUserId(client: B24Client): Promise<string> {
 	return String(me?.ID ?? '');
 }
 
+/** Поставщики Б24 = CRM-компании в воронке «Поставщики» (складские контрагенты, code CATALOG_CONTRACTOR_COMPANY).
+ *  Обычный crm.company.list их НЕ отдаёт (не дефолтная категория) — берём через универсальный crm.item.list. */
+let supplierCatId: number | null = null;
+async function supplierCategoryId(client: B24Client): Promise<number> {
+	if (supplierCatId !== null) return supplierCatId;
+	try {
+		const r = await client.call<{ categories?: Array<{ id?: number; code?: string }> }>('crm.category.list', { entityTypeId: 4 });
+		const cat = (r?.categories ?? []).find((c) => c.code === 'CATALOG_CONTRACTOR_COMPANY');
+		supplierCatId = cat ? Number(cat.id) : 8;
+	} catch { supplierCatId = 8; }
+	return supplierCatId;
+}
+
+async function fetchSupplierCompanies(client: B24Client, log: FastifyInstance['log']): Promise<string[]> {
+	const out: string[] = [];
+	try {
+		const categoryId = await supplierCategoryId(client);
+		for (let start = 0; start < 2000; start += 50) {
+			const r = await client.call<{ items?: Array<{ title?: string }> }>('crm.item.list', { entityTypeId: 4, filter: { categoryId }, select: ['id', 'title'], start });
+			const items = r?.items ?? [];
+			if (!items.length) break;
+			for (const it of items) { const t = String(it.title ?? '').trim(); if (t) out.push(t); }
+			if (items.length < 50) break;
+		}
+	} catch (e) {
+		log.warn({}, `[api/stock] список поставщиков (воронка контрагентов) недоступен — ${errInfo(e)}`);
+	}
+	return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
 
 /** Розничная цена в Б24 (тип «Розница» = catalogGroupId 2). Best-effort: обновляем, иначе добавляем; не бросаем. */
 async function pushRetailToB24(client: B24Client, productId: number, price: number, log: FastifyInstance['log']): Promise<void> {
@@ -93,8 +123,10 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			const [stores, uid] = await Promise.all([listActiveStoreTitles(erp), currentUserId(client)]);
-			return { ok: true, stores, canCreate: STOCK_CREATE_IDS.has(uid) };
+			const [stores, suppliers, uid] = await Promise.all([
+				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), currentUserId(client),
+			]);
+			return { ok: true, stores, suppliers, canCreate: STOCK_CREATE_IDS.has(uid) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
@@ -112,24 +144,6 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 			return { ok: true, items: await searchErpItems(erp, String(b.q ?? '')) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/search-items] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
-
-	// Поиск контрагентов-поставщиков = CRM-компании Б24 (складские контрагенты приходят из CRM).
-	// Пикер поставщика в форме «Приход»; имя выбранного/введённого заводится в ядре при создании.
-	app.post('/api/stock/search-contractors', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { q?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const q = String(b.q ?? '').trim();
-		if (q.length < 2) return { ok: true, contractors: [] };
-		try {
-			const rows = await client.call<Array<{ ID?: string | number; TITLE?: string }>>('crm.company.list', { filter: { '%TITLE': q }, select: ['ID', 'TITLE'], order: { TITLE: 'ASC' } });
-			const contractors = (rows ?? []).map((c) => ({ id: String(c.ID ?? ''), name: String(c.TITLE ?? '').trim() })).filter((c) => c.name);
-			return { ok: true, contractors };
-		} catch (e) {
-			app.log.error({}, `[api/stock/search-contractors] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
 		}
 	});

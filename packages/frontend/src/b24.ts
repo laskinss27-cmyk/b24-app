@@ -805,26 +805,15 @@ export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery', per
 /** Найденный в каталоге ядра товар (пикер позиций). */
 export interface StockItem { productId: number; name: string; article: string; brand: string }
 
-/** Справочники для форм: склады, право создавать (канарейка). Поставщики — отдельным поиском. */
-export async function fetchStockFormData(): Promise<{ stores: string[]; canCreate: boolean }> {
+/** Справочники для форм: склады, поставщики (Б24-воронка контрагентов), право создавать (канарейка). */
+export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean }> {
 	const res = await fetch('/api/stock/form-data', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; canCreate?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить справочники');
-	return { stores: json.stores ?? [], canCreate: Boolean(json.canCreate) };
-}
-
-/** Поиск контрагентов-поставщиков (CRM-компании Б24) для пикера в форме «Приход». */
-export async function searchContractors(q: string): Promise<Array<{ id: string; name: string }>> {
-	if (q.trim().length < 2) return [];
-	const res = await fetch('/api/stock/search-contractors', {
-		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), q }),
-	});
-	const json = (await res.json()) as { ok: boolean; contractors?: Array<{ id: string; name: string }> };
-	return json.contractors ?? [];
+	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate) };
 }
 
 /** Поиск товаров каталога ядра (id / имя / артикул) — пикер позиций в формах. */

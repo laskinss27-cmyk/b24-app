@@ -56,7 +56,7 @@ export async function ensureErpSetup(erp: ErpClient): Promise<void> {
 	setupDone = true;
 }
 
-/** Найти/создать поставщика по имени (выбор из Б24-списка / ввод нового в форме «Приход»). Возвращает имя в ядре. */
+/** Найти/создать поставщика по имени (выбор из списка Б24-контрагентов / ввод нового в форме «Приход»). Возвращает имя в ядре. */
 export async function ensureSupplier(erp: ErpClient, name: string): Promise<string> {
 	const clean = name.trim();
 	if (!clean) return TECH_SUPPLIER;
