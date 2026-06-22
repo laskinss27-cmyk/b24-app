@@ -456,17 +456,30 @@ export async function deleteInventoryRecoDraft(erp: ErpClient, name: string): Pr
 
 export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string; dealId: string }
 
-/** Последние документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация). */
-export async function listCoreMovements(erp: ErpClient, kind: 'issue' | 'receipt' | 'delivery', limit = 50): Promise<CoreMovement[]> {
+/**
+ * Документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация).
+ * Период (from/to по posting_date, YYYY-MM-DD) фильтруется в ядре; без периода — последние 50.
+ * Сортировка posting_date desc (свежие сверху).
+ */
+export async function listCoreMovements(
+	erp: ErpClient,
+	kind: 'issue' | 'receipt' | 'delivery',
+	opts: { from?: string; to?: string } = {},
+): Promise<CoreMovement[]> {
+	const dateFilters: unknown[] = [];
+	if (opts.from) dateFilters.push(['posting_date', '>=', opts.from]);
+	if (opts.to) dateFilters.push(['posting_date', '<=', opts.to]);
+	const limit = (opts.from || opts.to) ? 1000 : 50;
+	const ORDER = 'posting_date desc';
 	if (kind === 'delivery') {
-		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2]], limit);
+		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
 		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`, dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
 	if (kind === 'receipt') {
-		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2]], limit);
+		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
 		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: String(r['supplier'] ?? ''), dealId: String(r[DEAL_FIELD] ?? '') }));
 	}
-	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2]], limit);
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters], limit, ORDER);
 	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: 'списание', dealId: String(r[DEAL_FIELD] ?? '') }));
 }
 

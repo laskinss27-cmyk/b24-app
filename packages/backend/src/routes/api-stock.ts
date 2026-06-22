@@ -23,16 +23,20 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
 
-	// body: { domain, accessToken, kind: 'issue'|'receipt'|'delivery' }
+	// body: { domain, accessToken, kind: 'issue'|'receipt'|'delivery', from?, to? (YYYY-MM-DD) }
 	app.post('/api/stock/movements', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { kind?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { kind?: unknown; from?: unknown; to?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const kind = b.kind === 'receipt' ? 'receipt' : b.kind === 'delivery' ? 'delivery' : 'issue';
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+		const period: { from?: string; to?: string } = {};
+		if (isDate(b.from)) period.from = b.from;
+		if (isDate(b.to)) period.to = b.to;
 		try {
-			const movements = await listCoreMovements(erp, kind);
+			const movements = await listCoreMovements(erp, kind, period);
 			const owners = await resolveDealOwners(client, movements.map((m) => m.dealId));
 			return { ok: true, kind, movements: movements.map((m) => ({ ...m, ownerName: owners.get(m.dealId) ?? '' })) };
 		} catch (e) {

@@ -70,9 +70,10 @@ export class ErpClient {
 	}
 
 	/** Список документов. fields/filters — как в Frappe REST. Без лимита (limit_page_length=0). */
-	async list<T = Record<string, unknown>>(doctype: string, fields: string[], filters?: unknown[], limit = 0): Promise<T[]> {
+	async list<T = Record<string, unknown>>(doctype: string, fields: string[], filters?: unknown[], limit = 0, orderBy?: string): Promise<T[]> {
 		const q = new URLSearchParams({ fields: JSON.stringify(fields), limit_page_length: String(limit) });
 		if (filters) q.set('filters', JSON.stringify(filters));
+		if (orderBy) q.set('order_by', orderBy);
 		const r = await this.request('GET', `/api/resource/${encodeURIComponent(doctype)}?${q}`);
 		return (r.json['data'] as T[]) ?? [];
 	}
