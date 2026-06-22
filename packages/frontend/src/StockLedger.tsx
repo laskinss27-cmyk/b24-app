@@ -49,6 +49,16 @@ const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', bo
 const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
 const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
 
+/** Склады с остатком (qty>0) по убыванию. */
+const stockEntries = (it: StockItem): Array<[string, number]> => Object.entries(it.stocks ?? {}).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]);
+/** Краткая строка наличия для строки результата поиска (всего + топ-склады). */
+function StockHint({ it }: { it: StockItem }): JSX.Element {
+	const e = stockEntries(it);
+	if (!e.length) return <span style={{ color: '#c0392b', fontSize: 12 }}>нет на складах</span>;
+	const total = it.total ?? e.reduce((a, [, q]) => a + q, 0);
+	return <span style={{ color: '#1a7f37', fontSize: 12 }}>Σ {total} · {e.slice(0, 3).map(([s, q]) => `${s}: ${q}`).join(' · ')}{e.length > 3 ? ' …' : ''}</span>;
+}
+
 /** Справочники окна (склады/поставщики/право создавать). Поставщики — Б24-воронка контрагентов. */
 interface StockForm { stores: string[]; suppliers: string[]; canCreate: boolean }
 
@@ -104,6 +114,7 @@ function ProductFilter({ value, onChange, placeholder }: { value: StockItem | nu
 					{res.map((it) => (
 						<div key={it.productId} onClick={() => { onChange(it); setRes(null); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
 							{it.name || ('#' + it.productId)} <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
+							<div><StockHint it={it} /></div>
 						</div>
 					))}
 				</div>
@@ -476,6 +487,7 @@ function ItemPicker({ onPick }: { onPick: (it: StockItem) => void }): JSX.Elemen
 					{res.map((it) => (
 						<div key={it.productId} onClick={() => onPick(it)} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
 							<b>{it.name || ('#' + it.productId)}</b> <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
+							<div><StockHint it={it} /></div>
 						</div>
 					))}
 				</div>
@@ -487,7 +499,7 @@ function ItemPicker({ onPick }: { onPick: (it: StockItem) => void }): JSX.Elemen
 interface ReceiptLine { productId: number; name: string; qty: number; purchase: number; retail: number }
 
 /** Под-форma «Добавить товар» (логика 1С): поиск → выбор → кол-во (+цены для прихода) → «Добавить». */
-function AddItemModal({ withPrices, onAdd, onClose }: { withPrices: boolean; onAdd: (it: ReceiptLine) => void; onClose: () => void }): JSX.Element {
+function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPrices: boolean; highlightStore?: string; onAdd: (it: ReceiptLine) => void; onClose: () => void }): JSX.Element {
 	const [sel, setSel] = useState<StockItem | null>(null);
 	const [qty, setQty] = useState(1);
 	const [purchase, setPurchase] = useState(0);
@@ -530,10 +542,16 @@ function AddItemModal({ withPrices, onAdd, onClose }: { withPrices: boolean; onA
 					</>
 				)) : (
 					<>
-						<div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 8px' }}>
+						<div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 6px' }}>
 							<span>✅ <b>{sel.name || ('#' + sel.productId)}</b> <span style={{ color: '#7a8699', fontSize: 12 }}>id {sel.productId}</span></span>
 							<button style={btnGhost} onClick={() => setSel(null)}>сменить</button>
 						</div>
+						<div style={{ fontSize: 13, margin: '0 0 4px' }}>
+							Остатки: {stockEntries(sel).length
+								? stockEntries(sel).map(([s, q]) => <span key={s} style={{ marginRight: 10, ...(s === highlightStore ? { fontWeight: 700, color: '#185fa5' } : {}) }}>{s}: {q}</span>)
+								: <span style={{ color: '#c0392b' }}>нет на складах</span>}
+						</div>
+						{highlightStore ? <div style={{ fontSize: 12, color: (sel.stocks?.[highlightStore] ?? 0) < qty ? '#c0392b' : '#7a8699', marginBottom: 4 }}>На «{highlightStore}»: {sel.stocks?.[highlightStore] ?? 0}{(sel.stocks?.[highlightStore] ?? 0) < qty ? ` — меньше, чем вводишь (${qty})` : ''}</div> : null}
 						<label style={fieldLabel}>Количество</label>
 						<input type="number" min="0" step="any" autoFocus style={{ ...inp, width: 120 }} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
 						{withPrices && (
@@ -659,7 +677,7 @@ function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => 
 				{storeSelect(fromStore, setFromStore, form.stores, '— выберите склад —')}
 				<label style={fieldLabel}>Причина</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="например: брак, бой, недостача" value={reason} onChange={(e) => setReason(e.target.value)} />
-				{addOpen && <AddItemModal withPrices={false} onAdd={add} onClose={() => setAddOpen(false)} />}
+				{addOpen && <AddItemModal withPrices={false} {...(fromStore ? { highlightStore: fromStore } : {})} onAdd={add} onClose={() => setAddOpen(false)} />}
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<label style={fieldLabel}>Товары</label>
@@ -742,7 +760,7 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Создаётся статус «Запрошено». Снабжение проведёт «В пути» → «Получено» (честный транзит).</p>
-				{addOpen && <AddItemModal withPrices={false} onAdd={add} onClose={() => setAddOpen(false)} />}
+				{addOpen && <AddItemModal withPrices={false} {...(fromStore ? { highlightStore: fromStore } : {})} onAdd={add} onClose={() => setAddOpen(false)} />}
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>

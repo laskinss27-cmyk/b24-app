@@ -3,7 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
-	listCoreMovements, searchErpItems, listActiveStoreTitles,
+	listCoreMovements, searchErpItems, listActiveStoreTitles, fetchErpStocksFor,
 	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
 	fetchCoreDocDetail, itemStockLedger,
 } from '../erp/operations.js';
@@ -181,7 +181,16 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			return { ok: true, items: await searchErpItems(erp, String(b.q ?? '')) };
+			const items = await searchErpItems(erp, String(b.q ?? ''));
+			// Обогащаем остатками по складам (один батч-запрос Bin) — чтобы в пикере было видно наличие
+			// и «живую» карточку среди дублей.
+			const stockMap = await fetchErpStocksFor(erp, items.map((i) => i.productId));
+			const enriched = items.map((i) => {
+				const stocks = stockMap.get(i.productId) ?? {};
+				const total = Object.values(stocks).reduce((a, b) => a + b, 0);
+				return { ...i, stocks, total };
+			});
+			return { ok: true, items: enriched };
 		} catch (e) {
 			app.log.error({}, `[api/stock/search-items] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });

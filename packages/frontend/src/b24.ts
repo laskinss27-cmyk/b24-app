@@ -846,8 +846,8 @@ export async function fetchItemHistory(productId: number): Promise<ItemMovement[
 
 // ── Формы создания в окне «Складской учёт» ────────────────────────────────────
 
-/** Найденный в каталоге ядра товар (пикер позиций). */
-export interface StockItem { productId: number; name: string; article: string; brand: string }
+/** Найденный в каталоге ядра товар (пикер позиций). stocks/total — остатки по складам (для наличия в пикере). */
+export interface StockItem { productId: number; name: string; article: string; brand: string; stocks?: Record<string, number>; total?: number }
 
 /** Справочники для форм: склады, поставщики (Б24-воронка контрагентов), право создавать (канарейка). */
 export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean }> {
