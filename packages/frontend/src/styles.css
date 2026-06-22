@@ -1788,11 +1788,28 @@ html, body, #root { height: 100%; }
 /* На экране — визуально разделяем экземпляры (в печати они на разных страницах). */
 .blank-page + .blank-page { border-top: 2px dashed #d1d5db; margin-top: 28px; padding-top: 20px; }
 
+/* Печатные формы складских документов (перемещение/списание/приход). На экране — за кадром (left:-10000),
+   печатается через @media print ниже. */
+.stock-blank { position: fixed; left: -10000px; top: 0; width: 760px; background: #fff; color: #000; font-size: 13px; padding: 8px 0; }
+.sb-title { font-size: 17px; font-weight: 600; margin: 0 0 10px; }
+.sb-meta { font-size: 13px; color: #111; line-height: 1.8; margin-bottom: 12px; }
+.sb-meta b { font-weight: 600; }
+.sb-table { width: 100%; border-collapse: collapse; }
+.sb-table th { border: 1px solid #888; padding: 6px 8px; font-size: 12.5px; background: #f6f6f6; text-align: left; font-weight: 500; }
+.sb-table td { border: 1px solid #888; padding: 6px 8px; font-size: 12.5px; vertical-align: top; }
+.sb-num { text-align: right; white-space: nowrap; }
+.sb-foot td { font-weight: 600; }
+.sb-info { font-size: 13px; margin: 10px 0 0; }
+.sb-signs { display: flex; gap: 40px; margin-top: 30px; font-size: 13px; }
+.sb-signs > div { flex: 1; }
+.sb-signline { display: inline-block; border-bottom: 1px solid #000; min-width: 55%; }
+
 @media print {
 	body * { visibility: hidden; }
 	/* .inv добавлен: этот глобальный `body * {hidden}` (для Ремонтов/КП) иначе прячет
 	   и печать инвентаризации → пустые листы. Хром .inv скрыт display:none в 1-м @media print. */
-	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv * { visibility: visible; }
+	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv *, .stock-blank, .stock-blank * { visibility: visible; }
+	.stock-blank { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
 	.repair-blank { position: absolute; left: 0; top: 0; width: 100%; }
 	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
 	.no-print { display: none !important; }
