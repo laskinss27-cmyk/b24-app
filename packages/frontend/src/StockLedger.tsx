@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal, type TransferDoc, type CoreMovement } from './b24.js';
+import { getContext, type B24Context } from './b24-context.js';
+import { listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal, fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, type TransferDoc, type CoreMovement } from './b24.js';
 
 /** Кликабельная ссылка на сделку + ФИО ответственного (общий вид для всех складских документов). */
 function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | undefined }): JSX.Element {
@@ -33,8 +34,29 @@ const tabStyle = (active: boolean): CSSProperties => ({
 const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
 
+type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
+
 export function StockLedger(): JSX.Element {
+	const [ctx] = useState<B24Context>(() => getContext());
+	const [phase, setPhase] = useState<Phase>({ k: 'init' });
 	const [tab, setTab] = useState<Tab>('transfers');
+
+	// Канарейка: окно видит только BETA_USER_IDS / админ портала (как База/Реализации).
+	useEffect(() => {
+		if (ctx.__mock) { setPhase({ k: 'ready' }); return; }
+		const bx = window.BX24;
+		if (!bx) { setPhase({ k: 'ready' }); return; }
+		bx.init(() => {
+			void (async () => {
+				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
+				setPhase(!isPortalAdmin() && !BETA_USER_IDS.includes(uid) ? { k: 'denied' } : { k: 'ready' });
+			})().catch(() => setPhase({ k: 'denied' }));
+		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [ctx]);
+
+	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
+	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>🔒 Раздел в обкатке — доступен ограниченному кругу.</div>;
 	return (
 		<div style={{ maxWidth: 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
