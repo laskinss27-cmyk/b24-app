@@ -237,10 +237,26 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
  *  для ручного тестирования (быстро отвечает): видит ровно то, что рядовой менеджер. */
 export const BETA_USER_IDS = ['1858', '986', '1'];
 
-/** ID текущего пользователя, который смотрит (для канареечного гейта). */
+/** ID текущего пользователя, который смотрит (для канареечного гейта).
+ *  КЭШ на сессию: фронтовый BX24 user.current флапает (таймаут 15с) при повторных вызовах —
+ *  напр. кнопка «Реализации» в Базе монтирует ещё один гейт. Первый успешный id запоминаем,
+ *  дальше отдаём из кэша, не дёргая BX24. Кэшируем и in-flight промис (дедуп параллельных). */
+let _uidCache: string | null = null;
+let _uidInflight: Promise<string> | null = null;
 export async function fetchCurrentUserId(): Promise<string> {
-	const u = await call<{ ID?: string | number }>('user.current');
-	return String(u?.ID ?? '');
+	if (_uidCache) return _uidCache;
+	if (_uidInflight) return _uidInflight;
+	_uidInflight = (async () => {
+		try {
+			const u = await call<{ ID?: string | number }>('user.current');
+			const id = String(u?.ID ?? '');
+			if (id) _uidCache = id;
+			return id;
+		} finally {
+			_uidInflight = null;
+		}
+	})();
+	return _uidInflight;
 }
 
 /** Текущий пользователь: id + читаемое имя (для «кто взял точку» в сводке). */
