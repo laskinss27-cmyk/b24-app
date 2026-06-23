@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument } from './Kp.js';
@@ -236,6 +236,73 @@ export function DealProductsTab(): JSX.Element {
 	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} onAdd={() => setAdding(true)} onKp={() => setShowKp(true)} onReload={reload} />;
 }
 
+const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
+const splitCard: CSSProperties = { background: '#fff', borderRadius: 12, padding: 20, maxWidth: 560, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)', color: '#1a2231' };
+const splitFld: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 14, color: '#1a2231' };
+const splitGhost: CSSProperties = { ...splitFld, cursor: 'pointer', background: '#fff' };
+
+/** Перемещение со сплитом: распределить недостачу по нескольким складам-источникам.
+ *  Каждый источник = отдельный документ перемещения (бэкенд `groups`). */
+function TransferSplitModal({ dealId, productId, name, need, destName, sources, onClose, onDone }: {
+	dealId: number; productId: number; name: string; need: number; destName: string;
+	sources: Array<{ storeName: string; amount: number }>;
+	onClose: () => void; onDone: (msg: string) => void;
+}): JSX.Element {
+	const sorted = [...sources].sort((a, b) => b.amount - a.amount);
+	const [allocs, setAllocs] = useState<Array<{ storeName: string; qty: number }>>(() => {
+		const f = sorted[0];
+		return f ? [{ storeName: f.storeName, qty: Math.min(need, f.amount) }] : [];
+	});
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const availOf = (s: string): number => sources.find((x) => x.storeName === s)?.amount ?? 0;
+	const used = new Set(allocs.map((a) => a.storeName));
+	const free = sorted.filter((s) => !used.has(s.storeName));
+	const distributed = allocs.reduce((a, x) => a + (x.qty || 0), 0);
+	const valid = allocs.length > 0 && allocs.every((a) => a.storeName && a.qty > 0 && a.qty <= availOf(a.storeName)) && distributed === need;
+	const setAlloc = (i: number, patch: Partial<{ storeName: string; qty: number }>): void => setAllocs((as) => as.map((a, j) => j === i ? { ...a, ...patch } : a));
+	const addSrc = (): void => { const f = free[0]; if (f) setAllocs((as) => [...as, { storeName: f.storeName, qty: Math.min(Math.max(need - distributed, 0), f.amount) }]); };
+	const delSrc = (i: number): void => setAllocs((as) => as.filter((_, j) => j !== i));
+	const confirm = async (): Promise<void> => {
+		if (!valid || busy) return;
+		setBusy(true); setErr(null);
+		try {
+			await createTransfers({ dealId, toStore: destName, groups: allocs.map((a) => ({ fromStore: a.storeName, lines: [{ productId, name, qty: a.qty }] })) });
+			onDone(`✅ Перемещение запрошено: ${allocs.map((a) => `${a.storeName} × ${a.qty}`).join(', ')} → ${destName} (${allocs.length > 1 ? allocs.length + ' документа' : 'документ'} + задача снабжению).`);
+		} catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
+	};
+	return (
+		<div style={splitOv}>
+			<div style={splitCard}>
+				<h2 style={{ fontSize: 17, margin: '0 0 4px' }}>↪ Перемещение со сплитом</h2>
+				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 10 }}>{name} · нужно на «{destName}»: <b style={{ color: '#1a2231' }}>{need}</b> шт</div>
+				{!sources.length ? <p style={{ color: '#c0392b', fontSize: 13 }}>Нет складов-источников с остатком.</p> : (
+					<>
+						{allocs.map((a, i) => (
+							<div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}>
+								<select value={a.storeName} onChange={(e) => setAlloc(i, { storeName: e.target.value })} style={{ ...splitFld, flex: 1 }}>
+									{[a.storeName, ...free.map((s) => s.storeName)].map((sn) => <option key={sn} value={sn}>{sn} (есть {availOf(sn)})</option>)}
+								</select>
+								<input type="number" min="0" max={availOf(a.storeName)} value={a.qty} onChange={(e) => setAlloc(i, { qty: Number(e.target.value) })} style={{ ...splitFld, width: 80 }} />
+								{allocs.length > 1 && <button onClick={() => delSrc(i)} style={splitGhost}>✕</button>}
+							</div>
+						))}
+						{free.length > 0 && <button onClick={addSrc} style={{ ...splitGhost, marginTop: 4 }}>+ источник</button>}
+						<div style={{ fontSize: 13, marginTop: 10, color: distributed === need ? '#1a7f37' : '#c0392b' }}>
+							распределено {distributed} / {need}{distributed === need ? '' : distributed < need ? ' — добавь источник' : ' — перебор'}
+						</div>
+					</>
+				)}
+				{err && <p style={{ color: '#c0392b', fontSize: 13 }}>⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+					<button onClick={onClose} style={splitGhost}>Отмена</button>
+					<button className="btn-primary" disabled={!valid || busy} onClick={() => void confirm()}>{busy ? '…' : 'Запросить'}</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
@@ -258,7 +325,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	/** Имена черновиков ядра, ожидающих проведения (между «Реализация» и «Провести»). */
 	const [draftNames, setDraftNames] = useState<string[]>([]);
 	/** id строки, по которой создаётся перемещение. */
-	const [transferring, setTransferring] = useState<string | null>(null);
+	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
@@ -322,32 +389,6 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
 		} finally {
 			setSupplying(null);
-		}
-	};
-
-	// Перемещение: получатель = выбранный на строке склад (там 0), источник = склад с бо́льшим остатком.
-	// Создаёт документ «Запрошено» + задачу снабжению. Статусы дальше двигает снабжение (окно склад-учёта).
-	const doTransfer = async (r: EnrichedRow): Promise<void> => {
-		if (dealId == null || transferring != null || busy) return;
-		const dest = storeOf(r);
-		const need = remaining(r);
-		const src = r.stocks.filter((s) => s.amount > 0 && s.storeId !== dest).sort((a, b) => b.amount - a.amount)[0];
-		if (!src) { setNotice({ kind: 'err', text: '⛔ нет склада-источника с остатком' }); return; }
-		setTransferring(r.id);
-		setNotice(null);
-		try {
-			await createTransfers({
-				dealId,
-				toStore: storeName(dest),
-				groups: [{ fromStore: src.storeName, lines: [{ productId: r.productId, name: r.name, qty: need }] }],
-			});
-			setNotice({ kind: 'ok', text: `✅ Перемещение запрошено: ${src.storeName} → ${storeName(dest)} · ${r.name.slice(0, 30)} × ${need}. Задача ушла снабжению.` });
-			const fresh = await listTransfers(dealId).catch(() => null);
-			if (fresh) setDealTransfers(fresh.transfers);
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setTransferring(null);
 		}
 	};
 
@@ -467,10 +508,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 							return (
 								<button
 									className="st-badge transfer"
-									disabled={busy || transferring != null}
-									onClick={() => void doTransfer(r)}
-									title="0 на выбранном складе, но есть на других — запросить перемещение (источник = склад с остатком)"
-								>{transferring === r.id ? '…' : '↪ Переместить'}</button>
+									disabled={busy}
+									onClick={() => setSplitRow(r)}
+									title="Запросить перемещение со складов-источников (можно дробить по нескольким)"
+								>↪ Переместить</button>
 							);
 						})()}
 						{status === 'order' && (
@@ -667,6 +708,14 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>
+
+			{splitRow && dealId != null && (() => {
+				const dest = storeOf(splitRow);
+				const srcs = splitRow.stocks.filter((s) => s.amount > 0 && s.storeId !== dest).map((s) => ({ storeName: s.storeName, amount: s.amount }));
+				return <TransferSplitModal dealId={dealId} productId={splitRow.productId} name={splitRow.name} need={remaining(splitRow)} destName={storeName(dest)} sources={srcs}
+					onClose={() => setSplitRow(null)}
+					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); const fresh = await listTransfers(dealId).catch(() => null); if (fresh) setDealTransfers(fresh.transfers); }} />;
+			})()}
 
 		</div>
 	);
