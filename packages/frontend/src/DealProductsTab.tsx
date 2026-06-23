@@ -259,6 +259,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	const [draftNames, setDraftNames] = useState<string[]>([]);
 	/** id строки, по которой создаётся перемещение. */
 	const [transferring, setTransferring] = useState<string | null>(null);
+	const [refreshing, setRefreshing] = useState(false);
+	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const [dealTransfers, setDealTransfers] = useState<TransferDoc[]>([]);
 	useEffect(() => {
@@ -295,6 +297,9 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	/** Незакрытое перемещение по этому товару (запрошено/в пути) — чтобы показать статус вместо кнопки. */
 	const activeTransferOf = (r: EnrichedRow): TransferDoc | null =>
 		dealTransfers.find((t) => (t.status === 'requested' || t.status === 'in_transit') && t.lines.some((l) => l.productId === r.productId)) ?? null;
+	/** Полученное перемещение по товару: товар уже на складе Б, но остаток открытой вкладки мог не обновиться. */
+	const receivedTransferOf = (r: EnrichedRow): TransferDoc | null =>
+		dealTransfers.find((t) => t.status === 'received' && t.lines.some((l) => l.productId === r.productId)) ?? null;
 
 	// Товар «нет на складах» → заявка снабжения с точным перечнем (создаёт «Поставку № …»
 	// или дополняет открытую заявку этой сделки). Фича снабжения не менялась — только перевешена
@@ -450,6 +455,14 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 								<span className={`st-badge ${active.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${active.fromStore} → ${active.toStore}`}>
 									{active.status === 'in_transit' ? '🚚 в пути' : '⏳ запрошено'}
 								</span>
+							);
+							if (receivedTransferOf(r)) return (
+								<button
+									className="st-badge ready"
+									disabled={refreshing || busy}
+									onClick={() => void doRefresh()}
+									title="Перемещение получено — обновить остаток из ядра, чтобы реализовать"
+								>{refreshing ? '…' : '✓ получено — обновить'}</button>
 							);
 							return (
 								<button
