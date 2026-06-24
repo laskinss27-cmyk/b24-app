@@ -114,7 +114,7 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
 	if (price <= 0) return { dealId: data.dealId ?? null, created: false, noContact: false };
 	const contactId = data.client?.contactId ?? null;
-	const rows = [{ PRODUCT_NAME: `Платный ремонт №${data.repairNo}`, PRICE: price, QUANTITY: 1 }];
+	const rows = [{ PRODUCT_NAME: 'Платный ремонт', PRICE: price, QUANTITY: 1 }]; // свободная строка (PRODUCT_ID:0) — каталог не трогаем; номер ремонта — в названии сделки
 	if (data.dealId) {
 		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
 		try {
@@ -209,6 +209,27 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 	};
 }
 
+/** Прочитать ВСЕ записи ctv_repairs постранично. entity.item.get отдаёт ~50 за раз — без пагинации
+ * скан номеров (и список) теряет свежие ремонты при >50 записей (отсюда был дубль repairNo). Если
+ * портал не поддерживает `start` (та же первая запись повторно) — выходим, чтобы не зациклиться. */
+async function fetchAllRepairs(client: B24Client): Promise<Array<Record<string, unknown>>> {
+	const all: Array<Record<string, unknown>> = [];
+	let start = 0;
+	let prevFirstId: string | null = null;
+	for (let page = 0; page < 40; page++) {
+		const batch = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, SORT: { ID: 'DESC' }, start });
+		const items = Array.isArray(batch) ? batch : [];
+		if (!items.length) break;
+		const firstId = String(items[0]?.['ID'] ?? '');
+		if (firstId === prevFirstId) break; // `start` не поддержан — та же страница, дальше не идём
+		prevFirstId = firstId;
+		all.push(...items);
+		if (items.length < 50) break;
+		start += items.length;
+	}
+	return all;
+}
+
 export function registerApiRepairsRoute(app: FastifyInstance): void {
 	const clientFrom = (body: AuthBody): B24Client | null => {
 		if (!body.domain || !body.accessToken) return null;
@@ -222,8 +243,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		await ensureRepairsEntity(client);
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, SORT: { ID: 'DESC' } });
-			const repairs = (items ?? []).map(parseItem).filter((r): r is RepairData & { id: number; name: string } => r != null);
+			const items = await fetchAllRepairs(client); // ВСЕ записи постранично — чтобы список не обрезался на 50
+			const repairs = items.map(parseItem).filter((r): r is RepairData & { id: number; name: string } => r != null);
 			// Дорезолвить имена в истории для старых записей (где сохранён только byId).
 			const needIds = new Set<string>();
 			for (const r of repairs) for (const h of r.history) if (!h.byName && h.byId) needIds.add(h.byId);
@@ -277,13 +298,19 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			// маловероятна для канарейки; если список не прочитался — стартуем со 100, не падаем.
 			let repairNo = 100;
 			try {
-				const existing = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, SORT: { ID: 'DESC' } });
+				const existing = await fetchAllRepairs(client); // ВСЕ записи (постранично) — иначе при >50 ремонтах скан терял свежие → дубль 100
 				let max = 99;
-				for (const it of existing ?? []) {
-					try { const d = it['DETAIL_TEXT'] ? (JSON.parse(String(it['DETAIL_TEXT'])) as { repairNo?: unknown }) : {}; const n = Number(d.repairNo); if (Number.isFinite(n) && n > max) max = n; } catch { /* пропускаем битую запись */ }
+				let withNo = 0;
+				for (const it of existing) {
+					try { const d = it['DETAIL_TEXT'] ? (JSON.parse(String(it['DETAIL_TEXT'])) as { repairNo?: unknown }) : {}; const n = Number(d.repairNo); if (Number.isFinite(n) && n > 0) { withNo++; if (n > max) max = n; } } catch { /* пропускаем битую запись */ }
 				}
 				repairNo = max + 1;
-			} catch { /* не прочитали — оставим 100 */ }
+				app.log.info({ scanned: existing.length, withRepairNo: withNo, maxRepairNo: max, assigned: repairNo }, '[api/repairs/create] номер присвоен');
+			} catch (err) {
+				// На сбое скана НЕ ставим фикс. 100 (это и плодило дубли) — даём заведомо уникальный высокий номер.
+				repairNo = 100 + (Date.now() % 100000);
+				app.log.error({ repairNo }, `[api/repairs/create] скан номеров упал, присвоен уникальный по времени — ${errInfo(err)}`);
+			}
 
 			const data: RepairData = {
 				status: 'received_tt',
