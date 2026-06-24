@@ -290,7 +290,7 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 				<div className="table-wrap">
 					<table className="products-table report-table">
 						<thead>
-							<tr><th>№</th><th>Клиент</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Стоимость</th><th>Неисправность</th><th>Статус</th><th>Принят</th></tr>
+							<tr><th>№</th><th>Клиент</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Статус</th><th>Принят</th></tr>
 						</thead>
 						<tbody>
 							{view.map((r) => (
@@ -300,7 +300,7 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 									<td>{[r.device, r.model].filter(Boolean).join(' ') || <span className="muted">—</span>}</td>
 									<td className="nowrap">{r.serial || <span className="muted">—</span>}</td>
 									<td><span className={`pay-badge ${r.payType}`}>{r.payType === 'paid' ? 'платный' : 'гарантия'}</span></td>
-									<td className="nowrap">{r.payType === 'paid' && r.cost != null ? <b>{money(r.cost)}</b> : <span className="muted">—</span>}</td>
+									<td className="nowrap">{r.payType === 'paid' && r.ourPrice != null ? <b>{money(r.ourPrice)}</b> : <span className="muted">—</span>}</td>
 									<td className="repair-comment">{r.defect ? <span title={r.defect}>{r.defect}</span> : <span className="muted">—</span>}</td>
 									<td>{r.status === 'issued' ? <span className="status-done">завершён</span> : <span className={`repair-st st-${r.status}`}>{STATUS_LABEL[r.status]}</span>}</td>
 									<td className="muted nowrap">{ruDate(r.createdAt)}</td>
@@ -452,7 +452,8 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 					<textarea value={defect} rows={2} placeholder="со слов клиента" onChange={(e) => setDefect(e.target.value)} />
 				</label>
 				<label className="rf-field rf-wide">Комментарий сервисного центра
-					<textarea value={comment} rows={2} placeholder="диагностика / итог ремонта — заполняется после возврата" onChange={(e) => setComment(e.target.value)} />
+					<textarea value={comment} rows={2} disabled={!canEditPrice} placeholder={canEditPrice ? 'диагностика / итог ремонта — заполняется после возврата' : 'заполняет отдел снабжения'} onChange={(e) => setComment(e.target.value)} />
+					{!canEditPrice && <span className="muted small">заполняет и правит только снабжение</span>}
 				</label>
 
 				<div className="rf-field">Вид ремонта
@@ -461,24 +462,28 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 						<label><input type="radio" name="pay" checked={payType === 'paid'} onChange={() => setPayType('paid')} /> Платный</label>
 					</div>
 				</div>
-				{payType === 'paid' && (canEditPrice ? (
-					<label className="rf-field">Цена ремонта СЦ, ₽
-						<input type="number" min="0" step="1" value={cost} placeholder="что берёт сервис-центр" onChange={(e) => setCost(e.target.value)} />
-					</label>
-				) : (
-					<div className="rf-field">Цена ремонта СЦ
-						<span className="rf-readonly">{cost.trim() !== '' ? `${cost} ₽` : 'укажет руководитель / отдел закупки'}</span>
+				{payType === 'paid' && (
+					<div className="rf-field rf-wide rf-prices">
+						{canEditPrice ? (
+							<label className="rf-price-col">Цена ремонта СЦ, ₽
+								<input type="number" min="0" step="1" value={cost} placeholder="что берёт сервис-центр" onChange={(e) => setCost(e.target.value)} />
+							</label>
+						) : (
+							<div className="rf-price-col">Цена ремонта СЦ
+								<span className="rf-readonly">{cost.trim() !== '' ? `${cost} ₽` : 'укажет руководитель / отдел закупки'}</span>
+							</div>
+						)}
+						{canEditPrice ? (
+							<label className="rf-price-col">Наша цена, ₽
+								<input type="number" min="0" step="1" value={ourPrice} placeholder="что берём с клиента → сделка" onChange={(e) => setOurPrice(e.target.value)} />
+							</label>
+						) : (
+							<div className="rf-price-col">Наша цена
+								<span className="rf-readonly">{ourPrice.trim() !== '' ? `${ourPrice} ₽` : 'укажет руководитель / отдел закупки'}</span>
+							</div>
+						)}
 					</div>
-				))}
-				{payType === 'paid' && (canEditPrice ? (
-					<label className="rf-field">Наша цена, ₽
-						<input type="number" min="0" step="1" value={ourPrice} placeholder="что берём с клиента → сделка" onChange={(e) => setOurPrice(e.target.value)} />
-					</label>
-				) : (
-					<div className="rf-field">Наша цена
-						<span className="rf-readonly">{ourPrice.trim() !== '' ? `${ourPrice} ₽` : 'укажет руководитель / отдел закупки'}</span>
-					</div>
-				))}
+				)}
 
 				<label className="rf-field rf-wide">Файлы — фото и документы (Word, Excel, PDF)
 					<input type="file" accept="image/*,.doc,.docx,.xls,.xlsx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf" multiple onChange={(e) => void onAttach(e.target.files)} />

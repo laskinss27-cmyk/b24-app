@@ -89,12 +89,32 @@ async function currentUser(client: B24Client): Promise<CurrentUser> {
  * ремонте с привязанным контактом-клиентом; dealId пишется в карточку → дубля нет. Если цена потом
  * меняется — обновляем сумму и позицию у уже созданной сделки (best-effort). Без контакта не создаём.
  * Возвращает результат для подсказки на фронте. Мутирует data.dealId при создании. */
+/** Воронка сделок «Ремонты» (entityTypeId=2). Резолвим по имени (кэш на процесс), создаём если нет.
+ * Туда льём сделки платных ремонтов — отдельно от продаж и без робота-переименователя «Объектов».
+ * undefined — ещё не выясняли; number — id; на ошибке не кэшируем (повторим позже). */
+let repairsCategoryId: number | undefined;
+async function ensureRepairsDealCategory(client: B24Client, log: FastifyInstance['log']): Promise<number | null> {
+	if (repairsCategoryId !== undefined) return repairsCategoryId;
+	try {
+		const res = await client.call<{ categories?: Array<{ id: number | string; name: string }> }>('crm.category.list', { entityTypeId: 2 });
+		const found = (res?.categories ?? []).find((c) => String(c.name).trim().toLowerCase() === 'ремонты');
+		if (found) { repairsCategoryId = Number(found.id); return repairsCategoryId; }
+		const added = await client.call<{ category?: { id?: number | string } } | number>('crm.category.add', { entityTypeId: 2, fields: { name: 'Ремонты' } });
+		const id = typeof added === 'number' ? added : Number((added as { category?: { id?: number | string } })?.category?.id ?? 0);
+		if (id > 0) { repairsCategoryId = id; log.info({ id }, '[repairs] воронка сделок «Ремонты» создана'); return id; }
+		return null; // не вышло — не кэшируем, сделка уйдёт в общую воронку
+	} catch (err) {
+		log.warn({}, `[repairs] воронку «Ремонты» получить/создать не вышло — ${errInfo(err)}; сделка уйдёт в общую`);
+		return null;
+	}
+}
+
 interface DealSyncResult { dealId: number | null; created: boolean; noContact: boolean }
 async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyInstance['log']): Promise<DealSyncResult> {
 	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
 	if (price <= 0) return { dealId: data.dealId ?? null, created: false, noContact: false };
 	const contactId = data.client?.contactId ?? null;
-	const rows = [{ PRODUCT_NAME: 'Платный ремонт', PRICE: price, QUANTITY: 1 }];
+	const rows = [{ PRODUCT_NAME: `Платный ремонт №${data.repairNo}`, PRICE: price, QUANTITY: 1 }];
 	if (data.dealId) {
 		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
 		try {
@@ -106,9 +126,10 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	if (!contactId) return { dealId: null, created: false, noContact: true }; // не на кого вешать
 	try {
 		const title = `Платный ремонт №${data.repairNo}${data.device ? ` · ${data.device}` : ''}`;
-		const added = await client.call<number | { id?: number }>('crm.deal.add', {
-			fields: { TITLE: title, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB' },
-		});
+		const categoryId = await ensureRepairsDealCategory(client, log);
+		const fields: Record<string, unknown> = { TITLE: title, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB' };
+		if (categoryId) fields['CATEGORY_ID'] = categoryId; // отдельная воронка «Ремонты» (без робота-переименователя)
+		const added = await client.call<number | { id?: number }>('crm.deal.add', { fields });
 		const did = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 		if (!did) throw new Error('crm.deal.add не вернул id');
 		await client.call('crm.deal.productrows.set', { id: did, rows }).catch((e) => log.warn({}, `[repairs] productrows.set сделки ${did} — ${errInfo(e)}`));
@@ -278,7 +299,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				cost,
 				ourPrice,
 				dealId: null,
-				comment: s(b['comment']),
+				// Комментарий СЦ заполняет/правит только снабжение+ (у менеджеров поле неактивно).
+				comment: me.canEditPrice ? s(b['comment']) : '',
 				photos,
 				files,
 				createdAt: now,
@@ -340,7 +362,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const reqOur = b['ourPrice'] != null && b['ourPrice'] !== '' && Number.isFinite(Number(b['ourPrice'])) ? Number(b['ourPrice']) : null;
 			data.cost = data.payType !== 'paid' ? null : (me.canEditPrice ? reqCost : prevCost);
 			data.ourPrice = data.payType !== 'paid' ? null : (me.canEditPrice ? reqOur : prevOur);
-			data.comment = s(b['comment']);
+			// Комментарий СЦ правит только снабжение+; у менеджера держим прежний.
+			data.comment = me.canEditPrice ? s(b['comment']) : (data.comment ?? '');
 			// Лог: если изменился вид/цены — пишем кто и что.
 			data.history = Array.isArray(data.history) ? data.history : [];
 			if (prevPay !== data.payType || prevCost !== data.cost || prevOur !== data.ourPrice) {
