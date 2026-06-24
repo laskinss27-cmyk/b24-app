@@ -359,6 +359,18 @@ body {
 .stock-chip b {
 	color: #0f172a;
 }
+/* Свёрнутые остатки: показываем первые 2 склада, остальные — при наведении на строку (строка раздвигается). */
+.stock-chips .stock-chip:nth-child(n+3) { display: none; }
+tr:hover .stock-chips .stock-chip:nth-child(n+3) { display: inline-block; }
+.stock-more {
+	font-size: 11px;
+	color: #7a8699;
+	background: #eef0f3;
+	border-radius: 999px;
+	padding: 1px 7px;
+	align-self: center;
+}
+tr:hover .stock-more { display: none; }
 .supply-to {
 	max-width: 150px;
 	font-size: 12px;

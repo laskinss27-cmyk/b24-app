@@ -583,10 +583,11 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 					<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 					<td className="row-store">
 						{r.stocks.length ? (
-							<span className="stock-chips" title="Остатки по складам — справочно.">
-								{r.stocks.map((s) => (
+							<span className="stock-chips" title="Остатки по складам — наведи на строку, чтобы раскрыть все.">
+								{[...r.stocks].sort((a, b) => b.amount - a.amount).map((s) => (
 									<span key={s.storeId} className={`stock-chip${s.storeId === storeOf(r) ? ' sel' : ''}`}>{s.storeName}: <b>{s.amount}</b></span>
 								))}
+								{r.stocks.length > 2 && <span className="stock-more">+{r.stocks.length - 2}</span>}
 							</span>
 						) : <span className="none">нет нигде</span>}
 					</td>
@@ -616,11 +617,9 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 									title="Перемещение получено — обновить остаток из ядра, чтобы реализовать"
 								>{refreshing ? '…' : '✓ получено — обновить'}</button>
 							);
-							// Менеджер сам перемещение НЕ инициирует (не знает логистики) — только информируем.
-							// Оформление перемещения уйдёт снабжению (отдельная часть).
-							return (
-								<span className="st-badge transfer" title="Товара нет на складе реализации — перемещение оформляет снабжение">🚚 нужно перемещение</span>
-							);
+							// Менеджер перемещение не инициирует и видеть ничего не должен — пусто.
+							// (Активное/полученное перемещение от снабжения показано выше.)
+							return null;
 						})()}
 						{status === 'order' && (
 							<button
