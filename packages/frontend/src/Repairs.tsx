@@ -12,6 +12,7 @@ import {
 	searchRepairContacts,
 	uploadRepairFile,
 	fetchStores,
+	openDeal,
 	type NewRepairInput,
 	type StoreInfo,
 	type Repair,
@@ -38,6 +39,10 @@ const STATUS_LABEL: Record<RepairStatus, string> = {
 };
 const STATUS_FLOW: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
 
+/** Со статуса «принято в офисе» карточка заморожена — правит только снабжение+ (зеркало серверного гейта). */
+const LOCK_FROM_IDX = STATUS_FLOW.indexOf('received_office');
+function isLockedStatus(s: RepairStatus): boolean { return STATUS_FLOW.indexOf(s) >= LOCK_FROM_IDX; }
+
 /** Реквизит исполнителя для печатного акта (один на все). */
 const ACT_REQUISITE = 'ИП Поляков Д. Ю.';
 /** Назначение экземпляров акта (клиент · на точке · для сервиса). */
@@ -48,7 +53,7 @@ const MOCK: Repair[] = [
 		id: 1042, repairNo: 102, name: 'Видеодомофон CTV-M5702 · Иванов', status: 'received_tt',
 		client: { contactId: 16001, name: 'Иванов Пётр Сергеевич', phone: '+7 921 100-20-30' },
 		device: 'Видеодомофон', model: 'CTV-M5702', serial: 'M5702-AB-7781', point: 'Дунайский 64', appearance: 'Царапина на рамке снизу. Комплект: монитор',
-		defect: 'Не включается экран, питание есть', payType: 'warranty', cost: null, comment: '', photos: [], files: [],
+		defect: 'Не включается экран, питание есть', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: '', photos: [], files: [],
 		createdAt: new Date().toISOString(), createdById: '1858', createdByName: 'Сергей Ласкин',
 		history: [{ at: new Date().toISOString(), status: 'received_tt', byId: '1858' }],
 	},
@@ -56,7 +61,7 @@ const MOCK: Repair[] = [
 		id: 1039, repairNo: 101, name: 'Контроллер Shelly Pro 4PM · ООО Дом', status: 'sent',
 		client: { contactId: null, name: 'ООО «Умный дом»', phone: '+7 812 700-10-10' },
 		device: 'Контроллер', model: 'Shelly Pro 4PM', serial: 'SH-4PM-55012', point: 'Измайловский 18Д', appearance: 'Без видимых повреждений. Комплект: контроллер, б/п',
-		defect: 'Не отвечает по сети после грозы', payType: 'paid', cost: 3500, comment: 'СЦ: вне гарантии — замена платы питания', photos: [], files: [],
+		defect: 'Не отвечает по сети после грозы', payType: 'paid', cost: 3500, ourPrice: 5200, dealId: null, comment: 'СЦ: вне гарантии — замена платы питания', photos: [], files: [],
 		createdAt: new Date(Date.now() - 3 * 864e5).toISOString(), createdById: '1858', createdByName: 'Сергей Ласкин',
 		history: [
 			{ at: new Date(Date.now() - 3 * 864e5).toISOString(), status: 'received_tt', byId: '986', byName: 'Игорь Бекасов' },
@@ -68,7 +73,7 @@ const MOCK: Repair[] = [
 		id: 1031, repairNo: 100, name: 'IP-камера Dahua · Петров', status: 'issued',
 		client: { contactId: 16044, name: 'Петров Иван', phone: '+7 905 222-33-44' },
 		device: 'IP-камера', model: 'Dahua IPC-HFW2', serial: 'DH-2230-91кп', point: 'Дунайский 64', appearance: 'Потёртости корпуса. Комплект: камера, кронштейн',
-		defect: 'Засветы по ИК-подсветке', payType: 'warranty', cost: null, comment: 'СЦ: неисправность не подтвердилась, прошивка обновлена', photos: [], files: [],
+		defect: 'Засветы по ИК-подсветке', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: 'СЦ: неисправность не подтвердилась, прошивка обновлена', photos: [], files: [],
 		createdAt: new Date(Date.now() - 20 * 864e5).toISOString(), createdById: '986', createdByName: 'Игорь Бекасов',
 		history: [],
 	},
@@ -164,6 +169,7 @@ export function Repairs(): JSX.Element {
 			name: [input.device, input.model, input.client.name].filter(Boolean).join(' · ') || 'Ремонт',
 			status: initial?.status ?? 'received_tt',
 			...input,
+			dealId: initial?.dealId ?? null,
 			createdAt: initial?.createdAt ?? new Date().toISOString(),
 			createdById: initial?.createdById ?? 'dev',
 			createdByName: initial?.createdByName ?? 'dev (mock)',
@@ -202,11 +208,14 @@ export function Repairs(): JSX.Element {
 						setScreen({ k: 'card', repair: next });
 						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
 					}}
-					onSetPay={async (payType, cost) => {
-						const res = ctx.__mock ? { payType, cost } : await setRepairPayType(screen.repair.id, payType, cost);
-						const next = { ...screen.repair, payType: res.payType, cost: res.cost };
+					onSetPay={async (payType, cost, ourPrice) => {
+						const res = ctx.__mock
+							? { payType, cost, ourPrice, dealId: screen.repair.dealId, dealCreated: false, dealNoContact: false }
+							: await setRepairPayType(screen.repair.id, payType, cost, ourPrice);
+						const next = { ...screen.repair, payType: res.payType, cost: res.cost, ourPrice: res.ourPrice, dealId: res.dealId ?? screen.repair.dealId };
 						setScreen({ k: 'card', repair: next });
 						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
+						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact };
 					}}
 					onDelete={async () => {
 						const id = screen.repair.id;
@@ -333,6 +342,7 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	const [comment, setComment] = useState(initial?.comment ?? '');
 	const [payType, setPayType] = useState<'warranty' | 'paid'>(initial?.payType ?? 'warranty');
 	const [cost, setCost] = useState<string>(initial?.cost != null ? String(initial.cost) : '');
+	const [ourPrice, setOurPrice] = useState<string>(initial?.ourPrice != null ? String(initial.ourPrice) : '');
 	const [photos, setPhotos] = useState<RepairPhoto[]>(initial?.photos ?? []);
 	const [files, setFiles] = useState<RepairFile[]>(initial?.files ?? []);
 	const [uploading, setUploading] = useState(false);
@@ -382,6 +392,7 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 				device: device.trim(), model: model.trim(), serial: serial.trim(), point: point.trim(),
 				appearance: appearance.trim(), defect: defect.trim(), comment: comment.trim(), payType,
 				cost: payType === 'paid' && cost.trim() !== '' && Number.isFinite(Number(cost)) ? Number(cost) : null,
+				ourPrice: payType === 'paid' && ourPrice.trim() !== '' && Number.isFinite(Number(ourPrice)) ? Number(ourPrice) : null,
 				photos, files,
 			};
 			const r = await submit(input);
@@ -451,12 +462,21 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 					</div>
 				</div>
 				{payType === 'paid' && (canEditPrice ? (
-					<label className="rf-field">Стоимость ремонта, ₽
-						<input type="number" min="0" step="1" value={cost} placeholder="например, 3500" onChange={(e) => setCost(e.target.value)} />
+					<label className="rf-field">Цена ремонта СЦ, ₽
+						<input type="number" min="0" step="1" value={cost} placeholder="что берёт сервис-центр" onChange={(e) => setCost(e.target.value)} />
 					</label>
 				) : (
-					<div className="rf-field">Стоимость ремонта
+					<div className="rf-field">Цена ремонта СЦ
 						<span className="rf-readonly">{cost.trim() !== '' ? `${cost} ₽` : 'укажет руководитель / отдел закупки'}</span>
+					</div>
+				))}
+				{payType === 'paid' && (canEditPrice ? (
+					<label className="rf-field">Наша цена, ₽
+						<input type="number" min="0" step="1" value={ourPrice} placeholder="что берём с клиента → сделка" onChange={(e) => setOurPrice(e.target.value)} />
+					</label>
+				) : (
+					<div className="rf-field">Наша цена
+						<span className="rf-readonly">{ourPrice.trim() !== '' ? `${ourPrice} ₽` : 'укажет руководитель / отдел закупки'}</span>
 					</div>
 				))}
 
@@ -500,13 +520,23 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 }
 
 function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onStatus, onSetPay, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null) => Promise<void>; onDelete: () => Promise<void>;
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
 	const [costVal, setCostVal] = useState<string>(repair.cost != null ? String(repair.cost) : '');
+	const [ourVal, setOurVal] = useState<string>(repair.ourPrice != null ? String(repair.ourPrice) : '');
 	const [stErr, setStErr] = useState<string | null>(null);
+	const [dealMsg, setDealMsg] = useState<string | null>(null);
+	// Заморозка: с «принято в офисе» карточку трогает только снабжение+ (зеркало серверного гейта).
+	const locked = isLockedStatus(repair.status) && !canEditPrice;
 	const costNum = (): number | null => (costVal.trim() !== '' && Number.isFinite(Number(costVal)) ? Number(costVal) : null);
+	const ourNum = (): number | null => (ourVal.trim() !== '' && Number.isFinite(Number(ourVal)) ? Number(ourVal) : null);
+	function reactDeal(res: { dealCreated: boolean; dealNoContact: boolean }): void {
+		if (res.dealCreated) setDealMsg('✓ Сделка по платному ремонту создана.');
+		else if (res.dealNoContact) setDealMsg('⚠ Сделка не создана: у ремонта клиент без привязки к контакту Б24. Привяжи клиента в редактировании.');
+		else setDealMsg(null);
+	}
 	async function change(s: RepairStatus): Promise<void> {
 		if (s === repair.status) return;
 		setBusy(true); setStErr(null);
@@ -515,11 +545,11 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	async function changePay(p: 'warranty' | 'paid'): Promise<void> {
 		if (p === repair.payType) return;
 		setPayBusy(true); setStErr(null);
-		try { await onSetPay(p, p === 'paid' ? costNum() : null); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setPayBusy(false); }
+		try { reactDeal(await onSetPay(p, p === 'paid' ? costNum() : null, p === 'paid' ? ourNum() : null)); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setPayBusy(false); }
 	}
-	async function saveCost(): Promise<void> {
+	async function savePrices(): Promise<void> {
 		setPayBusy(true); setStErr(null);
-		try { await onSetPay('paid', costNum()); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setPayBusy(false); }
+		try { reactDeal(await onSetPay('paid', costNum(), ourNum())); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setPayBusy(false); }
 	}
 	async function remove(): Promise<void> {
 		if (busy) return;
@@ -536,15 +566,16 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 			<div className="rc-head">
 				<h2>Ремонт #{repairNo(repair)}{repair.status === 'issued' && <span className="status-done"> · завершён</span>}</h2>
 				<div className="rc-head-actions">
-					<button className="btn-secondary" onClick={onEdit}>✎ Редактировать</button>
+					<button className="btn-secondary" onClick={onEdit} disabled={locked} title={locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ Редактировать</button>
 					<button className="btn-primary" onClick={onPrint}>🖨 Напечатать бланк</button>
-					<button className="btn-danger" disabled={busy} onClick={() => void remove()} title="Удалить ремонт (необратимо)">🗑 Удалить</button>
+					<button className="btn-danger" disabled={busy || locked} onClick={() => void remove()} title={locked ? 'Принят в офисе — удалить может только снабжение' : 'Удалить ремонт (необратимо)'}>🗑 Удалить</button>
 				</div>
 			</div>
+			{locked && <p className="muted small">🔒 Ремонт принят в офисе — изменения (поля, цены, статус) доступны только снабжению.</p>}
 
 			<div className="rc-status">
 				<span className="rc-label">Статус</span>
-				<select value={repair.status} disabled={busy} onChange={(e) => void change(e.target.value as RepairStatus)}>
+				<select value={repair.status} disabled={busy || locked} onChange={(e) => void change(e.target.value as RepairStatus)}>
 					{STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
 				</select>
 				{busy && <span className="muted small">сохраняю…</span>}
@@ -554,20 +585,25 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 			<div className="rc-pay">
 				<span className="rc-label">Вид ремонта</span>
 				<div className="rc-pay-toggle">
-					<button className={`btn-secondary${repair.payType === 'warranty' ? ' active' : ''}`} disabled={payBusy} onClick={() => void changePay('warranty')}>Гарантийный</button>
-					<button className={`btn-secondary${repair.payType === 'paid' ? ' active' : ''}`} disabled={payBusy} onClick={() => void changePay('paid')}>Платный</button>
+					<button className={`btn-secondary${repair.payType === 'warranty' ? ' active' : ''}`} disabled={payBusy || locked} onClick={() => void changePay('warranty')}>Гарантийный</button>
+					<button className={`btn-secondary${repair.payType === 'paid' ? ' active' : ''}`} disabled={payBusy || locked} onClick={() => void changePay('paid')}>Платный</button>
 				</div>
 				{repair.payType === 'paid' && canEditPrice && (
 					<span className="rc-pay-cost">
-						<input type="number" min="0" step="1" value={costVal} placeholder="стоимость, ₽" disabled={payBusy} onChange={(e) => setCostVal(e.target.value)} />
-						<button className="btn-secondary" disabled={payBusy} onClick={() => void saveCost()}>Сохранить ₽</button>
+						<input type="number" min="0" step="1" value={costVal} placeholder="цена СЦ, ₽" disabled={payBusy} onChange={(e) => setCostVal(e.target.value)} title="Цена ремонта СЦ" />
+						<input type="number" min="0" step="1" value={ourVal} placeholder="наша цена, ₽" disabled={payBusy} onChange={(e) => setOurVal(e.target.value)} title="Наша цена (→ сделка)" />
+						<button className="btn-secondary" disabled={payBusy} onClick={() => void savePrices()}>Сохранить ₽</button>
 					</span>
 				)}
 				{repair.payType === 'paid' && !canEditPrice && (
-					<span className="rc-pay-cost"><b>{repair.cost != null ? money(repair.cost) : '—'}</b> <span className="muted small">цену меняет руководитель / закупка</span></span>
+					<span className="rc-pay-cost">СЦ <b>{repair.cost != null ? money(repair.cost) : '—'}</b> · наша <b>{repair.ourPrice != null ? money(repair.ourPrice) : '—'}</b> <span className="muted small">цены меняет руководитель / закупка</span></span>
 				)}
 				{payBusy && <span className="muted small">сохраняю…</span>}
 			</div>
+			{repair.payType === 'paid' && (repair.dealId
+				? <p className="muted small">🤝 Сделка: <button type="button" className="link-btn" onClick={() => openDeal(repair.dealId!)}>#{repair.dealId}</button></p>
+				: (repair.ourPrice != null && repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку по «нашей цене» — привяжи клиента к контакту Б24 (в редактировании).</p>))}
+			{dealMsg && <p className="muted small">{dealMsg}</p>}
 			{stErr && <p className="error">⛔ {stErr}</p>}
 
 			<div className="rc-body">
@@ -576,7 +612,8 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 				{row('Оборудование', [repair.device, repair.model].filter(Boolean).join(' '))}
 				{row('Серийный №', repair.serial)}
 				{row('Торговая точка', repair.point)}
-				{repair.payType === 'paid' && row('Стоимость', repair.cost != null ? money(repair.cost) : '—')}
+				{repair.payType === 'paid' && row('Цена ремонта СЦ', repair.cost != null ? money(repair.cost) : '—')}
+				{repair.payType === 'paid' && row('Наша цена', repair.ourPrice != null ? money(repair.ourPrice) : '—')}
 				{row('Внешний вид и комплектация', repair.appearance)}
 				{row('Неисправность', repair.defect)}
 				{row('Комментарий СЦ', repair.comment)}

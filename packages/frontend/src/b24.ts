@@ -1109,8 +1109,12 @@ export interface Repair {
 	appearance: string;
 	defect: string;
 	payType: 'warranty' | 'paid';
-	/** Стоимость ремонта (только у платных; у гарантийных null). */
+	/** Цена ремонта СЦ — что берёт сервисный центр (только у платных; у гарантийных null). */
 	cost: number | null;
+	/** Наша цена — что берём с клиента (только у платных; основа суммы сделки). */
+	ourPrice: number | null;
+	/** ID созданной по платному ремонту сделки Б24 (null — ещё не создана). */
+	dealId: number | null;
 	/** Комментарий сервисного центра (диагностика/итог) — заполняется после возврата. */
 	comment: string;
 	photos: RepairPhoto[];
@@ -1132,6 +1136,7 @@ export interface NewRepairInput {
 	defect: string;
 	payType: 'warranty' | 'paid';
 	cost: number | null;
+	ourPrice: number | null;
 	comment: string;
 	photos: RepairPhoto[];
 	files: RepairFile[];
@@ -1228,15 +1233,16 @@ export async function uploadRepairFile(file: File): Promise<RepairFile | null> {
 	return { ...json.photo, type: file.type || '' };
 }
 
-/** Быстрая смена вида ремонта платный↔гарантийный (+ стоимость при платном). */
-export async function setRepairPayType(id: number, payType: 'warranty' | 'paid', cost: number | null): Promise<{ payType: 'warranty' | 'paid'; cost: number | null }> {
+/** Быстрая смена вида ремонта платный↔гарантийный (+ цена СЦ и наша цена при платном).
+ * При простановке «нашей цены» сервер сам заводит/обновляет сделку → возвращает dealId/флаги. */
+export async function setRepairPayType(id: number, payType: 'warranty' | 'paid', cost: number | null, ourPrice: number | null): Promise<{ payType: 'warranty' | 'paid'; cost: number | null; ourPrice: number | null; dealId: number | null; dealCreated: boolean; dealNoContact: boolean }> {
 	const res = await fetch('/api/repairs/set-pay', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), id, payType, cost }),
+		body: JSON.stringify({ ...bx24Auth(), id, payType, cost, ourPrice }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; payType?: 'warranty' | 'paid'; cost?: number | null };
+	const json = (await res.json()) as { ok: boolean; error?: string; payType?: 'warranty' | 'paid'; cost?: number | null; ourPrice?: number | null; dealId?: number | null; dealCreated?: boolean; dealNoContact?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сменить вид ремонта');
-	return { payType: json.payType ?? payType, cost: json.cost ?? null };
+	return { payType: json.payType ?? payType, cost: json.cost ?? null, ourPrice: json.ourPrice ?? null, dealId: json.dealId ?? null, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact) };
 }
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */

@@ -30,6 +30,14 @@ function errInfo(err: unknown): string {
 export type RepairStatus = 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued';
 const STATUS_ORDER: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
 
+/** Со статуса «принято в офисе» карточка ЗАМОРОЖЕНА: любые изменения (поля/цены/вид/статус/удаление)
+ * только снабжение+ (canEditPrice). До этого (на ТТ) — правит кто угодно. Гейт по ТЕКУЩЕМУ статусу:
+ * перевести received_tt→received_office обычный приёмщик ещё может, дальше всё фиксируется. */
+const LOCK_FROM_INDEX = STATUS_ORDER.indexOf('received_office');
+function isLocked(s: RepairStatus): boolean {
+	return STATUS_ORDER.indexOf(s) >= LOCK_FROM_INDEX;
+}
+
 /** Маппинг старых статусов (до разделения приёма ТТ/офис) на новые — чтобы прежние карточки не сломались. */
 const LEGACY_STATUS: Record<string, RepairStatus> = {
 	received: 'received_tt',
@@ -77,6 +85,42 @@ async function currentUser(client: B24Client): Promise<CurrentUser> {
 	return { id, name, canEditPrice };
 }
 
+/** Авто-сделка по платному ремонту. Создаётся ОДИН раз при простановке «Наша цена» (>0) на платном
+ * ремонте с привязанным контактом-клиентом; dealId пишется в карточку → дубля нет. Если цена потом
+ * меняется — обновляем сумму и позицию у уже созданной сделки (best-effort). Без контакта не создаём.
+ * Возвращает результат для подсказки на фронте. Мутирует data.dealId при создании. */
+interface DealSyncResult { dealId: number | null; created: boolean; noContact: boolean }
+async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyInstance['log']): Promise<DealSyncResult> {
+	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
+	if (price <= 0) return { dealId: data.dealId ?? null, created: false, noContact: false };
+	const contactId = data.client?.contactId ?? null;
+	const rows = [{ PRODUCT_NAME: 'Платный ремонт', PRICE: price, QUANTITY: 1 }];
+	if (data.dealId) {
+		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
+		try {
+			await client.call('crm.deal.update', { id: data.dealId, fields: { OPPORTUNITY: price } });
+			await client.call('crm.deal.productrows.set', { id: data.dealId, rows });
+		} catch (err) { log.warn({}, `[repairs] обновление сделки ${data.dealId} не удалось — ${errInfo(err)}`); }
+		return { dealId: data.dealId, created: false, noContact: false };
+	}
+	if (!contactId) return { dealId: null, created: false, noContact: true }; // не на кого вешать
+	try {
+		const title = `Платный ремонт №${data.repairNo}${data.device ? ` · ${data.device}` : ''}`;
+		const added = await client.call<number | { id?: number }>('crm.deal.add', {
+			fields: { TITLE: title, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB' },
+		});
+		const did = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+		if (!did) throw new Error('crm.deal.add не вернул id');
+		await client.call('crm.deal.productrows.set', { id: did, rows }).catch((e) => log.warn({}, `[repairs] productrows.set сделки ${did} — ${errInfo(e)}`));
+		data.dealId = did;
+		log.info({ dealId: did, repairNo: data.repairNo }, '[repairs] сделка по платному ремонту создана');
+		return { dealId: did, created: true, noContact: false };
+	} catch (err) {
+		log.error({}, `[repairs] создание сделки не удалось — ${errInfo(err)}`);
+		return { dealId: null, created: false, noContact: false };
+	}
+}
+
 interface RepairPhoto { id: number; name: string; url: string }
 /** Прикреплённый документ (Word/Excel/PDF) — хранится на Диске Б24, в карточке только ссылка. */
 interface RepairFile { id: number; name: string; url: string; type: string }
@@ -94,8 +138,12 @@ interface RepairData {
 	appearance: string;
 	defect: string;
 	payType: 'warranty' | 'paid';
-	/** Стоимость ремонта (только для платных; у гарантийных null). */
+	/** Цена ремонта СЦ — что берёт сервисный центр (только для платных; у гарантийных null). */
 	cost: number | null;
+	/** Наша цена — что берём с клиента (только для платных; основа суммы сделки). */
+	ourPrice: number | null;
+	/** ID созданной по платному ремонту сделки Б24 (чтобы не задваивать; null — ещё не создана). */
+	dealId: number | null;
 	/** Комментарий сервисного центра (диагностика/итог ремонта) — заполняется после возврата. */
 	comment: string;
 	photos: RepairPhoto[];
@@ -128,6 +176,8 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 		defect: data.defect ?? '',
 		payType,
 		cost: payType === 'paid' && typeof data.cost === 'number' ? data.cost : null,
+		ourPrice: payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : null,
+		dealId: typeof data.dealId === 'number' && data.dealId > 0 ? data.dealId : null,
 		comment: data.comment ?? '',
 		photos: Array.isArray(data.photos) ? data.photos : [],
 		files: Array.isArray(data.files) ? data.files : [],
@@ -191,11 +241,13 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			: [];
 		const payType: 'warranty' | 'paid' = b['payType'] === 'paid' ? 'paid' : 'warranty';
 		const reqCost = payType === 'paid' && b['cost'] != null && b['cost'] !== '' && Number.isFinite(Number(b['cost'])) ? Number(b['cost']) : null;
+		const reqOur = payType === 'paid' && b['ourPrice'] != null && b['ourPrice'] !== '' && Number.isFinite(Number(b['ourPrice'])) ? Number(b['ourPrice']) : null;
 		try {
 			const me = await currentUser(client);
 			const byId = me.id;
 			const byName = me.name;
 			const cost = me.canEditPrice ? reqCost : null; // цену проставит только тот, кому разрешено
+			const ourPrice = me.canEditPrice ? reqOur : null;
 			const now = new Date().toISOString();
 			const cl = (b['client'] ?? {}) as { contactId?: unknown; name?: unknown; phone?: unknown };
 
@@ -224,6 +276,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				defect: s(b['defect']),
 				payType,
 				cost,
+				ourPrice,
+				dealId: null,
 				comment: s(b['comment']),
 				photos,
 				files,
@@ -232,6 +286,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				createdByName: byName,
 				history: [{ at: now, status: 'received_tt', byId, byName }],
 			};
+			// Платный + проставлена «Наша цена» + есть контакт → сразу заводим сделку (пишет data.dealId).
+			const dealSync = await syncRepairDeal(client, data, app.log);
 			const nameParts = [device, data.model, data.client.name].filter(Boolean);
 			const added = await client.call<number | { id?: number }>('entity.item.add', {
 				ENTITY: REPAIRS_ENTITY,
@@ -241,7 +297,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
 			app.log.info({ id }, '[api/repairs/create] ok');
-			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice };
+			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/create] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -262,9 +318,14 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
+			// Заморозка с «принято в офисе»: правит только снабжение+.
+			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — изменять может только снабжение' });
+			}
 			const cl = (b['client'] ?? {}) as { contactId?: unknown; name?: unknown; phone?: unknown };
 			const prevPay = data.payType ?? 'warranty';
 			const prevCost = typeof data.cost === 'number' ? data.cost : null;
+			const prevOur = typeof data.ourPrice === 'number' ? data.ourPrice : null;
 			// Перезаписываем редактируемые поля, сохраняем status/history/createdAt/createdBy.
 			data.client = { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) };
 			data.device = s(b['device']);
@@ -274,18 +335,23 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.appearance = s(b['appearance']);
 			data.defect = s(b['defect']);
 			data.payType = b['payType'] === 'paid' ? 'paid' : 'warranty';
-			// Цену меняет только тот, кому разрешено; иначе оставляем прежнюю (warranty всё равно обнуляет).
+			// Цены меняет только тот, кому разрешено; иначе оставляем прежние (warranty всё обнуляет).
 			const reqCost = b['cost'] != null && b['cost'] !== '' && Number.isFinite(Number(b['cost'])) ? Number(b['cost']) : null;
+			const reqOur = b['ourPrice'] != null && b['ourPrice'] !== '' && Number.isFinite(Number(b['ourPrice'])) ? Number(b['ourPrice']) : null;
 			data.cost = data.payType !== 'paid' ? null : (me.canEditPrice ? reqCost : prevCost);
+			data.ourPrice = data.payType !== 'paid' ? null : (me.canEditPrice ? reqOur : prevOur);
 			data.comment = s(b['comment']);
-			// Лог: если изменился вид/цена — пишем кто и что.
+			// Лог: если изменился вид/цены — пишем кто и что.
 			data.history = Array.isArray(data.history) ? data.history : [];
-			if (prevPay !== data.payType || prevCost !== data.cost) {
+			if (prevPay !== data.payType || prevCost !== data.cost || prevOur !== data.ourPrice) {
 				const parts: string[] = [];
 				if (prevPay !== data.payType) parts.push(`вид: ${data.payType === 'paid' ? 'платный' : 'гарантийный'}`);
-				if (prevCost !== data.cost) parts.push(`цена: ${data.cost == null ? '—' : `${data.cost}₽`}`);
+				if (prevCost !== data.cost) parts.push(`цена СЦ: ${data.cost == null ? '—' : `${data.cost}₽`}`);
+				if (prevOur !== data.ourPrice) parts.push(`наша цена: ${data.ourPrice == null ? '—' : `${data.ourPrice}₽`}`);
 				data.history.push({ at: new Date().toISOString(), status: data.status, byId: me.id, byName: me.name, note: parts.join(', ') });
 			}
+			// Платный + есть «Наша цена» → создать/обновить сделку (мутирует data.dealId).
+			const dealSync = await syncRepairDeal(client, data, app.log);
 			if (Array.isArray(b['photos'])) {
 				data.photos = (b['photos'] as Array<Record<string, unknown>>).map((p) => ({ id: Number(p['id']) || 0, name: s(p['name']), url: s(p['url']) })).filter((p) => p.url);
 			}
@@ -295,7 +361,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const name = [data.device, data.model, data.client.name].filter(Boolean).join(' · ') || 'Ремонт';
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id }, '[api/repairs/update] ok');
-			return { ok: true, repair: { id, name, ...data }, canEditPrice: me.canEditPrice };
+			return { ok: true, repair: { id, name, ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/update] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -305,7 +371,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 	// Быстрая смена вида ремонта платный↔гарантийный (без захода в полное редактирование).
 	// При переходе на платный можно сразу прислать стоимость; на гарантийный — стоимость обнуляется.
 	app.post('/api/repairs/set-pay', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { id?: unknown; payType?: unknown; cost?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown; payType?: unknown; cost?: unknown; ourPrice?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const id = Number(b.id);
@@ -317,22 +383,32 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
+			// Заморозка с «принято в офисе»: правит только снабжение+.
+			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — изменять может только снабжение' });
+			}
 			const prevPay = data.payType ?? 'warranty';
 			const prevCost = typeof data.cost === 'number' ? data.cost : null;
+			const prevOur = typeof data.ourPrice === 'number' ? data.ourPrice : null;
 			data.payType = payType;
-			// Серверный замок: цену задаёт только тот, кому разрешено; иначе держим прежнюю (warranty обнуляет).
+			// Серверный замок: цены задаёт только тот, кому разрешено; иначе держим прежние (warranty обнуляет).
 			const reqCost = b.cost != null && b.cost !== '' && Number.isFinite(Number(b.cost)) ? Number(b.cost) : null;
+			const reqOur = b.ourPrice != null && b.ourPrice !== '' && Number.isFinite(Number(b.ourPrice)) ? Number(b.ourPrice) : null;
 			data.cost = payType !== 'paid' ? null : (me.canEditPrice ? reqCost : prevCost);
+			data.ourPrice = payType !== 'paid' ? null : (me.canEditPrice ? reqOur : prevOur);
 			data.history = Array.isArray(data.history) ? data.history : [];
-			if (prevPay !== data.payType || prevCost !== data.cost) {
+			if (prevPay !== data.payType || prevCost !== data.cost || prevOur !== data.ourPrice) {
 				const parts: string[] = [];
 				if (prevPay !== data.payType) parts.push(`вид: ${data.payType === 'paid' ? 'платный' : 'гарантийный'}`);
-				if (prevCost !== data.cost) parts.push(`цена: ${data.cost == null ? '—' : `${data.cost}₽`}`);
+				if (prevCost !== data.cost) parts.push(`цена СЦ: ${data.cost == null ? '—' : `${data.cost}₽`}`);
+				if (prevOur !== data.ourPrice) parts.push(`наша цена: ${data.ourPrice == null ? '—' : `${data.ourPrice}₽`}`);
 				data.history.push({ at: new Date().toISOString(), status: data.status, byId: me.id, byName: me.name, note: parts.join(', ') });
 			}
+			// Платный + есть «Наша цена» → создать/обновить сделку.
+			const dealSync = await syncRepairDeal(client, data, app.log);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, payType, byPriceEditor: me.canEditPrice }, '[api/repairs/set-pay] ok');
-			return { ok: true, payType: data.payType, cost: data.cost, canEditPrice: me.canEditPrice };
+			return { ok: true, payType: data.payType, cost: data.cost, ourPrice: data.ourPrice, dealId: data.dealId, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/set-pay] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -347,6 +423,16 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		try {
+			// Заморозка: принятый в офисе ремонт удаляет только снабжение+.
+			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
+			const raw = (items ?? [])[0];
+			if (raw) {
+				const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+				const me = await currentUser(client);
+				if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+					return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — удалить может только снабжение' });
+				}
+			}
 			await client.call('entity.item.delete', { ENTITY: REPAIRS_ENTITY, ID: id });
 			app.log.info({ id }, '[api/repairs/delete] ok');
 			return { ok: true };
@@ -371,6 +457,11 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
+			// Заморозка: если карточка уже «принята в офисе» (или дальше) — двигать статус может только снабжение+.
+			// Гейт по ТЕКУЩЕМУ статусу: войти в офис с ТТ обычный приёмщик ещё может, дальше — только снабжение.
+			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — статус двигает только снабжение' });
+			}
 			data.status = status;
 			data.history = Array.isArray(data.history) ? data.history : [];
 			data.history.push({ at: new Date().toISOString(), status, byId: me.id, byName: me.name });
