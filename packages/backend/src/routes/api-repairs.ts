@@ -57,6 +57,12 @@ function normalizeStatus(s: unknown): RepairStatus {
 const PRICE_EDITOR_IDS = new Set(['1', '1858', '986']);
 const PRICE_EDITOR_DEPTS = new Set([10]);
 
+/** Поле сделки «Название объекта» (обязательное). Б24 собирает имя сделки по шаблону {{ID}}_{{это поле}},
+ * а TITLE напрямую переопределить нельзя — глобальное автоназвание затирает (проверено). Поэтому пишем
+ * сюда «Платный ремонт №N · клиент · устройство» → имя сделки выходит осмысленным. Код поля портал-специфичен
+ * (нашли через crm.deal.fields по заголовку «Название объекта»); сменят поле — имя просто станет «{ID}_». */
+const DEAL_OBJECT_NAME_FIELD = 'UF_CRM_1750227509';
+
 /** Кэш id→ФИО на процесс (имена меняются редко) — чтобы не дёргать user.get на каждой загрузке. */
 const userNameCache = new Map<string, string>();
 
@@ -125,10 +131,11 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	}
 	if (!contactId) return { dealId: null, created: false, noContact: true }; // не на кого вешать
 	try {
-		const title = `Платный ремонт №${data.repairNo}${data.device ? ` · ${data.device}` : ''}`;
+		// Имя сделки Б24 собирает как {{ID}}_{{Название объекта}} → кладём осмысленное в поле «Название объекта».
+		const objectName = [`Платный ремонт №${data.repairNo}`, data.client?.name, [data.device, data.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
 		const categoryId = await ensureRepairsDealCategory(client, log);
-		const fields: Record<string, unknown> = { TITLE: title, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB' };
-		if (categoryId) fields['CATEGORY_ID'] = categoryId; // отдельная воронка «Ремонты» (без робота-переименователя)
+		const fields: Record<string, unknown> = { TITLE: objectName, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB', [DEAL_OBJECT_NAME_FIELD]: objectName };
+		if (categoryId) fields['CATEGORY_ID'] = categoryId; // отдельная воронка «Ремонты»
 		const added = await client.call<number | { id?: number }>('crm.deal.add', { fields });
 		const did = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 		if (!did) throw new Error('crm.deal.add не вернул id');
