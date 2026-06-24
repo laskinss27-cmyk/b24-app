@@ -28,6 +28,8 @@ const MAIN_IBLOCK = 24;
 const OFFER_IBLOCK = 26;
 /** type «товар с предложениями» (родитель) — в плоском списке заменяется офферами. */
 const PARENT_TYPE = 3;
+/** type «услуга/работа» (catalog.product.list TYPE=7) — для фильтра «товары/услуги». */
+const SERVICE_TYPE = 7;
 /** Тип цены «Розница». На портале он ОДИН — BASE (catalog.priceType.list → #2). */
 const RETAIL_PRICE_GROUP = 2;
 
@@ -40,6 +42,8 @@ export interface BaseRow {
 	id: number;
 	iblockId: number;
 	name: string;
+	/** Услуга/работа (catalog type 7), а не товар. Для фильтра «товары/услуги» в пикере. */
+	isService: boolean;
 	article?: string | undefined;
 	model?: string | undefined;
 	manufacturer?: string | undefined;
@@ -219,6 +223,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			id,
 			iblockId: MAIN_IBLOCK,
 			name: String(p['name'] ?? `#${id}`),
+			isService: Number(p['type']) === SERVICE_TYPE,
 			article: undefined,
 			model: propVal(p['property330']),
 			manufacturer: propVal(p['property334']),
@@ -242,6 +247,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			id,
 			iblockId: OFFER_IBLOCK,
 			name: String(o['name'] ?? (par ? par['name'] : undefined) ?? `#${id}`),
+			isService: false, // офферы (type 4) — всегда вариации товара, не услуги
 			article: propVal(o['property360']),
 			model: propVal(o['property360']) ?? (par ? propVal(par['property330']) : undefined),
 			manufacturer: propVal(o['property334']) ?? (par ? propVal(par['property334']) : undefined),

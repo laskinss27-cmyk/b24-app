@@ -8,6 +8,8 @@ import {
 	fetchProfitCoef,
 	fetchStockPreferCore,
 	addProductsToDeal,
+	removeDealProduct,
+	updateDealProduct,
 	fetchDealShipped,
 	fetchDealRealizationsCore,
 	realizeCoreDraft,
@@ -171,6 +173,25 @@ export function DealProductsTab(): JSX.Element {
 		});
 	}, [ctx]);
 
+	// Растягиваем фрейм приложения под контент — иначе Б24 держит ~половину страницы и появляется внутренний
+	// скролл. fitWindow подгоняет высоту iframe под содержимое; ResizeObserver ловит подгрузку данных, раскрытие
+	// строк, открытие модалок. Дёргаем только при реальном изменении высоты (без петли — fitWindow не меняет scrollHeight).
+	useEffect(() => {
+		const bx = window.BX24;
+		if (!bx || ctx.__mock) return;
+		let last = 0;
+		const fit = (): void => {
+			const h = document.body.scrollHeight;
+			if (Math.abs(h - last) < 2) return;
+			last = h;
+			try { bx.fitWindow(); } catch { /* вне placement-контекста — игнор */ }
+		};
+		fit();
+		const ro = new ResizeObserver(() => fit());
+		ro.observe(document.body);
+		return () => ro.disconnect();
+	}, [ctx]);
+
 	if (state.phase === 'denied') {
 		return (
 			<div className="deal-products-tab">
@@ -303,9 +324,60 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
+/** Модалка правки одной строки сделки: количество + БАЗОВАЯ цена + скидка %. Итог и сумма
+ * пересчитываются на лету. Сохранение — productrows.set на бэкенде (там считается итоговая цена). */
+function EditRowModal({ row, onClose, onSave }: { row: EnrichedRow; onClose: () => void; onSave: (qty: number, basePrice: number, discountRate: number) => Promise<void> }): JSX.Element {
+	// Б24: row.price = итог (после скидки), row.discountSum = скидка за ед. → база = итог + скидка.
+	const base0 = row.price + row.discountSum;
+	const pct0 = base0 > 0 ? Math.round((row.discountSum / base0) * 1000) / 10 : 0;
+	const [qty, setQty] = useState(String(row.quantity));
+	const [price, setPrice] = useState(String(base0));
+	const [disc, setDisc] = useState(String(pct0));
+	const [saving, setSaving] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const qn = Number(qty.replace(',', '.'));
+	const pn = Number(price.replace(',', '.'));
+	const dn = Number(disc.replace(',', '.'));
+	const valid = Number.isFinite(qn) && qn > 0 && Number.isFinite(pn) && pn >= 0 && Number.isFinite(dn) && dn >= 0 && dn <= 100;
+	const finalUnit = valid ? Math.round(pn * (1 - dn / 100) * 100) / 100 : 0;
+	const submit = async (): Promise<void> => {
+		if (!valid || saving) return;
+		setSaving(true); setErr(null);
+		try { await onSave(qn, pn, dn); } catch (e) { setErr(String(e instanceof Error ? e.message : e)); setSaving(false); }
+	};
+	return (
+		<div style={splitOv} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+			<div style={splitCard}>
+				<h3 style={{ margin: '0 0 4px' }}>Изменить позицию</h3>
+				<p style={{ margin: '0 0 14px', color: '#7a8699', fontSize: 13 }}>{row.name}</p>
+				<div style={{ display: 'flex', gap: 12 }}>
+					<label style={{ flex: 1, fontSize: 13, color: '#475569' }}>Количество
+						<input style={{ ...splitFld, width: '100%', marginTop: 4 }} type="number" min="0" step="any" value={qty} autoFocus onChange={(e) => setQty(e.target.value)} />
+					</label>
+					<label style={{ flex: 1, fontSize: 13, color: '#475569' }}>Цена без скидки, ₽
+						<input style={{ ...splitFld, width: '100%', marginTop: 4 }} type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} />
+					</label>
+					<label style={{ flex: 1, fontSize: 13, color: '#475569' }}>Скидка, %
+						<input style={{ ...splitFld, width: '100%', marginTop: 4 }} type="number" min="0" max="100" step="any" value={disc} onChange={(e) => setDisc(e.target.value)} />
+					</label>
+				</div>
+				<p style={{ margin: '12px 0 0', color: '#475569', fontSize: 13 }}>Итог за ед.: <b>{valid ? finalUnit.toLocaleString('ru-RU') : '—'} ₽</b>{valid && dn > 0 && <span style={{ color: '#1a7f37' }}> (−{dn}%)</span>}</p>
+				<p style={{ margin: '4px 0 0', fontWeight: 600 }}>Сумма: {valid ? (finalUnit * qn).toLocaleString('ru-RU') : '—'} ₽</p>
+				{err && <p style={{ color: '#c0392b', fontSize: 13, margin: '8px 0 0' }}>⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+					<button className="btn-secondary" onClick={onClose} disabled={saving}>Отмена</button>
+					<button className="btn-primary" onClick={() => void submit()} disabled={!valid || saving}>{saving ? 'Сохраняю…' : 'Сохранить'}</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
+	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
+	const discPct = (r: EnrichedRow): number => { const base = r.price + r.discountSum; return base > 0 && r.discountSum > 0 ? Math.round((r.discountSum / base) * 1000) / 10 : 0; };
 
 	// Реализация — документ В ЯДРЕ (Delivery Note), а не в Битриксе (уходим от всех стен sale.order/
 	// shipment). Склад теперь НАШ: выбирается на каждой строке (селектор), пишется прямо в документ
@@ -316,6 +388,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	/** id строки, уходящей в снабжение (кнопки блокируются разом). */
 	const [supplying, setSupplying] = useState<string | null>(null);
+	/** id удаляемой строки (блокирует её кнопку на время запроса). */
+	const [removing, setRemoving] = useState<string | null>(null);
+	/** Строка, открытая на редактирование кол-ва/цены (модалка). */
+	const [editRow, setEditRow] = useState<EnrichedRow | null>(null);
 	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
 	const [rowStore, setRowStore] = useState<Record<string, number>>({});
 	/** Фаза реализации: idle → drafted (черновики ядра созданы по складам, ждут «Провести»). */
@@ -392,6 +468,23 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 		}
 	};
 
+	// Удалить строку (товар/работу) из сделки. Подтверждение + перезагрузка таблицы.
+	const doRemove = async (r: EnrichedRow): Promise<void> => {
+		if (dealId == null || removing != null || busy) return;
+		if (!window.confirm(`Удалить «${r.name}» из сделки?`)) return;
+		setRemoving(r.id);
+		setNotice(null);
+		try {
+			await removeDealProduct(dealId, Number(r.id));
+			setNotice({ kind: 'ok', text: `✅ Удалено из сделки: ${r.name.slice(0, 40)}` });
+			await onReload();
+		} catch (err) {
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setRemoving(null);
+		}
+	};
+
 	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
 	// монитор-вариация выпадал из «только TYPE 1» и был невидим при видимой сумме).
 	const goods = rows.filter((r) => !isWorkRow(r.type));
@@ -423,11 +516,24 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 		<tr key={r.id}>
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
-			<td className="num">{rub(r.price)}</td>
+			<td className="num">{rub(r.price)}{discPct(r) > 0 && <span className="disc-tag">−{discPct(r)}%</span>}</td>
 			<td className="num">{r.quantity} {r.measure}</td>
 			<td className="num">{rub(line(r))}</td>
 			<td><span className="none">—</span></td>
-			<td><span className="none">—</span></td>
+			<td>
+				<button
+					className="row-del"
+					disabled={busy || realizePhase !== 'idle'}
+					onClick={() => setEditRow(r)}
+					title="Изменить количество и цену"
+				>✎</button>
+				<button
+					className="row-del"
+					disabled={busy || removing != null || realizePhase !== 'idle'}
+					onClick={() => void doRemove(r)}
+					title="Удалить работу из сделки"
+				>{removing === r.id ? '…' : '🗑'}</button>
+			</td>
 		</tr>
 	);
 
@@ -459,7 +565,12 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 				<tr key={r.id} className={`goods-row st-${status}`}>
 					<td>{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}</td>
 					<td><span className="type-badge goods">товар</span></td>
-					<td className="num">{rub(r.price)}</td>
+					<td className="num">
+						{rub(r.price)}{discPct(r) > 0 && <span className="disc-tag">−{discPct(r)}%</span>}
+						{r.purchasingPrice != null
+							? <div className={`purchase-hint${r.price <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{r.price <= r.purchasingPrice ? ' ⚠' : ''}</div>
+							: <div className="purchase-hint muted-hint">закуп —</div>}
+					</td>
 					<td className="num">
 						<input
 							type="number" className="qty-input" min={0} max={left} step="any"
@@ -505,13 +616,10 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 									title="Перемещение получено — обновить остаток из ядра, чтобы реализовать"
 								>{refreshing ? '…' : '✓ получено — обновить'}</button>
 							);
+							// Менеджер сам перемещение НЕ инициирует (не знает логистики) — только информируем.
+							// Оформление перемещения уйдёт снабжению (отдельная часть).
 							return (
-								<button
-									className="st-badge transfer"
-									disabled={busy}
-									onClick={() => setSplitRow(r)}
-									title="Запросить перемещение со складов-источников (можно дробить по нескольким)"
-								>↪ Переместить</button>
+								<span className="st-badge transfer" title="Товара нет на складе реализации — перемещение оформляет снабжение">🚚 нужно перемещение</span>
 							);
 						})()}
 						{status === 'order' && (
@@ -522,6 +630,18 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 								title="Нет нигде — создать/дополнить заявку снабжения с точным перечнем"
 							>{supplying === r.id ? '…' : '+ Заказ'}</button>
 						)}
+						<button
+							className="row-del"
+							disabled={busy || realizePhase !== 'idle'}
+							onClick={() => setEditRow(r)}
+							title="Изменить количество и цену"
+						>✎</button>
+						<button
+							className="row-del"
+							disabled={busy || removing != null || realizePhase !== 'idle'}
+							onClick={() => void doRemove(r)}
+							title="Удалить товар из сделки"
+						>{removing === r.id ? '…' : '🗑'}</button>
 					</td>
 				</tr>,
 			);
@@ -716,6 +836,19 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 					onClose={() => setSplitRow(null)}
 					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); const fresh = await listTransfers(dealId).catch(() => null); if (fresh) setDealTransfers(fresh.transfers); }} />;
 			})()}
+
+			{editRow && dealId != null && (
+				<EditRowModal
+					row={editRow}
+					onClose={() => setEditRow(null)}
+					onSave={async (qty, price, discountRate) => {
+						await updateDealProduct(dealId, Number(editRow.id), qty, price, discountRate);
+						setEditRow(null);
+						setNotice({ kind: 'ok', text: `✅ Позиция обновлена: ${editRow.name.slice(0, 40)}` });
+						await onReload();
+					}}
+				/>
+			)}
 
 		</div>
 	);

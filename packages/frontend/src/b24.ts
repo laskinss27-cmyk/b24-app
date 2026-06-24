@@ -531,6 +531,8 @@ export interface BaseRow {
 	id: number;
 	iblockId: number;
 	name: string;
+	/** Услуга/работа (catalog type 7), а не товар — для фильтра «товары/услуги» в пикере. */
+	isService: boolean;
 	article?: string | undefined;
 	model?: string | undefined;
 	manufacturer?: string | undefined;
@@ -622,6 +624,28 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
 	return json.added ?? 0;
+}
+
+/** Удалить ОДНУ строку товара из сделки по её rowId. */
+export async function removeDealProduct(dealId: number, rowId: number): Promise<void> {
+	const res = await fetch('/api/deal/remove-product', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, rowId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить товар из сделки');
+}
+
+/** Изменить кол-во, БАЗОВУЮ цену и скидку % одной строки сделки по её rowId. */
+export async function updateDealProduct(dealId: number, rowId: number, quantity: number, price: number, discountRate: number): Promise<void> {
+	const res = await fetch('/api/deal/update-product', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, rowId, quantity, price, discountRate }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось изменить позицию');
 }
 
 export interface RealizeItem {

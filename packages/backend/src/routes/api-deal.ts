@@ -114,20 +114,33 @@ interface DealOrderInfo {
 	payment: { total: number; paid: number } | null;
 }
 
+/** Оплата у этого портала ведётся смарт-процессом «Касса» в полях сделки (платежей в заказе НЕТ).
+ * Эти поля — источник истины по оплате; платежи заказа оставляем как фолбэк. */
+const KASSA_PAID_FIELD = 'UF_CRM_1765984372';   // «Сумма оплат, руб.»
+const KASSA_REMAIN_FIELD = 'UF_CRM_1765984397'; // «Остаток к оплате, руб.»
+
 async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<DealOrderInfo> {
 	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), reserves: new Map(), shipments: [], payment: null };
+
+	// Оплата из «Кассы» (поля сделки) — приоритетный источник. total = оплачено + остаток.
+	const dealPay = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId }).catch(() => null);
+	const kassaPaidRaw = dealPay?.[KASSA_PAID_FIELD];
+	const kassaPayment = (kassaPaidRaw != null && kassaPaidRaw !== '')
+		? { total: (Number(kassaPaidRaw) || 0) + (Number(dealPay?.[KASSA_REMAIN_FIELD]) || 0), paid: Number(kassaPaidRaw) || 0 }
+		: null;
+
 	const bnd = await client.call<{ orderEntity?: Array<Record<string, unknown>> }>('crm.orderentity.list', {
 		filter: { ownerId: dealId, ownerTypeId: 2 }, select: ['*'],
 	});
 	const orderId = Number(bnd?.orderEntity?.[0]?.['orderId'] ?? 0);
-	if (!orderId) return info;
+	if (!orderId) { info.payment = kassaPayment; return info; }
 	info.orderId = orderId;
 
 	const ord = await client.call<{ order?: { basketItems?: Array<Record<string, unknown>>; payments?: Array<Record<string, unknown>>; price?: unknown } }>('sale.order.get', { id: orderId });
-	// Оплата: итого = price заказа, оплачено = сумма платежей с paid='Y'.
+	// Оплата: касса (поля сделки) приоритетна; иначе фолбэк на платежи заказа (paid='Y').
 	const payTotal = Number(ord?.order?.price ?? 0);
 	const payPaid = (ord?.order?.payments ?? []).filter((p) => p['paid'] === 'Y').reduce((a, p) => a + Number(p['sum'] ?? 0), 0);
-	info.payment = { total: payTotal, paid: payPaid };
+	info.payment = kassaPayment ?? { total: payTotal, paid: payPaid };
 	const basketIdToRow = new Map<number, number>();
 	for (const b of ord?.order?.basketItems ?? []) {
 		const m = /^crm_pr_(\d+)$/.exec(String(b['xmlId'] ?? ''));
@@ -303,6 +316,95 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return { ok: true, added };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/add-products] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Удалить ОДНУ товарную строку из сделки по её rowId (crm.item.productrow.delete).
+	app.post('/api/deal/remove-product', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; rowId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		const rowId = Number(b.rowId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		if (!Number.isInteger(rowId) || rowId <= 0) return reply.code(400).send({ ok: false, error: 'bad rowId' });
+		try {
+			// Читаем текущие строки тем же API, что и таблица (productrows.get), убираем нужную по ID,
+			// пересохраняем остальные (productrows.set) — гарантированно тот же id-простор, без рисков
+			// расхождения нового/старого API. Пустой список = у сделки не остаётся товаров (ок).
+			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+			const all = rows ?? [];
+			const remaining = all.filter((r) => Number(r['ID']) !== rowId);
+			if (remaining.length === all.length) return reply.code(404).send({ ok: false, error: 'строка не найдена' });
+			const setRows = remaining.map((r) => ({
+				PRODUCT_ID: Number(r['PRODUCT_ID'] ?? 0),
+				PRODUCT_NAME: String(r['PRODUCT_NAME'] ?? ''),
+				PRICE: Number(r['PRICE'] ?? 0),
+				QUANTITY: Number(r['QUANTITY'] ?? 0),
+				DISCOUNT_TYPE_ID: Number(r['DISCOUNT_TYPE_ID'] ?? 2),
+				DISCOUNT_RATE: Number(r['DISCOUNT_RATE'] ?? 0),
+				DISCOUNT_SUM: Number(r['DISCOUNT_SUM'] ?? 0),
+				TAX_RATE: r['TAX_RATE'] ?? null,
+				TAX_INCLUDED: String(r['TAX_INCLUDED'] ?? 'N'),
+				MEASURE_CODE: Number(r['MEASURE_CODE'] ?? 796),
+			}));
+			await client.call('crm.deal.productrows.set', { id: dealId, rows: setRows });
+			app.log.info({ dealId, rowId, left: setRows.length }, '[api/deal/remove-product] ok');
+			return { ok: true };
+		} catch (err) {
+			app.log.error({ dealId, rowId }, `[api/deal/remove-product] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Изменить кол-во, БАЗОВУЮ цену и СКИДКУ % одной строки сделки. Тот же надёжный путь, что и удаление:
+	// productrows.get → правим нужную строку → productrows.set всех (один id-простор).
+	// Модель Б24: PRICE = итог за ед. (после скидки), DISCOUNT_SUM = скидка за ед., DISCOUNT_RATE = %.
+	// База (без скидки) приходит от фронта в `price`; итог и скидку считаем тут.
+	app.post('/api/deal/update-product', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; rowId?: unknown; quantity?: unknown; price?: unknown; discountRate?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		const rowId = Number(b.rowId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		if (!Number.isInteger(rowId) || rowId <= 0) return reply.code(400).send({ ok: false, error: 'bad rowId' });
+		const newQty = Number(b.quantity);
+		const basePrice = Number(b.price);
+		const rate = Number(b.discountRate);
+		if (!Number.isFinite(newQty) || newQty <= 0) return reply.code(400).send({ ok: false, error: 'bad quantity' });
+		if (!Number.isFinite(basePrice) || basePrice < 0) return reply.code(400).send({ ok: false, error: 'bad price' });
+		if (!Number.isFinite(rate) || rate < 0 || rate > 100) return reply.code(400).send({ ok: false, error: 'bad discount' });
+		const r2 = (n: number): number => Math.round(n * 100) / 100;
+		const discSum = r2(basePrice * rate / 100); // скидка за единицу
+		const finalPrice = r2(basePrice - discSum);  // итоговая цена за единицу
+		try {
+			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+			const all = rows ?? [];
+			let found = false;
+			const setRows = all.map((r) => {
+				const isTarget = Number(r['ID']) === rowId;
+				if (isTarget) found = true;
+				return {
+					PRODUCT_ID: Number(r['PRODUCT_ID'] ?? 0),
+					PRODUCT_NAME: String(r['PRODUCT_NAME'] ?? ''),
+					PRICE: isTarget ? finalPrice : Number(r['PRICE'] ?? 0),
+					QUANTITY: isTarget ? newQty : Number(r['QUANTITY'] ?? 0),
+					DISCOUNT_TYPE_ID: isTarget ? 2 : Number(r['DISCOUNT_TYPE_ID'] ?? 2),
+					DISCOUNT_RATE: isTarget ? rate : Number(r['DISCOUNT_RATE'] ?? 0),
+					DISCOUNT_SUM: isTarget ? discSum : Number(r['DISCOUNT_SUM'] ?? 0),
+					TAX_RATE: r['TAX_RATE'] ?? null,
+					TAX_INCLUDED: String(r['TAX_INCLUDED'] ?? 'N'),
+					MEASURE_CODE: Number(r['MEASURE_CODE'] ?? 796),
+				};
+			});
+			if (!found) return reply.code(404).send({ ok: false, error: 'строка не найдена' });
+			await client.call('crm.deal.productrows.set', { id: dealId, rows: setRows });
+			app.log.info({ dealId, rowId, newQty, basePrice, rate, finalPrice }, '[api/deal/update-product] ok');
+			return { ok: true };
+		} catch (err) {
+			app.log.error({ dealId, rowId }, `[api/deal/update-product] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

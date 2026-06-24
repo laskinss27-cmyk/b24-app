@@ -54,10 +54,11 @@ const MOCK_STORES: StoreInfo[] = [
 	{ id: 22, title: 'Максидом ул. Фаворского 12', active: true },
 ];
 const MOCK_ROWS: BaseRow[] = [
-	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionName: 'Видеонаблюдение', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
-	{ id: 1810, iblockId: 24, name: 'Трубка аудиодомофона УКП-12', article: 'УКП-12', model: 'УКП-12', manufacturer: '', sectionName: 'Домофоны', retail: 780, purchase: null, total: 8, stockByStore: { 8: 4, 22: 4 } },
-	{ id: 1811, iblockId: 24, name: 'Трубка аудиодомофона УКП-12м', article: 'УКП-12м', model: 'УКП-12м', manufacturer: 'Vizit', sectionName: 'Домофоны', retail: 820, purchase: 782, total: 9, stockByStore: { 8: 5, 10: 4 } },
-	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
+	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false, article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionName: 'Видеонаблюдение', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
+	{ id: 1810, iblockId: 24, name: 'Трубка аудиодомофона УКП-12', isService: false, article: 'УКП-12', model: 'УКП-12', manufacturer: '', sectionName: 'Домофоны', retail: 780, purchase: null, total: 8, stockByStore: { 8: 4, 22: 4 } },
+	{ id: 1811, iblockId: 24, name: 'Трубка аудиодомофона УКП-12м', isService: false, article: 'УКП-12м', model: 'УКП-12м', manufacturer: 'Vizit', sectionName: 'Домофоны', retail: 820, purchase: 782, total: 9, stockByStore: { 8: 5, 10: 4 } },
+	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', isService: false, article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
+	{ id: 3001, iblockId: 24, name: 'Монтаж видеокамеры (работа)', isService: true, article: '', model: '', manufacturer: '', sectionName: 'Услуги', retail: 1500, purchase: null, total: 0, stockByStore: {} },
 ];
 
 type SortKey = 'id' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
@@ -123,6 +124,8 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	const [store, setStore] = useState<string>(ALL);
 	const [q, setQ] = useState('');
 	const [onlyStock, setOnlyStock] = useState(true);
+	/** Фильтр вида позиции для удобства подбора: все / только товары / только услуги (работы). */
+	const [kind, setKind] = useState<'all' | 'goods' | 'services'>('all');
 	const [sortKey, setSortKey] = useState<SortKey>('name');
 	const [sortDir, setSortDir] = useState<1 | -1>(1);
 
@@ -181,7 +184,10 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 				.sort((a, b) => b.qty - a.qty);
 			return { d, qty, others };
 		});
-		if (onlyStock) list = list.filter((r) => r.qty > 0);
+		// Фильтр остатка к услугам не применяем — у работ остатка нет (иначе «Услуги» давали бы пусто).
+		if (onlyStock && kind !== 'services') list = list.filter((r) => r.qty > 0 || r.d.isService);
+		if (kind === 'goods') list = list.filter((r) => !r.d.isService);
+		else if (kind === 'services') list = list.filter((r) => r.d.isService);
 		if (words.length) {
 			list = list.filter((r) => {
 				const hay = `${r.d.id} ${r.d.name} ${r.d.article ?? ''} ${r.d.manufacturer ?? ''} ${r.d.model ?? ''} ${r.d.sectionName ?? ''}`.toLowerCase();
@@ -208,7 +214,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 			return String(x).localeCompare(String(y), 'ru') * sortDir;
 		});
 		return list;
-	}, [rows, q, onlyStock, isAll, sid, sortKey, sortDir]);
+	}, [rows, q, onlyStock, kind, isAll, sid, sortKey, sortDir]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
@@ -369,6 +375,11 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 					<input type="search" value={q} placeholder="2050, камера, vizit, УКП…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
+				<div className="tb-seg" role="group" aria-label="Вид позиции">
+					{([['all', 'Все'], ['goods', 'Товары'], ['services', 'Услуги']] as const).map(([k, lbl]) => (
+						<button key={k} type="button" className={`tb-seg-btn${kind === k ? ' active' : ''}`} onClick={() => setKind(k)}>{lbl}</button>
+					))}
+				</div>
 				<div className="tb-spacer" />
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>

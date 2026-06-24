@@ -1304,6 +1304,37 @@ html, body, #root { height: 100%; }
 	user-select: none;
 	padding-bottom: 9px;
 }
+/* Сегментированный переключатель вида позиции (Все / Товары / Услуги). */
+.tb-seg {
+	display: inline-flex;
+	border: 1px solid #cdd5e0;
+	border-radius: 8px;
+	overflow: hidden;
+	margin-bottom: 9px;
+}
+.tb-seg-btn {
+	border: none;
+	background: #fff;
+	color: #475569;
+	font-size: 13px;
+	font-family: inherit;
+	padding: 6px 12px;
+	cursor: pointer;
+	border-left: 1px solid #cdd5e0;
+}
+.tb-seg-btn:first-child { border-left: none; }
+.tb-seg-btn:hover { background: #f6f8fb; }
+.tb-seg-btn.active { background: #185fa5; color: #fff; }
+/* Кнопка удаления строки товара/работы из сделки. */
+.row-del { background: none; border: none; cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.5; padding: 2px 5px; margin-left: 4px; }
+.row-del:hover { opacity: 1; }
+.row-del:disabled { opacity: 0.25; cursor: default; }
+/* Бейдж скидки в строке товара/работы. */
+.disc-tag { display: inline-block; margin-left: 5px; font-size: 11px; color: #1a7f37; background: #e7f6ee; border-radius: 5px; padding: 1px 5px; vertical-align: middle; white-space: nowrap; }
+/* Закупочная цена под розницей в строке товара (.danger — розница ≤ закупки). */
+.purchase-hint { font-size: 11px; color: #7a8699; font-weight: 400; margin-top: 2px; white-space: nowrap; }
+.purchase-hint.danger { color: #c0392b; font-weight: 600; }
+.purchase-hint.muted-hint { color: #aab4c2; }
 .tb-spacer {
 	flex: 1;
 }
