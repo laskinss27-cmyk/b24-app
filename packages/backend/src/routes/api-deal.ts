@@ -112,6 +112,9 @@ interface DealOrderInfo {
 	shipments: Array<{ id: number; accountNumber: string; deducted: boolean; items: Record<string, number>; stores?: Record<string, string> }>;
 	/** Оплата заказа сделки: total = сумма заказа, paid = сумма платежей с paid='Y'. null — заказа нет. */
 	payment: { total: number; paid: number } | null;
+	/** Склад-источник сделки = преобладающий склад в резервах корзины заказа (на него дефолтим
+	 *  «Склад реализации», иначе всегда вставал первый — «Склад Прихода»). null — нет резервов. */
+	sourceStoreId: number | null;
 }
 
 /** Оплата у этого портала ведётся смарт-процессом «Касса» в полях сделки (платежей в заказе НЕТ).
@@ -120,7 +123,7 @@ const KASSA_PAID_FIELD = 'UF_CRM_1765984372';   // «Сумма оплат, ру
 const KASSA_REMAIN_FIELD = 'UF_CRM_1765984397'; // «Остаток к оплате, руб.»
 
 async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<DealOrderInfo> {
-	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), reserves: new Map(), shipments: [], payment: null };
+	const info: DealOrderInfo = { orderId: null, basket: new Map(), shipped: new Map(), reserves: new Map(), shipments: [], payment: null, sourceStoreId: null };
 
 	// Оплата из «Кассы» (поля сделки) — приоритетный источник. total = оплачено + остаток.
 	const dealPay = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId }).catch(() => null);
@@ -142,6 +145,7 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 	const payPaid = (ord?.order?.payments ?? []).filter((p) => p['paid'] === 'Y').reduce((a, p) => a + Number(p['sum'] ?? 0), 0);
 	info.payment = kassaPayment ?? { total: payTotal, paid: payPaid };
 	const basketIdToRow = new Map<number, number>();
+	const storeTally = new Map<number, number>(); // склад резерва → сколько строк (для склада-источника сделки)
 	for (const b of ord?.order?.basketItems ?? []) {
 		const m = /^crm_pr_(\d+)$/.exec(String(b['xmlId'] ?? ''));
 		if (!m) continue;
@@ -153,7 +157,10 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 		const stores = [...new Set(((b['reservations'] as Array<Record<string, unknown>>) ?? [])
 			.map((r) => Number(r['storeId'] ?? 0)).filter((s) => s > 0))];
 		if (stores.length) info.reserves.set(rowId, stores);
+		for (const s of stores) storeTally.set(s, (storeTally.get(s) ?? 0) + 1);
 	}
+	// Склад-источник сделки = самый частый склад в резервах (на него дефолтим «Склад реализации»).
+	info.sourceStoreId = [...storeTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
 	const sh = await client.call<{ shipments?: Array<Record<string, unknown>> }>('sale.shipment.list', {
 		filter: { orderId, system: 'N' }, select: ['id', 'accountNumber', 'deducted'],
@@ -503,6 +510,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				reserves: Object.fromEntries(info.reserves),
 				shipments: info.shipments,
 				payment: info.payment,
+				sourceStoreId: info.sourceStoreId,
 				supply,
 				rows,
 			};

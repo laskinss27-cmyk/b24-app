@@ -43,6 +43,8 @@ interface TableData {
 	coreReals: CoreRealization[];
 	/** Оплата заказа сделки (из Б24): total/paid. null — заказа/оплаты нет. */
 	payment: { total: number; paid: number } | null;
+	/** Склад-источник сделки (из резервов заказа) — дефолт «Склада реализации». null — нет. */
+	sourceStoreId: number | null;
 	/** Заявки снабжения сделки. */
 	supply: SupplyCard[];
 	/** Активные склады каталога. */
@@ -61,6 +63,7 @@ const MOCK_DATA: TableData = {
 	coef: 0.5,
 	coreReals: [],   // чистый мок: прошлых реализаций нет (реализация считается на проде через ядро)
 	payment: { total: 103500, paid: 50000 },   // мок: частичная оплата для демонстрации баннера
+	sourceStoreId: 8,   // мок: склад-источник сделки = Дунайский (не первый) — проверить дефолт селектора
 	supply: [],
 	stores: [
 		{ id: 4, title: 'Измайловский 18Д', active: true },
@@ -88,7 +91,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
-		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, supply: [], rows: null })),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, sourceStoreId: null, supply: [], rows: null })),
 		// Что уже реализовано — из ЯДРА (Delivery Note по сделке). Ядро не подключено → [].
 		withTimeout(fetchDealRealizationsCore(dealId), 25000, 'deal/realize-core list').catch(() => [] as CoreRealization[]),
 	]);
@@ -109,7 +112,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			purchasingPrice: e?.purchasingPrice ?? null,
 		};
 	});
-	return { rows: enriched, coef, coreReals, payment: shippedInfo.payment, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
+	return { rows: enriched, coef, coreReals, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -394,7 +397,12 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	}, [dealId]);
 	/** Глобальный «Склад реализации» = склад, с которого продаём. Дефолт для всех строк;
 	 *  где его не хватает — строка идёт в перемещение НА него. Per-row селектор может переопределить. */
-	const [realizeStore, setRealizeStore] = useState<number>(() => data.stores[0]?.id ?? 0);
+	// Дефолт «Склада реализации» = склад-источник сделки (из резервов заказа), если он среди активных;
+	// иначе первый склад. Раньше всегда вставал первый — приложение игнорировало склад сделки.
+	const [realizeStore, setRealizeStore] = useState<number>(() => {
+		const src = data.sourceStoreId;
+		return src != null && data.stores.some((s) => s.id === src) ? src : (data.stores[0]?.id ?? 0);
+	});
 
 	// Сколько уже реализовано по товару — из ЯДРА (черновики + проведённые). Связь — по productId:
 	// документ ядра хранит item_code=productId без rowId, а в типичной сделке товар уникален по строкам.
@@ -497,20 +505,16 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
-				<span className="cell-price">
-					<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id}
-						onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
-					<span className="cell-x">−</span>
-					<input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id}
-						onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" />
-					<span className="cell-pct">%</span>
-				</span>
+				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 			</td>
 			<td className="num">
-				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id}
-					onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
+				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 			</td>
+			<td className="num">
+				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
+			</td>
+			<td className="num"><span className="none">—</span></td>
 			<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 			<td><span className="none">—</span></td>
 			<td>
@@ -534,6 +538,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 				<td className="part-name">↳ {r.name}</td>
 				<td><span className="type-badge part">{p.submitted ? 'реализовано' : 'черновик'}</span></td>
 				<td className="num">{rub(r.price)}</td>
+				<td className="num"><span className="none">—</span></td>
+				<td className="num"><span className="none">—</span></td>
 				<td className="num">{p.qty} {r.measure}</td>
 				<td className="num">{rub(r.price * p.qty)}</td>
 				<td className="row-store part-store">
@@ -553,32 +559,20 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 					<td>{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
-						<span className="cell-price">
-							<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id}
-								onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
-							<span className="cell-x">−</span>
-							<input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id}
-								onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" />
-							<span className="cell-pct">%</span>
-						</span>
+						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 						<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 						{r.purchasingPrice != null
 							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
 							: <div className="purchase-hint muted-hint">закуп —</div>}
 					</td>
 					<td className="num">
-						<div className="qtypair">
-							<label className="qtypair-l">кол-во
-								<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id}
-									onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
-							</label>
-							<label className="qtypair-l">отгруз.
-								<input type="number" className="qty-input" min={0} max={left} step="any"
-									value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy}
-									onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} onBlur={(e) => onRowBlur(r, e)}
-									title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} />
-							</label>
-						</div>
+						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+					</td>
+					<td className="num">
+						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
+					</td>
+					<td className="num">
+						<input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} onBlur={(e) => onRowBlur(r, e)} title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} />
 					</td>
 					<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 					<td className="row-store">
@@ -645,7 +639,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	// наглядно было видно, где что (раньше шли вперемешку одним списком).
 	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
 		<tr className="group-band">
-			<td colSpan={4}>{label} <span className="group-band-count">· {list.length}</span></td>
+			<td colSpan={6}>{label} <span className="group-band-count">· {list.length}</span></td>
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
@@ -750,7 +744,9 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 						<th>Товар / работа</th>
 						<th>Тип</th>
 						<th className="num">Цена</th>
-						<th className="num">Отгрузить</th>
+						<th className="num">Скидка</th>
+						<th className="num">Кол-во</th>
+						<th className="num">К отгрузке</th>
 						<th className="num">Сумма</th>
 						<th>Остатки по складам</th>
 						<th>Склад · статус</th>
