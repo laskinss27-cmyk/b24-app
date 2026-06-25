@@ -8,7 +8,7 @@ import { REPAIR_LOGO } from './repair-logo.js';
  * (подключим из ядра Item.image). Печать через window.print + @media print.
  */
 
-const COMPANY = { name: 'ИП Поляков Д. Ю.', phone: '+7 921 091-70-19', site: 'dom-automation.ru' };
+const COMPANY = { name: 'ИП Поляков Д. Ю.', phone: '+7 812 963-02-32', site: 'dom-automation.ru' };
 const money = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽`;
 function ruDate(s: string): string {
 	if (!s) return '';
@@ -44,6 +44,16 @@ export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mo
 		withTimeout(fetchDealKp(dealId), 30000, 'deal/kp').then(setKp).catch((e: unknown) => setErr(String(e instanceof Error ? e.message : e)));
 	}, [dealId, mock]);
 
+	// Единая сетка колонок для таблиц товаров и работ — чтобы цифры (кол-во/цена/сумма) стояли в один столбец.
+	const renderCols = (): JSX.Element => (
+		<colgroup>
+			<col style={{ width: '42px' }} />
+			<col />
+			<col style={{ width: '58px' }} />
+			<col style={{ width: '96px' }} />
+			<col style={{ width: '104px' }} />
+		</colgroup>
+	);
 	const goodsRow = (r: KpRow, i: number): JSX.Element => (
 		<tr key={`g${i}`} className={i % 2 ? 'kp-zebra' : ''}>
 			<td className="kp-photo-cell">{r.photo ? <img src={r.photo} alt="" className="kp-photo" /> : <div className="kp-photo kp-photo-empty" />}</td>
@@ -55,10 +65,10 @@ export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mo
 	);
 	const workRow = (r: KpRow, i: number): JSX.Element => (
 		<tr key={`w${i}`} className={i % 2 ? 'kp-zebra' : ''}>
-			<td>{r.name}</td>
-			<td className="kp-num kp-w-qty">{r.qty}</td>
-			<td className="kp-num kp-w-price">{money(r.price)}</td>
-			<td className="kp-num kp-w-sum">{money(r.sum)}</td>
+			<td colSpan={2}>{r.name}</td>
+			<td className="kp-num">{r.qty}</td>
+			<td className="kp-num">{money(r.price)}</td>
+			<td className="kp-num">{money(r.sum)}</td>
 		</tr>
 	);
 
@@ -88,6 +98,7 @@ export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mo
 						<>
 							<div className="kp-section">Оборудование</div>
 							<table className="kp-table">
+								{renderCols()}
 								<thead><tr><th colSpan={2}>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
 								<tbody>{kp.goods.map(goodsRow)}</tbody>
 							</table>
@@ -98,6 +109,7 @@ export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mo
 						<>
 							<div className="kp-section">Работы</div>
 							<table className="kp-table">
+								{renderCols()}
 								<tbody>{kp.works.map(workRow)}</tbody>
 							</table>
 						</>
@@ -107,7 +119,6 @@ export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mo
 						{kp.goods.length > 0 && <div className="kp-trow"><span>Оборудование</span><span>{money(kp.sumGoods)}</span></div>}
 						{kp.works.length > 0 && <div className="kp-trow"><span>Работы</span><span>{money(kp.sumWorks)}</span></div>}
 						<div className="kp-trow kp-grand"><span>Итого</span><span className="kp-grand-sum">{money(kp.total)}</span></div>
-						<div className="kp-novat">без НДС</div>
 					</div>
 
 					<div className="kp-foot">Предложение действительно 14 дней. Гарантия на оборудование — по гарантии производителя, на работы — 12 мес.</div>

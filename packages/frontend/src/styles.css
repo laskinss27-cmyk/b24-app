@@ -118,6 +118,15 @@ body {
 .products-table tbody tr:hover {
 	background: #fafafa;
 }
+/* Заголовок над полем: колонки с инпутами/бейджем (Тип·Цена·Скидка·Кол-во·К отгрузке) — по центру,
+   чтобы короткая надпись села над полем, а не у правого края. Товар(2)/Сумма(8)/Остатки(9)/Склад(10) — как были. */
+.products-table thead th:nth-child(3), .products-table tbody td:nth-child(3),
+.products-table thead th:nth-child(4), .products-table tbody td:nth-child(4),
+.products-table thead th:nth-child(5), .products-table tbody td:nth-child(5),
+.products-table thead th:nth-child(6), .products-table tbody td:nth-child(6),
+.products-table thead th:nth-child(7), .products-table tbody td:nth-child(7) {
+	text-align: center;
+}
 
 .type-badge {
 	display: inline-block;
@@ -1343,14 +1352,13 @@ html, body, #root { height: 100%; }
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
-	margin-right: 8px;
-	border: 1px solid #f0c4c4;
-	border-radius: 6px;
-	background: #fdeaea;
+	width: 18px;
+	height: 18px;
+	border: 1px solid #e3b7b7;
+	border-radius: 5px;
+	background: transparent;
 	color: #c0392b;
-	font-size: 14px;
+	font-size: 12px;
 	line-height: 1;
 	font-weight: 700;
 	cursor: pointer;
@@ -1359,7 +1367,7 @@ html, body, #root { height: 100%; }
 	transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .row-del-x:hover { background: #c0392b; border-color: #c0392b; color: #fff; }
-.row-del-x:disabled { opacity: 0.35; cursor: default; background: #f4f4f4; border-color: #e0e0e0; color: #aaa; }
+.row-del-x:disabled { opacity: 0.3; cursor: default; border-color: #e0e0e0; color: #bbb; }
 /* Бейдж скидки в строке товара/работы. */
 .disc-tag { display: inline-block; margin-left: 5px; font-size: 11px; color: #1a7f37; background: #e7f6ee; border-radius: 5px; padding: 1px 5px; vertical-align: middle; white-space: nowrap; }
 /* Закупочная цена под розницей в строке товара (.danger — розница ≤ закупки). */
@@ -1728,14 +1736,15 @@ html, body, #root { height: 100%; }
 .group-band-count { font-weight: 400; color: #64748b; }
 .group-band-sum { color: #334155; }
 
-/* ── Чекбокс «отгрузить эту строку» (реализация только отмеченного) ───────── */
+/* ── Первая колонка: удалить (✕) + чекбокс «отгрузить эту строку» ──────────── */
 .products-table th.check-col,
 .products-table td.check-col {
-	width: 32px;
+	width: 52px;
 	text-align: center;
 	padding-left: 6px;
 	padding-right: 6px;
 }
+.row-controls { display: inline-flex; align-items: center; gap: 7px; }
 .products-table input.row-check {
 	width: 16px;
 	height: 16px;
@@ -1862,7 +1871,8 @@ html, body, #root { height: 100%; }
 .kp-meta { font-size: 12px; color: #6b7280; padding: 0 28px; }
 .kp-client { font-size: 13px; padding: 10px 28px 0; }
 .kp-section { font-size: 13.5px; font-weight: 500; color: #ED2024; border-bottom: 1px solid #f3c9ca; padding-bottom: 5px; margin: 16px 28px 6px; }
-.kp-table { width: calc(100% - 56px); margin: 0 28px; border-collapse: collapse; font-size: 12.5px; }
+.kp-table { width: calc(100% - 56px); margin: 0 28px; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.kp-table td { word-wrap: break-word; }
 .kp-table thead tr { background: #FCEDED; color: #9A1B1E; }
 .kp-table th { text-align: left; padding: 7px 8px; font-weight: 500; }
 .kp-table th.kp-num { text-align: right; }
@@ -1873,12 +1883,10 @@ html, body, #root { height: 100%; }
 .kp-photo { width: 34px; height: 34px; border-radius: 5px; object-fit: cover; display: block; }
 .kp-photo-empty { background: #f3f4f6; border: 1px solid #e5e7eb; }
 .kp-article { font-size: 11px; color: #9ca3af; }
-.kp-w-qty { width: 48px; } .kp-w-price { width: 88px; } .kp-w-sum { width: 96px; }
 .kp-totals { padding: 16px 28px 22px; display: flex; flex-direction: column; align-items: flex-end; }
 .kp-trow { display: flex; justify-content: space-between; min-width: 250px; font-size: 12.5px; padding: 3px 0; color: #374151; }
 .kp-grand { font-size: 16px; font-weight: 500; border-top: 2px solid #ED2024; margin-top: 6px; padding-top: 8px; color: #1a1a1a; }
 .kp-grand-sum { color: #ED2024; }
-.kp-novat { font-size: 11px; color: #9ca3af; min-width: 250px; text-align: right; margin-top: 4px; }
 .kp-foot { padding: 11px 28px; background: #fafafa; border-top: 1px solid #eee; font-size: 11px; color: #6b7280; line-height: 1.6; }
 
 /* ── Статус оплаты сделки ─────────────────────────────────────── */

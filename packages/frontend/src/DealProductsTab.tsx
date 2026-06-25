@@ -504,16 +504,17 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>
-			<td className="check-col"></td>
-			<td>
-				<button
-					className="row-del-x"
-					disabled={busy || removing != null || realizePhase !== 'idle'}
-					onClick={() => void doRemove(r)}
-					title="Удалить работу из сделки"
-				>{removing === r.id ? '…' : '✕'}</button>
-				{r.name}
+			<td className="check-col">
+				<div className="row-controls">
+					<button
+						className="row-del-x"
+						disabled={busy || removing != null || realizePhase !== 'idle'}
+						onClick={() => void doRemove(r)}
+						title="Удалить работу из сделки"
+					>{removing === r.id ? '…' : '✕'}</button>
+				</div>
 			</td>
+			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
@@ -562,24 +563,24 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			out.push(
 				<tr key={r.id} className={`goods-row st-${status}${isSel(r) ? ' sel-row' : ''}`}>
 					<td className="check-col">
-						<input
-							type="checkbox"
-							className="row-check"
-							checked={isSel(r)}
-							disabled={status !== 'ready' || realizePhase !== 'idle' || busy}
-							onChange={() => toggleSel(r)}
-							title={status === 'ready' ? 'Отгрузить эту строку в реализации' : 'Строку нельзя отгрузить с выбранного склада — выбери склад, где хватает'}
-						/>
+						<div className="row-controls">
+							<button
+								className="row-del-x"
+								disabled={busy || removing != null || realizePhase !== 'idle'}
+								onClick={() => void doRemove(r)}
+								title="Удалить товар из сделки"
+							>{removing === r.id ? '…' : '✕'}</button>
+							<input
+								type="checkbox"
+								className="row-check"
+								checked={isSel(r)}
+								disabled={status !== 'ready' || realizePhase !== 'idle' || busy}
+								onChange={() => toggleSel(r)}
+								title={status === 'ready' ? 'Отгрузить эту строку в реализации' : 'Строку нельзя отгрузить с выбранного склада — выбери склад, где хватает'}
+							/>
+						</div>
 					</td>
-					<td>
-						<button
-							className="row-del-x"
-							disabled={busy || removing != null || realizePhase !== 'idle'}
-							onClick={() => void doRemove(r)}
-							title="Удалить товар из сделки"
-						>{removing === r.id ? '…' : '✕'}</button>
-						{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}
-					</td>
+					<td>{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
 						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
