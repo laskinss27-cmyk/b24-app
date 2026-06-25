@@ -437,7 +437,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const phones = contact?.['PHONE'] as Array<{ VALUE?: string }> | undefined;
 			const clientPhone = String(phones?.[0]?.VALUE ?? '');
 			const mgrName = mgrRaw ? [mgrRaw['NAME'], mgrRaw['LAST_NAME']].filter(Boolean).join(' ').trim() : '';
-			const mgrPhone = mgrRaw ? String(mgrRaw['PERSONAL_MOBILE'] ?? mgrRaw['WORK_PHONE'] ?? '') : '';
+			// Только РАБОЧИЙ телефон менеджера (личный мобильный в КП не светим). Пусто — строка без телефона.
+			const mgrPhone = mgrRaw ? String(mgrRaw['WORK_PHONE'] ?? '') : '';
 			// Артикул из хвоста названия (Eltis B-21, Lock-E01) — простой regex, только если в нём есть цифра.
 			const articleOf = (name: string): string => {
 				const m = /([A-Za-zА-Яа-я0-9][A-Za-z0-9\-/.]{3,})\s*$/.exec(name.trim());
