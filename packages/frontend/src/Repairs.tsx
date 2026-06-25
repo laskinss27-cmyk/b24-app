@@ -8,6 +8,7 @@ import {
 	updateRepair,
 	updateRepairStatus,
 	setRepairPayType,
+	setRepairIssueStore,
 	deleteRepair,
 	searchRepairContacts,
 	uploadRepairFile,
@@ -384,7 +385,8 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	}
 
 	async function onSubmit(): Promise<void> {
-		if (!device.trim() && !clientName.trim()) { setFormErr('Заполни хотя бы оборудование или клиента.'); return; }
+		if (!clientName.trim()) { setFormErr('Клиент обязателен — выбери из базы или впиши ФИО (новый создастся в Б24).'); return; }
+		if (!contactId && !clientPhone.trim()) { setFormErr('Укажи телефон клиента — по нему найдём существующего или заведём нового в Б24.'); return; }
 		setSaving(true); setFormErr(null);
 		try {
 			const input: NewRepairInput = {
@@ -419,7 +421,9 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 							))}
 						</div>
 					)}
-					{contactId && <span className="muted small">✓ контакт Б24 #{contactId}</span>}
+					{contactId
+						? <span className="muted small">✓ контакт Б24 #{contactId}</span>
+						: clientName.trim() ? <span className="muted small">＋ новый клиент — создастся в Б24 с телефоном</span> : null}
 				</label>
 				<label className="rf-field">Телефон
 					<input type="text" value={clientPhone} placeholder="+7 …" onChange={(e) => setClientPhone(e.target.value)} />
@@ -533,6 +537,10 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	const [ourVal, setOurVal] = useState<string>(repair.ourPrice != null ? String(repair.ourPrice) : '');
 	const [stErr, setStErr] = useState<string | null>(null);
 	const [dealMsg, setDealMsg] = useState<string | null>(null);
+	const [issueStores, setIssueStores] = useState<StoreInfo[]>([]);
+	const [issueVal, setIssueVal] = useState<string>(repair.issueStore ?? '');
+	const [issueBusy, setIssueBusy] = useState(false);
+	useEffect(() => { if (!mock) fetchStores().then((s) => setIssueStores(s.filter((x) => x.active))).catch(() => setIssueStores([])); }, [mock]);
 	// Заморозка: с «принято в офисе» карточку трогает только снабжение+ (зеркало серверного гейта).
 	const locked = isLockedStatus(repair.status) && !canEditPrice;
 	const costNum = (): number | null => (costVal.trim() !== '' && Number.isFinite(Number(costVal)) ? Number(costVal) : null);
@@ -544,8 +552,16 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	}
 	async function change(s: RepairStatus): Promise<void> {
 		if (s === repair.status) return;
+		// «Готово к выдаче» двигает аппарат на склад выдачи — без выбранного склада переход не имеет смысла.
+		if (s === 'ready_tt' && !issueVal.trim()) { setStErr('Сначала выбери склад выдачи — туда переместится аппарат.'); return; }
 		setBusy(true); setStErr(null);
 		try { await onStatus(s); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
+	}
+	async function changeIssue(store: string): Promise<void> {
+		setIssueVal(store);
+		if (mock) return;
+		setIssueBusy(true); setStErr(null);
+		try { await setRepairIssueStore(repair.id, store); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setIssueBusy(false); }
 	}
 	async function changePay(p: 'warranty' | 'paid'): Promise<void> {
 		if (p === repair.payType) return;
@@ -585,6 +601,16 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 				</select>
 				{busy && <span className="muted small">сохраняю…</span>}
 				{mock && <span className="muted small">(dev: статус не пишется)</span>}
+			</div>
+
+			<div className="rc-status">
+				<span className="rc-label">Склад выдачи</span>
+				<select value={issueVal} disabled={issueBusy || locked} onChange={(e) => void changeIssue(e.target.value)} title="Куда переместить аппарат при «Готово к выдаче». Задаётся, когда отремонтировали — клиент может забрать на другой точке.">
+					<option value="">— не выбран —</option>
+					{issueStores.map((s) => <option key={s.id} value={s.title}>{s.title}</option>)}
+				</select>
+				{issueBusy && <span className="muted small">сохраняю…</span>}
+				{!issueVal.trim() && <span className="muted small">выбери перед «Готово к выдаче»</span>}
 			</div>
 
 			<div className="rc-pay">

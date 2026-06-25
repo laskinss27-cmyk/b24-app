@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
+import { ErpClient } from '../erp/client.js';
+import { receiveRepairUnit, renameRepairItem, moveRepairUnit } from '../erp/operations.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -117,10 +119,11 @@ async function ensureRepairsDealCategory(client: B24Client, log: FastifyInstance
 
 interface DealSyncResult { dealId: number | null; created: boolean; noContact: boolean }
 async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyInstance['log']): Promise<DealSyncResult> {
+	// Сделка заводится на ЛЮБОЙ ремонт (даже гарантийный): сумма = «наша цена» у платного, 0 у гарантийного.
 	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
-	if (price <= 0) return { dealId: data.dealId ?? null, created: false, noContact: false };
 	const contactId = data.client?.contactId ?? null;
-	const rows = [{ PRODUCT_NAME: 'Платный ремонт', PRICE: price, QUANTITY: 1 }]; // свободная строка (PRODUCT_ID:0) — каталог не трогаем; номер ремонта — в названии сделки
+	const rowName = data.payType === 'paid' ? 'Платный ремонт' : 'Гарантийный ремонт';
+	const rows = [{ PRODUCT_NAME: rowName, PRICE: price, QUANTITY: 1 }]; // свободная строка (PRODUCT_ID:0) — каталог не трогаем; номер ремонта — в названии сделки
 	if (data.dealId) {
 		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
 		try {
@@ -149,6 +152,109 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	}
 }
 
+/** Офисный склад (хардкод — решение Сергея): в него аппарат едет при «принято в офисе». */
+const OFFICE_STORE = 'Измайловский 18Д';
+/** Транзитный склад ядра — пока аппарат в ремонте / в пути. */
+const TRANSIT_STORE = 'Goods In Transit';
+
+/** Имя позиции ремонтного аппарата на складе: `[ремонт]<оборуд. модель> s/n <серийник> <ФИО клиента>`. */
+function buildRepairItemName(data: RepairData): string {
+	const head = [data.device, data.model].map((s) => s.trim()).filter(Boolean).join(' ');
+	const sn = data.serial.trim() ? ` s/n ${data.serial.trim()}` : '';
+	const who = data.client?.name?.trim() ? ` ${data.client.name.trim()}` : '';
+	return `[ремонт]${head}${sn}${who}`.trim();
+}
+
+/** Разложить «Иванов Иван Иваныч» на поля контакта Б24. ≥2 слов → Фамилия/Имя/Отчество; 1 слово → Имя. */
+function splitFio(fio: string): { LAST_NAME: string; NAME: string; SECOND_NAME: string } {
+	const parts = fio.trim().split(/\s+/).filter(Boolean);
+	if (parts.length >= 2) return { LAST_NAME: parts[0]!, NAME: parts[1]!, SECOND_NAME: parts.slice(2).join(' ') };
+	return { LAST_NAME: '', NAME: parts[0] ?? '', SECOND_NAME: '' };
+}
+
+/** Клиент ремонта = контакт Б24. Уже привязан → берём; иначе ищем по телефону (Б24 не даст дубль с тем же
+ *  номером) и при отсутствии заводим новый контакт с телефоном. Возвращает id (null — не вышло/нет данных). */
+async function resolveOrCreateContact(
+	client: B24Client,
+	args: { contactId: number | null; name: string; phone: string },
+	log: FastifyInstance['log'],
+): Promise<number | null> {
+	if (args.contactId && args.contactId > 0) return args.contactId;
+	const phone = args.phone.trim();
+	const name = args.name.trim();
+	if (!name) return null;
+	// Поиск по телефону — чтобы не плодить дубли (и Б24 всё равно не создаст контакт с занятым номером).
+	if (phone) {
+		try {
+			const dup = await client.call<{ CONTACT?: Array<number | string> }>('crm.duplicate.findbycomm', { type: 'PHONE', values: [phone], entity_type: 'CONTACT' });
+			const found = Number((dup?.CONTACT ?? [])[0] ?? 0);
+			if (found > 0) return found;
+		} catch (err) { log.warn({}, `[repairs] поиск контакта по телефону не вышел — ${errInfo(err)}`); }
+	}
+	try {
+		const fields: Record<string, unknown> = { ...splitFio(name) };
+		if (phone) fields['PHONE'] = [{ VALUE: phone, VALUE_TYPE: 'WORK' }];
+		const added = await client.call<number | { id?: number }>('crm.contact.add', { fields });
+		const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+		if (id > 0) { log.info({ contactId: id }, '[repairs] создан контакт клиента'); return id; }
+	} catch (err) { log.error({}, `[repairs] создание контакта не удалось — ${errInfo(err)}`); }
+	return null;
+}
+
+/** Материализовать ремонт на складе ЯДРА: позиция `[ремонт]…` + приход 1 шт на склад точки приёмки.
+ *  Создаётся ОДИН раз (по отсутствию repairItemCode); при правке — только переименование (не плодим позиции).
+ *  Best-effort: ядро недоступно/без точки приёмки — ремонт всё равно сохраняется. Мутирует data.repairItemCode. */
+async function syncRepairStock(data: RepairData, log: FastifyInstance['log'], opts: { allowCreate: boolean } = { allowCreate: true }): Promise<void> {
+	const erp = ErpClient.fromEnv();
+	if (!erp) return; // ядро не сконфигурировано — фича оживёт при переключении склада на ядро
+	const itemName = buildRepairItemName(data);
+	try {
+		if (data.repairItemCode) {
+			await renameRepairItem(erp, { itemCode: data.repairItemCode, itemName });
+			return;
+		}
+		// Заводим позицию ТОЛЬКО при приёмке. На правке старого ремонта (без кода) не создаём — иначе
+		// оприходуем на склад давно закрытые ремонты.
+		if (!opts.allowCreate) return;
+		const store = data.point.trim();
+		if (!store) { log.warn({ repairNo: data.repairNo }, '[repairs] склад приёмки (точка) не указан — позиция на складе не заведена'); return; }
+		const itemCode = `REPAIR-${data.repairNo}`;
+		await receiveRepairUnit(erp, { itemCode, itemName, storeTitle: store });
+		data.repairItemCode = itemCode;
+		data.repairStore = store; // аппарат теперь лежит на складе точки приёмки
+		log.info({ itemCode, store }, '[repairs] позиция ремонта заведена на складе ядра');
+	} catch (err) {
+		log.warn({ repairNo: data.repairNo }, `[repairs] склад ядра: позицию завести/переименовать не вышло — ${errInfo(err)}`);
+	}
+}
+
+/** Движение позиции по смене статуса (этап 2). Best-effort; мутирует data.repairStore.
+ *  Только вперёд: откат статуса остаток не двигает (ограничение v1). Карта:
+ *   принято в офисе → Измайловский · отправлено в ремонт → транзит · отправлено на ТТ → без движения (в пути)
+ *   готово к выдаче → склад выдачи · выдано → склад не трогаем (дальше работа в сделке). */
+async function moveRepairForStatus(data: RepairData, newStatus: RepairStatus, log: FastifyInstance['log']): Promise<void> {
+	const erp = ErpClient.fromEnv();
+	if (!erp || !data.repairItemCode) return;
+	const target = newStatus === 'received_office' ? OFFICE_STORE
+		: newStatus === 'sent' ? TRANSIT_STORE
+		: newStatus === 'ready_tt' ? (data.issueStore?.trim() || null)
+		: null;
+	if (!target) {
+		if (newStatus === 'ready_tt') log.warn({ repairNo: data.repairNo }, '[repairs] «готово к выдаче» без склада выдачи — перемещение не сделано');
+		return;
+	}
+	const from = data.repairStore?.trim();
+	if (!from) { log.warn({ repairNo: data.repairNo }, '[repairs] текущий склад позиции неизвестен — перемещение пропущено'); return; }
+	if (from === target) { data.repairStore = target; return; } // уже там (напр. приняли сразу в офисе)
+	try {
+		await moveRepairUnit(erp, { itemCode: data.repairItemCode, fromStore: from, toStore: target });
+		data.repairStore = target;
+		log.info({ itemCode: data.repairItemCode, from, to: target }, '[repairs] позиция перемещена по статусу');
+	} catch (err) {
+		log.warn({ repairNo: data.repairNo }, `[repairs] перемещение позиции (${from}→${target}) не вышло — ${errInfo(err)}`);
+	}
+}
+
 interface RepairPhoto { id: number; name: string; url: string }
 /** Прикреплённый документ (Word/Excel/PDF) — хранится на Диске Б24, в карточке только ссылка. */
 interface RepairFile { id: number; name: string; url: string; type: string }
@@ -170,8 +276,14 @@ interface RepairData {
 	cost: number | null;
 	/** Наша цена — что берём с клиента (только для платных; основа суммы сделки). */
 	ourPrice: number | null;
-	/** ID созданной по платному ремонту сделки Б24 (чтобы не задваивать; null — ещё не создана). */
+	/** ID созданной по ремонту сделки Б24 (чтобы не задваивать; null — ещё не создана). */
 	dealId: number | null;
+	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
+	repairItemCode: string | null;
+	/** Где аппарат лежит сейчас (название склада Б24) — чтобы перемещать «откуда» при смене статуса. */
+	repairStore: string | null;
+	/** Склад выдачи — куда переместить при «Готово к выдаче». Задаётся позже (когда отремонтировали), не при приёмке. */
+	issueStore: string | null;
 	/** Комментарий сервисного центра (диагностика/итог ремонта) — заполняется после возврата. */
 	comment: string;
 	photos: RepairPhoto[];
@@ -206,6 +318,9 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 		cost: payType === 'paid' && typeof data.cost === 'number' ? data.cost : null,
 		ourPrice: payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : null,
 		dealId: typeof data.dealId === 'number' && data.dealId > 0 ? data.dealId : null,
+		repairItemCode: typeof data.repairItemCode === 'string' && data.repairItemCode ? data.repairItemCode : null,
+		repairStore: typeof data.repairStore === 'string' && data.repairStore ? data.repairStore : null,
+		issueStore: typeof data.issueStore === 'string' && data.issueStore ? data.issueStore : null,
 		comment: data.comment ?? '',
 		photos: Array.isArray(data.photos) ? data.photos : [],
 		files: Array.isArray(data.files) ? data.files : [],
@@ -280,7 +395,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		const s = (v: unknown): string => String(v ?? '').trim();
 		const device = s(b['device']);
 		const clientName = s((b['client'] as { name?: unknown } | undefined)?.name);
-		if (!device && !clientName) return reply.code(400).send({ ok: false, error: 'нужно хотя бы оборудование или клиент' });
+		// Клиент обязателен для любого ремонта (платный/гарантийный): на него вешаем сделку и подписываем позицию склада.
+		if (!clientName) return reply.code(400).send({ ok: false, error: 'клиент обязателен — укажи ФИО или организацию' });
 
 		const photos: RepairPhoto[] = Array.isArray(b['photos'])
 			? (b['photos'] as Array<Record<string, unknown>>).map((p) => ({ id: Number(p['id']) || 0, name: s(p['name']), url: s(p['url']) })).filter((p) => p.url)
@@ -299,6 +415,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const ourPrice = me.canEditPrice ? reqOur : null;
 			const now = new Date().toISOString();
 			const cl = (b['client'] ?? {}) as { contactId?: unknown; name?: unknown; phone?: unknown };
+			// Клиент = контакт Б24: берём привязанный / находим по телефону / заводим нового (с телефоном).
+			const contactId = await resolveOrCreateContact(client, { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) }, app.log);
 
 			// Свой номер ремонта: со 100, дальше max+1. Независим от технического ID хранилища
 			// (он общий счётчик портала → большие числа). Гонка при одновременном создании
@@ -322,7 +440,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const data: RepairData = {
 				status: 'received_tt',
 				repairNo,
-				client: { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) },
+				client: { contactId, name: s(cl.name), phone: s(cl.phone) },
 				device,
 				model: s(b['model']),
 				serial: s(b['serial']),
@@ -333,6 +451,9 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				cost,
 				ourPrice,
 				dealId: null,
+				repairItemCode: null,
+				repairStore: null,
+				issueStore: null,
 				// Комментарий СЦ заполняет/правит только снабжение+ (у менеджеров поле неактивно).
 				comment: me.canEditPrice ? s(b['comment']) : '',
 				photos,
@@ -342,8 +463,9 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				createdByName: byName,
 				history: [{ at: now, status: 'received_tt', byId, byName }],
 			};
-			// Платный + проставлена «Наша цена» + есть контакт → сразу заводим сделку (пишет data.dealId).
+			// Сделка — на любой ремонт (пишет data.dealId). Затем позиция аппарата на складе ядра (пишет data.repairItemCode).
 			const dealSync = await syncRepairDeal(client, data, app.log);
+			await syncRepairStock(data, app.log);
 			const nameParts = [device, data.model, data.client.name].filter(Boolean);
 			const added = await client.call<number | { id?: number }>('entity.item.add', {
 				ENTITY: REPAIRS_ENTITY,
@@ -383,7 +505,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const prevCost = typeof data.cost === 'number' ? data.cost : null;
 			const prevOur = typeof data.ourPrice === 'number' ? data.ourPrice : null;
 			// Перезаписываем редактируемые поля, сохраняем status/history/createdAt/createdBy.
-			data.client = { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) };
+			const contactId = await resolveOrCreateContact(client, { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) }, app.log);
+			data.client = { contactId, name: s(cl.name), phone: s(cl.phone) };
 			data.device = s(b['device']);
 			data.model = s(b['model']);
 			data.serial = s(b['serial']);
@@ -407,8 +530,9 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				if (prevOur !== data.ourPrice) parts.push(`наша цена: ${data.ourPrice == null ? '—' : `${data.ourPrice}₽`}`);
 				data.history.push({ at: new Date().toISOString(), status: data.status, byId: me.id, byName: me.name, note: parts.join(', ') });
 			}
-			// Платный + есть «Наша цена» → создать/обновить сделку (мутирует data.dealId).
+			// Сделку держим в актуальном (мутирует data.dealId); позицию склада переименовываем вслед за карточкой.
 			const dealSync = await syncRepairDeal(client, data, app.log);
+			await syncRepairStock(data, app.log, { allowCreate: false });
 			if (Array.isArray(b['photos'])) {
 				data.photos = (b['photos'] as Array<Record<string, unknown>>).map((p) => ({ id: Number(p['id']) || 0, name: s(p['name']), url: s(p['url']) })).filter((p) => p.url);
 			}
@@ -522,11 +646,41 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.status = status;
 			data.history = Array.isArray(data.history) ? data.history : [];
 			data.history.push({ at: new Date().toISOString(), status, byId: me.id, byName: me.name });
+			// Движение позиции по новому статусу (офис/транзит/склад выдачи) — мутирует data.repairStore.
+			await moveRepairForStatus(data, status, app.log);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, status }, '[api/repairs/update-status] ok');
 			return { ok: true };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/update-status] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Установить склад выдачи (задаётся ближе к выдаче, на странице просмотра). Гейт заморозки: после
+	// «принято в офисе» меняет только снабжение+. Сам остаток двигает статус «Готово к выдаче».
+	app.post('/api/repairs/set-issue-store', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown; issueStore?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		const issueStore = String(b.issueStore ?? '').trim();
+		try {
+			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
+			const raw = (items ?? [])[0];
+			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
+			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+			const me = await currentUser(client);
+			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — склад выдачи задаёт снабжение' });
+			}
+			data.issueStore = issueStore || null;
+			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
+			app.log.info({ id, issueStore }, '[api/repairs/set-issue-store] ok');
+			return { ok: true, issueStore: data.issueStore };
+		} catch (err) {
+			app.log.error({}, `[api/repairs/set-issue-store] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

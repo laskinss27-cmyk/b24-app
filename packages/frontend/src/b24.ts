@@ -1139,8 +1139,14 @@ export interface Repair {
 	cost: number | null;
 	/** Наша цена — что берём с клиента (только у платных; основа суммы сделки). */
 	ourPrice: number | null;
-	/** ID созданной по платному ремонту сделки Б24 (null — ещё не создана). */
+	/** ID созданной по ремонту сделки Б24 (null — ещё не создана). */
 	dealId: number | null;
+	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
+	repairItemCode?: string | null;
+	/** Где аппарат лежит сейчас (название склада Б24). */
+	repairStore?: string | null;
+	/** Склад выдачи — куда переместить при «Готово к выдаче» (задаётся, когда отремонтировали). */
+	issueStore?: string | null;
 	/** Комментарий сервисного центра (диагностика/итог) — заполняется после возврата. */
 	comment: string;
 	photos: RepairPhoto[];
@@ -1261,6 +1267,17 @@ export async function uploadRepairFile(file: File): Promise<RepairFile | null> {
 
 /** Быстрая смена вида ремонта платный↔гарантийный (+ цена СЦ и наша цена при платном).
  * При простановке «нашей цены» сервер сам заводит/обновляет сделку → возвращает dealId/флаги. */
+/** Задать склад выдачи (на странице просмотра). При «Готово к выдаче» сервер перемещает аппарат на него. */
+export async function setRepairIssueStore(id: number, issueStore: string): Promise<string | null> {
+	const res = await fetch('/api/repairs/set-issue-store', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, issueStore }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; issueStore?: string | null };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось задать склад выдачи');
+	return json.issueStore ?? null;
+}
+
 export async function setRepairPayType(id: number, payType: 'warranty' | 'paid', cost: number | null, ourPrice: number | null): Promise<{ payType: 'warranty' | 'paid'; cost: number | null; ourPrice: number | null; dealId: number | null; dealCreated: boolean; dealNoContact: boolean }> {
 	const res = await fetch('/api/repairs/set-pay', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
