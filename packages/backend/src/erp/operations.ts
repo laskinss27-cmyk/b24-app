@@ -457,6 +457,23 @@ export async function moveRepairUnit(erp: ErpClient, args: { itemCode: string; f
 	return { name };
 }
 
+/** Списать ремонтный аппарат со склада при выдаче клиенту (Delivery Note, цена 0 — не продаём, выдаём владельцу).
+ *  Привязка к сделке через b24_deal_id → документ виден в реализациях сделки. Сразу проведён. */
+export async function deliverRepairUnit(erp: ErpClient, args: { itemCode: string; storeTitle: string; dealId?: number }): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	const doc = await erp.create('Delivery Note', {
+		company: ctx.company,
+		customer: TECH_CUSTOMER,
+		set_posting_time: 1,
+		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		items: [{ item_code: args.itemCode, qty: 1, warehouse: erpWarehouse(ctx, args.storeTitle), rate: 0 }],
+	});
+	const name = String(doc['name']);
+	await erp.submit('Delivery Note', name);
+	return { name };
+}
+
 // ── Инвентаризация: Stock Reconciliation «на основании» точки подсчёта ────────
 
 const INV_FIELD = 'b24_inv_ref';

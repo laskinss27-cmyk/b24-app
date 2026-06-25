@@ -11,12 +11,16 @@ import {
 	setRepairIssueStore,
 	deleteRepair,
 	searchRepairContacts,
+	findRepairContactByPhone,
+	createPresaleRepair,
+	fetchRepairStoreStock,
 	uploadRepairFile,
 	fetchStores,
 	openDeal,
 	type NewRepairInput,
 	type StoreInfo,
 	type Repair,
+	type RepairKind,
 	type RepairStatus,
 	type RepairContact,
 	type RepairPhoto,
@@ -37,12 +41,21 @@ const STATUS_LABEL: Record<RepairStatus, string> = {
 	sent_to_tt: 'Отправлено на ТТ',
 	ready_tt: 'Готово к выдаче',
 	issued: 'Выдано',
+	// предпродажный
+	pre_office: 'Принято в офисе',
+	pre_sent: 'Отправлено в ремонт',
+	pre_back_office: 'Принято с ремонта в офис',
+	pre_to_point: 'Отправлено на точку',
+	pre_at_tt: 'Принято на ТТ',
 };
 const STATUS_FLOW: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
+const PRESALE_FLOW: RepairStatus[] = ['pre_office', 'pre_sent', 'pre_back_office', 'pre_to_point', 'pre_at_tt'];
+/** Цепочка статусов по потоку ремонта. */
+const flowFor = (kind: RepairKind | undefined): RepairStatus[] => kind === 'presale' ? PRESALE_FLOW : STATUS_FLOW;
 
-/** Со статуса «принято в офисе» карточка заморожена — правит только снабжение+ (зеркало серверного гейта). */
+/** Со статуса «принято в офисе» КЛИЕНТСКАЯ карточка заморожена — правит только снабжение+. Предпродажный не замораживаем. */
 const LOCK_FROM_IDX = STATUS_FLOW.indexOf('received_office');
-function isLockedStatus(s: RepairStatus): boolean { return STATUS_FLOW.indexOf(s) >= LOCK_FROM_IDX; }
+function isLockedStatus(s: RepairStatus): boolean { const i = STATUS_FLOW.indexOf(s); return i >= 0 && i >= LOCK_FROM_IDX; }
 
 /** Реквизит исполнителя для печатного акта (один на все). */
 const ACT_REQUISITE = 'ИП Поляков Д. Ю.';
@@ -123,7 +136,7 @@ async function fileToPhoto(file: File, maxPx = 1280, quality = 0.7): Promise<Rep
 }
 
 type Phase = { k: 'init' } | { k: 'ready' };
-type Screen = { k: 'list' } | { k: 'form'; initial?: Repair } | { k: 'card'; repair: Repair } | { k: 'print'; repair: Repair };
+type Screen = { k: 'list' } | { k: 'form'; initial?: Repair } | { k: 'presale' } | { k: 'card'; repair: Repair } | { k: 'print'; repair: Repair };
 
 export function Repairs(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
@@ -193,6 +206,18 @@ export function Repairs(): JSX.Element {
 		);
 	}
 
+	if (screen.k === 'presale') {
+		return (
+			<Shell>
+				<PresaleForm
+					mock={Boolean(ctx.__mock)}
+					onCancel={() => setScreen({ k: 'list' })}
+					onDone={async (r) => { await load(); setScreen({ k: 'card', repair: r }); }}
+				/>
+			</Shell>
+		);
+	}
+
 	if (screen.k === 'card') {
 		return (
 			<Shell>
@@ -236,6 +261,7 @@ export function Repairs(): JSX.Element {
 				loading={loading}
 				err={err}
 				onAdd={() => setScreen({ k: 'form' })}
+				onAddPresale={() => setScreen({ k: 'presale' })}
 				onOpen={(r) => setScreen({ k: 'card', repair: r })}
 				onReload={() => void load()}
 			/>
@@ -243,9 +269,9 @@ export function Repairs(): JSX.Element {
 	);
 }
 
-function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
+function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onReload }: {
 	repairs: Repair[]; loading: boolean; err: string | null;
-	onAdd: () => void; onOpen: (r: Repair) => void; onReload: () => void;
+	onAdd: () => void; onAddPresale: () => void; onOpen: (r: Repair) => void; onReload: () => void;
 }): JSX.Element {
 	const [q, setQ] = useState('');
 	const [st, setSt] = useState<RepairStatus | 'all'>('all');
@@ -266,9 +292,9 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 				<button className="btn-primary" onClick={onAdd}>➕ Принять в ремонт</button>
 				<button
 					className="btn-secondary"
-					disabled
-					title="Заработает, когда наш склад переедет в ядро на всех: товар с точки уйдёт в ремонт со списанием остатка (склад «В ремонте» — у нас, Битрикс не трогаем). Возврат годного — на выбранную точку."
-				>🛠 Предпродажный ремонт · скоро</button>
+					onClick={onAddPresale}
+					title="Наш товар со склада уходит в ремонт: выбери склад-источник и аппарат. Движение по складам — в ядре, Битрикс не трогаем."
+				>🛠 Предпродажный ремонт</button>
 				<label className="tb-field">Статус
 					<select value={st} onChange={(e) => setSt(e.target.value as RepairStatus | 'all')}>
 						<option value="all">Все статусы</option>
@@ -297,10 +323,10 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 							{view.map((r) => (
 								<tr key={r.id} className={`repair-row${r.status === 'issued' ? ' done' : ''}`} onClick={() => onOpen(r)}>
 									<td><b>#{repairNo(r)}</b></td>
-									<td>{r.client.name || <span className="muted">—</span>}{r.client.phone && <div className="muted small">{r.client.phone}</div>}</td>
+									<td>{r.kind === 'presale' ? <span className="pay-badge presale">🛠 предпродажа</span> : (<>{r.client.name || <span className="muted">—</span>}{r.client.phone && <div className="muted small">{r.client.phone}</div>}</>)}</td>
 									<td>{[r.device, r.model].filter(Boolean).join(' ') || <span className="muted">—</span>}</td>
 									<td className="nowrap">{r.serial || <span className="muted">—</span>}</td>
-									<td><span className={`pay-badge ${r.payType}`}>{r.payType === 'paid' ? 'платный' : 'гарантия'}</span></td>
+									<td>{r.kind === 'presale' ? <span className="muted">—</span> : <span className={`pay-badge ${r.payType}`}>{r.payType === 'paid' ? 'платный' : 'гарантия'}</span>}</td>
 									<td className="nowrap">{r.payType === 'paid' && r.ourPrice != null ? <b>{money(r.ourPrice)}</b> : <span className="muted">—</span>}</td>
 									<td className="repair-comment">{r.defect ? <span title={r.defect}>{r.defect}</span> : <span className="muted">—</span>}</td>
 									<td>{r.status === 'issued' ? <span className="status-done">завершён</span> : <span className={`repair-st st-${r.status}`}>{STATUS_LABEL[r.status]}</span>}</td>
@@ -333,6 +359,7 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	const [clientPhone, setClientPhone] = useState(initial?.client.phone ?? '');
 	const [contactId, setContactId] = useState<number | null>(initial?.client.contactId ?? null);
 	const [results, setResults] = useState<RepairContact[]>([]);
+	const [phoneMatch, setPhoneMatch] = useState<RepairContact | null>(null);
 	const [device, setDevice] = useState(initial?.device ?? '');
 	const [model, setModel] = useState(initial?.model ?? '');
 	const [serial, setSerial] = useState(initial?.serial ?? '');
@@ -387,6 +414,12 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	async function onSubmit(): Promise<void> {
 		if (!clientName.trim()) { setFormErr('Клиент обязателен — выбери из базы или впиши ФИО (новый создастся в Б24).'); return; }
 		if (!contactId && !clientPhone.trim()) { setFormErr('Укажи телефон клиента — по нему найдём существующего или заведём нового в Б24.'); return; }
+		// Контроль дублей: номер занят существующим контактом — спрашиваем приёмщика ДО сохранения,
+		// чтобы ремонт не повис молча на чужом контакте (Б24 всё равно не создаст дубль по номеру).
+		if (!contactId && !mock && clientPhone.trim()) {
+			const found = await findRepairContactByPhone(clientPhone.trim()).catch(() => null);
+			if (found) { setPhoneMatch(found); setFormErr(null); return; }
+		}
 		setSaving(true); setFormErr(null);
 		try {
 			const input: NewRepairInput = {
@@ -518,10 +551,88 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 				</div>
 			)}
 
+			{phoneMatch && (
+				<div className="rf-phone-match">
+					📞 По номеру <b>{phoneMatch.phone || clientPhone}</b> уже есть контакт: <b>{phoneMatch.name}</b>. Это он?
+					<div className="rf-phone-match-actions">
+						<button type="button" className="btn-secondary" onClick={() => { pickContact(phoneMatch); setPhoneMatch(null); }}>Да, это клиент</button>
+						<button type="button" className="btn-secondary" onClick={() => setPhoneMatch(null)}>Другой — исправлю номер</button>
+					</div>
+				</div>
+			)}
 			{formErr && <p className="error">⛔ {formErr}</p>}
 
 			<div className="rf-actions">
 				<button className="btn-primary" onClick={() => void onSubmit()} disabled={saving || uploading}>{saving ? (isEdit ? 'Сохраняю…' : 'Создаю…') : (isEdit ? 'Сохранить' : 'Создать')}</button>
+				<button className="btn-secondary" onClick={onCancel} disabled={saving}>Отмена</button>
+			</div>
+		</div>
+	);
+}
+
+/** Форма предпродажного ремонта: выбрать склад-источник → аппарат из его остатков → в ремонт.
+ *  Без клиента/цен/сделки — двигаем существующий товар (productId) по складам. */
+function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () => void; onDone: (r: Repair) => Promise<void> }): JSX.Element {
+	const [stores, setStores] = useState<StoreInfo[]>([]);
+	const [sourceStore, setSourceStore] = useState('');
+	const [items, setItems] = useState<Array<{ productId: number; name: string; qty: number }>>([]);
+	const [loadingItems, setLoadingItems] = useState(false);
+	const [picked, setPicked] = useState<{ productId: number; name: string } | null>(null);
+	const [q, setQ] = useState('');
+	const [saving, setSaving] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	useEffect(() => { if (!mock) fetchStores().then((s) => setStores(s.filter((x) => x.active))).catch(() => setStores([])); }, [mock]);
+	async function loadItems(store: string): Promise<void> {
+		setSourceStore(store); setPicked(null); setItems([]); setErr(null);
+		if (!store || mock) return;
+		setLoadingItems(true);
+		try { setItems(await fetchRepairStoreStock(store)); } catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); } finally { setLoadingItems(false); }
+	}
+	const filtered = items.filter((i) => { const t = q.trim().toLowerCase(); return !t || i.name.toLowerCase().includes(t) || String(i.productId).includes(t); });
+	async function submit(): Promise<void> {
+		if (!sourceStore) { setErr('Выбери склад-источник.'); return; }
+		if (!picked) { setErr('Выбери аппарат из остатков склада.'); return; }
+		setSaving(true); setErr(null);
+		try {
+			if (mock) {
+				await onDone({ id: Math.floor(1000 + Math.random() * 9000), name: `[предпродажа] ${picked.name}`, kind: 'presale', status: 'pre_office', repairNo: 100, client: { contactId: null, name: '', phone: '' }, device: picked.name, model: '', serial: '', point: '', appearance: '', defect: '', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: '', photos: [], files: [], createdAt: new Date().toISOString(), createdById: 'dev', createdByName: 'dev (mock)', history: [], productId: picked.productId, sourceStore, repairStore: 'Измайловский 18Д', issueStore: null } as Repair);
+				return;
+			}
+			const r = await createPresaleRepair(sourceStore, picked.productId, picked.name);
+			await onDone(r);
+		} catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); } finally { setSaving(false); }
+	}
+	return (
+		<div className="repair-form">
+			<div className="base-backbar"><button className="btn-secondary" onClick={onCancel}>← К списку</button></div>
+			<h2>🛠 Предпродажный ремонт</h2>
+			<p className="muted small">Наш товар со склада уходит в ремонт. Выбери склад-источник и аппарат — дальше ведём по статусам. Без клиента, цен и сделки.</p>
+			<div className="rf-grid">
+				<label className="rf-field">Склад-источник
+					<select value={sourceStore} onChange={(e) => void loadItems(e.target.value)}>
+						<option value="">— выбери склад —</option>
+						{stores.map((s) => <option key={s.id} value={s.title}>{s.title}</option>)}
+					</select>
+				</label>
+			</div>
+			{sourceStore && (
+				<label className="rf-field rf-wide">Аппарат (из остатков склада)
+					<input type="search" value={q} placeholder="поиск по названию / id" onChange={(e) => setQ(e.target.value)} />
+					{loadingItems ? <p className="muted small">Гружу остатки…</p> : (
+						<div className="rf-suggest" style={{ position: 'static', maxHeight: 300 }}>
+							{filtered.length === 0 ? <p className="muted small">Нет позиций с остатком на складе.</p> : filtered.slice(0, 100).map((i) => (
+								<button key={i.productId} type="button" className={`rf-suggest-item${picked?.productId === i.productId ? ' active' : ''}`} onClick={() => setPicked({ productId: i.productId, name: i.name })}>
+									{i.name} <span className="muted small">· #{i.productId} · остаток {i.qty}</span>
+								</button>
+							))}
+						</div>
+					)}
+				</label>
+			)}
+			{picked && <p className="muted small">Выбран: <b>{picked.name}</b> (#{picked.productId}) → уйдёт в ремонт со склада «{sourceStore}».</p>}
+			{err && <p className="error">⛔ {err}</p>}
+			<div className="rf-actions">
+				<button className="btn-primary" onClick={() => void submit()} disabled={saving || !picked}>{saving ? 'Создаю…' : 'В ремонт'}</button>
 				<button className="btn-secondary" onClick={onCancel} disabled={saving}>Отмена</button>
 			</div>
 		</div>
@@ -541,8 +652,12 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	const [issueVal, setIssueVal] = useState<string>(repair.issueStore ?? '');
 	const [issueBusy, setIssueBusy] = useState(false);
 	useEffect(() => { if (!mock) fetchStores().then((s) => setIssueStores(s.filter((x) => x.active))).catch(() => setIssueStores([])); }, [mock]);
-	// Заморозка: с «принято в офисе» карточку трогает только снабжение+ (зеркало серверного гейта).
+	const presale = repair.kind === 'presale';
+	// Заморозка: с «принято в офисе» КЛИЕНТСКУЮ карточку трогает только снабжение+. Предпродажный не замораживаем.
 	const locked = isLockedStatus(repair.status) && !canEditPrice;
+	// Финальная точка: для клиентского — «склад выдачи» (при «Готово к выдаче»); для предпродажного — «склад точки»
+	// (выбрать перед «Отправлено на точку», туда вернётся при «Принято на ТТ»).
+	const needsIssueStore = (s: RepairStatus): boolean => presale ? (s === 'pre_to_point' || s === 'pre_at_tt') : s === 'ready_tt';
 	const costNum = (): number | null => (costVal.trim() !== '' && Number.isFinite(Number(costVal)) ? Number(costVal) : null);
 	const ourNum = (): number | null => (ourVal.trim() !== '' && Number.isFinite(Number(ourVal)) ? Number(ourVal) : null);
 	function reactDeal(res: { dealCreated: boolean; dealNoContact: boolean }): void {
@@ -552,8 +667,11 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	}
 	async function change(s: RepairStatus): Promise<void> {
 		if (s === repair.status) return;
-		// «Готово к выдаче» двигает аппарат на склад выдачи — без выбранного склада переход не имеет смысла.
-		if (s === 'ready_tt' && !issueVal.trim()) { setStErr('Сначала выбери склад выдачи — туда переместится аппарат.'); return; }
+		// Переход, требующий финальный склад, без выбранного склада — не имеет смысла.
+		if (needsIssueStore(s) && !issueVal.trim()) {
+			setStErr(presale ? 'Сначала выбери склад точки — туда вернётся товар.' : 'Сначала выбери склад выдачи — туда переместится аппарат.');
+			return;
+		}
 		setBusy(true); setStErr(null);
 		try { await onStatus(s); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
 	}
@@ -587,7 +705,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 			<div className="rc-head">
 				<h2>Ремонт #{repairNo(repair)}{repair.status === 'issued' && <span className="status-done"> · завершён</span>}</h2>
 				<div className="rc-head-actions">
-					<button className="btn-secondary" onClick={onEdit} disabled={locked} title={locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ Редактировать</button>
+					<button className="btn-secondary" onClick={onEdit} disabled={locked || presale} title={presale ? 'Предпродажный — ведётся статусами, без правки полей' : locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ Редактировать</button>
 					<button className="btn-primary" onClick={onPrint}>🖨 Напечатать бланк</button>
 					<button className="btn-danger" disabled={busy || locked} onClick={() => void remove()} title={locked ? 'Принят в офисе — удалить может только снабжение' : 'Удалить ремонт (необратимо)'}>🗑 Удалить</button>
 				</div>
@@ -597,59 +715,74 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 			<div className="rc-status">
 				<span className="rc-label">Статус</span>
 				<select value={repair.status} disabled={busy || locked} onChange={(e) => void change(e.target.value as RepairStatus)}>
-					{STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+					{flowFor(repair.kind).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
 				</select>
 				{busy && <span className="muted small">сохраняю…</span>}
 				{mock && <span className="muted small">(dev: статус не пишется)</span>}
 			</div>
 
 			<div className="rc-status">
-				<span className="rc-label">Склад выдачи</span>
-				<select value={issueVal} disabled={issueBusy || locked} onChange={(e) => void changeIssue(e.target.value)} title="Куда переместить аппарат при «Готово к выдаче». Задаётся, когда отремонтировали — клиент может забрать на другой точке.">
+				<span className="rc-label">{presale ? 'Склад точки' : 'Склад выдачи'}</span>
+				<select value={issueVal} disabled={issueBusy || locked} onChange={(e) => void changeIssue(e.target.value)} title={presale ? 'Куда вернуть товар на точку. Выбери перед «Отправлено на точку» — туда товар встанет при «Принято на ТТ».' : 'Куда переместить аппарат при «Готово к выдаче». Клиент может забрать на другой точке.'}>
 					<option value="">— не выбран —</option>
 					{issueStores.map((s) => <option key={s.id} value={s.title}>{s.title}</option>)}
 				</select>
 				{issueBusy && <span className="muted small">сохраняю…</span>}
-				{!issueVal.trim() && <span className="muted small">выбери перед «Готово к выдаче»</span>}
+				{!issueVal.trim() && <span className="muted small">{presale ? 'выбери перед «Отправлено на точку»' : 'выбери перед «Готово к выдаче»'}</span>}
 			</div>
 
-			<div className="rc-pay">
-				<span className="rc-label">Вид ремонта</span>
-				<div className="rc-pay-toggle">
-					<button className={`btn-secondary${repair.payType === 'warranty' ? ' active' : ''}`} disabled={payBusy || locked} onClick={() => void changePay('warranty')}>Гарантийный</button>
-					<button className={`btn-secondary${repair.payType === 'paid' ? ' active' : ''}`} disabled={payBusy || locked} onClick={() => void changePay('paid')}>Платный</button>
+			{!presale && (
+				<div className="rc-pay">
+					<span className="rc-label">Вид ремонта</span>
+					<div className="rc-pay-toggle">
+						<button className={`btn-secondary${repair.payType === 'warranty' ? ' active' : ''}`} disabled={payBusy || locked} onClick={() => void changePay('warranty')}>Гарантийный</button>
+						<button className={`btn-secondary${repair.payType === 'paid' ? ' active' : ''}`} disabled={payBusy || locked} onClick={() => void changePay('paid')}>Платный</button>
+					</div>
+					{repair.payType === 'paid' && canEditPrice && (
+						<span className="rc-pay-cost">
+							<input type="number" min="0" step="1" value={costVal} placeholder="цена СЦ, ₽" disabled={payBusy} onChange={(e) => setCostVal(e.target.value)} title="Цена ремонта СЦ" />
+							<input type="number" min="0" step="1" value={ourVal} placeholder="наша цена, ₽" disabled={payBusy} onChange={(e) => setOurVal(e.target.value)} title="Наша цена (→ сделка)" />
+							<button className="btn-secondary" disabled={payBusy} onClick={() => void savePrices()}>Сохранить ₽</button>
+						</span>
+					)}
+					{repair.payType === 'paid' && !canEditPrice && (
+						<span className="rc-pay-cost">СЦ <b>{repair.cost != null ? money(repair.cost) : '—'}</b> · наша <b>{repair.ourPrice != null ? money(repair.ourPrice) : '—'}</b> <span className="muted small">цены меняет руководитель / закупка</span></span>
+					)}
+					{payBusy && <span className="muted small">сохраняю…</span>}
 				</div>
-				{repair.payType === 'paid' && canEditPrice && (
-					<span className="rc-pay-cost">
-						<input type="number" min="0" step="1" value={costVal} placeholder="цена СЦ, ₽" disabled={payBusy} onChange={(e) => setCostVal(e.target.value)} title="Цена ремонта СЦ" />
-						<input type="number" min="0" step="1" value={ourVal} placeholder="наша цена, ₽" disabled={payBusy} onChange={(e) => setOurVal(e.target.value)} title="Наша цена (→ сделка)" />
-						<button className="btn-secondary" disabled={payBusy} onClick={() => void savePrices()}>Сохранить ₽</button>
-					</span>
-				)}
-				{repair.payType === 'paid' && !canEditPrice && (
-					<span className="rc-pay-cost">СЦ <b>{repair.cost != null ? money(repair.cost) : '—'}</b> · наша <b>{repair.ourPrice != null ? money(repair.ourPrice) : '—'}</b> <span className="muted small">цены меняет руководитель / закупка</span></span>
-				)}
-				{payBusy && <span className="muted small">сохраняю…</span>}
-			</div>
-			{repair.payType === 'paid' && (repair.dealId
+			)}
+			{!presale && repair.payType === 'paid' && (repair.dealId
 				? <p className="muted small">🤝 Сделка: <button type="button" className="link-btn" onClick={() => openDeal(repair.dealId!)}>#{repair.dealId}</button></p>
 				: (repair.ourPrice != null && repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку по «нашей цене» — привяжи клиента к контакту Б24 (в редактировании).</p>))}
 			{dealMsg && <p className="muted small">{dealMsg}</p>}
 			{stErr && <p className="error">⛔ {stErr}</p>}
 
 			<div className="rc-body">
-				{row('Клиент', repair.client.name)}
-				{row('Телефон', repair.client.phone)}
-				{row('Оборудование', [repair.device, repair.model].filter(Boolean).join(' '))}
-				{row('Серийный №', repair.serial)}
-				{row('Торговая точка', repair.point)}
-				{repair.payType === 'paid' && row('Цена ремонта СЦ', repair.cost != null ? money(repair.cost) : '—')}
-				{repair.payType === 'paid' && row('Наша цена', repair.ourPrice != null ? money(repair.ourPrice) : '—')}
-				{row('Внешний вид и комплектация', repair.appearance)}
-				{row('Неисправность', repair.defect)}
-				{row('Комментарий СЦ', repair.comment)}
-				{row('Принят', ruDateTime(repair.createdAt))}
-				{repair.createdByName && row('Принял', repair.createdByName)}
+				{presale ? (
+					<>
+						{row('Тип', '🛠 Предпродажный ремонт')}
+						{row('Аппарат', repair.device || (repair.productId != null ? `#${repair.productId}` : ''))}
+						{row('Склад-источник', repair.sourceStore ?? '')}
+						{row('Сейчас на складе', repair.repairStore ?? '')}
+						{row('Принят', ruDateTime(repair.createdAt))}
+						{repair.createdByName && row('Принял', repair.createdByName)}
+					</>
+				) : (
+					<>
+						{row('Клиент', repair.client.name)}
+						{row('Телефон', repair.client.phone)}
+						{row('Оборудование', [repair.device, repair.model].filter(Boolean).join(' '))}
+						{row('Серийный №', repair.serial)}
+						{row('Торговая точка', repair.point)}
+						{repair.payType === 'paid' && row('Цена ремонта СЦ', repair.cost != null ? money(repair.cost) : '—')}
+						{repair.payType === 'paid' && row('Наша цена', repair.ourPrice != null ? money(repair.ourPrice) : '—')}
+						{row('Внешний вид и комплектация', repair.appearance)}
+						{row('Неисправность', repair.defect)}
+						{row('Комментарий СЦ', repair.comment)}
+						{row('Принят', ruDateTime(repair.createdAt))}
+						{repair.createdByName && row('Принял', repair.createdByName)}
+					</>
+				)}
 			</div>
 
 			{repair.files.length > 0 && (

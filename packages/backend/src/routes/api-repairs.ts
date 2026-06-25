@@ -3,7 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { receiveRepairUnit, renameRepairItem, moveRepairUnit } from '../erp/operations.js';
+import { receiveRepairUnit, renameRepairItem, moveRepairUnit, deliverRepairUnit, fetchErpStoreStockFull } from '../erp/operations.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -27,17 +27,23 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-// Цепочка приёма теперь различает «на ТТ» и «в офисе» (где физически устройство):
-// принято на ТТ → принято в офисе → отправлено в ремонт → отправлено на ТТ → готово к выдаче → выдано.
-export type RepairStatus = 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued';
-const STATUS_ORDER: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
+// Два потока ремонта (kind):
+//  client  — клиентский RMA: принято на ТТ → в офисе → в ремонт → на ТТ → готово к выдаче → выдано.
+//  presale — предпродажный (наш товар со склада): в офисе → в ремонт → с ремонта в офис → на точку → принято на ТТ.
+export type RepairKind = 'client' | 'presale';
+export type RepairStatus =
+	| 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued'   // клиентский
+	| 'pre_office' | 'pre_sent' | 'pre_back_office' | 'pre_to_point' | 'pre_at_tt';        // предпродажный
+const CLIENT_ORDER: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
+const PRESALE_ORDER: RepairStatus[] = ['pre_office', 'pre_sent', 'pre_back_office', 'pre_to_point', 'pre_at_tt'];
+const statusOrder = (kind: RepairKind): RepairStatus[] => kind === 'presale' ? PRESALE_ORDER : CLIENT_ORDER;
 
-/** Со статуса «принято в офисе» карточка ЗАМОРОЖЕНА: любые изменения (поля/цены/вид/статус/удаление)
- * только снабжение+ (canEditPrice). До этого (на ТТ) — правит кто угодно. Гейт по ТЕКУЩЕМУ статусу:
- * перевести received_tt→received_office обычный приёмщик ещё может, дальше всё фиксируется. */
-const LOCK_FROM_INDEX = STATUS_ORDER.indexOf('received_office');
+/** Со статуса «принято в офисе» КЛИЕНТСКАЯ карточка ЗАМОРОЖЕНА: правит только снабжение+ (canEditPrice).
+ * Предпродажный не замораживаем (нет цен/клиента) — isLocked для его статусов вернёт false. */
+const LOCK_FROM_INDEX = CLIENT_ORDER.indexOf('received_office');
 function isLocked(s: RepairStatus): boolean {
-	return STATUS_ORDER.indexOf(s) >= LOCK_FROM_INDEX;
+	const i = CLIENT_ORDER.indexOf(s);
+	return i >= 0 && i >= LOCK_FROM_INDEX;
 }
 
 /** Маппинг старых статусов (до разделения приёма ТТ/офис) на новые — чтобы прежние карточки не сломались. */
@@ -48,10 +54,12 @@ const LEGACY_STATUS: Record<string, RepairStatus> = {
 	issued: 'issued',
 };
 
-function normalizeStatus(s: unknown): RepairStatus {
+function normalizeStatus(s: unknown, kind: RepairKind = 'client'): RepairStatus {
 	const v = String(s ?? '');
-	if (STATUS_ORDER.includes(v as RepairStatus)) return v as RepairStatus;
-	return LEGACY_STATUS[v] ?? 'received_tt';
+	const order = statusOrder(kind);
+	if (order.includes(v as RepairStatus)) return v as RepairStatus;
+	if (kind === 'client' && LEGACY_STATUS[v]) return LEGACY_STATUS[v]!;
+	return order[0]!;
 }
 
 /** Кто может РЕДАКТИРОВАТЬ цену ремонта: Вова(1), Сергей(1858), Бекасов(986) + отдел Снабжение(10).
@@ -255,11 +263,58 @@ async function moveRepairForStatus(data: RepairData, newStatus: RepairStatus, lo
 	}
 }
 
+/** Списание аппарата при «Выдано» (клиентский): Delivery Note в ядре, цена 0 (выдаём владельцу, не продаём),
+ *  привязка к сделке → виден в её реализациях. Идемпотентно (по repairDeliveryNote), best-effort. */
+async function writeOffRepairOnIssue(data: RepairData, log: FastifyInstance['log']): Promise<void> {
+	const erp = ErpClient.fromEnv();
+	if (!erp || !data.repairItemCode || data.repairDeliveryNote) return;
+	const store = data.repairStore?.trim();
+	if (!store) { log.warn({ repairNo: data.repairNo }, '[repairs] выдача: склад аппарата неизвестен — списание пропущено'); return; }
+	try {
+		const dn = await deliverRepairUnit(erp, { itemCode: data.repairItemCode, storeTitle: store, ...(data.dealId ? { dealId: data.dealId } : {}) });
+		data.repairDeliveryNote = dn.name;
+		data.repairStore = null; // аппарат выдан — со склада списан
+		log.info({ itemCode: data.repairItemCode, dn: dn.name }, '[repairs] аппарат списан при выдаче (Delivery Note)');
+	} catch (err) {
+		log.warn({ repairNo: data.repairNo }, `[repairs] списание при выдаче не вышло — ${errInfo(err)}`);
+	}
+}
+
+/** ПРЕДПРОДАЖНЫЙ: движение существующего товара (productId) по статусам. Best-effort; мутирует repairStore.
+ *  Карта: принято в офисе→Измайловский · отправлено в ремонт→транзит · принято с ремонта в офис→Измайловский ·
+ *  отправлено на точку→транзит (нужен склад точки = issueStore) · принято на ТТ→склад точки (issueStore). */
+async function movePresaleForStatus(data: RepairData, newStatus: RepairStatus, log: FastifyInstance['log']): Promise<void> {
+	const erp = ErpClient.fromEnv();
+	if (!erp || !data.productId) return;
+	const target = newStatus === 'pre_office' ? OFFICE_STORE
+		: newStatus === 'pre_sent' ? TRANSIT_STORE
+		: newStatus === 'pre_back_office' ? OFFICE_STORE
+		: newStatus === 'pre_to_point' ? TRANSIT_STORE
+		: newStatus === 'pre_at_tt' ? (data.issueStore?.trim() || null)
+		: null;
+	if (!target) {
+		if (newStatus === 'pre_at_tt') log.warn({ repairNo: data.repairNo }, '[repairs] предпродажный «принято на ТТ» без склада точки — перемещение не сделано');
+		return;
+	}
+	const from = data.repairStore?.trim();
+	if (!from) { log.warn({ repairNo: data.repairNo }, '[repairs] предпродажный: текущий склад неизвестен — перемещение пропущено'); return; }
+	if (from === target) { data.repairStore = target; return; }
+	try {
+		await moveRepairUnit(erp, { itemCode: String(data.productId), fromStore: from, toStore: target });
+		data.repairStore = target;
+		log.info({ productId: data.productId, from, to: target }, '[repairs] предпродажный: товар перемещён по статусу');
+	} catch (err) {
+		log.warn({ repairNo: data.repairNo }, `[repairs] предпродажное перемещение (${from}→${target}) не вышло — ${errInfo(err)}`);
+	}
+}
+
 interface RepairPhoto { id: number; name: string; url: string }
 /** Прикреплённый документ (Word/Excel/PDF) — хранится на Диске Б24, в карточке только ссылка. */
 interface RepairFile { id: number; name: string; url: string; type: string }
 
 interface RepairData {
+	/** Поток ремонта: 'client' (клиентский RMA) | 'presale' (предпродажный — наш товар со склада). */
+	kind: RepairKind;
 	status: RepairStatus;
 	/** Свой номер ремонта (со 100), независимый от технического ID хранилища (общий счётчик портала). */
 	repairNo: number;
@@ -284,6 +339,12 @@ interface RepairData {
 	repairStore: string | null;
 	/** Склад выдачи — куда переместить при «Готово к выдаче». Задаётся позже (когда отремонтировали), не при приёмке. */
 	issueStore: string | null;
+	/** Имя проведённого Delivery Note списания при «Выдано» (идемпотентность; null — ещё не списан). */
+	repairDeliveryNote: string | null;
+	/** ПРЕДПРОДАЖНЫЙ: productId существующего товара каталога, который отправили в ремонт (двигаем его). */
+	productId: number | null;
+	/** ПРЕДПРОДАЖНЫЙ: склад-источник, откуда товар ушёл в ремонт (для справки). */
+	sourceStore: string | null;
 	/** Комментарий сервисного центра (диагностика/итог ремонта) — заполняется после возврата. */
 	comment: string;
 	photos: RepairPhoto[];
@@ -302,10 +363,12 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 	const id = Number(it['ID']);
 	if (!Number.isInteger(id) || id <= 0) return null;
 	const payType = data.payType ?? 'warranty';
+	const kind: RepairKind = data.kind === 'presale' ? 'presale' : 'client';
 	return {
 		id,
 		name: String(it['NAME'] ?? ''),
-		status: normalizeStatus(data.status),
+		kind,
+		status: normalizeStatus(data.status, kind),
 		repairNo: Number(data.repairNo) || 0,
 		client: data.client ?? { contactId: null, name: '', phone: '' },
 		device: data.device ?? '',
@@ -321,6 +384,9 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 		repairItemCode: typeof data.repairItemCode === 'string' && data.repairItemCode ? data.repairItemCode : null,
 		repairStore: typeof data.repairStore === 'string' && data.repairStore ? data.repairStore : null,
 		issueStore: typeof data.issueStore === 'string' && data.issueStore ? data.issueStore : null,
+		repairDeliveryNote: typeof data.repairDeliveryNote === 'string' && data.repairDeliveryNote ? data.repairDeliveryNote : null,
+		productId: typeof data.productId === 'number' && data.productId > 0 ? data.productId : null,
+		sourceStore: typeof data.sourceStore === 'string' && data.sourceStore ? data.sourceStore : null,
 		comment: data.comment ?? '',
 		photos: Array.isArray(data.photos) ? data.photos : [],
 		files: Array.isArray(data.files) ? data.files : [],
@@ -350,6 +416,25 @@ async function fetchAllRepairs(client: B24Client): Promise<Array<Record<string, 
 		start += items.length;
 	}
 	return all;
+}
+
+/** Свой номер ремонта (со 100, дальше max+1) — общий для обоих потоков. На сбое скана — уникальный по времени
+ *  (фикс.100 плодил дубли). Гонка при одновременном создании маловероятна для канарейки. */
+async function assignRepairNo(client: B24Client, log: FastifyInstance['log']): Promise<number> {
+	try {
+		const existing = await fetchAllRepairs(client);
+		let max = 99, withNo = 0;
+		for (const it of existing) {
+			try { const d = it['DETAIL_TEXT'] ? (JSON.parse(String(it['DETAIL_TEXT'])) as { repairNo?: unknown }) : {}; const n = Number(d.repairNo); if (Number.isFinite(n) && n > 0) { withNo++; if (n > max) max = n; } } catch { /* битая запись */ }
+		}
+		const assigned = max + 1;
+		log.info({ scanned: existing.length, withRepairNo: withNo, maxRepairNo: max, assigned }, '[api/repairs] номер присвоен');
+		return assigned;
+	} catch (err) {
+		const rn = 100 + (Date.now() % 100000);
+		log.error({ repairNo: rn }, `[api/repairs] скан номеров упал, присвоен уникальный по времени — ${errInfo(err)}`);
+		return rn;
+	}
 }
 
 export function registerApiRepairsRoute(app: FastifyInstance): void {
@@ -418,26 +503,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			// Клиент = контакт Б24: берём привязанный / находим по телефону / заводим нового (с телефоном).
 			const contactId = await resolveOrCreateContact(client, { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) }, app.log);
 
-			// Свой номер ремонта: со 100, дальше max+1. Независим от технического ID хранилища
-			// (он общий счётчик портала → большие числа). Гонка при одновременном создании
-			// маловероятна для канарейки; если список не прочитался — стартуем со 100, не падаем.
-			let repairNo = 100;
-			try {
-				const existing = await fetchAllRepairs(client); // ВСЕ записи (постранично) — иначе при >50 ремонтах скан терял свежие → дубль 100
-				let max = 99;
-				let withNo = 0;
-				for (const it of existing) {
-					try { const d = it['DETAIL_TEXT'] ? (JSON.parse(String(it['DETAIL_TEXT'])) as { repairNo?: unknown }) : {}; const n = Number(d.repairNo); if (Number.isFinite(n) && n > 0) { withNo++; if (n > max) max = n; } } catch { /* пропускаем битую запись */ }
-				}
-				repairNo = max + 1;
-				app.log.info({ scanned: existing.length, withRepairNo: withNo, maxRepairNo: max, assigned: repairNo }, '[api/repairs/create] номер присвоен');
-			} catch (err) {
-				// На сбое скана НЕ ставим фикс. 100 (это и плодило дубли) — даём заведомо уникальный высокий номер.
-				repairNo = 100 + (Date.now() % 100000);
-				app.log.error({ repairNo }, `[api/repairs/create] скан номеров упал, присвоен уникальный по времени — ${errInfo(err)}`);
-			}
+			const repairNo = await assignRepairNo(client, app.log);
 
 			const data: RepairData = {
+				kind: 'client',
 				status: 'received_tt',
 				repairNo,
 				client: { contactId, name: s(cl.name), phone: s(cl.phone) },
@@ -454,6 +523,9 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				repairItemCode: null,
 				repairStore: null,
 				issueStore: null,
+				repairDeliveryNote: null,
+				productId: null,
+				sourceStore: null,
 				// Комментарий СЦ заполняет/правит только снабжение+ (у менеджеров поле неактивно).
 				comment: me.canEditPrice ? s(b['comment']) : '',
 				photos,
@@ -478,6 +550,73 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/create] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Остатки склада из ядра — пикер аппарата для предпродажного (выбираем товар со склада-источника).
+	// Ремонтные позиции (строковый код) сюда не попадают — fetchErpStoreStockFull берёт только числовые коды.
+	app.post('/api/repairs/store-stock', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { store?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const store = String(b.store ?? '').trim();
+		if (!store) return reply.code(400).send({ ok: false, error: 'не указан склад' });
+		try {
+			const rows = await fetchErpStoreStockFull(erp, store);
+			return { ok: true, items: rows.map((r) => ({ productId: r.productId, name: r.name, qty: r.book })) };
+		} catch (err) {
+			app.log.error({}, `[api/repairs/store-stock] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Принять в ПРЕДПРОДАЖНЫЙ ремонт: наш товар со склада-источника (productId из остатков) уходит в ремонт.
+	// Без клиента/цен/сделки. Создаётся в статусе «принято в офисе» + перемещение источник→Измайловский.
+	app.post('/api/repairs/create-presale', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { sourceStore?: unknown; productId?: unknown; itemName?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const s = (v: unknown): string => String(v ?? '').trim();
+		const sourceStore = s(b['sourceStore']);
+		const productId = Number(b['productId']);
+		const itemName = s(b['itemName']);
+		if (!sourceStore) return reply.code(400).send({ ok: false, error: 'не выбран склад-источник' });
+		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'не выбран аппарат' });
+		try {
+			const me = await currentUser(client);
+			const now = new Date().toISOString();
+			const repairNo = await assignRepairNo(client, app.log);
+			const data: RepairData = {
+				kind: 'presale',
+				status: 'pre_office',
+				repairNo,
+				client: { contactId: null, name: '', phone: '' },
+				device: itemName, model: '', serial: '', point: '',
+				appearance: '', defect: '',
+				payType: 'warranty', cost: null, ourPrice: null, dealId: null,
+				repairItemCode: null,
+				repairStore: sourceStore, // товар сейчас на источнике; первый статус сдвинет в офис
+				issueStore: null,
+				repairDeliveryNote: null,
+				productId, sourceStore,
+				comment: '',
+				photos: [], files: [],
+				createdAt: now, createdById: me.id, createdByName: me.name,
+				history: [{ at: now, status: 'pre_office', byId: me.id, byName: me.name }],
+			};
+			// «Принято в офисе» — перемещаем товар источник → Измайловский (мутирует repairStore).
+			await movePresaleForStatus(data, 'pre_office', app.log);
+			const name = (`[предпродажа] ${itemName}`).slice(0, 120) || 'Предпродажный ремонт';
+			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: REPAIRS_ENTITY, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
+			const newId = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+			if (!newId) throw new Error('entity.item.add не вернул id');
+			app.log.info({ id: newId, productId, sourceStore }, '[api/repairs/create-presale] ok');
+			return { ok: true, id: newId, repair: { id: newId, name, ...data } };
+		} catch (err) {
+			app.log.error({}, `[api/repairs/create-presale] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
@@ -631,23 +770,31 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		const id = Number(b.id);
 		const status = String(b.status) as RepairStatus;
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
-		if (!STATUS_ORDER.includes(status)) return reply.code(400).send({ ok: false, error: 'bad status' });
+		if (![...CLIENT_ORDER, ...PRESALE_ORDER].includes(status)) return reply.code(400).send({ ok: false, error: 'bad status' });
 		try {
 			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
 			const raw = (items ?? [])[0];
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+			const kind: RepairKind = data.kind === 'presale' ? 'presale' : 'client';
+			if (!statusOrder(kind).includes(status)) return reply.code(400).send({ ok: false, error: 'статус не из цепочки этого ремонта' });
 			const me = await currentUser(client);
-			// Заморозка: если карточка уже «принята в офисе» (или дальше) — двигать статус может только снабжение+.
-			// Гейт по ТЕКУЩЕМУ статусу: войти в офис с ТТ обычный приёмщик ещё может, дальше — только снабжение.
-			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+			// Заморозка (только клиентский): с «принято в офисе» двигать статус может только снабжение+.
+			// presale не замораживаем — isLocked для его статусов = false.
+			if (isLocked(normalizeStatus(data.status, kind)) && !me.canEditPrice) {
 				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — статус двигает только снабжение' });
 			}
 			data.status = status;
 			data.history = Array.isArray(data.history) ? data.history : [];
 			data.history.push({ at: new Date().toISOString(), status, byId: me.id, byName: me.name });
-			// Движение позиции по новому статусу (офис/транзит/склад выдачи) — мутирует data.repairStore.
-			await moveRepairForStatus(data, status, app.log);
+			// Движение по новому статусу — своё для каждого потока (мутирует data.repairStore).
+			if (kind === 'presale') {
+				await movePresaleForStatus(data, status, app.log);
+			} else {
+				await moveRepairForStatus(data, status, app.log);
+				// «Выдано» — списываем аппарат со склада (Delivery Note ядра, цена 0, привязка к сделке).
+				if (status === 'issued') await writeOffRepairOnIssue(data, app.log);
+			}
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, status }, '[api/repairs/update-status] ok');
 			return { ok: true };
@@ -681,6 +828,27 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			return { ok: true, issueStore: data.issueStore };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/set-issue-store] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Поиск контакта по ТЕЛЕФОНУ (контроль дублей при приёмке). Б24 не даст завести контакт с занятым
+	// номером — поэтому до сохранения показываем приёмщику, кто уже сидит на этом номере. null — свободен.
+	app.post('/api/repairs/find-by-phone', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { phone?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const phone = String(b.phone ?? '').trim();
+		if (phone.length < 4) return { ok: true, contact: null };
+		try {
+			const dup = await client.call<{ CONTACT?: Array<number | string> }>('crm.duplicate.findbycomm', { type: 'PHONE', values: [phone], entity_type: 'CONTACT' });
+			const id = Number((dup?.CONTACT ?? [])[0] ?? 0);
+			if (!id) return { ok: true, contact: null };
+			const c = await client.call<{ NAME?: string; LAST_NAME?: string; SECOND_NAME?: string; PHONE?: Array<{ VALUE?: string }> }>('crm.contact.get', { id });
+			const name = [c?.LAST_NAME, c?.NAME, c?.SECOND_NAME].filter(Boolean).join(' ').trim();
+			return { ok: true, contact: { id, name: name || `Контакт #${id}`, phone: String(c?.PHONE?.[0]?.VALUE ?? phone) } };
+		} catch (err) {
+			app.log.warn({}, `[api/repairs/find-by-phone] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

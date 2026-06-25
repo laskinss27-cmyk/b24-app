@@ -1116,13 +1116,18 @@ function bx24Auth(): { domain: string; accessToken: string } {
 
 // ── Ремонты (RMA) — всё наше: карточки в нашем store, клиент/фото из Б24 ───────
 
-export type RepairStatus = 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued';
+export type RepairKind = 'client' | 'presale';
+export type RepairStatus =
+	| 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued'   // клиентский
+	| 'pre_office' | 'pre_sent' | 'pre_back_office' | 'pre_to_point' | 'pre_at_tt';        // предпродажный
 export interface RepairPhoto { id: number; name: string; url: string }
 /** Прикреплённый документ (Word/Excel/PDF) — лежит на Диске Б24, в карточке ссылка. */
 export interface RepairFile { id: number; name: string; url: string; type: string }
 export interface Repair {
 	id: number;
 	name: string;
+	/** Поток: 'client' (клиентский RMA) | 'presale' (предпродажный — наш товар со склада). По умолчанию client. */
+	kind?: RepairKind;
 	status: RepairStatus;
 	/** Свой номер ремонта (со 100), независимый от технического ID хранилища. */
 	repairNo: number;
@@ -1145,8 +1150,12 @@ export interface Repair {
 	repairItemCode?: string | null;
 	/** Где аппарат лежит сейчас (название склада Б24). */
 	repairStore?: string | null;
-	/** Склад выдачи — куда переместить при «Готово к выдаче» (задаётся, когда отремонтировали). */
+	/** Склад выдачи (клиентский) / склад точки (предпродажный) — финальная точка перемещения. */
 	issueStore?: string | null;
+	/** ПРЕДПРОДАЖНЫЙ: productId товара, отправленного в ремонт. */
+	productId?: number | null;
+	/** ПРЕДПРОДАЖНЫЙ: склад-источник, откуда товар ушёл в ремонт. */
+	sourceStore?: string | null;
 	/** Комментарий сервисного центра (диагностика/итог) — заполняется после возврата. */
 	comment: string;
 	photos: RepairPhoto[];
@@ -1194,6 +1203,28 @@ export async function createRepair(input: NewRepairInput): Promise<Repair> {
 	return json.repair;
 }
 
+/** Остатки склада из ядра — пикер аппарата для предпродажного ремонта. */
+export async function fetchRepairStoreStock(store: string): Promise<Array<{ productId: number; name: string; qty: number }>> {
+	const res = await fetch('/api/repairs/store-stock', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), store }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; items?: Array<{ productId: number; name: string; qty: number }> };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить остатки склада');
+	return json.items ?? [];
+}
+
+/** Принять в ПРЕДПРОДАЖНЫЙ ремонт: товар со склада-источника (productId) уходит чиниться. */
+export async function createPresaleRepair(sourceStore: string, productId: number, itemName: string): Promise<Repair> {
+	const res = await fetch('/api/repairs/create-presale', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), sourceStore, productId, itemName }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось создать предпродажный ремонт');
+	return json.repair;
+}
+
 export async function updateRepair(id: number, input: NewRepairInput): Promise<Repair> {
 	const res = await fetch('/api/repairs/update', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1230,6 +1261,17 @@ export async function searchRepairContacts(q: string): Promise<RepairContact[]> 
 	});
 	const json = (await res.json()) as { ok: boolean; contacts?: RepairContact[] };
 	return json.contacts ?? [];
+}
+
+/** Найти контакт по телефону (контроль дублей при приёмке). null — номер свободен. */
+export async function findRepairContactByPhone(phone: string): Promise<RepairContact | null> {
+	if (phone.trim().length < 4) return null;
+	const res = await fetch('/api/repairs/find-by-phone', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), phone }),
+	});
+	const json = (await res.json()) as { ok: boolean; contact?: RepairContact | null };
+	return json.ok ? (json.contact ?? null) : null;
 }
 
 /** Загрузить фото на Б24 Диск. Best-effort: вернёт null, если Диск недоступен. */
