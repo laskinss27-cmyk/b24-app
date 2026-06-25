@@ -1338,9 +1338,28 @@ html, body, #root { height: 100%; }
 .tb-seg-btn:hover { background: #f6f8fb; }
 .tb-seg-btn.active { background: #185fa5; color: #fff; }
 /* Кнопка удаления строки товара/работы из сделки. */
-.row-del { background: none; border: none; cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.5; padding: 2px 5px; margin-left: 4px; }
-.row-del:hover { opacity: 1; }
-.row-del:disabled { opacity: 0.25; cursor: default; }
+/* Явный крестик удаления слева от названия товара/работы. */
+.row-del-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	margin-right: 8px;
+	border: 1px solid #f0c4c4;
+	border-radius: 6px;
+	background: #fdeaea;
+	color: #c0392b;
+	font-size: 14px;
+	line-height: 1;
+	font-weight: 700;
+	cursor: pointer;
+	vertical-align: middle;
+	flex: 0 0 auto;
+	transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.row-del-x:hover { background: #c0392b; border-color: #c0392b; color: #fff; }
+.row-del-x:disabled { opacity: 0.35; cursor: default; background: #f4f4f4; border-color: #e0e0e0; color: #aaa; }
 /* Бейдж скидки в строке товара/работы. */
 .disc-tag { display: inline-block; margin-left: 5px; font-size: 11px; color: #1a7f37; background: #e7f6ee; border-radius: 5px; padding: 1px 5px; vertical-align: middle; white-space: nowrap; }
 /* Закупочная цена под розницей в строке товара (.danger — розница ≤ закупки). */
@@ -1708,6 +1727,24 @@ html, body, #root { height: 100%; }
 }
 .group-band-count { font-weight: 400; color: #64748b; }
 .group-band-sum { color: #334155; }
+
+/* ── Чекбокс «отгрузить эту строку» (реализация только отмеченного) ───────── */
+.products-table th.check-col,
+.products-table td.check-col {
+	width: 32px;
+	text-align: center;
+	padding-left: 6px;
+	padding-right: 6px;
+}
+.products-table input.row-check {
+	width: 16px;
+	height: 16px;
+	cursor: pointer;
+	accent-color: #2563eb;
+}
+.products-table input.row-check:disabled { cursor: not-allowed; opacity: 0.4; }
+.products-table tr.goods-row.sel-row { background: #eff6ff; }
+.products-table tr.goods-row.sel-row:hover { background: #e0edff; }
 
 /* ── Ремонты (RMA) ─────────────────────────────────────────── */
 .repair-row { cursor: pointer; }

@@ -377,6 +377,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	const [savingRow, setSavingRow] = useState<string | null>(null);
 	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
 	const [rowStore, setRowStore] = useState<Record<string, number>>({});
+	/** Отмеченные галочкой строки — в реализацию идут ТОЛЬКО они. Дефолт: ничего не отмечено. */
+	const [selected, setSelected] = useState<Record<string, boolean>>({});
 	/** Фаза реализации: idle → drafted (черновики ядра созданы по складам, ждут «Провести»). */
 	const [realizePhase, setRealizePhase] = useState<'idle' | 'drafted'>('idle');
 	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
@@ -502,7 +504,16 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>
-			<td>{r.name}</td>
+			<td className="check-col"></td>
+			<td>
+				<button
+					className="row-del-x"
+					disabled={busy || removing != null || realizePhase !== 'idle'}
+					onClick={() => void doRemove(r)}
+					title="Удалить работу из сделки"
+				>{removing === r.id ? '…' : '✕'}</button>
+				{r.name}
+			</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
@@ -517,14 +528,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			<td className="num"><span className="none">—</span></td>
 			<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 			<td><span className="none">—</span></td>
-			<td>
-				<button
-					className="row-del"
-					disabled={busy || removing != null || realizePhase !== 'idle'}
-					onClick={() => void doRemove(r)}
-					title="Удалить работу из сделки"
-				>{removing === r.id ? '…' : '🗑'}</button>
-			</td>
+			<td><span className="none">—</span></td>
 		</tr>
 	);
 
@@ -535,6 +539,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 		const left = remaining(r);
 		const out: JSX.Element[] = parts.map((p) => (
 			<tr key={`${r.id}-${p.name}`} className="part-row">
+				<td className="check-col"></td>
 				<td className="part-name">↳ {r.name}</td>
 				<td><span className="type-badge part">{p.submitted ? 'реализовано' : 'черновик'}</span></td>
 				<td className="num">{rub(r.price)}</td>
@@ -555,8 +560,26 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 		if (left > 0) {
 			const status = rowStatus(r);
 			out.push(
-				<tr key={r.id} className={`goods-row st-${status}`}>
-					<td>{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}</td>
+				<tr key={r.id} className={`goods-row st-${status}${isSel(r) ? ' sel-row' : ''}`}>
+					<td className="check-col">
+						<input
+							type="checkbox"
+							className="row-check"
+							checked={isSel(r)}
+							disabled={status !== 'ready' || realizePhase !== 'idle' || busy}
+							onChange={() => toggleSel(r)}
+							title={status === 'ready' ? 'Отгрузить эту строку в реализации' : 'Строку нельзя отгрузить с выбранного склада — выбери склад, где хватает'}
+						/>
+					</td>
+					<td>
+						<button
+							className="row-del-x"
+							disabled={busy || removing != null || realizePhase !== 'idle'}
+							onClick={() => void doRemove(r)}
+							title="Удалить товар из сделки"
+						>{removing === r.id ? '…' : '✕'}</button>
+						{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}
+					</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
 						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
@@ -623,12 +646,6 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 								title="Нет нигде — создать/дополнить заявку снабжения с точным перечнем"
 							>{supplying === r.id ? '…' : '+ Заказ'}</button>
 						)}
-						<button
-							className="row-del"
-							disabled={busy || removing != null || realizePhase !== 'idle'}
-							onClick={() => void doRemove(r)}
-							title="Удалить товар из сделки"
-						>{removing === r.id ? '…' : '🗑'}</button>
 					</td>
 				</tr>,
 			);
@@ -639,13 +656,18 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	// наглядно было видно, где что (раньше шли вперемешку одним списком).
 	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
 		<tr className="group-band">
-			<td colSpan={6}>{label} <span className="group-band-count">· {list.length}</span></td>
+			<td colSpan={7}>{label} <span className="group-band-count">· {list.length}</span></td>
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
 
 	// Готовые к реализации строки → группируем по складу (на каждый склад — свой Delivery Note в ядре).
-	const readyGoods = goods.filter((r) => remaining(r) > 0 && rowStatus(r) === 'ready');
+	// Можно ли отгрузить строку сейчас (остаток есть + хватает на выбранном складе) — отсюда доступность галочки.
+		const canRealize = (r: EnrichedRow): boolean => remaining(r) > 0 && rowStatus(r) === 'ready';
+		const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
+		const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
+		// В реализацию идут ТОЛЬКО отмеченные галочкой строки (дефолт — ничего не отмечено).
+		const readyGoods = goods.filter((r) => canRealize(r) && isSel(r));
 	const realizeGroups = new Map<number, EnrichedRow[]>();
 	for (const r of readyGoods) {
 		const s = storeOf(r);
@@ -741,6 +763,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			<table className="products-table">
 				<thead>
 					<tr>
+						<th className="check-col" title="Отметь строки, которые отгружаем сейчас"></th>
 						<th>Товар / работа</th>
 						<th>Тип</th>
 						<th className="num">Цена</th>
@@ -800,7 +823,7 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 						))}
 					</div>
 				) : (
-					<span className="hint">Укажи у товаров кол-во и склад — готовые строки соберутся в реализацию (один документ на склад).</span>
+					<span className="hint">Отметь галочками строки, которые отгружаем сейчас — они соберутся в реализацию (один документ на склад).</span>
 				)}
 				<div className="realize-actions">
 					<button
