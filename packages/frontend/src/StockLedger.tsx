@@ -25,16 +25,17 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
  *  - Списания / Оприходования — журнал ядра + формы создания (черновик → «Провести»);
  *  - Реализации — read-only журнал (создаются из сделки).
  */
-type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery' | 'ledger';
+type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery' | 'return' | 'ledger';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'transfers', label: 'Перемещения' },
 	{ key: 'issue', label: 'Списания' },
 	{ key: 'receipt', label: 'Оприходования' },
 	{ key: 'delivery', label: 'Реализации' },
+	{ key: 'return', label: 'Возвраты' },
 	{ key: 'ledger', label: 'Отчёт по движению товара' },
 ];
 /** doctype ядра по типу вкладки (для раскрытия документа). */
-const KIND_DOCTYPE: Record<'issue' | 'receipt' | 'delivery', string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note' };
+const KIND_DOCTYPE: Record<'issue' | 'receipt' | 'delivery' | 'return', string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note', return: 'Delivery Note' };
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 /** Период без явных undefined (exactOptionalPropertyTypes). */
 const mkPeriod = (from: string, to: string): { from?: string; to?: string } => ({ ...(from ? { from } : {}), ...(to ? { to } : {}) });
@@ -469,7 +470,7 @@ const MOVE_STATUS_OPTS = [
 	{ value: 'draft', label: 'Черновик' },
 ];
 
-function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery'; form: StockForm | null }): JSX.Element {
+function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery' | 'return'; form: StockForm | null }): JSX.Element {
 	const [list, setList] = useState<CoreMovement[] | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -483,7 +484,7 @@ function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery'; 
 	const [busyDoc, setBusyDoc] = useState<string | null>(null);
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openDoc, setOpenDoc] = useState<string | null>(null);
-	const canPost = Boolean(form?.canCreate) && kind !== 'delivery';
+	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
 
 	useEffect(() => {
 		let alive = true; setList(null); setErr(null); setLoading(true);
@@ -499,7 +500,7 @@ function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery'; 
 	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); };
 
 	const submit = async (m: CoreMovement): Promise<void> => {
-		if (kind === 'delivery') return;
+		if (kind === 'delivery' || kind === 'return') return;
 		setBusyDoc(m.name); setErr(null);
 		try { await submitStockDoc(kind, m.name); setBump((b) => b + 1); }
 		catch (e) { setErr(errText(e)); }

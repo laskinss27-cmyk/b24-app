@@ -677,7 +677,7 @@ export interface CoreMovement { name: string; date: string; submitted: boolean; 
  */
 export async function listCoreMovements(
 	erp: ErpClient,
-	kind: 'issue' | 'receipt' | 'delivery',
+	kind: 'issue' | 'receipt' | 'delivery' | 'return',
 	opts: { from?: string; to?: string; productId?: number } = {},
 ): Promise<CoreMovement[]> {
 	const dateFilters: unknown[] = [];
@@ -687,9 +687,16 @@ export async function listCoreMovements(
 	const child = (childDt: string): unknown[] => opts.productId ? [[childDt, 'item_code', '=', String(opts.productId)]] : [];
 	const limit = (opts.from || opts.to || opts.productId) ? 1000 : 50;
 	const ORDER = 'posting_date desc';
-	if (kind === 'delivery') {
-		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Delivery Note Item')], limit, ORDER);
-		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`, dealId: String(r[DEAL_FIELD] ?? '') }));
+	if (kind === 'delivery' || kind === 'return') {
+		// Реализации и возвраты — один doctype (Delivery Note), разводим по is_return: 0=продажа, 1=возврат.
+		await ensureNoteField(erp, 'Delivery Note'); // причина возврата лежит в b24_note
+		const isRet = kind === 'return' ? 1 : 0;
+		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ['is_return', '=', isRet], ...dateFilters, ...child('Delivery Note Item')], limit, ORDER);
+		return rows.map((r) => {
+			const base = `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`;
+			const note = String(r[NOTE_FIELD] ?? '');
+			return { name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: kind === 'return' && note ? `${base} · ${note}` : base, dealId: String(r[DEAL_FIELD] ?? '') };
+		});
 	}
 	const withNote = (base: string, note: string): string => note ? (base ? `${base} · ${note}` : note) : base;
 	if (kind === 'receipt') {
