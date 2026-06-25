@@ -162,6 +162,8 @@ export interface ErpRealization {
 	dealId: string;
 	postingDate: string;
 	submitted: boolean;
+	/** true — это возврат от клиента (Delivery Note is_return), а не отгрузка. */
+	isReturn: boolean;
 	grandTotal: number;
 	items: Array<{ productId: number; itemName: string; qty: number; storeTitle: string }>;
 }
@@ -250,7 +252,7 @@ export async function createClientReturns(
 export async function listDealRealizations(erp: ErpClient, dealId: number): Promise<ErpRealization[]> {
 	const ctx = await erpContext(erp);
 	const heads = await erp.list('Delivery Note',
-		['name', DEAL_FIELD, 'posting_date', 'docstatus', 'grand_total'],
+		['name', DEAL_FIELD, 'posting_date', 'docstatus', 'grand_total', 'is_return'],
 		[[DEAL_FIELD, '=', String(dealId)], ['docstatus', '!=', 2]]);
 	const out: ErpRealization[] = [];
 	for (const h of heads) {
@@ -266,6 +268,7 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 			dealId: String(h[DEAL_FIELD] ?? ''),
 			postingDate: String(h['posting_date'] ?? ''),
 			submitted: Number(h['docstatus']) === 1,
+			isReturn: Number(h['is_return'] ?? 0) === 1,
 			grandTotal: Number(h['grand_total'] ?? 0),
 			items,
 		});

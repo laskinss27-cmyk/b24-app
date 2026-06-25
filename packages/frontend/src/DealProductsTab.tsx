@@ -498,13 +498,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	}
 
 	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
-	type Part = { name: string; submitted: boolean; qty: number; storeName: string };
+	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
 	const partsOf = (r: EnrichedRow): Part[] =>
 		data.coreReals
 			.map((rz): Part | null => {
 				const its = rz.items.filter((it) => it.productId === r.productId);
 				if (!its.length) return null;
-				return { name: rz.name, submitted: rz.submitted, qty: its.reduce((s, it) => s + it.qty, 0), storeName: its[0]!.storeTitle };
+				return { name: rz.name, submitted: rz.submitted, isReturn: Boolean(rz.isReturn), qty: its.reduce((s, it) => s + it.qty, 0), storeName: its[0]!.storeTitle };
 			})
 			.filter((p): p is Part => p != null);
 
@@ -548,7 +548,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			<tr key={`${r.id}-${p.name}`} className="part-row">
 				<td className="check-col"></td>
 				<td className="part-name">↳ {r.name}</td>
-				<td><span className="type-badge part">{p.submitted ? 'реализовано' : 'черновик'}</span></td>
+				<td><span className={`type-badge part${p.isReturn ? ' part-return' : ''}`}>{p.isReturn ? 'возврат' : p.submitted ? 'реализовано' : 'черновик'}</span></td>
 				<td className="num">{rub(r.price)}</td>
 				<td className="num"><span className="none">—</span></td>
 				<td className="num"><span className="none">—</span></td>
@@ -558,8 +558,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					<span className="part-reserve" title="Склад списания в ядре">{p.storeName}</span>
 				</td>
 				<td className="realize-cell">
-					<span className="shipment-chip" title={p.submitted ? 'проведена в ядре — остаток списан' : 'черновик в ядре — проверь и нажми «Провести»'}>
-						{p.name} {p.submitted ? '✓ проведена' : '✎ черновик'}
+					<span className="shipment-chip" title={p.isReturn ? 'возврат от клиента — товар вернулся на склад' : p.submitted ? 'проведена в ядре — остаток списан' : 'черновик в ядре — проверь и нажми «Провести»'}>
+						{p.name} {p.isReturn ? '↩ возврат' : p.submitted ? '✓ проведена' : '✎ черновик'}
 					</span>
 				</td>
 			</tr>

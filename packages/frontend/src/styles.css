@@ -321,6 +321,10 @@ body {
 	background: #f0fdf4;
 	color: #15803d;
 }
+.type-badge.part.part-return {
+	background: #fff7ed;
+	color: #c2410c;
+}
 .part-store {
 	font-size: 12px;
 }

@@ -971,6 +971,8 @@ export interface CoreRealization {
 	postingDate: string;
 	/** true = проведён (остаток ядра списан), false = черновик. */
 	submitted: boolean;
+	/** true — это возврат от клиента (Delivery Note is_return), а не отгрузка. */
+	isReturn?: boolean;
 	grandTotal: number;
 	items: CoreRealizationItem[];
 }
