@@ -1017,6 +1017,18 @@ export async function realizeCoreSubmit(names: string[]): Promise<string[]> {
 	return json.submitted;
 }
 
+/** Возврат ОТ КЛИЕНТА: создать в ядре возвраты (Delivery Note is_return) по выбранным позициям. */
+export async function createDealReturn(dealId: number, note: string, lines: Array<{ productId: number; qty: number; store: string }>): Promise<string[]> {
+	const res = await fetch('/api/deal/realize-core', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), action: 'return', dealId, note, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; returns?: string[] };
+	if (!json.ok || !json.returns) throw new Error(json.error ?? 'не удалось оформить возврат');
+	return json.returns;
+}
+
 /** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */
 export async function addProductToDeal(dealId: number, productId: number, quantity: number, price?: number): Promise<{ id: number; name: string; price: number; quantity: number }> {
 	const res = await fetch('/api/deal/add-product', {

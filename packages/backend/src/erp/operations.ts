@@ -194,6 +194,58 @@ export async function submitRealization(erp: ErpClient, name: string): Promise<v
 	await erp.submit('Delivery Note', name);
 }
 
+/**
+ * Возврат ОТ КЛИЕНТА: Delivery Note с is_return — товар обратно на склад, сторно реализации.
+ * Привязка `return_against` к оригинальной реализации сделки (по productId) → себестоимость берётся
+ * по FIFO автоматически. qty отрицательное. Причина → b24_note. Один документ на каждую исходную
+ * реализацию (return_against один на DN). Сразу проводится. Возвращает имена созданных возвратов.
+ */
+export async function createClientReturns(
+	erp: ErpClient,
+	args: { dealId: number; note?: string; lines: Array<{ productId: number; qty: number; storeTitle: string }> },
+): Promise<{ names: string[] }> {
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	if (!args.lines.length) throw new Error('нет позиций возврата');
+	await ensureNoteField(erp, 'Delivery Note');
+	// Оригинал по productId: проведённая реализация сделки, где этот товар отгружался.
+	const reals = (await listDealRealizations(erp, args.dealId)).filter((r) => r.submitted);
+	const origOf = (productId: number): string | null =>
+		reals.find((rz) => rz.items.some((it) => it.productId === productId && it.qty > 0))?.name ?? null;
+	// Группируем по оригиналу (return_against — один на документ).
+	const byOrig = new Map<string, Array<{ productId: number; qty: number; storeTitle: string }>>();
+	for (const l of args.lines) {
+		const key = origOf(l.productId) ?? '';
+		if (!byOrig.has(key)) byOrig.set(key, []);
+		byOrig.get(key)!.push(l);
+	}
+	// Для строк без найденного оригинала ставим себестоимость из valuation ядра (иначе нулевая оценка).
+	const orphanIds = (byOrig.get('') ?? []).map((l) => l.productId);
+	const valuation = orphanIds.length ? await fetchErpPurchasing(erp, orphanIds) : new Map<number, number>();
+	const names: string[] = [];
+	for (const [orig, lines] of byOrig.entries()) {
+		const doc = await erp.create('Delivery Note', {
+			company: ctx.company,
+			customer: TECH_CUSTOMER,
+			is_return: 1,
+			...(orig ? { return_against: orig } : {}),
+			set_posting_time: 1,
+			[DEAL_FIELD]: String(args.dealId),
+			...(args.note ? { [NOTE_FIELD]: args.note.slice(0, 200) } : {}),
+			items: lines.map((l) => ({
+				item_code: String(l.productId),
+				qty: -Math.abs(l.qty),
+				warehouse: erpWarehouse(ctx, l.storeTitle),
+				...(orig ? {} : { rate: Math.max(valuation.get(l.productId) ?? 0, 0.01) }),
+			})),
+		});
+		const name = String(doc['name']);
+		await erp.submit('Delivery Note', name);
+		names.push(name);
+	}
+	return { names };
+}
+
 /** Все партии-реализации сделки — одним фильтром по b24_deal_id. */
 export async function listDealRealizations(erp: ErpClient, dealId: number): Promise<ErpRealization[]> {
 	const ctx = await erpContext(erp);

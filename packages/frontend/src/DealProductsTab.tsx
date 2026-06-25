@@ -14,6 +14,7 @@ import {
 	fetchDealRealizationsCore,
 	realizeCoreDraft,
 	realizeCoreSubmit,
+	createDealReturn,
 	requestSupply,
 	openSupplyCard,
 	createTransfers,
@@ -56,7 +57,7 @@ type State =
 	| { phase: 'denied' }
 	| { phase: 'loading' }
 	| { phase: 'error'; message: string }
-	| { phase: 'ready'; data: TableData; viewer: string; dev: boolean };
+	| { phase: 'ready'; data: TableData; viewer: string; dev: boolean; canReturn: boolean };
 
 // ── Mock для локального превью (BX24 в dev недоступен) ──────────────────────────
 const MOCK_DATA: TableData = {
@@ -145,7 +146,7 @@ export function DealProductsTab(): JSX.Element {
 	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
 		if (ctx.__mock) {
-			setState({ phase: 'ready', data: MOCK_DATA, viewer: 'dev (mock)', dev: true });
+			setState({ phase: 'ready', data: MOCK_DATA, viewer: 'dev (mock)', dev: true, canReturn: true });
 			return;
 		}
 		const bx24 = window.BX24;
@@ -159,7 +160,7 @@ export function DealProductsTab(): JSX.Element {
 		}
 		const dealId = ctx.dealId;
 		bx24.init(() => {
-			call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current')
+			call<{ ID?: string | number; NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current')
 				.then((user) => {
 					const viewerId = String(user.ID ?? '');
 					const viewerName = `${user.NAME ?? ''} ${user.LAST_NAME ?? ''}`.trim() || viewerId;
@@ -167,9 +168,12 @@ export function DealProductsTab(): JSX.Element {
 						setState({ phase: 'denied' });
 						return;
 					}
+					// Возврат оформляет снабжение+ (Вова 1 / Сергей 1858 / Бекасов 986 + отдел Снабжение 10).
+					const depts = Array.isArray(user.UF_DEPARTMENT) ? user.UF_DEPARTMENT.map(Number) : [];
+					const canReturn = ['1', '1858', '986'].includes(viewerId) || depts.includes(10);
 					setState({ phase: 'loading' });
 					loadAll(dealId)
-						.then((data) => setState({ phase: 'ready', data, viewer: viewerName, dev: false }))
+						.then((data) => setState({ phase: 'ready', data, viewer: viewerName, dev: false, canReturn }))
 						.catch((err: unknown) => setState({ phase: 'error', message: String(err instanceof Error ? err.message : err) }));
 				})
 				.catch((err: unknown) => setState({ phase: 'error', message: `user.current: ${String(err instanceof Error ? err.message : err)}` }));
@@ -257,7 +261,7 @@ export function DealProductsTab(): JSX.Element {
 		return <KpDocument dealId={ctx.dealId} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} dealId={ctx.dealId} onAdd={() => setAdding(true)} onKp={() => setShowKp(true)} onReload={reload} />;
+	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} onAdd={() => setAdding(true)} onKp={() => setShowKp(true)} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -327,7 +331,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; dealId: number | null; onAdd: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; onAdd: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
@@ -387,6 +391,8 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 	const [draftNames, setDraftNames] = useState<string[]>([]);
 	/** id строки, по которой создаётся перемещение. */
 	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
+	/** Открыто модальное окно возврата от клиента. */
+	const [showReturn, setShowReturn] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
@@ -744,6 +750,12 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 			<div className="deal-addbar">
 				<button className="btn-primary" onClick={onAdd}>➕ Добавить товар</button>
 				<button className="btn-secondary" onClick={onKp}>📄 КП</button>
+				<button
+					className="btn-secondary"
+					disabled={!canReturn || dev}
+					onClick={() => setShowReturn(true)}
+					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Возврат оформляет снабжение'}
+				>↩️ Возврат</button>
 				<label className="global-store" title="Склад, с которого продаём. Где его не хватает — строку можно переместить НА него.">
 					🏬 Склад реализации:&nbsp;
 					<select
@@ -850,6 +862,85 @@ function RealTable({ data, viewer, dev, dealId, onAdd, onKp, onReload }: { data:
 					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); const fresh = await listTransfers(dealId).catch(() => null); if (fresh) setDealTransfers(fresh.transfers); }} />;
 			})()}
 
+			{showReturn && dealId != null && (
+				<ReturnModal
+					dealId={dealId}
+					stores={data.stores}
+					returnable={goods.filter((r) => realizedOf(r.productId) > 0).map((r) => ({ productId: r.productId, name: r.name, shipped: realizedOf(r.productId), measure: r.measure }))}
+					onClose={() => setShowReturn(false)}
+					onDone={async (msg) => { setShowReturn(false); setNotice({ kind: 'ok', text: msg }); await onReload(); }}
+				/>
+			)}
+
+		</div>
+	);
+}
+
+/** Возврат от клиента: модалка со списком ОТГРУЖЕННЫХ позиций — отметить, указать кол-во и склад возврата,
+ *  причину, «Вернуть». Создаёт в ядре Delivery Note is_return (товар обратно на склад, сторно реализации). */
+function ReturnModal({ dealId, stores, returnable, onClose, onDone }: {
+	dealId: number;
+	stores: StoreInfo[];
+	returnable: Array<{ productId: number; name: string; shipped: number; measure: string }>;
+	onClose: () => void;
+	onDone: (msg: string) => Promise<void>;
+}): JSX.Element {
+	const firstStore = stores[0]?.title ?? '';
+	const [sel, setSel] = useState<Record<number, boolean>>({});
+	const [qty, setQty] = useState<Record<number, string>>({});
+	const [store, setStore] = useState<Record<number, string>>({});
+	const [note, setNote] = useState('');
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const qtyOf = (r: { productId: number; shipped: number }): number => {
+		const v = Number(String(qty[r.productId] ?? r.shipped).replace(',', '.')) || 0;
+		return Math.min(Math.max(0, v), r.shipped); // вернуть не больше, чем отгружено
+	};
+	const lines = returnable
+		.filter((r) => sel[r.productId])
+		.map((r) => ({ productId: r.productId, qty: qtyOf(r), store: store[r.productId] ?? firstStore }))
+		.filter((l) => l.qty > 0 && l.store);
+	const confirm = async (): Promise<void> => {
+		if (!lines.length || busy) return;
+		setBusy(true); setErr(null);
+		try {
+			const names = await createDealReturn(dealId, note.trim(), lines);
+			await onDone(`✅ Возврат оформлен: ${names.length} ${names.length === 1 ? 'документ' : 'документа'}, позиций ${lines.length}. Товар вернулся на склад.`);
+		} catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
+	};
+	return (
+		<div style={splitOv}>
+			<div style={{ ...splitCard, maxWidth: 720 }}>
+				<h2 style={{ fontSize: 17, margin: '0 0 4px' }}>↩️ Возврат от клиента · сделка #{dealId}</h2>
+				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 10 }}>Отметь отгруженные позиции, укажи кол-во и склад возврата.</div>
+				{!returnable.length ? <p style={{ color: '#c0392b', fontSize: 13 }}>По сделке нет отгруженных позиций — возвращать нечего.</p> : (
+					<table className="products-table" style={{ minWidth: 0 }}>
+						<thead><tr><th className="check-col"></th><th>Товар</th><th className="num">Возврат</th><th>Склад возврата</th></tr></thead>
+						<tbody>
+							{returnable.map((r) => (
+								<tr key={r.productId}>
+									<td className="check-col"><input type="checkbox" className="row-check" checked={Boolean(sel[r.productId])} disabled={busy} onChange={() => setSel((m) => ({ ...m, [r.productId]: !m[r.productId] }))} /></td>
+									<td>{r.name} <span className="muted small">· отгружено {r.shipped} {r.measure}</span></td>
+									<td className="num"><input type="number" className="qty-input" min={0} max={r.shipped} step="any" value={qty[r.productId] ?? String(r.shipped)} disabled={busy || !sel[r.productId]} onChange={(e) => setQty((m) => ({ ...m, [r.productId]: e.target.value }))} /></td>
+									<td>
+										<select className="store-select" value={store[r.productId] ?? firstStore} disabled={busy || !sel[r.productId]} onChange={(e) => setStore((m) => ({ ...m, [r.productId]: e.target.value }))}>
+											{stores.map((s) => <option key={s.id} value={s.title}>{s.title}</option>)}
+										</select>
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				)}
+				<label style={{ display: 'block', fontSize: 13, color: '#1a2231', marginTop: 12 }}>Причина / комментарий
+					<input type="text" value={note} placeholder="напр.: запас монтажнику, не пригодилось" onChange={(e) => setNote(e.target.value)} style={{ ...splitFld, width: '100%', marginTop: 4 }} />
+				</label>
+				{err && <p style={{ color: '#c0392b', fontSize: 13 }}>⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+					<button onClick={onClose} style={splitGhost} disabled={busy}>Отмена</button>
+					<button className="btn-primary" disabled={!lines.length || busy} onClick={() => void confirm()}>{busy ? '…' : `Вернуть${lines.length ? ` (${lines.length})` : ''}`}</button>
+				</div>
+			</div>
 		</div>
 	);
 }

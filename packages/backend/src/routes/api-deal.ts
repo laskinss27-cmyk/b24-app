@@ -3,7 +3,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { createRealizationDraft, submitRealization, listDealRealizations } from '../erp/operations.js';
+import { createRealizationDraft, submitRealization, listDealRealizations, createClientReturns } from '../erp/operations.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -213,7 +213,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	// action='submit': проводим переданные черновики (docstatus 1) → остаток ядра реально списывается.
 	// Один документ на склад (группировка на фронте). «День X» (синк перестаёт затирать) — отдельно.
 	app.post('/api/deal/realize-core', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; action?: unknown; groups?: unknown; names?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; action?: unknown; groups?: unknown; names?: unknown; note?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -247,6 +247,26 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				if (!drafts.length) return reply.code(400).send({ ok: false, error: 'нет валидных строк для реализации' });
 				app.log.info({ dealId, drafts: drafts.length }, '[api/deal/realize-core] drafts created');
 				return { ok: true, drafts };
+			}
+			if (action === 'return') {
+				// Возврат ОТ КЛИЕНТА — только снабжение+ (Вова 1 / Сергей 1858 / Бекасов 986 + отдел Снабжение 10).
+				const me = await client.call<{ ID?: unknown; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
+				const uid = String(me?.['ID'] ?? '');
+				const depts = Array.isArray(me?.['UF_DEPARTMENT']) ? (me!['UF_DEPARTMENT'] as unknown[]).map(Number) : [];
+				if (!(['1', '1858', '986'].includes(uid) || depts.includes(10))) {
+					return reply.code(403).send({ ok: false, error: 'возврат оформляет снабжение' });
+				}
+				const dealId = Number(b.dealId);
+				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				const note = String(b.note ?? '').trim();
+				const lines = (Array.isArray(b.lines) ? b.lines : [])
+					.map((l) => l as { productId?: unknown; qty?: unknown; store?: unknown })
+					.map((l) => ({ productId: Number(l.productId), qty: Number(l.qty), storeTitle: String(l.store ?? '').trim() }))
+					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0 && l.storeTitle);
+				if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций возврата' });
+				const { names } = await createClientReturns(erp, { dealId, ...(note ? { note } : {}), lines });
+				app.log.info({ dealId, returns: names.length }, '[api/deal/realize-core] returns created');
+				return { ok: true, returns: names };
 			}
 			if (action === 'submit') {
 				const names = (Array.isArray(b.names) ? b.names : []).map(String).filter((n) => n && n !== 'undefined');
