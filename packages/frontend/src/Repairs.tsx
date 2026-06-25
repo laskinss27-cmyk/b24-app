@@ -386,7 +386,12 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 		try { setResults(await searchRepairContacts(v)); } catch { setResults([]); }
 	}
 	function pickContact(c: RepairContact): void {
-		setClientName(c.name); setClientPhone(c.phone); setContactId(c.id); setResults([]);
+		setClientName(c.name); setClientPhone(c.phone); setContactId(c.id); setResults([]); setPhoneMatch(null);
+	}
+	/** Проактивный подбор по номеру: при уходе из поля телефона ищем занявший его контакт и показываем плашку. */
+	async function checkPhone(): Promise<void> {
+		if (mock || contactId || clientPhone.trim().length < 4) { setPhoneMatch(null); return; }
+		try { setPhoneMatch(await findRepairContactByPhone(clientPhone.trim())); } catch { /* молча — подстрахует сабмит */ }
 	}
 
 	/** Одна кнопка на всё: изображения → превью (data-URL), документы Word/Excel/PDF → Диск Б24 (ссылка). */
@@ -459,8 +464,17 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 						: clientName.trim() ? <span className="muted small">＋ новый клиент — создастся в Б24 с телефоном</span> : null}
 				</label>
 				<label className="rf-field">Телефон
-					<input type="text" value={clientPhone} placeholder="+7 …" onChange={(e) => setClientPhone(e.target.value)} />
+					<input type="text" value={clientPhone} placeholder="+7 …" onChange={(e) => { setClientPhone(e.target.value); setPhoneMatch(null); }} onBlur={() => void checkPhone()} />
 				</label>
+				{phoneMatch && (
+					<div className="rf-phone-match" style={{ gridColumn: '1 / -1' }}>
+						📞 По номеру <b>{phoneMatch.phone || clientPhone}</b> уже есть контакт: <b>{phoneMatch.name}</b>. Это он?
+						<div className="rf-phone-match-actions">
+							<button type="button" className="btn-secondary" onClick={() => pickContact(phoneMatch)}>Да, это клиент</button>
+							<button type="button" className="btn-secondary" onClick={() => setPhoneMatch(null)}>Другой — исправлю номер</button>
+						</div>
+					</div>
+				)}
 
 				<label className="rf-field">Оборудование
 					<input type="text" value={device} placeholder="видеодомофон, контроллер…" onChange={(e) => setDevice(e.target.value)} />
@@ -551,15 +565,6 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 				</div>
 			)}
 
-			{phoneMatch && (
-				<div className="rf-phone-match">
-					📞 По номеру <b>{phoneMatch.phone || clientPhone}</b> уже есть контакт: <b>{phoneMatch.name}</b>. Это он?
-					<div className="rf-phone-match-actions">
-						<button type="button" className="btn-secondary" onClick={() => { pickContact(phoneMatch); setPhoneMatch(null); }}>Да, это клиент</button>
-						<button type="button" className="btn-secondary" onClick={() => setPhoneMatch(null)}>Другой — исправлю номер</button>
-					</div>
-				</div>
-			)}
 			{formErr && <p className="error">⛔ {formErr}</p>}
 
 			<div className="rf-actions">
