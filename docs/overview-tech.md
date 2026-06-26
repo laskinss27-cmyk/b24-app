@@ -7,26 +7,26 @@
 
 ## Архитектура
 ```
-Битрикс24 (облако) ──HTTPS──> VPS reg.ru (nginx + Let's Encrypt)
-                                   │  обратный ssh-туннель
-                                   ▼
-                         Домашний сервер (spare-ноут, Ubuntu)
-                         ┌─────────────────────────────────┐
-                         │ Docker-сеть:                     │
-                         │  • backend (Node/TS/Fastify)     │
-                         │  • ERPNext/Frappe (складское ядро)│
-                         │     MariaDB + Redis + воркеры     │
-                         └─────────────────────────────────┘
+Битрикс24 (облако) ──HTTPS──> корп-VPS 201.51.12.57 (Ubuntu, 24/7)
+                              ┌──────────────────────────────────────┐
+                              │ nginx :443 (Let's Encrypt, sslip.io)  │
+                              │   → backend 127.0.0.1:3000            │
+                              │ Docker-сеть erpnext_frappe_network:   │
+                              │  • backend (Node/TS/Fastify)          │
+                              │  • ERPNext/Frappe (складское ядро)    │
+                              │     MariaDB + Redis + воркеры         │
+                              │ + синк и бэкапы (cron)                │
+                              └──────────────────────────────────────┘
 ```
 - Приложение встраивается в Б24 как iframe-вкладки (placement) — backend генерит их и раздаёт собранный фронт.
-- Публичная «дверь» — VPS reg.ru: nginx с TLS, за ним обратный ssh-туннель до домашнего сервера. С облака Yandex Cloud съехали — теперь своя инфра, без облачных платежей.
-- backend и складское ядро — в одной docker-сети (внутренний обмен без туннеля).
+- Публичная «дверь» — nginx с TLS прямо на VPS (`201.51.12.57.sslip.io`), без туннелей. С Yandex Cloud съехали, своя инфра.
+- backend и складское ядро — в одной docker-сети (обмен по `frontend:8080`); наружу торчат только nginx:443 и ssh.
 
 ## Стек
 - **Frontend:** React + Vite + TypeScript, монорепо (`packages/frontend|backend|shared`).
 - **Backend:** Node + TypeScript + Fastify; REST-интеграция с Б24 (вебхуки/placement), entity-store Б24 для своих документов.
 - **Складское ядро:** ERPNext (Frappe, MariaDB, Redis) — каталог, остатки по складам, проводки, сверки.
-- **Инфра:** Docker, обратный ssh-туннель, nginx + Let's Encrypt, cron-синк, heartbeat-алёрты в Б24, команда `status` + рунбук восстановления (`docs/SOS.md`, `docs/network.md`).
+- **Инфра:** один VPS, Docker, nginx + Let's Encrypt, cron-синк и бэкапы (БД на Б24-Диск), команда `status` + рунбук восстановления из GitHub+бэкапа (`docs/runbook.md`, `docs/SOS.md`, `docs/network.md`).
 
 ## Масштаб данных
 - Мигрирован весь каталог Б24 в ядро: **~5000 SKU** (товары + цветовые/поставщицкие вариации, наследование бренд/модель/раздел).

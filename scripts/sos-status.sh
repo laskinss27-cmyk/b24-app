@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 #  B24-APP — «ГЛАЗА»: одна команда показывает состояние всей системы по-русски.
-#  Запуск на спейре (домашний сервер): просто `status`  (алиас в ~/.bashrc)
+#  Запуск на VPS (201.51.12.57): просто `status`  (установлен в /usr/local/bin/status)
 #  Только ЧТЕНИЕ — ничего не меняет, запускать можно сколько угодно раз.
 #  Что чинить при ⛔ — см. docs/SOS.md.
 # ─────────────────────────────────────────────────────────────────────────────
 set -o pipefail
-ENV=~/sync/.env
+ENV=/root/sync/.env
+DOMAIN=201.51.12.57.sslip.io
+CERT=/etc/letsencrypt/live/$DOMAIN/cert.pem
 ok=0; bad=0
 green() { printf '  \033[32m✅ %s\033[0m\n' "$1"; ok=$((ok+1)); }
 red()   { printf '  \033[31m⛔ %s\033[0m\n' "$1"; bad=$((bad+1)); }
 warn()  { printf '  \033[33mℹ️  %s\033[0m\n' "$1"; }
 info()  { printf '     %s\n' "$1"; }
 hdr()   { printf '\n\033[1m[%s]\033[0m\n' "$1"; }
-# Сколько минут ноут включён (для отличия «синк ещё не гонялся после старта» от настоящего сбоя).
+# Сколько минут VPS включён (отличить «синк ещё не гонялся после ребута» от настоящего сбоя).
 upmin=$(( $(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0) / 60 ))
 
 printf '\033[1m═══════════════════════════════════════════\033[0m\n'
-printf '\033[1m  B24-APP — состояние системы\033[0m\n'
+printf '\033[1m  B24-APP — состояние системы (корп-VPS)\033[0m\n'
 printf '  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 printf '\033[1m═══════════════════════════════════════════\033[0m\n'
 
@@ -44,42 +46,49 @@ code=$(curl -s --max-time 8 -o /dev/null -w '%{http_code}' http://localhost:3000
 
 # 3) Публичная дверь (через неё Битрикс достаёт приложение снаружи)
 hdr "Публичная дверь (для Битрикса)"
-pub=$(curl -s --max-time 12 -o /dev/null -w '%{http_code}' https://194-226-97-154.regru.cloud/health)
-[ "$pub" = "200" ] && green "снаружи доступна (HTTP 200)" || { red "снаружи НЕ доступна (код: ${pub:-нет})"; info "→ проверь туннель ниже и VPS; docs/SOS.md «Приложение лежит у всех»"; }
+pub=$(curl -s --max-time 12 -o /dev/null -w '%{http_code}' https://$DOMAIN/health)
+[ "$pub" = "200" ] && green "снаружи доступна (HTTP 200, https://$DOMAIN)" || { red "снаружи НЕ доступна (код: ${pub:-нет})"; info "→ docs/SOS.md «Дверь снаружи недоступна»"; }
 
-# 4) Туннель ноут → VPS
-hdr "Туннель на VPS (reg.ru)"
-t=$(systemctl is-active b24-tunnel 2>/dev/null)
-[ "$t" = "active" ] && green "туннель active" || { red "туннель НЕ активен (статус: ${t:-нет})"; info "→ docs/SOS.md «Туннель отвалился»"; }
+# 4) nginx + TLS-сертификат
+hdr "Дверь nginx + сертификат"
+n=$(systemctl is-active nginx 2>/dev/null)
+[ "$n" = "active" ] && green "nginx active" || { red "nginx НЕ активен (статус: ${n:-нет})"; info "→ systemctl restart nginx"; }
+if [ -f "$CERT" ]; then
+  end=$(openssl x509 -enddate -noout -in "$CERT" 2>/dev/null | cut -d= -f2)
+  if [ -n "$end" ]; then
+    days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+    if   [ "$days" -gt 14 ]; then green "сертификат действует ещё $days дн."
+    elif [ "$days" -gt 0 ];  then warn "сертификат истекает через $days дн. (должен продлиться сам; проверь: certbot renew)"
+    else red "сертификат ПРОСРОЧЕН"; info "→ certbot renew --force-renewal && systemctl reload nginx"; fi
+  fi
+else
+  warn "файл сертификата не найден ($CERT) — возможно домен другой"
+fi
 
 # 5) Контейнеры Docker
-# create-site и configurator — ОДНОРАЗОВЫЕ (отрабатывают раз при установке и штатно
-# выключаются). Их Exited — это норма, поломкой НЕ считаем. Смотрим только рабочие сервисы.
 hdr "Контейнеры Docker (рабочие сервисы)"
-INIT='create-site|configurator'
-total_svc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -vE "$INIT" | grep -c .)
-up_svc=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -vE "$INIT" | grep -c .)
+total_svc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -c .)
+up_svc=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c .)
 if [ "$up_svc" -eq "$total_svc" ] && [ "$up_svc" -ge 10 ]; then
-  green "все рабочие контейнеры подняты ($up_svc)"
+  green "все контейнеры подняты ($up_svc)"
 else
-  red "поднято $up_svc из $total_svc рабочих контейнеров"
-  docker ps -a --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -vE "$INIT" | grep -ivE 'Up ' | sed 's/^/     ⤷ лежит: /'
-  info "→ docs/SOS.md «Контейнер упал»"
+  red "поднято $up_svc из $total_svc контейнеров"
+  docker ps -a --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -ivE 'Up ' | sed 's/^/     ⤷ лежит: /'
+  info "→ docs/SOS.md «Контейнер упал» / «Ядро не отвечает»"
 fi
 
 # 6) Синхронизация остатков Б24 → ядро (cron, ежечасно)
 hdr "Синхронизация остатков (ежечасно)"
-LOG=~/sync/sync.log
+LOG=/root/sync/sync.log
 if [ -f "$LOG" ]; then
   age=$(( ( $(date +%s) - $(stat -c %Y "$LOG") ) / 60 ))
   when=$(date -r "$LOG" '+%Y-%m-%d %H:%M')
   if [ "$age" -le 75 ]; then
     green "синк свежий — последний прогон $when (${age} мин назад)"
   elif [ "$upmin" -lt 70 ]; then
-    # Ноут недавно включён — синк просто ещё не успел отработать после старта, нагонит в ближайший :07.
-    warn "синк нагонит после включения (ноут поднят ${upmin} мин назад; последний прогон $when) — это норма"
+    warn "синк нагонит после ребута (VPS поднят ${upmin} мин назад; последний $when) — норма"
   else
-    red "синк давно не отрабатывал — последний $when (${age} мин назад, ожидается раз в час)"; info "→ docs/SOS.md «Синк встал»"
+    red "синк давно не отрабатывал — последний $when (${age} мин назад)"; info "→ docs/SOS.md «Синк встал»"
   fi
   info "итог последнего прогона:"
   tail -n 2 "$LOG" | sed 's/^/        /'
@@ -87,8 +96,22 @@ else
   red "лог синка не найден ($LOG)"
 fi
 
-# 7) Ресурсы ноутбука
-hdr "Ресурсы ноутбука"
+# 7) Бэкап ядра (ежедневно)
+hdr "Бэкап ядра (ежедневно)"
+BK=/root/core-backups
+last=$(ls -1t "$BK"/*-database.sql.gz 2>/dev/null | head -1)
+if [ -n "$last" ]; then
+  bage=$(( ( $(date +%s) - $(stat -c %Y "$last") ) / 3600 ))
+  bwhen=$(date -r "$last" '+%Y-%m-%d %H:%M')
+  cnt=$(ls -1 "$BK"/*-database.sql.gz 2>/dev/null | grep -c .)
+  if [ "$bage" -le 30 ]; then green "свежий бэкап БД: $bwhen (копий: $cnt)"
+  else warn "последний бэкап БД $bwhen (${bage}ч назад; ежедневный в 12:00) — проверь /root/sync/core-backup.log"; fi
+else
+  red "бэкапы БД не найдены ($BK)"; info "→ bash /root/sync/core-backup.sh"
+fi
+
+# 8) Ресурсы VPS
+hdr "Ресурсы VPS"
 df -h / | awk 'NR==2{printf "     💾 диск: занято %s, свободно %s\n",$5,$4}'
 free -h | awk '/^Mem:/{printf "     🧠 память: свободно %s из %s\n",$7,$2}'
 
