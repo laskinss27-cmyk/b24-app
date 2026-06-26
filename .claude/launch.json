@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:frontend"],
       "port": 5173
+    },
+    {
+      "name": "proto",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "serve", "D:/Projects", "-l", "tcp://127.0.0.1:8123"],
+      "port": 8123
     }
   ]
 }
