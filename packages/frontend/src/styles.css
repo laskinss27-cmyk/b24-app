@@ -1436,6 +1436,11 @@ html, body, #root { height: 100%; }
 }
 .base-table tbody tr {
 	cursor: pointer;
+	/* Браузер пропускает рендер/лейаут строк за пределами экрана — большой список
+	   (тысячи позиций) строится мгновенно, без виртуализации. contain-intrinsic-size
+	   — оценка высоты строки, чтобы скролл-бар был правильной длины. */
+	content-visibility: auto;
+	contain-intrinsic-size: auto 44px;
 }
 .base-table tbody tr:hover {
 	background: #f8fbff;
