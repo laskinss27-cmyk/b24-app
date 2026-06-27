@@ -626,6 +626,22 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 	return json.added ?? 0;
 }
 
+/** Заказ для «Снаб»: один Sales Order = спрос одной сделки. */
+export interface SupplyOrderItem { productId: number; itemName: string; qty: number; rate: number; stocks: Record<string, number> }
+export interface SupplyOrderRow { name: string; dealId: string; dealTitle: string; date: string; total: number; closed: boolean; items: SupplyOrderItem[] }
+
+/** Все заказы снабжения из ядра (Sales Order по сделкам) + статус/название из Б24. Ядро не подключено → []. */
+export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
+	const res = await fetch('/api/supply/orders', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth() }),
+	});
+	const json = (await res.json()) as { ok: boolean; orders?: SupplyOrderRow[] };
+	if (!json.ok) return [];
+	return json.orders ?? [];
+}
+
 /** Строка плана сделки из ядра (черновик Sales Order). delivered — сколько уже отгружено. */
 export interface DealPlanItem {
 	productId: number;

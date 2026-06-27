@@ -345,6 +345,42 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 	}));
 }
 
+/** Заказ для дисплея снабжения: один Sales Order = спрос одной сделки. */
+export interface SupplyOrderItem { productId: number; itemName: string; qty: number; rate: number; stocks: Record<string, number> }
+export interface SupplyOrder { name: string; dealId: string; date: string; total: number; items: SupplyOrderItem[] }
+
+/** ВСЕ заказы снабжения из ядра (Sales Order, кроме отменённых) с позициями и остатками по складам.
+ *  Источник спроса для рабочего места «Снаб». Статус/название сделки добавляет роут из Б24. */
+export async function listSupplyOrders(erp: ErpClient): Promise<SupplyOrder[]> {
+	await ensurePlanField(erp);
+	const stocks = await fetchErpStocks(erp); // productId → { '<склад>': qty } (один запрос Bin)
+	const heads = await erp.list('Sales Order',
+		['name', DEAL_FIELD, 'transaction_date', 'grand_total'],
+		[['docstatus', '!=', 2]], 0, 'creation desc');
+	const out: SupplyOrder[] = [];
+	for (const h of heads) {
+		const so = await erp.get<Record<string, unknown>>('Sales Order', String(h['name']));
+		const items = ((so?.['items'] as Array<Record<string, unknown>>) ?? []).map((it) => {
+			const productId = Number(it['item_code']);
+			return {
+				productId,
+				itemName: String(it['item_name'] ?? ''),
+				qty: Number(it['qty'] ?? 0),
+				rate: Number(it['rate'] ?? 0),
+				stocks: stocks.get(productId) ?? {},
+			};
+		});
+		out.push({
+			name: String(h['name']),
+			dealId: String(h[DEAL_FIELD] ?? ''),
+			date: String(h['transaction_date'] ?? ''),
+			total: Number(h['grand_total'] ?? 0),
+			items,
+		});
+	}
+	return out;
+}
+
 /** Перемещение между складами (Stock Entry: Material Transfer). Возвращает имя черновика. */
 export async function createTransferDraft(
 	erp: ErpClient,

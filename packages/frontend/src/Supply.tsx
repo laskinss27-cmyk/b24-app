@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getContext } from './b24-context.js';
-import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS } from './b24.js';
+import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, type SupplyOrderRow } from './b24.js';
 
 /**
  * «Снаб» — рабочее место снабженца (КАРКАС). Структура по прототипу v2 + правки заказчика
@@ -19,22 +19,18 @@ const SECTIONS: Array<{ key: SectionKey; title: string; group: string }> = [
 	{ key: 'reports', title: '📊 Отчёты', group: 'Аналитика' },
 ];
 
-interface Pos { product: string; qty: string; stocks: Array<{ store: string; n: number }> }
-interface Order { id: string; deal: string; where: string; due: string; status: string; positions: Pos[] }
-
-// МОК до подключения ядра (заказы = Sales Order по сделкам).
-const MOCK_ORDERS: Order[] = [
-	{ id: 'ZM-2419', deal: 'D-556', where: 'ТТ Мурино', due: '07.04', status: 'Новый', positions: [
-		{ product: 'Блок питания 12В 5А', qty: '2 шт', stocks: [{ store: 'ЦС', n: 12 }, { store: 'Парнас', n: 3 }] },
-		{ product: 'Видеорегистратор 8-кан CTV-HD9508', qty: '1 шт', stocks: [{ store: 'ЦС', n: 4 }] },
+// Dev-мок в ФОРМЕ реальных данных (заказы = Sales Order ядра). На проде грузим с /api/supply/orders.
+const MOCK_ORDERS: SupplyOrderRow[] = [
+	{ name: 'SAL-ORD-2026-0001', dealId: '556', dealTitle: 'Монтаж видеонаблюдения', date: '2026-04-04', total: 12800, closed: false, items: [
+		{ productId: 104, itemName: 'Блок питания 12В 5А', qty: 2, rate: 650, stocks: { 'ЦС': 12, 'Парнас': 3 } },
+		{ productId: 103, itemName: 'Видеорегистратор 8-канальный', qty: 1, rate: 8900, stocks: { 'ЦС': 4 } },
 	] },
-	{ id: 'ZM-2418', deal: 'D-553', where: 'ТТ Парнас', due: '06.04', status: 'В разборе', positions: [
-		{ product: 'IP-домофон Dahua', qty: '8 шт', stocks: [{ store: 'ЦС', n: 5 }, { store: 'Мурино', n: 3 }] },
-		{ product: 'Контроллер СКУД ZKTeco', qty: '4 шт', stocks: [] },
-		{ product: 'Кабель UTP cat5e 305м', qty: '2 бухты', stocks: [{ store: 'Девяткино', n: 10 }] },
+	{ name: 'SAL-ORD-2026-0002', dealId: '553', dealTitle: 'СКУД офис', date: '2026-04-03', total: 41000, closed: false, items: [
+		{ productId: 201, itemName: 'IP-домофон Dahua', qty: 8, rate: 3500, stocks: { 'ЦС': 5, 'Мурино': 3 } },
+		{ productId: 202, itemName: 'Контроллер СКУД ZKTeco', qty: 4, rate: 0, stocks: {} },
 	] },
-	{ id: 'ZM-2416', deal: 'D-551', where: 'ТТ Богатырский', due: '06.04', status: 'В обеспечении', positions: [
-		{ product: 'Видеокамера CTV-IPB2028', qty: '4 шт', stocks: [{ store: 'ЦС', n: 20 }, { store: 'Девяткино', n: 6 }] },
+	{ name: 'SAL-ORD-2026-0003', dealId: '551', dealTitle: 'Камеры ТТ Богатырский', date: '2026-04-02', total: 9000, closed: true, items: [
+		{ productId: 301, itemName: 'Видеокамера CTV-IPB2028', qty: 4, rate: 2250, stocks: { 'ЦС': 20, 'Девяткино': 6 } },
 	] },
 ];
 
@@ -55,6 +51,8 @@ export function Supply(): JSX.Element {
 	const [section, setSection] = useState<SectionKey>('orders');
 	const [openId, setOpenId] = useState<string | null>(null);
 	const [picked, setPicked] = useState<Record<string, boolean>>({});
+	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
+	const [loadingOrders, setLoadingOrders] = useState(!ctx.__mock);
 
 	useEffect(() => {
 		if (ctx.__mock) { setPhase('ready'); return; }
@@ -65,6 +63,8 @@ export function Supply(): JSX.Element {
 				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
 				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) { setPhase('denied'); return; }
 				setPhase('ready');
+				// Реальные заказы из ядра (Sales Order по сделкам). Ядро недоступно → пусто, каркас живёт.
+				fetchSupplyOrders().then(setOrders).catch(() => setOrders([])).finally(() => setLoadingOrders(false));
 			})().catch(() => setPhase('denied'));
 		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,17 +101,19 @@ export function Supply(): JSX.Element {
 
 				{section === 'orders' ? (
 					<div style={{ display: 'grid', gap: 10, maxWidth: 1080 }}>
-						{MOCK_ORDERS.map((o) => {
-							const open = openId === o.id;
+						{loadingOrders && <div style={{ color: C.muted, fontSize: 13 }}>Загрузка заказов из ядра…</div>}
+						{!loadingOrders && orders.length === 0 && <div style={{ color: C.muted, fontSize: 13 }}>Заказов в ядре пока нет (заказ появляется, когда в сделку добавляют товар).</div>}
+						{orders.map((o) => {
+							const open = openId === o.name;
 							return (
-								<div key={o.id} style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden' }}>
-									<div onClick={() => toggle(o.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', cursor: 'pointer' }}>
+								<div key={o.name} style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', opacity: o.closed ? 0.55 : 1 }}>
+									<div onClick={() => toggle(o.name)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', cursor: 'pointer' }}>
 										<span style={{ color: C.muted, width: 14 }}>{open ? '▾' : '▸'}</span>
-										<b style={{ minWidth: 86 }}>{o.id}</b>
-										<span style={{ color: C.muted, fontSize: 13 }}>сделка {o.deal}</span>
-										<span style={{ fontSize: 13 }}>→ {o.where}</span>
-										<span style={{ color: C.muted, fontSize: 12, marginLeft: 'auto' }}>нужно к {o.due}</span>
-										<span style={{ fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: C.surface2, color: C.muted }}>{o.status}</span>
+										<b style={{ minWidth: 150 }}>{o.dealTitle || `Сделка ${o.dealId}`}</b>
+										<span style={{ color: C.muted, fontSize: 13 }}>сделка #{o.dealId}</span>
+										<span style={{ fontSize: 13, color: C.muted }}>{o.items.length} поз.</span>
+										<span style={{ color: C.muted, fontSize: 12, marginLeft: 'auto' }}>{o.date}</span>
+										<span style={{ fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: o.closed ? C.surface2 : '#fff0dc', color: o.closed ? C.muted : '#b26a17' }}>{o.closed ? 'обеспечено' : 'активный'}</span>
 									</div>
 									{open && (
 										<div style={{ borderTop: `1px solid ${C.line}`, padding: '12px 16px' }}>
@@ -120,31 +122,36 @@ export function Supply(): JSX.Element {
 													<th style={{ textAlign: 'left', padding: '6px 8px', width: 28 }}></th>
 													<th style={{ textAlign: 'left', padding: '6px 8px' }}>Позиция</th>
 													<th style={{ textAlign: 'left', padding: '6px 8px' }}>Запрос</th>
-													<th style={{ textAlign: 'left', padding: '6px 8px' }}>Остатки</th>
+													<th style={{ textAlign: 'left', padding: '6px 8px' }}>Остатки по складам</th>
 													<th style={{ textAlign: 'left', padding: '6px 8px' }}>Источник</th>
 												</tr></thead>
 												<tbody>
-													{o.positions.map((p, i) => (
-														<tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
-															<td style={{ padding: '8px' }}><input type="checkbox" checked={picked[keyOf(o.id, i)] ?? false} onChange={() => setPicked((m) => ({ ...m, [keyOf(o.id, i)]: !(m[keyOf(o.id, i)] ?? false) }))} /></td>
-															<td style={{ padding: '8px' }}><b>{p.product}</b></td>
-															<td style={{ padding: '8px' }}>{p.qty}</td>
-															<td style={{ padding: '8px' }}>{p.stocks.length ? p.stocks.map((s) => `${s.store}: ${s.n}`).join(' · ') : <span style={{ color: '#ab4343' }}>нет нигде</span>}</td>
-															<td style={{ padding: '8px' }}>
-																<select style={{ font: 'inherit', fontSize: 12, padding: '6px 8px', border: `1px solid ${C.line}`, borderRadius: 8, background: C.surface }}>
-																	<option>выбрать источник…</option>
-																	{p.stocks.map((s) => <option key={s.store}>{s.store} ({s.n})</option>)}
-																	<option>закупить</option>
-																</select>
-															</td>
-														</tr>
-													))}
+													{o.items.map((p, i) => {
+														const stockEntries = Object.entries(p.stocks).filter(([, n]) => n > 0);
+														return (
+															<tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
+																<td style={{ padding: '8px' }}><input type="checkbox" disabled={o.closed} checked={picked[keyOf(o.name, i)] ?? false} onChange={() => setPicked((m) => ({ ...m, [keyOf(o.name, i)]: !(m[keyOf(o.name, i)] ?? false) }))} /></td>
+																<td style={{ padding: '8px' }}><b>{p.itemName || `#${p.productId}`}</b></td>
+																<td style={{ padding: '8px' }}>{p.qty} шт</td>
+																<td style={{ padding: '8px' }}>{stockEntries.length ? stockEntries.map(([s, n]) => `${s}: ${n}`).join(' · ') : <span style={{ color: '#ab4343' }}>нет нигде</span>}</td>
+																<td style={{ padding: '8px' }}>
+																	<select disabled={o.closed} style={{ font: 'inherit', fontSize: 12, padding: '6px 8px', border: `1px solid ${C.line}`, borderRadius: 8, background: C.surface }}>
+																		<option>выбрать источник…</option>
+																		{stockEntries.map(([s, n]) => <option key={s}>{s} ({n})</option>)}
+																		<option>закупить</option>
+																	</select>
+																</td>
+															</tr>
+														);
+													})}
 												</tbody>
 											</table>
-											<div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-												<button onClick={() => alert('Каркас: здесь создадутся перемещения и закупки по выбранным позициям')} style={{ border: 'none', cursor: 'pointer', padding: '9px 14px', borderRadius: 9, fontWeight: 600, background: C.primary, color: '#fff' }}>Обеспечить выбранное</button>
-												<button onClick={() => alert('Каркас: массовая закупка отмеченных позиций')} style={{ border: `1px solid ${C.line}`, cursor: 'pointer', padding: '9px 14px', borderRadius: 9, fontWeight: 600, background: C.surface2 }}>Закупить отмеченное</button>
-											</div>
+											{!o.closed && (
+												<div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+													<button onClick={() => alert('Каркас: здесь создадутся перемещения и закупки по выбранным позициям')} style={{ border: 'none', cursor: 'pointer', padding: '9px 14px', borderRadius: 9, fontWeight: 600, background: C.primary, color: '#fff' }}>Обеспечить выбранное</button>
+													<button onClick={() => alert('Каркас: массовая закупка отмеченных позиций')} style={{ border: `1px solid ${C.line}`, cursor: 'pointer', padding: '9px 14px', borderRadius: 9, fontWeight: 600, background: C.surface2 }}>Закупить отмеченное</button>
+												</div>
+											)}
 										</div>
 									)}
 								</div>
