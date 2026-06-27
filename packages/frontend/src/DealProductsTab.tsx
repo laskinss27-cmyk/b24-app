@@ -448,11 +448,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		listTransfers(dealId).then((r) => { if (alive) setDealTransfers(r.transfers); }).catch(() => { if (alive) setDealTransfers([]); });
 		return () => { alive = false; };
 	}, [dealId]);
-	/** Глобальный «Склад реализации» = склад, с которого продаём. Дефолт для всех строк;
-	 *  где его не хватает — строка идёт в перемещение НА него. Per-row селектор может переопределить. */
-	// Дефолт «Склада реализации» = склад-источник сделки (из резервов заказа), если он среди активных;
-	// иначе первый склад. Раньше всегда вставал первый — приложение игнорировало склад сделки.
-	const [realizeStore, setRealizeStore] = useState<number>(() => {
+	/** Дефолтный склад строк (UI-выпадайки вверху больше нет — склад выбирается на самой строке).
+	 *  Дефолт = склад-источник сделки (из резервов заказа), если активен; иначе первый склад.
+	 *  Per-row селектор (rowStore) переопределяет его на конкретной строке. */
+	const [realizeStore] = useState<number>(() => {
 		const src = data.sourceStoreId;
 		return src != null && data.stores.some((s) => s.id === src) ? src : (data.stores[0]?.id ?? 0);
 	});
@@ -831,20 +830,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					onClick={() => setShowReturn(true)}
 					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Возврат оформляет снабжение'}
 				>↩️ Возврат</button>
-				<label className="global-store" title="Склад, с которого продаём. Где его не хватает — строку можно переместить НА него.">
-					🏬 Склад реализации:&nbsp;
-					<select
-						className="store-select"
-						value={realizeStore}
-						disabled={realizePhase !== 'idle' || busy}
-						onChange={(e) => setRealizeStore(Number(e.target.value))}
-					>
-						{data.stores.map((s) => (
-							<option key={s.id} value={s.id}>{s.title}</option>
-						))}
-					</select>
-				</label>
-				<span className="hint">«Добавить» — каталог-пикер; «КП» — коммерческое предложение из сделки</span>
+				<span className="hint">«Добавить» — каталог-пикер; «КП» — коммерческое предложение из сделки. Склад реализации выбирается на самой строке товара.</span>
 			</div>
 
 			<div className="table-wrap">
