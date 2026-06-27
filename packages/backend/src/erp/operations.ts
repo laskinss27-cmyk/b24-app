@@ -276,6 +276,75 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 	return out;
 }
 
+// ── ПЛАН СДЕЛКИ = черновик Sales Order с b24_deal_id ──────────────────────────────────────
+// Что менеджер собрал в сделку (реальные товары) живёт ЗДЕСЬ, а не в Б24 (Б24 несёт свёрнутую
+// услугу «Выезд инженера»). Реализация (Delivery Note) идёт против заказа; остаток к отгрузке
+// ERPNext считает сам (delivered_qty/per_delivered). Источник правды о составе сделки.
+let planFieldDone = false;
+async function ensurePlanField(erp: ErpClient): Promise<void> {
+	if (planFieldDone) return;
+	const cfName = `Sales Order-${DEAL_FIELD}`;
+	if (!(await erp.get('Custom Field', cfName))) {
+		await erp.create('Custom Field', {
+			dt: 'Sales Order', fieldname: DEAL_FIELD, label: 'B24 Deal', fieldtype: 'Data',
+			insert_after: 'customer', in_standard_filter: 1, in_list_view: 1,
+		});
+	}
+	planFieldDone = true;
+}
+
+// priceListRate = базовая цена (до скидки), discountPercent = скидка %. rate (итог) ERPNext считает сам.
+export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number }
+export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number }
+
+/** Черновик плана сделки (Sales Order docstatus 0 по b24_deal_id) — имя или null. */
+async function findDealPlan(erp: ErpClient, dealId: number): Promise<string | null> {
+	const rows = await erp.list('Sales Order', ['name'], [[DEAL_FIELD, '=', String(dealId)], ['docstatus', '=', 0]], 1, 'creation desc');
+	return rows[0] ? String(rows[0]['name']) : null;
+}
+
+/** Перезаписать план сделки актуальным составом. lines=[] → удалить черновик плана.
+ *  Нет черновика — создаёт; есть — заменяет строки. Новые товары заводит в ядре (ensureCoreItem). */
+export async function upsertDealPlan(erp: ErpClient, dealId: number, lines: PlanLine[], deliveryDate: string): Promise<{ name: string | null }> {
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	await ensurePlanField(erp);
+	const existing = await findDealPlan(erp, dealId);
+	if (!lines.length) {
+		if (existing) await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(existing)}`);
+		return { name: null };
+	}
+	for (const l of lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
+	// Скидку храним нативно: price_list_rate (база) + discount_percentage → rate ERPNext посчитает сам.
+	const items = lines.map((l) => ({ item_code: String(l.productId), qty: l.qty, price_list_rate: l.priceListRate, discount_percentage: l.discountPercent, delivery_date: deliveryDate }));
+	if (existing) {
+		const doc = await erp.update('Sales Order', existing, { items, delivery_date: deliveryDate });
+		return { name: String(doc['name'] ?? existing) };
+	}
+	const doc = await erp.create('Sales Order', {
+		company: ctx.company, customer: TECH_CUSTOMER, delivery_date: deliveryDate,
+		[DEAL_FIELD]: String(dealId), items,
+	});
+	return { name: String(doc['name']) };
+}
+
+/** Состав плана сделки (строки черновика Sales Order). delivered = сколько уже отгружено (ядро считает). */
+export async function listDealPlan(erp: ErpClient, dealId: number): Promise<PlanItem[]> {
+	const name = await findDealPlan(erp, dealId);
+	if (!name) return [];
+	const so = await erp.get<Record<string, unknown>>('Sales Order', name);
+	const items = (so?.['items'] as Array<Record<string, unknown>>) ?? [];
+	return items.map((it) => ({
+		productId: Number(it['item_code']),
+		itemName: String(it['item_name'] ?? ''),
+		qty: Number(it['qty'] ?? 0),
+		rate: Number(it['rate'] ?? 0),
+		priceListRate: Number(it['price_list_rate'] ?? it['rate'] ?? 0),
+		discountPercent: Number(it['discount_percentage'] ?? 0),
+		delivered: Number(it['delivered_qty'] ?? 0),
+	}));
+}
+
 /** Перемещение между складами (Stock Entry: Material Transfer). Возвращает имя черновика. */
 export async function createTransferDraft(
 	erp: ErpClient,

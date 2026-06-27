@@ -3,7 +3,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { createRealizationDraft, submitRealization, listDealRealizations, createClientReturns } from '../erp/operations.js';
+import { createRealizationDraft, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan } from '../erp/operations.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -33,6 +33,19 @@ interface AuthBody {
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+}
+
+// productId услуги «Выезд инженера» в Б24-каталоге. Б24-карточка несёт ОДНУ эту строку на сумму
+// сделки (товарный состав живёт в ядре, Sales Order). Услуга TYPE 7 — склад не трогает, сделка
+// закрывается без проводки по складу.
+const VYEZD_PRODUCT_ID = 9814;
+
+/** Поставить в Б24-сделку ОДНУ строку «Выезд инженера» на сумму total (или очистить, если total<=0). */
+async function setDealB24Service(client: B24Client, dealId: number, total: number): Promise<void> {
+	await client.call('crm.deal.productrows.set', {
+		id: dealId,
+		rows: total > 0 ? [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: 'Выезд инженера', PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }] : [],
+	});
 }
 
 /** Розничная цена (BASE, catalogGroupId=2) для набора productId — батчем. */
@@ -324,8 +337,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const items = Array.isArray(b.items) ? b.items : [];
 		const clean = items
-			.map((it) => it as { productId?: unknown; quantity?: unknown; price?: unknown })
-			.map((it) => ({ productId: Number(it.productId), quantity: Number(it.quantity), price: Number(it.price) }))
+			.map((it) => it as { productId?: unknown; quantity?: unknown; price?: unknown; name?: unknown })
+			.map((it) => ({ productId: Number(it.productId), quantity: Number(it.quantity), price: Number(it.price), name: String(it.name ?? '') }))
 			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.quantity) && it.quantity > 0);
 		if (!clean.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
 
@@ -333,13 +346,36 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			// Цены, которых нет в запросе, добираем из BASE одним батчем.
 			const need = clean.filter((it) => !Number.isFinite(it.price) || it.price < 0).map((it) => it.productId);
 			const basePrices = need.length ? await fetchBasePrices(client, need) : new Map<number, number>();
+			const priced = clean.map((it) => ({ ...it, price: Number.isFinite(it.price) && it.price >= 0 ? it.price : (basePrices.get(it.productId) ?? 0) }));
+
+			const erp = ErpClient.fromEnv();
+			if (erp) {
+				// ПОКРЫВАЛО: состав сделки → ПЛАН в ядре (Sales Order), а Б24 несёт ОДНУ свёрнутую
+				// услугу «Выезд инженера». Новые товары мёржим в план по productId (кол-во суммируем).
+				const byId = new Map<number, { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number }>();
+				for (const p of await listDealPlan(erp, dealId)) byId.set(p.productId, { productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent });
+				for (const it of priced) {
+					const prev = byId.get(it.productId);
+					// Новый товар добавляется БЕЗ скидки (база = цена из пикера). Существующий — копим кол-во, цену обновляем, скидку сохраняем.
+					if (prev) { prev.qty += it.quantity; prev.priceListRate = it.price; }
+					else byId.set(it.productId, { productId: it.productId, qty: it.quantity, priceListRate: it.price, discountPercent: 0, ...(it.name ? { itemName: it.name } : {}) });
+				}
+				const lines = [...byId.values()];
+				const today = new Date().toISOString().slice(0, 10);
+				await upsertDealPlan(erp, dealId, lines, today);
+				const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
+				await setDealB24Service(client, dealId, total);
+				app.log.info({ dealId, planLines: lines.length, total }, '[api/deal/add-products] core plan + B24 service');
+				return { ok: true, added: priced.length, plan: lines.length, total };
+			}
+
+			// ФОЛБЭК (ядро не подключено): как раньше — товары в строки Б24.
 			let added = 0;
-			for (const it of clean) {
-				const price = Number.isFinite(it.price) && it.price >= 0 ? it.price : (basePrices.get(it.productId) ?? 0);
-				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price, quantity: it.quantity } });
+			for (const it of priced) {
+				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price: it.price, quantity: it.quantity } });
 				added++;
 			}
-			app.log.info({ dealId, added }, '[api/deal/add-products] ok');
+			app.log.info({ dealId, added }, '[api/deal/add-products] ok (b24 fallback)');
 			return { ok: true, added };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/add-products] failed — ${errInfo(err)}`);
@@ -432,6 +468,82 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return { ok: true };
 		} catch (err) {
 			app.log.error({ dealId, rowId }, `[api/deal/update-product] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// СВЕРНУТЬ сделку в одну услугу «Выезд инженера» вручную (на случай старых сделок; при добавлении
+	// товара через /add-products сворачивание уже идёт автоматически). productId 9814 — VYEZD_PRODUCT_ID.
+	app.post('/api/deal/collapse-service', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+			const all = rows ?? [];
+			// Сумма сделки = Σ PRICE×QUANTITY текущих строк (PRICE = итог за ед. после скидки).
+			const total = Math.round(all.reduce((a, r) => a + Number(r['PRICE'] ?? 0) * Number(r['QUANTITY'] ?? 0), 0) * 100) / 100;
+			if (total <= 0) return reply.code(400).send({ ok: false, error: 'в сделке нет суммы для сворачивания' });
+			// Уже свёрнута? (одна строка-услуга «Выезд инженера») — не трогаем, идемпотентно.
+			if (all.length === 1 && Number(all[0]?.['PRODUCT_ID']) === VYEZD_PRODUCT_ID) {
+				return { ok: true, total, already: true };
+			}
+			await client.call('crm.deal.productrows.set', {
+				id: dealId,
+				rows: [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: 'Выезд инженера', PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }],
+			});
+			app.log.info({ dealId, total, was: all.length }, '[api/deal/collapse-service] ok');
+			return { ok: true, total, replaced: all.length };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/collapse-service] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// СОСТАВ СДЕЛКИ ИЗ ЯДРА (план = строки черновика Sales Order). Источник правды для нашей вкладки:
+	// показываем реальные товары, что бы Б24 ни подменял в своей карточке. Ядро не подключено → [].
+	app.post('/api/deal/plan', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return { ok: true, items: [] as unknown[] };
+		try {
+			const items = await listDealPlan(erp, dealId);
+			return { ok: true, items };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/plan] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// ПЕРЕЗАПИСАТЬ состав плана сделки целиком (из вкладки: правка кол-ва/цены, удаление строк) →
+	// затем пересчитать «Выезд инженера» в Б24. items=[] → план пуст и Б24-строки очищаются.
+	app.post('/api/deal/plan-set', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const lines = (Array.isArray(b.items) ? b.items : [])
+			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown })
+			.map((it) => ({ productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent) || 0 }))
+			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.qty) && it.qty > 0 && Number.isFinite(it.priceListRate) && it.priceListRate >= 0 && it.discountPercent >= 0 && it.discountPercent <= 100);
+		try {
+			const today = new Date().toISOString().slice(0, 10);
+			await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
+			const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
+			await setDealB24Service(client, dealId, total);
+			app.log.info({ dealId, lines: lines.length, total }, '[api/deal/plan-set] ok');
+			return { ok: true, total, lines: lines.length };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/plan-set] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

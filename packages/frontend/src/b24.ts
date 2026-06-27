@@ -615,7 +615,7 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 }
 
 /** Добавить НЕСКОЛЬКО товаров в сделку за раз (корзина пикера → «Готово»). Возвращает кол-во добавленных. */
-export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number }[]): Promise<number> {
+export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string }[]): Promise<number> {
 	const res = await fetch('/api/deal/add-products', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -624,6 +624,59 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
 	return json.added ?? 0;
+}
+
+/** Строка плана сделки из ядра (черновик Sales Order). delivered — сколько уже отгружено. */
+export interface DealPlanItem {
+	productId: number;
+	itemName: string;
+	qty: number;
+	/** Итоговая цена за ед. (после скидки) — ERPNext считает из базы и скидки. */
+	rate: number;
+	/** Базовая цена за ед. (до скидки). */
+	priceListRate: number;
+	/** Скидка, %. */
+	discountPercent: number;
+	delivered: number;
+}
+
+/** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24.
+ *  Ядро не подключено / read-only фолбэк → []. */
+export async function fetchDealPlan(dealId: number): Promise<DealPlanItem[]> {
+	const res = await fetch('/api/deal/plan', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok: boolean; items?: DealPlanItem[] };
+	if (!json.ok) return [];
+	return json.items ?? [];
+}
+
+/** Перезаписать состав сделки в ядре (план = Sales Order) целиком — правка/удаление строк из вкладки.
+ *  Б24 пересчитывается в одну «Выезд инженера». Возвращает итоговую сумму. */
+export async function setDealPlan(dealId: number, items: DealPlanItem[]): Promise<number> {
+	const res = await fetch('/api/deal/plan-set', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, items }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить состав сделки');
+	return json.total ?? 0;
+}
+
+/** Свернуть сделку в одну услугу «Выезд инженера» на полную сумму (товарный состав живёт в ядре,
+ *  Б24-карточка несёт только сумму). Возвращает итоговую сумму услуги. */
+export async function collapseDealToService(dealId: number): Promise<number> {
+	const res = await fetch('/api/deal/collapse-service', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось свернуть сделку в услугу');
+	return json.total ?? 0;
 }
 
 /** Удалить ОДНУ строку товара из сделки по её rowId. */

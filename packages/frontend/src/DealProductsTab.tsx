@@ -10,8 +10,10 @@ import {
 	addProductsToDeal,
 	removeDealProduct,
 	updateDealProduct,
+	setDealPlan,
 	fetchDealShipped,
 	fetchDealRealizationsCore,
+	fetchDealPlan,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	createDealReturn,
@@ -27,6 +29,7 @@ import {
 	type StoreInfo,
 	type ProductEnrichment,
 	type CoreRealization,
+	type DealPlanItem,
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type SupplyCard,
@@ -42,6 +45,10 @@ interface TableData {
 	coef: number;
 	/** Реализации сделки ИЗ ЯДРА (Delivery Note по b24_deal_id): черновики + проведённые. */
 	coreReals: CoreRealization[];
+	/** Состав сделки ИЗ ЯДРА (план = строки черновика Sales Order) — сырой ответ ядра. */
+	plan: DealPlanItem[];
+	/** Товары сделки = строки плана, приведённые к формату таблицы (с остатками) — на них работает движок реализации. */
+	planRows: EnrichedRow[];
 	/** Оплата заказа сделки (из Б24): total/paid. null — заказа/оплаты нет. */
 	payment: { total: number; paid: number } | null;
 	/** Склад-источник сделки (из резервов заказа) — дефолт «Склада реализации». null — нет. */
@@ -63,6 +70,14 @@ type State =
 const MOCK_DATA: TableData = {
 	coef: 0.5,
 	coreReals: [],   // чистый мок: прошлых реализаций нет (реализация считается на проде через ядро)
+	plan: [
+		{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 1, rate: 1000, priceListRate: 1000, discountPercent: 0, delivered: 0 },
+		{ productId: 102, itemName: 'Кабель UTP cat5e, бухта 305 м', qty: 1, rate: 100, priceListRate: 100, discountPercent: 0, delivered: 0 },
+	],
+	planRows: [
+		{ id: 'plan-101', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 1000, quantity: 1, discountSum: 0, measure: 'шт', purchasingPrice: 600, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
+		{ id: 'plan-102', productId: 102, name: 'Кабель UTP cat5e, бухта 305 м', type: 1, price: 100, quantity: 1, discountSum: 0, measure: 'шт', purchasingPrice: 80, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 30 }] },
+	],
 	payment: { total: 103500, paid: 50000 },   // мок: частичная оплата для демонстрации баннера
 	sourceStoreId: 8,   // мок: склад-источник сделки = Дунайский (не первый) — проверить дефолт селектора
 	supply: [],
@@ -87,7 +102,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [bxRows, stores, coef, shippedInfo, coreReals] = await Promise.all([
+	const [bxRows, stores, coef, shippedInfo, coreReals, plan] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
@@ -95,25 +110,43 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, sourceStoreId: null, supply: [], rows: null })),
 		// Что уже реализовано — из ЯДРА (Delivery Note по сделке). Ядро не подключено → [].
 		withTimeout(fetchDealRealizationsCore(dealId), 25000, 'deal/realize-core list').catch(() => [] as CoreRealization[]),
+		// Состав сделки (план = Sales Order ядра) — реальные товары, мимо подмены Б24. Ядро не подключено → [].
+		withTimeout(fetchDealPlan(dealId), 25000, 'deal/plan').catch(() => [] as DealPlanItem[]),
 	]);
 	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
 	// если бэкенд их не отдал — берём BX24-результат.
 	const rows = shippedInfo.rows ?? bxRows;
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
-	const goodsIds = [...new Set(rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0))];
-	// Остатки/закупки тянем только если есть товары (на пустой сделке — сразу пусто, без лишнего вызова).
-	const enrich: Record<number, ProductEnrichment> = goodsIds.length
-		? await withTimeout(fetchStockPreferCore(goodsIds), 25000, 'stock/purchasing').catch(() => ({}))
+	// Остатки/закупки тянем для ТОВАРОВ ПЛАНА (из ядра) — именно они теперь товары сделки.
+	// + productId строк Б24 (на случай старых сделок без плана) — подстраховка.
+	const planIds = plan.map((p) => p.productId).filter((id) => id > 0);
+	const b24GoodsIds = rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0);
+	const allIds = [...new Set([...planIds, ...b24GoodsIds])];
+	const enrich: Record<number, ProductEnrichment> = allIds.length
+		? await withTimeout(fetchStockPreferCore(allIds), 25000, 'stock/purchasing').catch(() => ({}))
 		: {};
-	const enriched: EnrichedRow[] = rows.map((r) => {
-		const e = enrich[r.productId];
-		return {
-			...r,
-			stocks: (e?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` })),
-			purchasingPrice: e?.purchasingPrice ?? null,
-		};
-	});
-	return { rows: enriched, coef, coreReals, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
+	const mkStocks = (pid: number): EnrichedRow['stocks'] =>
+		(enrich[pid]?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));
+	const enriched: EnrichedRow[] = rows.map((r) => ({
+		...r,
+		stocks: mkStocks(r.productId),
+		purchasingPrice: enrich[r.productId]?.purchasingPrice ?? null,
+	}));
+	// Товары сделки = строки ПЛАНА (ядро), приведённые к формату строки таблицы — чтобы весь движок
+	// реализации (чекбоксы/склад/статусы/партии/«Реализовать») работал на них без изменений.
+	const planRows: EnrichedRow[] = plan.map((p) => ({
+		id: `plan-${p.productId}`,
+		productId: p.productId,
+		name: p.itemName || `#${p.productId}`,
+		type: 1,
+		price: p.rate,                                                  // итог за ед. (после скидки)
+		quantity: p.qty,
+		discountSum: Math.round((p.priceListRate - p.rate) * 100) / 100, // скидка ₽/ед = база − итог (база восстановима)
+		measure: 'шт',
+		stocks: mkStocks(p.productId),
+		purchasingPrice: enrich[p.productId]?.purchasingPrice ?? null,
+	}));
+	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -248,7 +281,7 @@ export function DealProductsTab(): JSX.Element {
 					title: `Добавить товар в сделку #${dealId}`,
 					onCancel: () => setAdding(false),
 					onDone: async (items) => {
-						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price })));
+						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name })));
 						setAdding(false);
 						await reload();
 					},
@@ -346,6 +379,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const clearEdit = (id: string): void => setRowEdits((m) => { const n = { ...m }; delete n[id]; return n; });
 	/** Итоговая цена за единицу из текущих правок (база · скидка). */
 	const finalUnitOf = (r: EnrichedRow): number => { const e = editOf(r); const p = Number(e.price.replace(',', '.')) || 0; const d = Number(e.disc.replace(',', '.')) || 0; return Math.round(p * (1 - d / 100) * 100) / 100; };
+	// Строка ТОВАРА — из плана ядра (id вида 'plan-<productId>'); работы — из Б24 (числовой rowId).
+	const isPlanRow = (r: EnrichedRow): boolean => String(r.id).startsWith('plan-');
 	const saveRow = async (r: EnrichedRow): Promise<void> => {
 		if (dealId == null || savingRow) return;
 		const e = editOf(r);
@@ -353,7 +388,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p) || p < 0 || !Number.isFinite(d) || d < 0 || d > 100) { clearEdit(r.id); return; }
 		if (q === r.quantity && Math.abs(p - baseOf(r)) < 0.005 && Math.abs(d - discPct(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
 		setSavingRow(r.id); setNotice(null);
-		try { await updateDealProduct(dealId, Number(r.id), q, p, d); clearEdit(r.id); await onReload(); }
+		try {
+			if (isPlanRow(r)) {
+				// Товар плана: пишем НОВЫЙ состав в ядро (база p + скидка d% — скидка сохраняется, цену вернуть можно)
+				// + пересчёт «Выезд инженера» в Б24.
+				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
+			} else {
+				await updateDealProduct(dealId, Number(r.id), q, p, d);
+			}
+			clearEdit(r.id);
+			await onReload();
+		}
 		catch (err) { setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` }); }
 		finally { setSavingRow(null); }
 	};
@@ -471,7 +516,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		setRemoving(r.id);
 		setNotice(null);
 		try {
-			await removeDealProduct(dealId, Number(r.id));
+			if (isPlanRow(r)) {
+				// Товар плана: убираем из состава ядра + пересчёт «Выезд инженера» в Б24.
+				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId));
+			} else {
+				await removeDealProduct(dealId, Number(r.id));
+			}
 			setNotice({ kind: 'ok', text: `✅ Удалено из сделки: ${r.name.slice(0, 40)}` });
 			await onReload();
 		} catch (err) {
@@ -483,10 +533,16 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 
 	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
 	// монитор-вариация выпадал из «только TYPE 1» и был невидим при видимой сумме).
-	const goods = rows.filter((r) => !isWorkRow(r.type));
+	// ТОВАРЫ сделки = строки ПЛАНА (из ядра). На них работает весь движок реализации ниже.
+	const goods = data.planRows;
 	const works = rows.filter((r) => isWorkRow(r.type));
+	// «Выезд инженера» (productId 9814) — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
+	const VYEZD_PID = 9814;
+	const realWorks = works.filter((r) => r.productId !== VYEZD_PID);
+	const sumRealWorks = realWorks.reduce((a, r) => a + line(r), 0);
 	const sumGoods = goods.reduce((a, r) => a + line(r), 0);
 	const sumWorks = works.reduce((a, r) => a + line(r), 0);
+
 	const discount = rows.reduce((a, r) => a + r.discountSum, 0);
 	const total = sumGoods + sumWorks;
 	const profitWorks = sumWorks * coef;
@@ -507,6 +563,25 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				return { name: rz.name, submitted: rz.submitted, isReturn: Boolean(rz.isReturn), qty: its.reduce((s, it) => s + it.qty, 0), storeName: its[0]!.storeTitle };
 			})
 			.filter((p): p is Part => p != null);
+
+		// ВКЛАДКА НЕ СМОТРИТ на товарный состав Б24 (он врёт — Б24 подменяет товар на услугу).
+		// Товары показываем ТОЛЬКО из ядра. Поэтому в матч против строк Б24 берём лишь работы:
+		// все товарные реализации ядра (их productId нет среди работ) попадут в блок «Реализовано из ядра».
+		const rowPids = new Set(works.map((r) => r.productId));
+		type OrphanPart = { key: string; itemName: string; doc: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
+		const orphanParts: OrphanPart[] = data.coreReals.flatMap((rz) =>
+			rz.items
+				.filter((it) => !rowPids.has(it.productId))
+				.map((it, i): OrphanPart => ({
+					key: `${rz.name}-${it.productId}-${i}`,
+					itemName: it.itemName || `Товар ${it.productId}`,
+					doc: rz.name,
+					submitted: rz.submitted,
+					isReturn: Boolean(rz.isReturn),
+					qty: it.qty,
+					storeName: it.storeTitle,
+				})),
+		);
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>
@@ -789,10 +864,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					</tr>
 				</thead>
 				<tbody>
+					{/* ТОВАРЫ = строки плана из ядра, через штатный движок (чекбоксы/склад/статусы/партии/
+					    реализация). «Выезд инженера» (Б24) скрыт; реальные работы — ниже. */}
 					{goods.length > 0 && groupBand('🧰 Товары', goods, sumGoods)}
 					{goods.flatMap(renderGoodsRows)}
-					{works.length > 0 && groupBand('🔧 Работы и услуги', works, sumWorks)}
-					{works.map(renderWorkRow)}
+					{realWorks.length > 0 && groupBand('🔧 Работы и услуги', realWorks, sumRealWorks)}
+					{realWorks.map(renderWorkRow)}
 				</tbody>
 			</table>
 			</div>
@@ -800,15 +877,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			<div className="totals">
 				<div className="trow"><span>Сумма товаров</span><span>{rub(sumGoods)}</span></div>
 				<div className="trow">
-					<span className="approx" title={unknownGoods ? `≈: у ${unknownGoods} из ${goods.length} товаров не заполнена закупочная цена. Источник закупки уточняем у Володи.` : 'Считается по нативной закупочной цене каталога. Источник уточняем у Володи.'}>
+					<span className="approx" title={unknownGoods ? `≈: у ${unknownGoods} из ${goods.length} товаров не заполнена закупочная цена.` : 'Считается по закупочной цене из ядра.'}>
 						Прибыль товаров ≈{unknownGoods ? ` (без ${unknownGoods})` : ''}
 					</span>
 					<span>{rub(profitGoods)}</span>
 				</div>
-				<div className="trow"><span>Сумма работ</span><span>{rub(sumWorks)}</span></div>
-				<div className="trow"><span>Прибыль работ (×{coef})</span><span>{rub(profitWorks)}</span></div>
-				<div className="trow muted"><span>Скидка</span><span>{rub(discount)}</span></div>
-				<div className="trow grand"><span>Итого</span><span>{rub(total)}</span></div>
+				{sumRealWorks > 0 && <div className="trow"><span>Сумма работ</span><span>{rub(sumRealWorks)}</span></div>}
+				{sumRealWorks > 0 && <div className="trow"><span>Прибыль работ (×{coef})</span><span>{rub(sumRealWorks * coef)}</span></div>}
+				<div className="trow grand"><span>Итого</span><span>{rub(sumGoods + sumRealWorks)}</span></div>
 			</div>
 
 			{data.supply.length > 0 && (
