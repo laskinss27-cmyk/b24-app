@@ -246,6 +246,7 @@ export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ s
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/inventory', INVENTORY_MENU_TITLE, 'Sales');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/repairs', REPAIRS_MENU_TITLE, 'Repairs');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/stock', STOCK_MENU_TITLE, 'Stock');
+	await bind(INVENTORY_MENU_PLACEMENT, '/placement/supply', SUPPLY_MENU_TITLE, 'Supply');
 	await bind(DEAL_LIST_REPORT_PLACEMENT, '/placement/sales-report', DEAL_LIST_REPORT_TITLE, 'Sales report');
 	// Флаг «сделано» — только если НЕ упёрлись в ACCESS_DENIED (т.е. это был админ и сверка прошла).
 	if (!denied) placementsReconciled = true;
@@ -384,6 +385,29 @@ export async function bindStockMenuPlacement(opts: BindDealTabOptions): Promise<
 			HANDLER: handlerUrl,
 			TITLE: STOCK_MENU_TITLE,
 			LANG_ALL: { ru: { TITLE: STOCK_MENU_TITLE }, en: { TITLE: 'Stock' } },
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
+/** Пункт ЛЕВОГО МЕНЮ «Снаб» — рабочее место снабженца (view='supply'). Коротко, чтобы не путать
+ *  с нативными «Снабжение» и «Снабжение 2.0». LEFT_MENU допускает несколько привязок. */
+export const SUPPLY_MENU_TITLE = 'Снаб';
+
+export async function bindSupplyMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/supply`;
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: INVENTORY_MENU_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: SUPPLY_MENU_TITLE,
+			LANG_ALL: { ru: { TITLE: SUPPLY_MENU_TITLE }, en: { TITLE: 'Supply' } },
 		});
 		return { status: 'bound' };
 	} catch (err) {

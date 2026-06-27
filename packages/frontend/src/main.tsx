@@ -7,6 +7,7 @@ import { MobileCount } from './MobileCount.js';
 import { SalesReport } from './SalesReport.js';
 import { Repairs } from './Repairs.js';
 import { StockLedger } from './StockLedger.js';
+import { Supply } from './Supply.js';
 import './styles.css';
 
 const root = document.getElementById('root');
@@ -23,6 +24,6 @@ const ctx = getContext();
 
 createRoot(root).render(
 	<StrictMode>
-		{ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
+		{ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
 	</StrictMode>,
 );

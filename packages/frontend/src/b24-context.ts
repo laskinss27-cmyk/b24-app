@@ -8,7 +8,7 @@ export interface B24Context {
 	/** id задачи — устаревший путь (task placement не принимается новой карточкой). */
 	taskId?: number | null;
 	/** какой экран рендерить. 'inventory' — модуль (левое меню); 'mobileCount' — мобильный подсчёт (/m); 'salesReport' — отчёт по продажам (меню сделок); 'repairs' — ремонты (левое меню). */
-	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | null;
+	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | null;
 	domain: string | null;
 	memberId: string | null;
 	/** Мобильный режим (/m, вне iframe): токен/точка/юзер приходят в контексте, BX24 SDK нет. */

@@ -18,7 +18,10 @@
 				var __inv = __sp.has('inv');
 				var __rep = __sp.has('repairs');
 				var __stock = __sp.has('stock');
-				window.__B24_CONTEXT__ = __stock
+				var __supply = __sp.has('supply');
+				window.__B24_CONTEXT__ = __supply
+					? { view: 'supply', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }
+					: __stock
 					? { view: 'stock', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }
 					: __rep
 					? { view: 'repairs', dealId: null, domain: 'umniydom.bitrix24.ru', memberId: null, __mock: true }

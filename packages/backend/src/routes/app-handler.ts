@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, ensureRepairsEntity, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -161,6 +161,16 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 				app.log.info({ menu: rep.status, entity: repEnt.status }, '[app/handler] repairs menu + entity');
 			} catch (err) {
 				app.log.error({}, `[app/handler] repairs bind failed — ${err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err)}`);
+			}
+
+			// 3.6) Пункты левого меню «Складской учёт» и «Снаб» — на каждом открытии гарантируем привязку
+			// (новые пункты появляются у уже установленного приложения без переустановки). Идемпотентно.
+			try {
+				const stk = await bindStockMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				const sup = await bindSupplyMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ stock: stk.status, supply: sup.status }, '[app/handler] stock + supply menu');
+			} catch (err) {
+				app.log.error({}, `[app/handler] stock/supply bind failed — ${err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err)}`);
 			}
 
 			// 4.5) ЧИСТКА эксперимента: снимаем временную привязку CATALOG_EXTERNAL_PRODUCT.
