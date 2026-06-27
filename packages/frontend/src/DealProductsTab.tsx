@@ -11,6 +11,7 @@ import {
 	removeDealProduct,
 	updateDealProduct,
 	setDealPlan,
+	createDealSupplyRequest,
 	fetchDealShipped,
 	fetchDealRealizationsCore,
 	fetchDealPlan,
@@ -434,6 +435,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const [busy, setBusy] = useState(false);
 	/** Имена черновиков ядра, ожидающих проведения (между «Реализация» и «Провести»). */
 	const [draftNames, setDraftNames] = useState<string[]>([]);
+	/** Открыта форма заявки в снабжение (по отмеченным товарам). */
+	const [supplyOpen, setSupplyOpen] = useState(false);
+	/** Комментарий снабженцу на позицию: rowId → текст. */
+	const [supplyNotes, setSupplyNotes] = useState<Record<string, string>>({});
+	/** Идёт создание заявки в снабжение. */
+	const [supplyBusy, setSupplyBusy] = useState(false);
 	/** id строки, по которой создаётся перемещение. */
 	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
 	/** Открыто модальное окно возврата от клиента. */
@@ -654,9 +661,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 								type="checkbox"
 								className="row-check"
 								checked={isSel(r)}
-								disabled={status !== 'ready' || realizePhase !== 'idle' || busy}
+								disabled={realizePhase !== 'idle' || busy}
 								onChange={() => toggleSel(r)}
-								title={status === 'ready' ? 'Отгрузить эту строку в реализации' : 'Строку нельзя отгрузить с выбранного склада — выбери склад, где хватает'}
+								title={status === 'ready' ? 'Отметить: реализовать (если хватает) или отправить в снабжение' : 'Отметить, чтобы отправить в снабжение (на складе не хватает)'}
 							/>
 						</div>
 					</td>
@@ -755,6 +762,26 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		if (!realizeGroups.has(s)) realizeGroups.set(s, []);
 		realizeGroups.get(s)!.push(r);
 	}
+
+	// В снабжение идут ВСЕ отмеченные товары (в т.ч. дефицитные — для них заявка и нужна).
+	const supplyGoods = goods.filter((r) => isSel(r));
+	const doCreateSupply = async (): Promise<void> => {
+		if (dealId == null || !supplyGoods.length || supplyBusy) return;
+		setSupplyBusy(true);
+		setNotice(null);
+		try {
+			const lines = supplyGoods.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r) > 0 ? remaining(r) : r.quantity, note: (supplyNotes[r.id] ?? '').trim() }));
+			await createDealSupplyRequest(dealId, lines);
+			setSupplyOpen(false);
+			setSupplyNotes({});
+			setSelected({});
+			setNotice({ kind: 'ok', text: `Заявка в снабжение создана: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')}. Снабженец увидит её в «Снаб».` });
+		} catch (err) {
+			setNotice({ kind: 'err', text: `Ошибка: ${String(err instanceof Error ? err.message : err)}` });
+		} finally {
+			setSupplyBusy(false);
+		}
+	};
 
 	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре (по одному на склад);
 	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
@@ -912,9 +939,34 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					{realizePhase === 'drafted' && (
 						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
 					)}
+					{realizePhase === 'idle' && supplyGoods.length > 0 && !supplyOpen && (
+						<button className="btn-cancel-draft" disabled={busy} title="Отправить отмеченные товары в снабжение (закупка или перемещение)" onClick={() => setSupplyOpen(true)}>В снабжение ({supplyGoods.length})</button>
+					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>
+
+			{supplyOpen && supplyGoods.length > 0 && (
+				<div className="realize-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+					<b>Заявка в снабжение — {supplyGoods.length} {plural(supplyGoods.length, 'позиция', 'позиции', 'позиций')}. Снабженец сам решит: закупить или привезти с другого склада.</b>
+					<table className="products-table" style={{ width: '100%' }}>
+						<thead><tr><th>Товар</th><th className="num">Нужно</th><th>Комментарий снабженцу</th></tr></thead>
+						<tbody>
+							{supplyGoods.map((r) => (
+								<tr key={r.id}>
+									<td>{r.name}</td>
+									<td className="num">{remaining(r) > 0 ? remaining(r) : r.quantity} {r.measure}</td>
+									<td><input type="text" className="cell-inp" style={{ width: '100%' }} placeholder="напр.: новый, в плёнке — распакованный не вези" value={supplyNotes[r.id] ?? ''} onChange={(e) => setSupplyNotes((m) => ({ ...m, [r.id]: e.target.value }))} /></td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+					<div className="realize-actions">
+						<button className="btn-realize-all" disabled={dev || supplyBusy} onClick={() => void doCreateSupply()}>{supplyBusy ? '…' : 'Создать заявку'}</button>
+						<button className="btn-cancel-draft" disabled={supplyBusy} onClick={() => setSupplyOpen(false)}>Отмена</button>
+					</div>
+				</div>
+			)}
 
 			{splitRow && dealId != null && (() => {
 				const dest = storeOf(splitRow);
