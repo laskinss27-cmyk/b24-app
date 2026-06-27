@@ -626,11 +626,11 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 	return json.added ?? 0;
 }
 
-/** Заказ для «Снаб»: один Sales Order = спрос одной сделки. */
-export interface SupplyOrderItem { productId: number; itemName: string; qty: number; rate: number; stocks: Record<string, number> }
-export interface SupplyOrderRow { name: string; dealId: string; dealTitle: string; date: string; total: number; closed: boolean; items: SupplyOrderItem[] }
+/** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
+export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
+export interface SupplyOrderRow { name: string; dealId: string; dealTitle: string; date: string; status: string; closed: boolean; items: SupplyOrderItem[] }
 
-/** Все заказы снабжения из ядра (Sales Order по сделкам) + статус/название из Б24. Ядро не подключено → []. */
+/** Все заявки снабжения из ядра (Material Request по сделкам) + название сделки из Б24. Ядро не подключено → []. */
 export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 	const res = await fetch('/api/supply/orders', {
 		method: 'POST',
@@ -640,6 +640,18 @@ export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 	const json = (await res.json()) as { ok: boolean; orders?: SupplyOrderRow[] };
 	if (!json.ok) return [];
 	return json.orders ?? [];
+}
+
+/** Создать заявку в снабжение по выбранным товарам сделки (кнопка «Снабжение» во вкладке). */
+export async function createDealSupplyRequest(dealId: number, lines: Array<{ productId: number; itemName: string; qty: number; note: string }>): Promise<string> {
+	const res = await fetch('/api/supply/request', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось создать заявку в снабжение');
+	return json.name ?? '';
 }
 
 /** Строка плана сделки из ядра (черновик Sales Order). delivered — сколько уже отгружено. */

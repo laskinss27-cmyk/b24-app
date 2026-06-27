@@ -19,18 +19,17 @@ const SECTIONS: Array<{ key: SectionKey; title: string; group: string }> = [
 	{ key: 'reports', title: '📊 Отчёты', group: 'Аналитика' },
 ];
 
-// Dev-мок в ФОРМЕ реальных данных (заказы = Sales Order ядра). На проде грузим с /api/supply/orders.
+// Dev-мок в ФОРМЕ реальных данных (заявки = Material Request ядра). На проде грузим с /api/supply/orders.
 const MOCK_ORDERS: SupplyOrderRow[] = [
-	{ name: 'SAL-ORD-2026-0001', dealId: '556', dealTitle: 'Монтаж видеонаблюдения', date: '2026-04-04', total: 12800, closed: false, items: [
-		{ productId: 104, itemName: 'Блок питания 12В 5А', qty: 2, rate: 650, stocks: { 'ЦС': 12, 'Парнас': 3 } },
-		{ productId: 103, itemName: 'Видеорегистратор 8-канальный', qty: 1, rate: 8900, stocks: { 'ЦС': 4 } },
+	{ name: 'MAT-MR-2026-0001', dealId: '556', dealTitle: 'Монтаж видеонаблюдения', date: '2026-04-04', status: 'Pending', closed: false, items: [
+		{ productId: 104, itemName: 'Блок питания 12В 5А', qty: 2, note: '', stocks: { 'ЦС': 12, 'Парнас': 3 } },
+		{ productId: 103, itemName: 'Видеорегистратор 8-канальный', qty: 1, note: 'нужен новый, в плёнке — распакованный не вези', stocks: { 'ЦС': 4 } },
 	] },
-	{ name: 'SAL-ORD-2026-0002', dealId: '553', dealTitle: 'СКУД офис', date: '2026-04-03', total: 41000, closed: false, items: [
-		{ productId: 201, itemName: 'IP-домофон Dahua', qty: 8, rate: 3500, stocks: { 'ЦС': 5, 'Мурино': 3 } },
-		{ productId: 202, itemName: 'Контроллер СКУД ZKTeco', qty: 4, rate: 0, stocks: {} },
+	{ name: 'MAT-MR-2026-0002', dealId: '553', dealTitle: 'СКУД офис', date: '2026-04-03', status: 'Pending', closed: false, items: [
+		{ productId: 202, itemName: 'Контроллер СКУД ZKTeco', qty: 4, note: '', stocks: {} },
 	] },
-	{ name: 'SAL-ORD-2026-0003', dealId: '551', dealTitle: 'Камеры ТТ Богатырский', date: '2026-04-02', total: 9000, closed: true, items: [
-		{ productId: 301, itemName: 'Видеокамера CTV-IPB2028', qty: 4, rate: 2250, stocks: { 'ЦС': 20, 'Девяткино': 6 } },
+	{ name: 'MAT-MR-2026-0003', dealId: '551', dealTitle: 'Камеры ТТ Богатырский', date: '2026-04-02', status: 'Ordered', closed: true, items: [
+		{ productId: 301, itemName: 'Видеокамера CTV-IPB2028', qty: 4, note: '', stocks: { 'ЦС': 20, 'Девяткино': 6 } },
 	] },
 ];
 
@@ -131,7 +130,7 @@ export function Supply(): JSX.Element {
 														return (
 															<tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
 																<td style={{ padding: '8px' }}><input type="checkbox" disabled={o.closed} checked={picked[keyOf(o.name, i)] ?? false} onChange={() => setPicked((m) => ({ ...m, [keyOf(o.name, i)]: !(m[keyOf(o.name, i)] ?? false) }))} /></td>
-																<td style={{ padding: '8px' }}><b>{p.itemName || `#${p.productId}`}</b></td>
+																<td style={{ padding: '8px' }}><b>{p.itemName || `#${p.productId}`}</b>{p.note && <div style={{ fontSize: 11, color: C.muted, fontStyle: 'italic' }}>прим.: {p.note}</div>}</td>
 																<td style={{ padding: '8px' }}>{p.qty} шт</td>
 																<td style={{ padding: '8px' }}>{stockEntries.length ? stockEntries.map(([s, n]) => `${s}: ${n}`).join(' · ') : <span style={{ color: '#ab4343' }}>нет нигде</span>}</td>
 																<td style={{ padding: '8px' }}>

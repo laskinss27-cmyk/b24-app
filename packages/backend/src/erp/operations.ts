@@ -381,6 +381,80 @@ export async function listSupplyOrders(erp: ErpClient): Promise<SupplyOrder[]> {
 	return out;
 }
 
+// ── ЗАЯВКА В СНАБЖЕНИЕ = Material Request (родной документ обеспечения ERPNext) ──────────────
+// Менеджер из сделки отмечает товары, которых не хватает, → создаётся Material Request (потребность),
+// привязка b24_deal_id. Снабженец из неё делает закупку (Purchase Order) или перемещение (Stock Entry).
+let mrFieldDone = false;
+async function ensureMrField(erp: ErpClient): Promise<void> {
+	if (mrFieldDone) return;
+	const cfName = `Material Request-${DEAL_FIELD}`;
+	if (!(await erp.get('Custom Field', cfName))) {
+		await erp.create('Custom Field', {
+			dt: 'Material Request', fieldname: DEAL_FIELD, label: 'B24 Deal', fieldtype: 'Data',
+			insert_after: 'title', in_standard_filter: 1, in_list_view: 1,
+		});
+	}
+	mrFieldDone = true;
+}
+
+export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string }
+
+/** Создать заявку в снабжение (Material Request, тип Purchase) по выбранным товарам сделки. */
+export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[] }): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	await ensureMrField(erp);
+	if (!args.lines.length) throw new Error('пустая заявка');
+	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
+	const doc = await erp.create('Material Request', {
+		company: ctx.company,
+		material_request_type: 'Purchase',
+		schedule_date: args.scheduleDate,
+		[DEAL_FIELD]: String(args.dealId),
+		items: args.lines.map((l) => ({
+			item_code: String(l.productId),
+			qty: l.qty,
+			schedule_date: args.scheduleDate,
+			...(l.note ? { description: l.note } : {}),
+		})),
+	});
+	return { name: String(doc['name']) };
+}
+
+export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
+export interface SupplyRequest { name: string; dealId: string; date: string; status: string; items: SupplyReqItem[] }
+
+/** Все заявки снабжения из ядра (Material Request, кроме отменённых) с позициями, комментариями и остатками. */
+export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[]> {
+	await ensureMrField(erp);
+	const stocks = await fetchErpStocks(erp);
+	const heads = await erp.list('Material Request',
+		['name', DEAL_FIELD, 'transaction_date', 'status'],
+		[['docstatus', '!=', 2]], 0, 'creation desc');
+	const out: SupplyRequest[] = [];
+	for (const h of heads) {
+		const mr = await erp.get<Record<string, unknown>>('Material Request', String(h['name']));
+		const items = ((mr?.['items'] as Array<Record<string, unknown>>) ?? []).map((it) => {
+			const productId = Number(it['item_code']);
+			return {
+				productId,
+				itemName: String(it['item_name'] ?? ''),
+				qty: Number(it['qty'] ?? 0),
+				note: String(it['description'] ?? ''),
+				stocks: stocks.get(productId) ?? {},
+			};
+		});
+		out.push({
+			name: String(h['name']),
+			dealId: String(h[DEAL_FIELD] ?? ''),
+			date: String(h['transaction_date'] ?? ''),
+			status: String(h['status'] ?? ''),
+			items,
+		});
+	}
+	return out;
+}
+
 /** Перемещение между складами (Stock Entry: Material Transfer). Возвращает имя черновика. */
 export async function createTransferDraft(
 	erp: ErpClient,
