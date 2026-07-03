@@ -32,6 +32,13 @@
 | `POST /api/deal/realize` | `dealId, items[{rowId,productId,quantity,rowQuantity,price,name}]` | черновик-партия реализации (цикл см. features.md); ответ `{orderId, orderReused, shipmentId, accountNumber, dupRemoved}`; при ошибке `{ok:false, error, created{...}}` — артефакты для ручной зачистки |
 | `POST /api/deal/supply-request` | `dealId, items[{name,quantity,measure}], storeToName?` | заявка снабжения: append в открытую или создание «Поставка № N_…» (+галка на сделке против робота); ответ `{mode:'created'\|'appended', cardId, title}` |
 
+## Снаб
+
+| Роут | Вход (помимо auth) | Что делает |
+|---|---|---|
+| `POST /api/supply/request` | `dealId, lines[{productId,itemName,qty,note?}]` | кнопка «Заказ» во вкладке сделки: создаёт Material Request ядра по выбранным товарам |
+| `POST /api/supply/orders` | — | рабочее место «Снаб»: все Material Request ядра по сделкам + название сделки из Б24 |
+
 ## Конвенции
 
 - Серверные походы в Б24 — только `B24Client` (throttle, batch, типизированные ошибки).

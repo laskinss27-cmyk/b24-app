@@ -18,7 +18,6 @@ import {
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	createDealReturn,
-	requestSupply,
 	openSupplyCard,
 	createTransfers,
 	listTransfers,
@@ -417,8 +416,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	// строкой-записью, под ней живёт остаток со своим складом, полем кол-ва и кнопкой.
 	const [batchQty, setBatchQty] = useState<Record<string, string>>({});
 	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-	/** id строки, уходящей в снабжение (кнопки блокируются разом). */
-	const [supplying, setSupplying] = useState<string | null>(null);
 	/** id удаляемой строки (блокирует её кнопку на время запроса). */
 	const [removing, setRemoving] = useState<string | null>(null);
 	/** Инлайн-правки строк: rowId → {кол-во, базовая цена, скидка %} (строками, пока редактируется). */
@@ -435,10 +432,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const [busy, setBusy] = useState(false);
 	/** Имена черновиков ядра, ожидающих проведения (между «Реализация» и «Провести»). */
 	const [draftNames, setDraftNames] = useState<string[]>([]);
-	/** Открыта форма заявки в снабжение (по отмеченным товарам). */
-	const [supplyOpen, setSupplyOpen] = useState(false);
-	/** Комментарий снабженцу на позицию: rowId → текст. */
-	const [supplyNotes, setSupplyNotes] = useState<Record<string, string>>({});
 	/** Идёт создание заявки в снабжение. */
 	const [supplyBusy, setSupplyBusy] = useState(false);
 	/** id строки, по которой создаётся перемещение. */
@@ -491,33 +484,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const receivedTransferOf = (r: EnrichedRow): TransferDoc | null =>
 		dealTransfers.find((t) => t.status === 'received' && t.lines.some((l) => l.productId === r.productId)) ?? null;
 
-	// Товар «нет на складах» → заявка снабжения с точным перечнем (создаёт «Поставку № …»
-	// или дополняет открытую заявку этой сделки). Фича снабжения не менялась — только перевешена
-	// на кнопку «+ Заказ» (раньше была заглушкой).
-	const doSupply = async (r: EnrichedRow): Promise<void> => {
-		if (dealId == null || supplying != null || busy) return;
-		setSupplying(r.id);
-		setNotice(null);
-		try {
-			const res = await requestSupply(dealId, [{ name: r.name, quantity: remaining(r), measure: r.measure }]);
-			setNotice({
-				kind: 'ok',
-				text: res.mode === 'created'
-					? `✅ Заявка снабжения «${res.title}» создана: ${r.name.slice(0, 30)} × ${remaining(r)}`
-					: `✅ Дополнил заявку «${res.title}»: ${r.name.slice(0, 30)} × ${remaining(r)}`,
-			});
-			openSupplyCard(res.cardId);
-			await onReload();
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setSupplying(null);
-		}
-	};
-
 	// Удалить строку (товар/работу) из сделки. Подтверждение + перезагрузка таблицы.
 	const doRemove = async (r: EnrichedRow): Promise<void> => {
-		if (dealId == null || removing != null || busy) return;
+		if (dealId == null || removing != null || busy || supplyBusy) return;
 		if (!window.confirm(`Удалить «${r.name}» из сделки?`)) return;
 		setRemoving(r.id);
 		setNotice(null);
@@ -653,7 +622,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						<div className="row-controls">
 							<button
 								className="row-del-x"
-								disabled={busy || removing != null || realizePhase !== 'idle'}
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle'}
 								onClick={() => void doRemove(r)}
 								title="Удалить товар из сделки"
 							>{removing === r.id ? '…' : '✕'}</button>
@@ -661,7 +630,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 								type="checkbox"
 								className="row-check"
 								checked={isSel(r)}
-								disabled={realizePhase !== 'idle' || busy}
+								disabled={realizePhase !== 'idle' || busy || supplyBusy}
 								onChange={() => toggleSel(r)}
 								title={status === 'ready' ? 'Отметить: реализовать (если хватает) или отправить в снабжение' : 'Отметить, чтобы отправить в снабжение (на складе не хватает)'}
 							/>
@@ -726,14 +695,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							// (Активное/полученное перемещение от снабжения показано выше.)
 							return null;
 						})()}
-						{status === 'order' && (
-							<button
-								className="st-badge order"
-								disabled={busy || supplying != null}
-								onClick={() => void doSupply(r)}
-								title="Нет нигде — создать/дополнить заявку снабжения с точным перечнем"
-							>{supplying === r.id ? '…' : '+ Заказ'}</button>
-						)}
+						{status === 'order' && <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказ»">нет нигде</span>}
 					</td>
 				</tr>,
 			);
@@ -763,21 +725,20 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		realizeGroups.get(s)!.push(r);
 	}
 
-	// В снабжение идут ВСЕ отмеченные товары (в т.ч. дефицитные — для них заявка и нужна).
-	const supplyGoods = goods.filter((r) => isSel(r));
+	// В заказ идут ВСЕ отмеченные товары с остатком к отработке. Дальше снабженец сам решит:
+	// закупать или закрывать потребность перемещением.
+	const supplyGoods = goods.filter((r) => isSel(r) && remaining(r) > 0);
 	const doCreateSupply = async (): Promise<void> => {
-		if (dealId == null || !supplyGoods.length || supplyBusy) return;
+		if (dealId == null || !supplyGoods.length || supplyBusy || busy || realizePhase !== 'idle') return;
 		setSupplyBusy(true);
 		setNotice(null);
 		try {
-			const lines = supplyGoods.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r) > 0 ? remaining(r) : r.quantity, note: (supplyNotes[r.id] ?? '').trim() }));
+			const lines = supplyGoods.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: '' }));
 			await createDealSupplyRequest(dealId, lines);
-			setSupplyOpen(false);
-			setSupplyNotes({});
 			setSelected({});
-			setNotice({ kind: 'ok', text: `Заявка в снабжение создана: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')}. Снабженец увидит её в «Снаб».` });
+			setNotice({ kind: 'ok', text: `✅ Заказ создан: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')}. Снабженец увидит его в «Снаб».` });
 		} catch (err) {
-			setNotice({ kind: 'err', text: `Ошибка: ${String(err instanceof Error ? err.message : err)}` });
+			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
 		} finally {
 			setSupplyBusy(false);
 		}
@@ -786,7 +747,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре (по одному на склад);
 	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
 	const doDraft = async (): Promise<void> => {
-		if (dealId == null || busy || !realizeGroups.size) return;
+		if (dealId == null || busy || supplyBusy || !realizeGroups.size) return;
 		const groups: RealizeCoreGroup[] = [...realizeGroups.entries()].map(([sid, rs]) => ({
 			storeTitle: storeName(sid),
 			lines: rs.map((r) => ({ productId: r.productId, qty: qtyOf(r), rate: r.price })),
@@ -806,7 +767,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		}
 	};
 	const doSubmit = async (): Promise<void> => {
-		if (busy || !draftNames.length) return;
+		if (busy || supplyBusy || !draftNames.length) return;
 		setBusy(true);
 		setNotice(null);
 		try {
@@ -864,7 +825,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			<table className="products-table">
 				<thead>
 					<tr>
-						<th className="check-col" title="Отметь строки, которые отгружаем сейчас"></th>
+						<th className="check-col" title="Отметь строки, которые нужно реализовать или заказать"></th>
 						<th>Товар / работа</th>
 						<th>Тип</th>
 						<th className="num">Цена</th>
@@ -925,12 +886,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						))}
 					</div>
 				) : (
-					<span className="hint">Отметь галочками строки, которые отгружаем сейчас — они соберутся в реализацию (один документ на склад).</span>
+					<span className="hint">Отметь галочками строки, а затем выбери действие: «Реализация» спишет со склада, «Заказ» отправит потребность снабжению.</span>
 				)}
 				<div className="realize-actions">
 					<button
 						className={`btn-realize-all${realizePhase === 'drafted' ? ' submit' : ''}`}
-						disabled={dev || busy || (realizePhase === 'idle' ? realizeGroups.size === 0 : draftNames.length === 0)}
+						disabled={dev || busy || supplyBusy || (realizePhase === 'idle' ? realizeGroups.size === 0 : draftNames.length === 0)}
 						title={dev ? 'В dev-режиме недоступно — реализация считается на проде через ядро' : undefined}
 						onClick={() => void (realizePhase === 'idle' ? doDraft() : doSubmit())}
 					>
@@ -939,34 +900,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					{realizePhase === 'drafted' && (
 						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
 					)}
-					{realizePhase === 'idle' && supplyGoods.length > 0 && !supplyOpen && (
-						<button className="btn-cancel-draft" disabled={busy} title="Отправить отмеченные товары в снабжение (закупка или перемещение)" onClick={() => setSupplyOpen(true)}>В снабжение ({supplyGoods.length})</button>
+					{realizePhase === 'idle' && supplyGoods.length > 0 && (
+						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Создать заказ для снабжения по отмеченным товарам" onClick={() => void doCreateSupply()}>{supplyBusy ? '…' : `Заказ (${supplyGoods.length})`}</button>
 					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>
-
-			{supplyOpen && supplyGoods.length > 0 && (
-				<div className="realize-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
-					<b>Заявка в снабжение — {supplyGoods.length} {plural(supplyGoods.length, 'позиция', 'позиции', 'позиций')}. Снабженец сам решит: закупить или привезти с другого склада.</b>
-					<table className="products-table" style={{ width: '100%' }}>
-						<thead><tr><th>Товар</th><th className="num">Нужно</th><th>Комментарий снабженцу</th></tr></thead>
-						<tbody>
-							{supplyGoods.map((r) => (
-								<tr key={r.id}>
-									<td>{r.name}</td>
-									<td className="num">{remaining(r) > 0 ? remaining(r) : r.quantity} {r.measure}</td>
-									<td><input type="text" className="cell-inp" style={{ width: '100%' }} placeholder="напр.: новый, в плёнке — распакованный не вези" value={supplyNotes[r.id] ?? ''} onChange={(e) => setSupplyNotes((m) => ({ ...m, [r.id]: e.target.value }))} /></td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-					<div className="realize-actions">
-						<button className="btn-realize-all" disabled={dev || supplyBusy} onClick={() => void doCreateSupply()}>{supplyBusy ? '…' : 'Создать заявку'}</button>
-						<button className="btn-cancel-draft" disabled={supplyBusy} onClick={() => setSupplyOpen(false)}>Отмена</button>
-					</div>
-				</div>
-			)}
 
 			{splitRow && dealId != null && (() => {
 				const dest = storeOf(splitRow);

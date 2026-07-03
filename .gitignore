@@ -11,6 +11,8 @@ build/
 .vscode/
 *.tsbuildinfo
 coverage/
+.docker-codex/
+.npm-cache/
 
 # секреты разведки — webhook URL, OAuth credentials и т.п.
 .secrets/
