@@ -134,7 +134,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	}));
 	// Товары сделки = строки ПЛАНА (ядро), приведённые к формату строки таблицы — чтобы весь движок
 	// реализации (чекбоксы/склад/статусы/партии/«Реализовать») работал на них без изменений.
-	const planRows: EnrichedRow[] = plan.map((p) => ({
+	const planRowsFromCore: EnrichedRow[] = plan.map((p) => ({
 		id: `plan-${p.productId}`,
 		productId: p.productId,
 		name: p.itemName || `#${p.productId}`,
@@ -146,6 +146,12 @@ async function loadAll(dealId: number): Promise<TableData> {
 		stocks: mkStocks(p.productId),
 		purchasingPrice: enrich[p.productId]?.purchasingPrice ?? null,
 	}));
+	// Старые/ручные сделки могут содержать реальные товары только в строках Б24, без Sales Order
+	// в ядре. Не прячем их: показываем как товарные строки, пока пользователь не перенесёт/правит
+	// состав через наше окно. Служебная услуга «Выезд инженера» сюда не попадёт: это TYPE 7.
+	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
+	const b24OnlyGoods = enriched.filter((r) => !isWorkRow(r.type) && r.productId > 0 && !planIdsSet.has(r.productId));
+	const planRows = [...planRowsFromCore, ...b24OnlyGoods];
 	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
 }
 
