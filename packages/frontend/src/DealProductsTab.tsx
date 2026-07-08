@@ -796,14 +796,22 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 
 	return (
 		<div className="deal-products-tab">
-			<header>
-				<h1>Товары сделки</h1>
-				<p className="subtitle">Сделка #{dealId ?? '—'} · {rows.length} {plural(rows.length, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
+			<header className="deal-head">
+				<div>
+					<h1>Товары сделки</h1>
+					<p className="subtitle">Сделка #{dealId ?? '—'} · {rows.length} {plural(rows.length, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
+				</div>
+				<div className="deal-head-stats">
+					<div><span>Товары</span><b>{goods.length}</b></div>
+					<div><span>Работы</span><b>{realWorks.length}</b></div>
+					<div><span>К реализации</span><b>{readyGoods.length}</b></div>
+					<div><span>Сумма</span><b>{rub(sumGoods + sumRealWorks)}</b></div>
+				</div>
 			</header>
 
 			{dev
-				? <div className="dev-banner">dev-режим: данные мок (BX24 недоступен локально). В проде — реальные из Битрикса.</div>
-				: <div className="beta-banner">⚙️ Бета-доступ: эту таблицу пока видишь только ты. Остальные работают в стандартной вкладке «Товары».</div>}
+				? <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>
+				: <div className="beta-banner">Бета-доступ: эту таблицу пока видишь только ты. Остальные работают в стандартной вкладке «Товары».</div>}
 
 			{data.payment && data.payment.total > 0 && (() => {
 				const { total, paid } = data.payment;
@@ -811,23 +819,25 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				const full = paid >= total - 0.01;
 				const cls = full ? 'pay-full' : paid > 0 ? 'pay-partial' : 'pay-none';
 				const text = full
-					? `✅ Оплачено 100% (${rub(total)})`
+					? `Оплачено 100% (${rub(total)})`
 					: paid > 0
-						? `🟡 Частичная оплата: оплачено ${rub(paid)} · остаток ${rub(rem)}`
-						: `⚪ Не оплачено · к оплате ${rub(total)}`;
+						? `Частичная оплата: оплачено ${rub(paid)} · остаток ${rub(rem)}`
+						: `Не оплачено · к оплате ${rub(total)}`;
 				return <div className={`deal-pay ${cls}`}>{text}</div>;
 			})()}
 
 			<div className="deal-addbar">
-				<button className="btn-primary" onClick={onAdd}>➕ Добавить товар</button>
-				<button className="btn-secondary" onClick={onKp}>📄 КП</button>
+				<div className="deal-actions">
+				<button className="btn-primary" onClick={onAdd}>Добавить товар</button>
+				<button className="btn-secondary" onClick={onKp}>КП</button>
 				<button
 					className="btn-secondary"
 					disabled={!canReturn || dev}
 					onClick={() => setShowReturn(true)}
 					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Возврат оформляет снабжение'}
-				>↩️ Возврат</button>
-				<span className="hint">«Добавить» — каталог-пикер; «КП» — коммерческое предложение из сделки. Склад реализации выбирается на самой строке товара.</span>
+				>Возврат</button>
+				</div>
+				<span className="hint">Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.</span>
 			</div>
 
 			<div className="table-wrap">
@@ -849,9 +859,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				<tbody>
 					{/* ТОВАРЫ = строки плана из ядра, через штатный движок (чекбоксы/склад/статусы/партии/
 					    реализация). «Выезд инженера» (Б24) скрыт; реальные работы — ниже. */}
-					{goods.length > 0 && groupBand('🧰 Товары', goods, sumGoods)}
+					{goods.length > 0 && groupBand('Товары', goods, sumGoods)}
 					{goods.flatMap(renderGoodsRows)}
-					{realWorks.length > 0 && groupBand('🔧 Работы и услуги', realWorks, sumRealWorks)}
+					{realWorks.length > 0 && groupBand('Работы и услуги', realWorks, sumRealWorks)}
 					{realWorks.map(renderWorkRow)}
 				</tbody>
 			</table>
@@ -891,7 +901,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					<div className="realize-plan">
 						<b>К реализации — {realizeGroups.size} {plural(realizeGroups.size, 'документ', 'документа', 'документов')} (по складам):</b>
 						{[...realizeGroups.entries()].map(([sid, rs]) => (
-							<span key={sid} className="plan-group">📦 {storeName(sid)}: {rs.map((r) => `${r.name.slice(0, 22)} ×${qtyOf(r)}`).join(' · ')}</span>
+							<span key={sid} className="plan-group">{storeName(sid)}: {rs.map((r) => `${r.name.slice(0, 22)} ×${qtyOf(r)}`).join(' · ')}</span>
 						))}
 					</div>
 				) : (

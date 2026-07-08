@@ -1904,6 +1904,289 @@ html, body, #root { height: 100%; }
 .pay-partial { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
 .pay-none { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
 
+/* ── Сделка: строгая рабочая вкладка товаров ─────────────────────────────── */
+.deal-products-tab {
+	max-width: none;
+	min-height: 100vh;
+	margin: 0;
+	padding: 24px 28px 36px;
+	background: #f5f6f8;
+	color: #111827;
+}
+.deal-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 24px;
+	margin-bottom: 16px;
+}
+.deal-products-tab header h1 {
+	margin: 0 0 6px;
+	font-size: 26px;
+	line-height: 1.15;
+	letter-spacing: 0;
+}
+.deal-products-tab .subtitle {
+	margin: 0;
+	color: #6b7280;
+	font-size: 13px;
+}
+.deal-head-stats {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(96px, auto));
+	gap: 1px;
+	border: 1px solid #d9dee7;
+	border-radius: 8px;
+	overflow: hidden;
+	background: #d9dee7;
+}
+.deal-head-stats > div {
+	min-width: 96px;
+	padding: 12px 14px;
+	background: #fff;
+}
+.deal-head-stats span {
+	display: block;
+	margin-bottom: 5px;
+	color: #6b7280;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: .04em;
+}
+.deal-head-stats b {
+	font-size: 15px;
+	white-space: nowrap;
+}
+.beta-banner,
+.dev-banner,
+.deal-pay {
+	display: block;
+	margin: 0 0 12px;
+	border-radius: 8px;
+	padding: 10px 14px;
+	font-size: 13px;
+	font-weight: 600;
+}
+.beta-banner {
+	background: #fff7ed;
+	border-color: #fed7aa;
+	color: #9a3412;
+}
+.dev-banner {
+	background: #eef2ff;
+	border-color: #c7d2fe;
+	color: #3730a3;
+}
+.deal-addbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin: 0 0 14px;
+	padding: 14px 16px;
+	background: #fff;
+	border: 1px solid #d9dee7;
+	border-radius: 8px;
+}
+.deal-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.deal-addbar .hint {
+	max-width: 520px;
+	color: #6b7280;
+	font-size: 12px;
+	line-height: 1.45;
+	text-align: right;
+}
+.deal-products-tab .btn-primary,
+.deal-products-tab .btn-secondary {
+	border-radius: 7px;
+	padding: 9px 13px;
+	font-size: 13px;
+	font-weight: 700;
+	cursor: pointer;
+}
+.deal-products-tab .btn-primary {
+	background: #1f6feb;
+	color: #fff;
+	border: 1px solid #1f6feb;
+}
+.deal-products-tab .btn-secondary {
+	background: #fff;
+	color: #374151;
+	border: 1px solid #cfd6e3;
+}
+.deal-products-tab .btn-primary:hover:not(:disabled) {
+	background: #195fc8;
+}
+.deal-products-tab .btn-secondary:hover:not(:disabled) {
+	background: #f8fafc;
+	border-color: #aeb8c7;
+}
+.deal-products-tab .btn-primary:disabled,
+.deal-products-tab .btn-secondary:disabled {
+	opacity: .45;
+	cursor: not-allowed;
+}
+.deal-products-tab .table-wrap {
+	background: #fff;
+	border: 1px solid #d9dee7;
+	border-radius: 8px;
+	overflow: auto;
+}
+.deal-products-tab .products-table {
+	min-width: 1120px;
+	border-collapse: separate;
+	border-spacing: 0;
+	font-size: 13px;
+}
+.deal-products-tab .products-table th,
+.deal-products-tab .products-table td {
+	padding: 10px 12px;
+	border-bottom: 1px solid #e5e7eb;
+}
+.deal-products-tab .products-table th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: #fafbfc;
+	color: #6b7280;
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: .04em;
+}
+.deal-products-tab .products-table tbody tr:hover {
+	background: #f8fafc;
+}
+.deal-products-tab .group-band td {
+	background: #eef2f7;
+	color: #374151;
+	font-weight: 800;
+	text-transform: uppercase;
+	font-size: 11px;
+	letter-spacing: .04em;
+}
+.deal-products-tab .group-band-sum {
+	color: #111827;
+}
+.deal-products-tab .type-badge {
+	border-radius: 999px;
+	padding: 3px 9px;
+	font-size: 11px;
+}
+.deal-products-tab .type-badge.goods {
+	background: #eef2ff;
+	color: #3730a3;
+}
+.deal-products-tab .type-badge.work {
+	background: #f1f5f9;
+	color: #475569;
+}
+.deal-products-tab .cell-inp,
+.deal-products-tab .products-table .qty-input,
+.deal-products-tab .store-select {
+	border: 1px solid #cfd6e3;
+	border-radius: 6px;
+	background: #fff;
+	color: #111827;
+}
+.deal-products-tab .cell-inp:focus,
+.deal-products-tab .products-table .qty-input:focus,
+.deal-products-tab .store-select:focus {
+	outline: 2px solid rgba(31, 111, 235, .16);
+	border-color: #1f6feb;
+}
+.deal-products-tab .row-del-x {
+	border-color: #f0c7c7;
+	border-radius: 6px;
+}
+.deal-products-tab .row-check {
+	accent-color: #1f6feb;
+}
+.deal-products-tab .stock-chip {
+	border-radius: 6px;
+	background: #f1f5f9;
+	border-color: #e2e8f0;
+}
+.deal-products-tab .stock-chip.sel {
+	background: #ecfdf5;
+	color: #047857;
+	box-shadow: inset 0 0 0 1px #a7f3d0;
+}
+.deal-products-tab .st-badge {
+	border-radius: 999px;
+	padding: 4px 10px;
+	font-size: 11px;
+}
+.deal-products-tab .st-badge.ready {
+	background: #ecfdf5;
+	border-color: #bbf7d0;
+	color: #047857;
+}
+.deal-products-tab .st-badge.order {
+	background: #eef2ff;
+	border-color: #c7d2fe;
+	color: #3730a3;
+}
+.deal-products-tab .part-row td {
+	background: #fbfcfe;
+}
+.deal-products-tab .shipment-chip {
+	border-radius: 999px;
+	background: #f1f5f9;
+	border-color: #d9dee7;
+	color: #374151;
+}
+.deal-products-tab .totals {
+	margin-top: 16px;
+	margin-left: auto;
+	background: #fff;
+	border-color: #d9dee7;
+	border-radius: 8px;
+}
+.deal-products-tab .realize-bar {
+	margin-top: 14px;
+	padding: 14px 16px;
+	background: #fff;
+	border: 1px solid #d9dee7;
+	border-radius: 8px;
+	justify-content: space-between;
+}
+.deal-products-tab .realize-plan b {
+	color: #111827;
+}
+.deal-products-tab .realize-actions {
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+.deal-products-tab .realize-bar button,
+.deal-products-tab .btn-realize {
+	border-radius: 7px;
+}
+
+@media (max-width: 980px) {
+	.deal-products-tab {
+		padding: 18px 14px 28px;
+	}
+	.deal-head,
+	.deal-addbar,
+	.deal-products-tab .realize-bar {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	.deal-head-stats {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.deal-addbar .hint {
+		max-width: none;
+		text-align: left;
+	}
+}
+
 /* На экране — визуально разделяем экземпляры (в печати они на разных страницах). */
 .blank-page + .blank-page { border-top: 2px dashed #d1d5db; margin-top: 28px; padding-top: 20px; }
 
