@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="950" viewBox="0 0 1440 950">
+  <defs>
+    <style>
+      .bg { fill: #f5f6f8; }
+      .panel { fill: #ffffff; stroke: #d9dee7; stroke-width: 1; }
+      .panel-soft { fill: #fafbfc; stroke: #d9dee7; stroke-width: 1; }
+      .rail { fill: #111827; }
+      .rail-muted { fill: #8b95a7; font: 12px Arial, sans-serif; }
+      .rail-text { fill: #e5e7eb; font: 14px Arial, sans-serif; }
+      .rail-active { fill: #24324a; }
+      .title { fill: #111827; font: 700 26px Arial, sans-serif; }
+      .h2 { fill: #111827; font: 700 16px Arial, sans-serif; }
+      .h3 { fill: #111827; font: 700 14px Arial, sans-serif; }
+      .text { fill: #374151; font: 13px Arial, sans-serif; }
+      .small { fill: #6b7280; font: 12px Arial, sans-serif; }
+      .tiny { fill: #6b7280; font: 11px Arial, sans-serif; }
+      .head { fill: #6b7280; font: 700 11px Arial, sans-serif; letter-spacing: .4px; }
+      .num { fill: #111827; font: 700 24px Arial, sans-serif; }
+      .btn { fill: #1f6feb; }
+      .btn-text { fill: #fff; font: 700 13px Arial, sans-serif; }
+      .btn-ghost { fill: #fff; stroke: #cfd6e3; }
+      .chip { fill: #eef2ff; stroke: #c7d2fe; }
+      .chip-text { fill: #3730a3; font: 700 11px Arial, sans-serif; }
+      .warn { fill: #fff7ed; stroke: #fed7aa; }
+      .warn-text { fill: #9a3412; font: 700 11px Arial, sans-serif; }
+      .ok { fill: #ecfdf5; stroke: #bbf7d0; }
+      .ok-text { fill: #047857; font: 700 11px Arial, sans-serif; }
+      .bad { fill: #fef2f2; stroke: #fecaca; }
+      .bad-text { fill: #b91c1c; font: 700 11px Arial, sans-serif; }
+      .line { stroke: #e5e7eb; stroke-width: 1; }
+      .input { fill: #fff; stroke: #cfd6e3; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1440" height="950"/>
+
+  <!-- Left rail -->
+  <rect class="rail" x="0" y="0" width="248" height="950"/>
+  <rect x="24" y="28" width="36" height="36" rx="6" fill="#1f6feb"/>
+  <text x="74" y="43" class="rail-text" style="font-weight:700;font-size:17px">Снаб</text>
+  <text x="74" y="60" class="rail-muted">рабочее место</text>
+
+  <text x="24" y="110" class="rail-muted">ОПЕРАЦИИ</text>
+  <rect class="rail-active" x="14" y="126" width="220" height="38" rx="6"/>
+  <text x="30" y="150" class="rail-text" style="font-weight:700">Заявки</text>
+  <text x="30" y="190" class="rail-text">Логистика</text>
+  <text x="30" y="228" class="rail-text">Закупки</text>
+  <text x="30" y="266" class="rail-text">Согласование оплат</text>
+
+  <text x="24" y="326" class="rail-muted">СКЛАД</text>
+  <text x="30" y="366" class="rail-text">Документы склада</text>
+  <text x="30" y="404" class="rail-text">Остатки</text>
+  <text x="30" y="442" class="rail-text">Движение товара</text>
+
+  <text x="24" y="502" class="rail-muted">АНАЛИТИКА</text>
+  <text x="30" y="542" class="rail-text">Отчеты</text>
+
+  <rect x="24" y="850" width="200" height="58" rx="8" fill="#172033" stroke="#2c3a55"/>
+  <text x="38" y="875" class="rail-muted">Источник данных</text>
+  <text x="38" y="894" class="rail-text" style="font-size:13px">ERPNext / Material Request</text>
+
+  <!-- Header -->
+  <text x="280" y="50" class="title">Заявки снабжения</text>
+  <text x="280" y="74" class="small">Дефицит из сделок, распределение по источникам, закупка и перемещения</text>
+
+  <rect class="input" x="1028" y="26" width="180" height="36" rx="6"/>
+  <text x="1044" y="49" class="small">Период: 7 дней</text>
+  <rect class="btn" x="1220" y="26" width="160" height="36" rx="6"/>
+  <text x="1244" y="49" class="btn-text">Создать вручную</text>
+
+  <!-- KPI row -->
+  <rect class="panel" x="280" y="104" width="250" height="88" rx="8"/>
+  <text x="300" y="134" class="small">Активные заявки</text>
+  <text x="300" y="168" class="num">18</text>
+  <text x="362" y="168" class="small">+4 сегодня</text>
+
+  <rect class="panel" x="548" y="104" width="250" height="88" rx="8"/>
+  <text x="568" y="134" class="small">Позиции без остатка</text>
+  <text x="568" y="168" class="num">37</text>
+  <text x="630" y="168" class="small">требуют закупки</text>
+
+  <rect class="panel" x="816" y="104" width="250" height="88" rx="8"/>
+  <text x="836" y="134" class="small">Ожидают решения</text>
+  <text x="836" y="168" class="num">9</text>
+  <text x="884" y="168" class="small">старше 2 дней</text>
+
+  <rect class="panel" x="1084" y="104" width="296" height="88" rx="8"/>
+  <text x="1104" y="134" class="small">Сегодня в работу</text>
+  <text x="1104" y="168" class="num">12</text>
+  <text x="1168" y="168" class="small">перемещений и закупок</text>
+
+  <!-- Filters -->
+  <rect class="panel" x="280" y="214" width="1100" height="64" rx="8"/>
+  <rect class="input" x="300" y="230" width="300" height="34" rx="6"/>
+  <text x="318" y="252" class="small">Поиск по сделке, товару, номеру</text>
+  <rect class="input" x="616" y="230" width="150" height="34" rx="6"/>
+  <text x="634" y="252" class="small">Статус: все</text>
+  <rect class="input" x="780" y="230" width="170" height="34" rx="6"/>
+  <text x="798" y="252" class="small">Источник: любой</text>
+  <rect class="input" x="964" y="230" width="170" height="34" rx="6"/>
+  <text x="982" y="252" class="small">Склад: любой</text>
+  <rect class="btn-ghost" x="1152" y="230" width="104" height="34" rx="6"/>
+  <text x="1176" y="252" class="text" style="font-weight:700">Сбросить</text>
+  <rect class="btn" x="1268" y="230" width="92" height="34" rx="6"/>
+  <text x="1292" y="252" class="btn-text">Найти</text>
+
+  <!-- Main content left -->
+  <rect class="panel" x="280" y="300" width="760" height="590" rx="8"/>
+  <text x="300" y="330" class="h2">Очередь заявок</text>
+  <text x="930" y="330" class="small">обновлено 11:24</text>
+  <line class="line" x1="280" y1="350" x2="1040" y2="350"/>
+
+  <text x="300" y="376" class="head">ЗАЯВКА</text>
+  <text x="490" y="376" class="head">СДЕЛКА</text>
+  <text x="698" y="376" class="head">ПОЗИЦИИ</text>
+  <text x="806" y="376" class="head">СТАТУС</text>
+  <text x="928" y="376" class="head">СРОК</text>
+
+  <rect x="292" y="392" width="736" height="70" rx="6" fill="#f8fafc" stroke="#bfdbfe"/>
+  <text x="300" y="418" class="h3">MR-2026-0142</text>
+  <text x="300" y="440" class="small">создано сегодня, 10:52</text>
+  <text x="490" y="418" class="text" style="font-weight:700">Монтаж видеонаблюдения</text>
+  <text x="490" y="440" class="small">сделка #37004, клиент: Литейный 12</text>
+  <text x="698" y="428" class="text">5 строк</text>
+  <rect class="warn" x="806" y="406" width="82" height="24" rx="12"/>
+  <text x="824" y="423" class="warn-text">новая</text>
+  <text x="928" y="428" class="text">сегодня</text>
+
+  <line class="line" x1="292" y1="478" x2="1028" y2="478"/>
+  <text x="300" y="506" class="h3">MR-2026-0141</text>
+  <text x="300" y="528" class="small">вчера, 18:12</text>
+  <text x="490" y="506" class="text" style="font-weight:700">СКУД офис</text>
+  <text x="490" y="528" class="small">сделка #36992, клиент: Северный</text>
+  <text x="698" y="516" class="text">3 строки</text>
+  <rect class="chip" x="806" y="494" width="110" height="24" rx="12"/>
+  <text x="824" y="511" class="chip-text">в работе</text>
+  <text x="928" y="516" class="text">завтра</text>
+
+  <line class="line" x1="292" y1="552" x2="1028" y2="552"/>
+  <text x="300" y="580" class="h3">MR-2026-0140</text>
+  <text x="300" y="602" class="small">вчера, 15:31</text>
+  <text x="490" y="580" class="text" style="font-weight:700">Камеры ТТ Богатырский</text>
+  <text x="490" y="602" class="small">сделка #36922, клиент: розница</text>
+  <text x="698" y="590" class="text">8 строк</text>
+  <rect class="bad" x="806" y="568" width="92" height="24" rx="12"/>
+  <text x="824" y="585" class="bad-text">дефицит</text>
+  <text x="928" y="590" class="text">2 дня</text>
+
+  <line class="line" x1="292" y1="626" x2="1028" y2="626"/>
+  <text x="300" y="654" class="h3">MR-2026-0139</text>
+  <text x="300" y="676" class="small">05.07.2026</text>
+  <text x="490" y="654" class="text" style="font-weight:700">Домофония Парнас</text>
+  <text x="490" y="676" class="small">сделка #36881, клиент: УК Сфера</text>
+  <text x="698" y="664" class="text">2 строки</text>
+  <rect class="ok" x="806" y="642" width="104" height="24" rx="12"/>
+  <text x="824" y="659" class="ok-text">закрыта</text>
+  <text x="928" y="664" class="text">готово</text>
+
+  <!-- Detail panel right -->
+  <rect class="panel" x="1060" y="300" width="320" height="590" rx="8"/>
+  <text x="1082" y="330" class="h2">MR-2026-0142</text>
+  <rect class="warn" x="1268" y="310" width="82" height="24" rx="12"/>
+  <text x="1286" y="327" class="warn-text">новая</text>
+  <text x="1082" y="356" class="small">Монтаж видеонаблюдения · сделка #37004</text>
+  <line class="line" x1="1060" y1="376" x2="1380" y2="376"/>
+
+  <text x="1082" y="406" class="head">ПОЗИЦИИ</text>
+  <rect class="panel-soft" x="1082" y="422" width="276" height="82" rx="6"/>
+  <text x="1098" y="448" class="text" style="font-weight:700">IP-камера 4 Мп</text>
+  <text x="1098" y="470" class="small">нужно 6 · остатки: Парнас 2, офис 1</text>
+  <text x="1098" y="490" class="tiny">решение: 3 переместить, 3 закупить</text>
+
+  <rect class="panel-soft" x="1082" y="514" width="276" height="82" rx="6"/>
+  <text x="1098" y="540" class="text" style="font-weight:700">Регистратор 8 каналов</text>
+  <text x="1098" y="562" class="small">нужно 1 · остатки: офис 4</text>
+  <text x="1098" y="582" class="tiny">решение: перемещение из офиса</text>
+
+  <rect class="panel-soft" x="1082" y="606" width="276" height="82" rx="6"/>
+  <text x="1098" y="632" class="text" style="font-weight:700">Блок питания 12В 5А</text>
+  <text x="1098" y="654" class="small">нужно 4 · остатки: нет</text>
+  <text x="1098" y="674" class="tiny">решение: закупка</text>
+
+  <text x="1082" y="726" class="head">БЫСТРЫЙ ПРОСМОТР</text>
+  <rect class="panel-soft" x="1082" y="744" width="276" height="102" rx="6"/>
+  <text x="1098" y="772" class="small">Правая панель только показывает состав</text>
+  <text x="1098" y="794" class="small">и текущее состояние заявки.</text>
+  <text x="1098" y="824" class="text" style="font-weight:700">Работа с источниками открывается</text>
+  <text x="1098" y="844" class="text" style="font-weight:700">кликом по заявке в списке.</text>
+
+  <!-- Footer note -->
+  <text x="280" y="926" class="small">Стиль: меньше эмодзи, плотнее таблицы, спокойные статусы, действия только там, где они нужны.</text>
+</svg>

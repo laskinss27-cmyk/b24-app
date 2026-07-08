@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="950" viewBox="0 0 1440 950">
+  <defs>
+    <style>
+      .bg { fill: #f5f6f8; }
+      .panel { fill: #ffffff; stroke: #d9dee7; stroke-width: 1; }
+      .soft { fill: #fafbfc; stroke: #d9dee7; stroke-width: 1; }
+      .title { fill: #111827; font: 700 25px Arial, sans-serif; }
+      .h2 { fill: #111827; font: 700 16px Arial, sans-serif; }
+      .h3 { fill: #111827; font: 700 14px Arial, sans-serif; }
+      .text { fill: #374151; font: 13px Arial, sans-serif; }
+      .small { fill: #6b7280; font: 12px Arial, sans-serif; }
+      .tiny { fill: #6b7280; font: 11px Arial, sans-serif; }
+      .head { fill: #6b7280; font: 700 11px Arial, sans-serif; letter-spacing: .4px; }
+      .line { stroke: #e5e7eb; stroke-width: 1; }
+      .input { fill: #fff; stroke: #cfd6e3; }
+      .btn { fill: #1f6feb; }
+      .btnText { fill: #fff; font: 700 13px Arial, sans-serif; }
+      .ghost { fill: #fff; stroke: #cfd6e3; }
+      .chip { fill: #eef2ff; stroke: #c7d2fe; }
+      .chipText { fill: #3730a3; font: 700 11px Arial, sans-serif; }
+      .ok { fill: #ecfdf5; stroke: #bbf7d0; }
+      .okText { fill: #047857; font: 700 11px Arial, sans-serif; }
+      .warn { fill: #fff7ed; stroke: #fed7aa; }
+      .warnText { fill: #9a3412; font: 700 11px Arial, sans-serif; }
+      .bad { fill: #fef2f2; stroke: #fecaca; }
+      .badText { fill: #b91c1c; font: 700 11px Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1440" height="950"/>
+
+  <!-- Header -->
+  <text x="48" y="52" class="small">Сделка #37004</text>
+  <text x="48" y="84" class="title">Товары сделки</text>
+  <text x="48" y="108" class="small">Состав КП, остатки ядра, реализация, заявки снабжения и печатная форма</text>
+
+  <rect class="ok" x="1030" y="48" width="178" height="28" rx="14"/>
+  <text x="1054" y="67" class="okText">оплачено 100%</text>
+  <rect class="chip" x="1220" y="48" width="150" height="28" rx="14"/>
+  <text x="1242" y="67" class="chipText">канарейка</text>
+
+  <!-- Action bar -->
+  <rect class="panel" x="48" y="132" width="1344" height="70" rx="8"/>
+  <rect class="btn" x="72" y="150" width="150" height="34" rx="6"/>
+  <text x="96" y="172" class="btnText">Добавить товар</text>
+  <rect class="ghost" x="234" y="150" width="94" height="34" rx="6"/>
+  <text x="260" y="172" class="text" style="font-weight:700">КП</text>
+  <rect class="ghost" x="340" y="150" width="116" height="34" rx="6"/>
+  <text x="366" y="172" class="text" style="font-weight:700">Возврат</text>
+  <rect class="input" x="916" y="150" width="210" height="34" rx="6"/>
+  <text x="936" y="172" class="small">Фильтр: все строки</text>
+  <rect class="input" x="1140" y="150" width="220" height="34" rx="6"/>
+  <text x="1160" y="172" class="small">Поиск в сделке</text>
+
+  <!-- KPI row -->
+  <rect class="panel" x="48" y="226" width="310" height="82" rx="8"/>
+  <text x="70" y="256" class="small">Итого по сделке</text>
+  <text x="70" y="288" class="title" style="font-size:24px">103 500 ₽</text>
+  <text x="206" y="288" class="small">товары + работы</text>
+
+  <rect class="panel" x="374" y="226" width="310" height="82" rx="8"/>
+  <text x="396" y="256" class="small">Прибыль по товарам</text>
+  <text x="396" y="288" class="title" style="font-size:24px">28 400 ₽</text>
+  <text x="532" y="288" class="small">по закупке ядра</text>
+
+  <rect class="panel" x="700" y="226" width="310" height="82" rx="8"/>
+  <text x="722" y="256" class="small">К отгрузке</text>
+  <text x="722" y="288" class="title" style="font-size:24px">7 позиций</text>
+  <text x="848" y="288" class="small">2 готовы, 3 ждут</text>
+
+  <rect class="panel" x="1026" y="226" width="366" height="82" rx="8"/>
+  <text x="1048" y="256" class="small">Снабжение</text>
+  <text x="1048" y="288" class="title" style="font-size:24px">2 заявки</text>
+  <text x="1160" y="288" class="small">1 активная, 1 закрыта</text>
+
+  <!-- Table -->
+  <rect class="panel" x="48" y="332" width="1344" height="440" rx="8"/>
+  <text x="72" y="362" class="h2">Состав сделки</text>
+  <text x="72" y="384" class="small">Редактирование в строке. Склад реализации выбирается только для отгрузки, снабжение выбирает источник отдельно.</text>
+  <line class="line" x1="48" y1="404" x2="1392" y2="404"/>
+
+  <text x="72" y="430" class="head"> </text>
+  <text x="108" y="430" class="head">ПОЗИЦИЯ</text>
+  <text x="450" y="430" class="head">ЦЕНА</text>
+  <text x="548" y="430" class="head">СКИДКА</text>
+  <text x="642" y="430" class="head">КОЛ-ВО</text>
+  <text x="732" y="430" class="head">ОТГРУЗИТЬ</text>
+  <text x="848" y="430" class="head">ОСТАТКИ</text>
+  <text x="1056" y="430" class="head">СКЛАД / СТАТУС</text>
+  <text x="1248" y="430" class="head">СУММА</text>
+
+  <!-- Goods row 1 -->
+  <rect x="60" y="446" width="1320" height="58" rx="6" fill="#f8fafc" stroke="#d9dee7"/>
+  <rect class="input" x="76" y="462" width="16" height="16" rx="3"/>
+  <text x="108" y="470" class="h3">IP-камера 4 Мп CTV-IPB2028</text>
+  <text x="108" y="490" class="tiny">артикул: CTV-IPB2028 · модель: IPB2028</text>
+  <rect class="input" x="450" y="458" width="74" height="30" rx="5"/>
+  <text x="466" y="478" class="text">4 900</text>
+  <rect class="input" x="548" y="458" width="58" height="30" rx="5"/>
+  <text x="568" y="478" class="text">0%</text>
+  <rect class="input" x="642" y="458" width="58" height="30" rx="5"/>
+  <text x="664" y="478" class="text">6</text>
+  <rect class="input" x="732" y="458" width="58" height="30" rx="5"/>
+  <text x="754" y="478" class="text">3</text>
+  <text x="848" y="470" class="text">есть 3 на 2 складах</text>
+  <text x="848" y="490" class="tiny">Офис 1 · Парнас 2</text>
+  <rect class="warn" x="1056" y="456" width="128" height="24" rx="12"/>
+  <text x="1076" y="473" class="warnText">частично</text>
+  <text x="1056" y="494" class="tiny">остальное в снабжение</text>
+  <text x="1248" y="478" class="text" style="font-weight:700">29 400 ₽</text>
+
+  <!-- Goods row 2 -->
+  <line class="line" x1="60" y1="522" x2="1380" y2="522"/>
+  <rect class="input" x="76" y="542" width="16" height="16" rx="3"/>
+  <text x="108" y="550" class="h3">Регистратор 8 каналов</text>
+  <text x="108" y="570" class="tiny">товар ядра · закупка известна</text>
+  <rect class="input" x="450" y="538" width="74" height="30" rx="5"/>
+  <text x="466" y="558" class="text">12 800</text>
+  <rect class="input" x="548" y="538" width="58" height="30" rx="5"/>
+  <text x="568" y="558" class="text">5%</text>
+  <rect class="input" x="642" y="538" width="58" height="30" rx="5"/>
+  <text x="664" y="558" class="text">1</text>
+  <rect class="input" x="732" y="538" width="58" height="30" rx="5"/>
+  <text x="754" y="558" class="text">1</text>
+  <text x="848" y="550" class="text">есть 4 на 1 складе</text>
+  <text x="848" y="570" class="tiny">Офис 4</text>
+  <rect class="ok" x="1056" y="536" width="96" height="24" rx="12"/>
+  <text x="1076" y="553" class="okText">готов</text>
+  <text x="1056" y="574" class="tiny">Офис</text>
+  <text x="1248" y="558" class="text" style="font-weight:700">12 160 ₽</text>
+
+  <!-- Goods row 3 -->
+  <line class="line" x1="60" y1="602" x2="1380" y2="602"/>
+  <rect class="input" x="76" y="622" width="16" height="16" rx="3"/>
+  <text x="108" y="630" class="h3">Блок питания 12В 5А</text>
+  <text x="108" y="650" class="tiny">нет на складах · нужен заказ</text>
+  <rect class="input" x="450" y="618" width="74" height="30" rx="5"/>
+  <text x="466" y="638" class="text">850</text>
+  <rect class="input" x="548" y="618" width="58" height="30" rx="5"/>
+  <text x="568" y="638" class="text">0%</text>
+  <rect class="input" x="642" y="618" width="58" height="30" rx="5"/>
+  <text x="664" y="638" class="text">4</text>
+  <rect class="input" x="732" y="618" width="58" height="30" rx="5"/>
+  <text x="754" y="638" class="text">0</text>
+  <text x="848" y="630" class="badText">нет на складах</text>
+  <text x="848" y="650" class="tiny">последний приход 28.06</text>
+  <rect class="bad" x="1056" y="616" width="112" height="24" rx="12"/>
+  <text x="1076" y="633" class="badText">дефицит</text>
+  <text x="1056" y="654" class="tiny">заказать</text>
+  <text x="1248" y="638" class="text" style="font-weight:700">3 400 ₽</text>
+
+  <!-- Work row -->
+  <line class="line" x1="60" y1="682" x2="1380" y2="682"/>
+  <text x="108" y="710" class="h3">Монтаж и настройка камер</text>
+  <text x="108" y="730" class="tiny">работа / услуга</text>
+  <rect class="input" x="450" y="698" width="74" height="30" rx="5"/>
+  <text x="466" y="718" class="text">1 800</text>
+  <rect class="input" x="548" y="698" width="58" height="30" rx="5"/>
+  <text x="568" y="718" class="text">0%</text>
+  <rect class="input" x="642" y="698" width="58" height="30" rx="5"/>
+  <text x="664" y="718" class="text">20</text>
+  <text x="732" y="718" class="small">не отгружается</text>
+  <text x="848" y="718" class="small">склад не нужен</text>
+  <rect class="chip" x="1056" y="696" width="84" height="24" rx="12"/>
+  <text x="1076" y="713" class="chipText">услуга</text>
+  <text x="1248" y="718" class="text" style="font-weight:700">36 000 ₽</text>
+
+  <!-- Bottom bar -->
+  <rect class="panel" x="48" y="798" width="1344" height="92" rx="8"/>
+  <text x="72" y="832" class="h2">Выбранные строки</text>
+  <text x="72" y="858" class="text">Отметь товарные строки и выбери действие. Реализация доступна только когда остатка хватает на выбранном складе.</text>
+  <rect class="btn" x="930" y="824" width="144" height="38" rx="6"/>
+  <text x="960" y="848" class="btnText">Реализация</text>
+  <rect class="ghost" x="1088" y="824" width="144" height="38" rx="6"/>
+  <text x="1118" y="848" class="text" style="font-weight:700">Заказать</text>
+  <rect class="ghost" x="1246" y="824" width="114" height="38" rx="6"/>
+  <text x="1276" y="848" class="text" style="font-weight:700">Удалить</text>
+</svg>
