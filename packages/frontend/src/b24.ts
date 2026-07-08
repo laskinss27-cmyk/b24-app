@@ -642,7 +642,7 @@ export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 	return json.orders ?? [];
 }
 
-/** Создать заявку в снабжение по выбранным товарам сделки (кнопка «Снабжение» во вкладке). */
+/** Сформировать заказ в снабжение по выбранным чекбоксами товарам сделки. */
 export async function createDealSupplyRequest(dealId: number, lines: Array<{ productId: number; itemName: string; qty: number; note: string }>): Promise<string> {
 	const res = await fetch('/api/supply/request', {
 		method: 'POST',

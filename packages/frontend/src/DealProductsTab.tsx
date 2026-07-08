@@ -424,7 +424,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const [savingRow, setSavingRow] = useState<string | null>(null);
 	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
 	const [rowStore, setRowStore] = useState<Record<string, number>>({});
-	/** Отмеченные галочкой строки — в реализацию идут ТОЛЬКО они. Дефолт: ничего не отмечено. */
+	/** Отмеченные галочкой строки — универсальный выбор для действий: реализация, заказ и дальше. */
 	const [selected, setSelected] = useState<Record<string, boolean>>({});
 	/** Фаза реализации: idle → drafted (черновики ядра созданы по складам, ждут «Провести»). */
 	const [realizePhase, setRealizePhase] = useState<'idle' | 'drafted'>('idle');
@@ -695,7 +695,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							// (Активное/полученное перемещение от снабжения показано выше.)
 							return null;
 						})()}
-						{status === 'order' && <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказ»">нет нигде</span>}
+						{status === 'order' && (
+							<span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
+						)}
 					</td>
 				</tr>,
 			);
@@ -725,8 +727,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		realizeGroups.get(s)!.push(r);
 	}
 
-	// В заказ идут ВСЕ отмеченные товары с остатком к отработке. Дальше снабженец сам решит:
-	// закупать или закрывать потребность перемещением.
+	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
+	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
 	const supplyGoods = goods.filter((r) => isSel(r) && remaining(r) > 0);
 	const doCreateSupply = async (): Promise<void> => {
 		if (dealId == null || !supplyGoods.length || supplyBusy || busy || realizePhase !== 'idle') return;
@@ -736,7 +738,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			const lines = supplyGoods.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: '' }));
 			await createDealSupplyRequest(dealId, lines);
 			setSelected({});
-			setNotice({ kind: 'ok', text: `✅ Заказ создан: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')}. Снабженец увидит его в «Снаб».` });
+			setNotice({ kind: 'ok', text: `Заказ сформирован: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')}. Он появился в дисплее снабжения.` });
+			await onReload();
 		} catch (err) {
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
 		} finally {
@@ -825,7 +828,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			<table className="products-table">
 				<thead>
 					<tr>
-						<th className="check-col" title="Отметь строки, которые нужно реализовать или заказать"></th>
+						<th className="check-col" title="Универсальный выбор строк для действий: реализовать, заказать и дальше"></th>
 						<th>Товар / работа</th>
 						<th>Тип</th>
 						<th className="num">Цена</th>
@@ -886,7 +889,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						))}
 					</div>
 				) : (
-					<span className="hint">Отметь галочками строки, а затем выбери действие: «Реализация» спишет со склада, «Заказ» отправит потребность снабжению.</span>
+					<span className="hint">Отметь строки галочками и выбери действие: реализовать доступное со склада или заказать через снабжение.</span>
 				)}
 				<div className="realize-actions">
 					<button
@@ -901,7 +904,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
 					)}
 					{realizePhase === 'idle' && supplyGoods.length > 0 && (
-						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Создать заказ для снабжения по отмеченным товарам" onClick={() => void doCreateSupply()}>{supplyBusy ? '…' : `Заказ (${supplyGoods.length})`}</button>
+						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => void doCreateSupply()}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
 					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
