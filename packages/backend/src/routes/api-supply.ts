@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, type SupplyPurchaseStage } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, type SupplyPurchaseStage } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 
 /**
@@ -20,7 +20,7 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-interface TransferLine { productId: number; name: string; qty: number; rate?: number }
+interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string }
 interface TransferProgress {
 	id: number;
 	name: string;
@@ -32,7 +32,7 @@ interface TransferProgress {
 	receivedLines: TransferLine[];
 	shortageLines: TransferLine[];
 }
-interface PurchaseReceiptChild { name: string; status: string; lines: TransferLine[] }
+interface PurchaseReceiptChild { name: string; status: string; purchaseOrder: string; lines: TransferLine[] }
 interface PurchaseChild {
 	name: string;
 	supplier: string;
@@ -78,7 +78,7 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 		const receipts = new Map<string, PurchaseReceiptChild[]>();
 		const receiptHeaders = await erp.list<Record<string, unknown>>(
 			'Purchase Receipt',
-			['name', 'status', SUPPLY_REQUEST_FIELD],
+			['name', 'status', SUPPLY_REQUEST_FIELD, SUPPLY_PURCHASE_ORDER_FIELD],
 			[[SUPPLY_REQUEST_FIELD, 'in', requestNames], ['docstatus', '!=', 2]],
 			0,
 			'creation desc',
@@ -91,8 +91,9 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 			const child: PurchaseReceiptChild = {
 				name: String(h['name'] ?? ''),
 				status: String(h['status'] ?? ''),
+				purchaseOrder: String(h[SUPPLY_PURCHASE_ORDER_FIELD] ?? full?.[SUPPLY_PURCHASE_ORDER_FIELD] ?? ''),
 				lines: rawItems
-					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0) }))
+					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0), warehouse: String(l['warehouse'] ?? '') }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 			};
 			receipts.set(requestName, [...(receipts.get(requestName) ?? []), child]);
@@ -126,7 +127,15 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 		}
 		for (const [requestName, rows] of receipts.entries()) {
 			const purchases = out.get(requestName);
-			if (purchases?.[0]) purchases[0].receipts = rows;
+			if (purchases?.[0]) {
+				const orphanRows: PurchaseReceiptChild[] = [];
+				for (const receipt of rows) {
+					const target = receipt.purchaseOrder ? purchases.find((purchase) => purchase.name === receipt.purchaseOrder) : null;
+					if (target) target.receipts.push(receipt);
+					else orphanRows.push(receipt);
+				}
+				if (orphanRows.length) purchases[0].receipts.push(...orphanRows);
+			}
 			else out.set(requestName, [{ name: 'Приходы без заказа поставщику', supplier: '', status: 'Received', supplyStage: 'received', orderedAt: '', expectedAt: '', total: 0, lines: [], receipts: rows }]);
 		}
 	} catch {

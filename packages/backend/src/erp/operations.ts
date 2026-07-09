@@ -14,6 +14,7 @@ const DEAL_FIELD = 'b24_deal_id';
 /** Документы, которым нужно поле сделки. */
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
+export const SUPPLY_PURCHASE_ORDER_FIELD = 'b24_purchase_order';
 export const SUPPLY_PURCHASE_STAGE_FIELD = 'b24_supply_stage';
 export const SUPPLY_PURCHASE_ORDERED_AT_FIELD = 'b24_ordered_at';
 export const SUPPLY_PURCHASE_EXPECTED_AT_FIELD = 'b24_expected_at';
@@ -491,6 +492,15 @@ async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
 				insert_after: DEAL_FIELD, in_standard_filter: 1,
 			});
 		}
+		if (dt === 'Purchase Receipt') {
+			const purchaseOrderField = `${dt}-${SUPPLY_PURCHASE_ORDER_FIELD}`;
+			if (!(await erp.get('Custom Field', purchaseOrderField))) {
+				await erp.create('Custom Field', {
+					dt, fieldname: SUPPLY_PURCHASE_ORDER_FIELD, label: 'B24 Purchase Order', fieldtype: 'Data',
+					insert_after: SUPPLY_REQUEST_FIELD, in_standard_filter: 1,
+				});
+			}
+		}
 	}
 	if (!(await erp.get('Custom Field', `Purchase Order-${SUPPLY_PURCHASE_STAGE_FIELD}`))) {
 		await erp.create('Custom Field', {
@@ -587,6 +597,7 @@ export async function createSupplyPurchaseReceipt(
 		remarks: `Supply purchase order ${args.purchaseOrder}`,
 		[DEAL_FIELD]: String(args.dealId),
 		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
+		[SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder,
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,

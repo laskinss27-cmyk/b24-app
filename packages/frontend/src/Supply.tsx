@@ -31,7 +31,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 				{ productId: 104, name: 'Блок питания 12В 5А', qty: 4, rate: 920 },
 			],
 			receipts: [
-				{ name: 'PR-DEMO-0001', status: 'Completed', lines: [{ productId: 301, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2, rate: 7350 }] },
+				{ name: 'PR-DEMO-0001', status: 'Completed', purchaseOrder: 'PO-DEMO-0001', lines: [{ productId: 301, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2, rate: 7350, warehouse: 'Офис' }] },
 			],
 		},
 		{
@@ -95,10 +95,15 @@ const plannedQtyForOrder = (order: SupplyOrderRow, decisions: DecisionMap): numb
 		const key = itemKey(order.name, item.productId, index);
 		return sum + (decisions[key] ?? []).reduce((a, row) => a + row.qty, 0);
 	}, 0);
-const requestedQtyForOrder = (order: SupplyOrderRow): number => order.items.reduce((sum, item) => sum + item.qty, 0);
+const requestItemsForOrder = (order: SupplyOrderRow): SupplyOrderItem[] => order.originalItems?.length ? order.originalItems : order.items;
+const requestedQtyForOrder = (order: SupplyOrderRow): number => requestItemsForOrder(order).reduce((sum, item) => sum + item.qty, 0);
 const documentedQtyForOrder = (order: SupplyOrderRow): number =>
 	(order.transfers ?? []).reduce((sum, transfer) => sum + transfer.lines.reduce((a, line) => a + line.qty, 0), 0)
 	+ (order.purchases ?? []).reduce((sum, purchase) => sum + purchase.lines.reduce((a, line) => a + line.qty, 0), 0);
+const supplyDocumentCount = (order: SupplyOrderRow): number =>
+	(order.transfers?.length ?? 0)
+	+ (order.purchases?.length ?? 0)
+	+ (order.purchases ?? []).reduce((sum, purchase) => sum + purchase.receipts.length, 0);
 const orderStatusView = (order: SupplyOrderRow, decisions: DecisionMap = {}): { label: string; className: string; note: string } => {
 	const requested = requestedQtyForOrder(order);
 	const planned = plannedQtyForOrder(order, decisions);
@@ -127,6 +132,8 @@ const childStatusClass = (status: string): string => {
 };
 const linesSummary = (lines: TransferLineDto[]): string =>
 	lines.map((line) => `${line.name || `#${line.productId}`}: ${line.qty} шт`).join(', ');
+const receiptLinesSummary = (lines: TransferLineDto[]): string =>
+	lines.map((line) => `${line.name || `#${line.productId}`}: ${line.qty} шт${line.warehouse ? ` · ${line.warehouse}` : ''}`).join(', ');
 const money = (value: number): string => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value);
 const purchaseReceivedQty = (purchase: SupplyPurchaseChild, productId: number): number =>
 	purchase.receipts.reduce((sum, receipt) => sum + receipt.lines.filter((line) => line.productId === productId).reduce((a, line) => a + line.qty, 0), 0);
@@ -224,8 +231,8 @@ function PurchaseInlineDetails({ purchase }: { purchase: SupplyPurchaseChild }):
 					<span>Приходов пока нет</span>
 				) : purchase.receipts.map((receipt) => (
 					<div key={receipt.name}>
-						<b>Приход {receipt.name}</b>
-						<small>{linesSummary(receipt.lines)}</small>
+						<b>Оприходование {receipt.name}</b>
+						<small>{receiptLinesSummary(receipt.lines)}</small>
 					</div>
 				))}
 			</div>
@@ -242,7 +249,7 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUp
 }): JSX.Element {
 	const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null);
 	const view = orderStatusView(order);
-	const docsCount = (order.purchases?.length ?? 0) + (order.transfers?.length ?? 0);
+	const docsCount = supplyDocumentCount(order);
 	const connector = () => (
 		<svg className="supply-tree-connector" viewBox="0 0 44 44" aria-hidden="true" focusable="false">
 			<path d="M4 0 V22 Q4 34 16 34 H44" />
@@ -284,6 +291,16 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUp
 								</div>
 							</div>
 							{isExpanded && <PurchaseInlineDetails purchase={purchase} />}
+							{purchase.receipts.map((receipt) => (
+								<div key={`tree-receipt-${receipt.name}`} className="supply-tree-node receipt">
+									{connector()}
+									<div>
+										<b>Оприходование {receipt.name}</b>
+										<small>{receiptLinesSummary(receipt.lines)}</small>
+									</div>
+									<i className={`supply-status ${childStatusClass(receipt.status)}`}>{receipt.status || 'получено'}</i>
+								</div>
+							))}
 						</div>
 					);
 				})}
@@ -344,7 +361,7 @@ function OrdersList({ orders, decisions, loading, selectedName, onPreview, onOpe
 						>
 							<span><b>{order.name}</b><small>{order.date}</small></span>
 							<span><b>{order.dealTitle || `Сделка #${order.dealId}`}</b><small>{order.toStore || `#${order.dealId}`}</small></span>
-							<span>{order.items.length} {plural(order.items.length, 'позиция', 'позиции', 'позиций')}<small>{view.note}</small></span>
+							<span>{requestItemsForOrder(order).length} {plural(requestItemsForOrder(order).length, 'позиция', 'позиции', 'позиций')}<small>{view.note}</small></span>
 							<span><i className={`supply-status ${view.className}`}>{view.label}</i></span>
 							<span>{order.date || '-'}</span>
 						</button>
@@ -378,10 +395,10 @@ function PreviewPanel({ order, decisions }: { order: SupplyOrderRow | null; deci
 				<span>Сделка #{order.dealId}</span>
 				<span>{order.toStore || 'склад не указан'}</span>
 				<span>{order.date || 'без даты'}</span>
-				<span>{order.items.length} {plural(order.items.length, 'позиция', 'позиции', 'позиций')}</span>
+				<span>{requestItemsForOrder(order).length} {plural(requestItemsForOrder(order).length, 'позиция', 'позиции', 'позиций')}</span>
 			</div>
 			<div className="supply-preview-items">
-				{order.items.map((item, index) => {
+				{requestItemsForOrder(order).map((item, index) => {
 					const stocks = stockEntries(item);
 					return (
 						<div key={`${item.productId}-${index}`} className="supply-preview-item">
@@ -420,7 +437,7 @@ function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePur
 	const treeOrders = orders.filter((order) => (order.purchases?.length ?? 0) > 0 || (order.transfers?.length ?? 0) > 0);
 	const purchaseRows = orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ order, purchase, stage: effectivePurchaseStage(purchase) })));
 	const filteredRows = filter === 'all' ? purchaseRows : purchaseRows.filter((row) => row.stage === filter);
-	const docs = treeOrders.reduce((sum, order) => sum + (order.purchases?.length ?? 0) + (order.transfers?.length ?? 0), 0);
+	const docs = treeOrders.reduce((sum, order) => sum + supplyDocumentCount(order), 0);
 	return (
 		<>
 			<section className="supply-card supply-purchase-board">
@@ -479,6 +496,86 @@ function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePur
 	);
 }
 
+function LogisticsSection({ orders, loading, onOpenOrder }: { orders: SupplyOrderRow[]; loading: boolean; onOpenOrder: (order: SupplyOrderRow) => void }): JSX.Element {
+	const rows = orders.flatMap((order) => (order.transfers ?? []).map((transfer) => ({ order, transfer })));
+	return (
+		<section className="supply-card supply-docs-board">
+			<div className="supply-card-head">
+				<div>
+					<h2>Перемещения</h2>
+					<p>Все перемещения, созданные из заявок снабжения.</p>
+				</div>
+				<span className="supply-muted">{rows.length} {plural(rows.length, 'документ', 'документа', 'документов')}</span>
+			</div>
+			<div className="supply-docs-list">
+				{loading && <div className="supply-empty">Загрузка перемещений из ядра...</div>}
+				{!loading && rows.length === 0 && <div className="supply-empty">Перемещений по заявкам пока нет.</div>}
+				{rows.map(({ order, transfer }) => (
+					<div key={`${order.name}-${transfer.id || transfer.name}`} className="supply-doc-row">
+						<div>
+							<b>{transfer.name || `Перемещение #${transfer.id}`}</b>
+							<small>{order.name} · сделка #{order.dealId} · {transfer.fromStore || 'склад отправки'} → {transfer.toStore || order.toStore || 'склад получения'}</small>
+							<em>{linesSummary(transfer.lines)}</em>
+							{transfer.status === 'shortage' && transfer.shortageLines.length > 0 && <em>Недовоз: {linesSummary(transfer.shortageLines)}</em>}
+						</div>
+						<div className="supply-linked-actions">
+							<i className={`supply-status ${childStatusClass(transfer.status)}`}>{transferStatusLabel(transfer.status)}</i>
+							<button type="button" onClick={() => onOpenOrder(order)}>Заявка</button>
+						</div>
+					</div>
+				))}
+			</div>
+		</section>
+	);
+}
+
+function StockDocumentsSection({ orders, loading, onOpenOrder }: { orders: SupplyOrderRow[]; loading: boolean; onOpenOrder: (order: SupplyOrderRow) => void }): JSX.Element {
+	const receiptRows = orders.flatMap((order) => (order.purchases ?? []).flatMap((purchase) => purchase.receipts.map((receipt) => ({ order, purchase, receipt }))));
+	const transferRows = orders.flatMap((order) => (order.transfers ?? []).map((transfer) => ({ order, transfer })));
+	const total = receiptRows.length + transferRows.length;
+	return (
+		<section className="supply-card supply-docs-board">
+			<div className="supply-card-head">
+				<div>
+					<h2>Складские документы</h2>
+					<p>Оприходования и перемещения, которые объясняют закрытие заявок.</p>
+				</div>
+				<span className="supply-muted">{total} {plural(total, 'документ', 'документа', 'документов')}</span>
+			</div>
+			<div className="supply-docs-list">
+				{loading && <div className="supply-empty">Загрузка складских документов из ядра...</div>}
+				{!loading && total === 0 && <div className="supply-empty">Складских документов по заявкам пока нет.</div>}
+				{receiptRows.map(({ order, purchase, receipt }) => (
+					<div key={`${order.name}-${purchase.name}-${receipt.name}`} className="supply-doc-row">
+						<div>
+							<b>Оприходование {receipt.name}</b>
+							<small>{order.name} · заказ {purchase.name} · {purchase.supplier || DEFAULT_SUPPLIER}</small>
+							<em>{receiptLinesSummary(receipt.lines)}</em>
+						</div>
+						<div className="supply-linked-actions">
+							<i className={`supply-status ${childStatusClass(receipt.status)}`}>{receipt.status || 'получено'}</i>
+							<button type="button" onClick={() => onOpenOrder(order)}>Заявка</button>
+						</div>
+					</div>
+				))}
+				{transferRows.map(({ order, transfer }) => (
+					<div key={`${order.name}-${transfer.id || transfer.name}`} className="supply-doc-row">
+						<div>
+							<b>Перемещение {transfer.name || `#${transfer.id}`}</b>
+							<small>{order.name} · {transfer.fromStore || 'склад отправки'} → {transfer.toStore || order.toStore || 'склад получения'}</small>
+							<em>{linesSummary(transfer.lines)}</em>
+						</div>
+						<div className="supply-linked-actions">
+							<i className={`supply-status ${childStatusClass(transfer.status)}`}>{transferStatusLabel(transfer.status)}</i>
+							<button type="button" onClick={() => onOpenOrder(order)}>Заявка</button>
+						</div>
+					</div>
+				))}
+			</div>
+		</section>
+	);
+}
+
 function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase, onUpdatePurchaseStage }: {
 	order: SupplyOrderRow;
 	decisions: DecisionMap;
@@ -492,16 +589,18 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 }): JSX.Element {
-	const totals = order.items.reduce((acc, item, index) => {
+	const requestItems = requestItemsForOrder(order);
+	const requestedTotal = requestItems.reduce((sum, item) => sum + item.qty, 0);
+	const plannedTotal = order.items.reduce((sum, item, index) => {
 		const key = itemKey(order.name, item.productId, index);
-		const used = (decisions[key] ?? []).reduce((a, d) => a + d.qty, 0);
-		return { qty: acc.qty + item.qty, used: acc.used + used };
-	}, { qty: 0, used: 0 });
-	const allDone = totals.qty > 0 && totals.used >= totals.qty;
-	const existingDocs = (order.transfers?.length ?? 0) + (order.purchases?.length ?? 0);
+		return sum + (decisions[key] ?? []).reduce((a, d) => a + d.qty, 0);
+	}, 0);
+	const remainingTotals = order.items.reduce((sum, item) => sum + item.qty, 0);
+	const allDone = remainingTotals > 0 && plannedTotal >= remainingTotals;
+	const existingDocs = supplyDocumentCount(order);
 	const plannedTransfers = Object.values(decisions).flat().filter((row) => row.kind === 'transfer').reduce((sum, row) => sum + row.qty, 0);
 	const plannedPurchases = Object.values(decisions).flat().filter((row) => row.kind === 'purchase').reduce((sum, row) => sum + row.qty, 0);
-	const nextAction = allDone ? 'Можно создать перемещения и заявки поставщикам' : `Распредели еще ${Math.max(totals.qty - totals.used, 0)} шт`;
+	const nextAction = remainingTotals === 0 ? 'Остаток закрыт документами' : allDone ? 'Можно создать перемещения и заявки поставщикам' : `Распредели еще ${Math.max(remainingTotals - plannedTotal, 0)} шт`;
 
 	return (
 		<div className="supply-main supply-detail">
@@ -517,12 +616,12 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 			<section className="supply-card supply-flow">
 				<div className="supply-flow-step">
 					<span>1. Потребность</span>
-					<b>{totals.qty} шт в {order.items.length} позициях</b>
+					<b>{requestedTotal} шт в {requestItems.length} позициях</b>
 					<small>Это то, что запросила сделка.</small>
 				</div>
 				<div className="supply-flow-step">
 					<span>2. План закрытия</span>
-					<b>{totals.used} из {totals.qty} шт выбрано</b>
+					<b>{plannedTotal} из {remainingTotals} шт выбрано</b>
 					<small>{plannedTransfers > 0 ? `Переместить: ${plannedTransfers} шт. ` : ''}{plannedPurchases > 0 ? `Купить: ${plannedPurchases} шт.` : 'Ниже выбери перемещение или закупку.'}</small>
 				</div>
 				<div className="supply-flow-step">
@@ -557,6 +656,7 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 						<p>По каждой строке выбери: забрать с другой точки или создать заявку поставщику. Закупку можно ставить больше потребности, заявка на сделку от этого не переполнится.</p>
 					</div>
 				</div>
+				{order.items.length === 0 && <div className="supply-empty">Остатка по заявке нет. Ниже уже нечего распределять, смотри созданные документы выше.</div>}
 				{order.items.map((item, index) => {
 					const key = itemKey(order.name, item.productId, index);
 					const rows = decisions[key] ?? [];
@@ -910,7 +1010,7 @@ export function Supply(): JSX.Element {
 						<>
 							<div className="supply-kpis">
 								<div><span>Активные заявки</span><b>{orders.filter((o) => !o.closed).length}</b></div>
-								<div><span>Позиции</span><b>{orders.reduce((a, o) => a + o.items.length, 0)}</b></div>
+								<div><span>Позиции</span><b>{orders.reduce((a, o) => a + requestItemsForOrder(o).length, 0)}</b></div>
 								<div><span>Закрытые</span><b>{orders.filter((o) => o.closed).length}</b></div>
 							</div>
 							<div className="supply-content-grid">
@@ -926,6 +1026,18 @@ export function Supply(): JSX.Element {
 							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
 							onReceivePurchase={openReceivePurchase}
 							onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
+						/>
+					) : section === 'logistics' ? (
+						<LogisticsSection
+							orders={orders}
+							loading={loadingOrders}
+							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
+						/>
+					) : section === 'stock' ? (
+						<StockDocumentsSection
+							orders={orders}
+							loading={loadingOrders}
+							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
 						/>
 					) : (
 						<section className="supply-card supply-placeholder">

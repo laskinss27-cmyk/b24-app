@@ -629,7 +629,7 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
 export interface SupplyTransferChild { id: number; name: string; status: string; fromStore: string; toStore: string; lines: TransferLineDto[]; receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[] }
-export interface SupplyPurchaseReceiptChild { name: string; status: string; lines: TransferLineDto[] }
+export interface SupplyPurchaseReceiptChild { name: string; status: string; purchaseOrder?: string; lines: TransferLineDto[] }
 export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
 export interface SupplyPurchaseChild { name: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
 export interface SupplyOrderRow {
@@ -896,7 +896,7 @@ export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise
 
 // ── Перемещения (складской учёт) ─────────────────────────────────────────────
 export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'shortage' | 'canceled';
-export interface TransferLineDto { productId: number; name: string; qty: number; rate?: number }
+export interface TransferLineDto { productId: number; name: string; qty: number; rate?: number; warehouse?: string }
 export interface TransferDoc {
 	id: number;
 	name: string;

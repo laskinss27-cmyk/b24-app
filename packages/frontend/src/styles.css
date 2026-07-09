@@ -2712,6 +2712,11 @@ html, body, #root { height: 100%; }
 .supply-tree-node.transfer {
 	border-color: #cfd6e3;
 }
+.supply-tree-node.receipt {
+	border-color: #bbd4c4;
+	background: #fbfefc;
+	margin-left: 110px;
+}
 .supply-tree-node b,
 .supply-tree-node small,
 .supply-tree-node em {
@@ -2747,6 +2752,7 @@ html, body, #root { height: 100%; }
 }
 .supply-tree-branch,
 .supply-tree-node.transfer,
+.supply-tree-node.receipt,
 .supply-tree-empty {
 	position: relative;
 }
@@ -2813,6 +2819,9 @@ html, body, #root { height: 100%; }
 	.supply-tree-details {
 		margin-left: 32px;
 	}
+	.supply-tree-node.receipt {
+		margin-left: 32px;
+	}
 	.supply-purchase-line {
 		grid-template-columns: minmax(220px, 1.6fr) 84px 84px 84px 105px 115px;
 		min-width: 700px;
@@ -2839,6 +2848,43 @@ html, body, #root { height: 100%; }
 	.supply-tree-details {
 		margin-left: 0;
 	}
+	.supply-tree-node.receipt {
+		margin-left: 0;
+	}
+}
+.supply-docs-board {
+	overflow: hidden;
+}
+.supply-docs-list {
+	display: grid;
+	border-top: 1px solid #e5e7eb;
+}
+.supply-doc-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 16px;
+	align-items: center;
+	padding: 15px 20px;
+	border-bottom: 1px solid #edf0f4;
+	background: #fff;
+}
+.supply-doc-row b,
+.supply-doc-row small,
+.supply-doc-row em {
+	display: block;
+}
+.supply-doc-row small {
+	margin-top: 4px;
+	color: #4b5563;
+	font-size: 12px;
+	line-height: 1.4;
+}
+.supply-doc-row em {
+	margin-top: 5px;
+	color: #6b7280;
+	font-size: 12px;
+	font-style: normal;
+	line-height: 1.4;
 }
 .supply-purchase-lines-card {
 	overflow: hidden;
