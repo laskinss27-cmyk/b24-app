@@ -2637,6 +2637,51 @@ html, body, #root { height: 100%; }
 	padding: 7px 10px;
 	font-size: 12px;
 }
+.supply-purchase-board {
+	margin-bottom: 18px;
+}
+.supply-purchase-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 0 20px 16px;
+	border-bottom: 1px solid #e5e7eb;
+}
+.supply-purchase-filters button {
+	border: 1px solid #cfd6e3;
+	border-radius: 999px;
+	background: #fff;
+	color: #374151;
+	padding: 7px 11px;
+	font-size: 12px;
+	font-weight: 700;
+}
+.supply-purchase-filters button.active {
+	border-color: #2563eb;
+	background: #eff6ff;
+	color: #1d4ed8;
+}
+.supply-purchase-board-list {
+	display: grid;
+}
+.supply-purchase-board-row {
+	display: grid;
+	grid-template-columns: minmax(260px, 1.45fr) 150px 120px 160px auto;
+	gap: 14px;
+	align-items: center;
+	padding: 13px 20px;
+	border-bottom: 1px solid #edf0f4;
+}
+.supply-purchase-board-row b,
+.supply-purchase-board-row small {
+	display: block;
+}
+.supply-purchase-board-row small {
+	margin-top: 4px;
+	color: #6b7280;
+	font-size: 12px;
+	line-height: 1.35;
+}
 .supply-tree-list {
 	display: grid;
 	gap: 18px;

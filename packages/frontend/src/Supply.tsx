@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
-import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, createTransfers, createSupplyPurchaseOrder, receiveSupplyPurchase, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type TransferLineDto } from './b24.js';
+import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, createTransfers, createSupplyPurchaseOrder, receiveSupplyPurchase, updateSupplyPurchaseStage, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyPurchaseStage, type TransferLineDto } from './b24.js';
 
 type SectionKey = 'orders' | 'logistics' | 'purchase' | 'payment' | 'stock' | 'reports';
 const SECTIONS: Array<{ key: SectionKey; title: string; group: string }> = [
@@ -22,6 +22,10 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 			name: 'PO-DEMO-0001',
 			supplier: 'ТД Север',
 			status: 'To Receive and Bill',
+			supplyStage: 'ordered',
+			orderedAt: '2026-04-05',
+			expectedAt: '2026-04-09',
+			total: 33080,
 			lines: [
 				{ productId: 301, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 4, rate: 7350 },
 				{ productId: 104, name: 'Блок питания 12В 5А', qty: 4, rate: 920 },
@@ -34,6 +38,9 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 			name: 'PO-DEMO-0002',
 			supplier: 'Линия Безопасности',
 			status: 'Draft',
+			supplyStage: 'approval',
+			expectedAt: '2026-04-10',
+			total: 13780,
 			lines: [{ productId: 301, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2, rate: 6890 }],
 			receipts: [],
 		},
@@ -126,14 +133,36 @@ const purchaseReceivedQty = (purchase: SupplyPurchaseChild, productId: number): 
 const purchaseOrderedQty = (purchase: SupplyPurchaseChild): number => purchase.lines.reduce((sum, line) => sum + line.qty, 0);
 const purchaseReceivedTotal = (purchase: SupplyPurchaseChild): number =>
 	purchase.lines.reduce((sum, line) => sum + Math.min(purchaseReceivedQty(purchase, line.productId), line.qty), 0);
-const supplierRequestStatus = (purchase: SupplyPurchaseChild): { label: string; className: string } => {
+const purchaseTotal = (purchase: SupplyPurchaseChild): number =>
+	Number(purchase.total ?? 0) || purchase.lines.reduce((sum, line) => sum + line.qty * Number(line.rate ?? 0), 0);
+const effectivePurchaseStage = (purchase: SupplyPurchaseChild): SupplyPurchaseStage | 'partial' | 'received' => {
 	const ordered = purchaseOrderedQty(purchase);
 	const received = purchaseReceivedTotal(purchase);
-	if (/cancel/i.test(purchase.status)) return { label: 'отменено', className: 'draft' };
-	if (ordered > 0 && received >= ordered) return { label: 'получено', className: 'done' };
-	if (received > 0) return { label: 'частично получено', className: 'active' };
-	if (/ordered|to receive|submitted/i.test(purchase.status)) return { label: 'отправлено поставщику', className: 'active' };
+	if (/cancel/i.test(purchase.status) || purchase.supplyStage === 'cancelled') return 'cancelled';
+	if (ordered > 0 && received >= ordered) return 'received';
+	if (received > 0) return 'partial';
+	const stage = String(purchase.supplyStage ?? '').trim();
+	if (stage === 'approval' || stage === 'approved' || stage === 'ordered' || stage === 'draft') return stage;
+	if (/ordered|to receive|submitted/i.test(purchase.status)) return 'ordered';
+	return 'draft';
+};
+const supplierRequestStatus = (purchase: SupplyPurchaseChild): { label: string; className: string } => {
+	const stage = effectivePurchaseStage(purchase);
+	if (stage === 'cancelled') return { label: 'отменено', className: 'draft' };
+	if (stage === 'received') return { label: 'получено', className: 'done' };
+	if (stage === 'partial') return { label: 'частично пришло', className: 'active' };
+	if (stage === 'ordered') return { label: 'ожидаем поставку', className: 'active' };
+	if (stage === 'approved') return { label: 'согласовано', className: 'active' };
+	if (stage === 'approval') return { label: 'на согласовании', className: 'active' };
 	return { label: 'черновик', className: 'draft' };
+};
+const nextPurchaseAction = (purchase: SupplyPurchaseChild): { label: string; stage?: SupplyPurchaseStage; receive?: boolean } | null => {
+	const stage = effectivePurchaseStage(purchase);
+	if (stage === 'draft') return { label: 'На согласование', stage: 'approval' };
+	if (stage === 'approval') return { label: 'Согласовано', stage: 'approved' };
+	if (stage === 'approved') return { label: 'Заказано', stage: 'ordered' };
+	if (stage === 'ordered' || stage === 'partial') return { label: 'Оприходовать', receive: true };
+	return null;
 };
 const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] ?? ch));
 function printHtml(title: string, body: string): void {
@@ -204,11 +233,12 @@ function PurchaseInlineDetails({ purchase }: { purchase: SupplyPurchaseChild }):
 	);
 }
 
-function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
+function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage }: {
 	order: SupplyOrderRow;
 	docsBusy: boolean;
 	onOpenOrder?: (order: SupplyOrderRow) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
+	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 }): JSX.Element {
 	const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null);
 	const view = orderStatusView(order);
@@ -236,6 +266,7 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 					const ordered = purchaseOrderedQty(purchase);
 					const received = purchaseReceivedTotal(purchase);
 					const isExpanded = expandedPurchase === purchase.name;
+					const action = nextPurchaseAction(purchase);
 					return (
 						<div key={`tree-purchase-${purchase.name}`} className="supply-tree-branch">
 							{connector()}
@@ -248,7 +279,8 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 									<i className={`supply-status ${status.className}`}>{status.label}</i>
 									<button type="button" onClick={() => setExpandedPurchase(isExpanded ? null : purchase.name)}>{isExpanded ? 'Свернуть' : 'Детали'}</button>
 									<button type="button" onClick={() => printSupplierRequest(order, purchase)}>Печать</button>
-									<button type="button" disabled={docsBusy} onClick={() => onReceivePurchase(purchase)}>Принять</button>
+									{action?.stage && <button type="button" disabled={docsBusy} onClick={() => onUpdatePurchaseStage(purchase, action.stage!)}>{action.label}</button>}
+									{action?.receive && <button type="button" disabled={docsBusy} onClick={() => onReceivePurchase(purchase)}>{action.label}</button>}
 								</div>
 							</div>
 							{isExpanded && <PurchaseInlineDetails purchase={purchase} />}
@@ -365,34 +397,89 @@ function PreviewPanel({ order, decisions }: { order: SupplyOrderRow | null; deci
 	);
 }
 
-function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePurchase }: {
+type PurchaseFilter = 'all' | SupplyPurchaseStage | 'partial' | 'received';
+const PURCHASE_FILTERS: Array<{ key: PurchaseFilter; label: string }> = [
+	{ key: 'all', label: 'Все' },
+	{ key: 'draft', label: 'Черновики' },
+	{ key: 'approval', label: 'На согласовании' },
+	{ key: 'approved', label: 'Согласовано' },
+	{ key: 'ordered', label: 'Ожидаем' },
+	{ key: 'partial', label: 'Частично пришло' },
+	{ key: 'received', label: 'Получено' },
+];
+
+function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage }: {
 	orders: SupplyOrderRow[];
 	loading: boolean;
 	docsBusy: boolean;
 	onOpenOrder: (order: SupplyOrderRow) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
+	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 }): JSX.Element {
+	const [filter, setFilter] = useState<PurchaseFilter>('all');
 	const treeOrders = orders.filter((order) => (order.purchases?.length ?? 0) > 0 || (order.transfers?.length ?? 0) > 0);
+	const purchaseRows = orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ order, purchase, stage: effectivePurchaseStage(purchase) })));
+	const filteredRows = filter === 'all' ? purchaseRows : purchaseRows.filter((row) => row.stage === filter);
 	const docs = treeOrders.reduce((sum, order) => sum + (order.purchases?.length ?? 0) + (order.transfers?.length ?? 0), 0);
 	return (
-		<section className="supply-card supply-linked-docs">
-			<div className="supply-card-head">
-				<div>
-					<h2>Дерево заявок</h2>
-					<p>Заявка сверху, ниже закупки, перемещения после закупки и перемещения с других точек.</p>
+		<>
+			<section className="supply-card supply-purchase-board">
+				<div className="supply-card-head">
+					<div>
+						<h2>Журнал закупок</h2>
+						<p>Рабочая очередь снабжения: согласование, заказ поставщику и ожидание прихода.</p>
+					</div>
+					<span className="supply-muted">{purchaseRows.length} {plural(purchaseRows.length, 'заказ', 'заказа', 'заказов')}</span>
 				</div>
-				<span className="supply-muted">{docs} {plural(docs, 'документ', 'документа', 'документов')}</span>
-			</div>
-			<div className="supply-tree-list">
-				{loading && <div className="supply-empty">Загрузка закупок из ядра...</div>}
-				{!loading && treeOrders.length === 0 && <div className="supply-empty">Документов пока нет. Они появятся здесь после создания закупок или перемещений из заявки снабжения.</div>}
-				{treeOrders.map((order) => <SupplyOrderTree key={order.name} order={order} docsBusy={docsBusy} onOpenOrder={onOpenOrder} onReceivePurchase={onReceivePurchase} />)}
-			</div>
-		</section>
+				<div className="supply-purchase-filters">
+					{PURCHASE_FILTERS.map((item) => <button key={item.key} className={filter === item.key ? 'active' : ''} type="button" onClick={() => setFilter(item.key)}>{item.label}</button>)}
+				</div>
+				<div className="supply-purchase-board-list">
+					{loading && <div className="supply-empty">Загрузка закупок из ядра...</div>}
+					{!loading && filteredRows.length === 0 && <div className="supply-empty">В этом статусе закупок пока нет.</div>}
+					{filteredRows.map(({ order, purchase }) => {
+						const status = supplierRequestStatus(purchase);
+						const action = nextPurchaseAction(purchase);
+						const ordered = purchaseOrderedQty(purchase);
+						const received = purchaseReceivedTotal(purchase);
+						return (
+							<div key={`${order.name}-${purchase.name}`} className="supply-purchase-board-row">
+								<div>
+									<b>{purchase.name} · {purchase.supplier || DEFAULT_SUPPLIER}</b>
+									<small>{order.name} · сделка #{order.dealId} · склад: {order.toStore || '-'}</small>
+								</div>
+								<span><i className={`supply-status ${status.className}`}>{status.label}</i></span>
+								<span>{ordered} / {received}<small>заказано / пришло</small></span>
+								<span>{money(purchaseTotal(purchase))} ₽<small>{purchase.expectedAt ? `ожидаем ${purchase.expectedAt}` : 'без даты'}</small></span>
+								<div className="supply-linked-actions">
+									<button type="button" onClick={() => onOpenOrder(order)}>Заявка</button>
+									{action?.stage && <button type="button" disabled={docsBusy} onClick={() => onUpdatePurchaseStage(purchase, action.stage!)}>{action.label}</button>}
+									{action?.receive && <button type="button" disabled={docsBusy} onClick={() => onReceivePurchase(purchase)}>{action.label}</button>}
+								</div>
+							</div>
+						);
+					})}
+				</div>
+			</section>
+			<section className="supply-card supply-linked-docs">
+				<div className="supply-card-head">
+					<div>
+						<h2>Дерево заявок</h2>
+						<p>Заявка сверху, ниже закупки и перемещения, созданные из нее.</p>
+					</div>
+					<span className="supply-muted">{docs} {plural(docs, 'документ', 'документа', 'документов')}</span>
+				</div>
+				<div className="supply-tree-list">
+					{loading && <div className="supply-empty">Загрузка закупок из ядра...</div>}
+					{!loading && treeOrders.length === 0 && <div className="supply-empty">Документов пока нет. Они появятся здесь после создания закупок или перемещений из заявки снабжения.</div>}
+					{treeOrders.map((order) => <SupplyOrderTree key={order.name} order={order} docsBusy={docsBusy} onOpenOrder={onOpenOrder} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} />)}
+				</div>
+			</section>
+		</>
 	);
 }
 
-function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase }: {
+function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase, onUpdatePurchaseStage }: {
 	order: SupplyOrderRow;
 	decisions: DecisionMap;
 	drafts: DraftInput;
@@ -403,6 +490,7 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 	removeDecision: (key: string, id: string) => void;
 	createDocs: () => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
+	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 }): JSX.Element {
 	const totals = order.items.reduce((acc, item, index) => {
 		const key = itemKey(order.name, item.productId, index);
@@ -457,7 +545,7 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 						</div>
 					</div>
 					<div className="supply-tree-list">
-						<SupplyOrderTree order={order} docsBusy={docsBusy} onReceivePurchase={onReceivePurchase} />
+						<SupplyOrderTree order={order} docsBusy={docsBusy} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} />
 					</div>
 				</section>
 			)}
@@ -664,6 +752,27 @@ export function Supply(): JSX.Element {
 		setReceivingPurchase(null);
 		setReceivingOrderName(null);
 	};
+	const changePurchaseStage = async (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage): Promise<void> => {
+		if (docsBusy) return;
+		setDocsBusy(true);
+		try {
+			if (ctx.__mock) {
+				setOrders((current) => current.map((order) => ({
+					...order,
+					purchases: (order.purchases ?? []).map((doc) => doc.name === purchase.name ? { ...doc, supplyStage: stage, ...(stage === 'ordered' ? { orderedAt: new Date().toISOString().slice(0, 10) } : {}) } : doc),
+				})));
+			} else {
+				await updateSupplyPurchaseStage(purchase.name, stage);
+				await refreshOrders(true);
+			}
+			const view = supplierRequestStatus({ ...purchase, supplyStage: stage });
+			setNotice(`${purchase.name}: ${view.label}.`);
+		} catch (err) {
+			setNotice(err instanceof Error ? err.message : 'Не удалось обновить статус закупки.');
+		} finally {
+			setDocsBusy(false);
+		}
+	};
 	const submitReceivePurchase = async (): Promise<void> => {
 		const purchase = receivingPurchase;
 		const order = detailOrder ?? orders.find((row) => row.name === receivingOrderName) ?? (purchase ? orders.find((row) => (row.purchases ?? []).some((doc) => doc.name === purchase.name)) : null);
@@ -692,7 +801,7 @@ export function Supply(): JSX.Element {
 			await refreshOrders(true);
 			setNotice(`Приход создан: ${receipt}.`);
 		} catch (err) {
-			setNotice(err instanceof Error ? err.message : 'Не удалось принять закупку.');
+			setNotice(err instanceof Error ? err.message : 'Не удалось оприходовать закупку.');
 		} finally {
 			setDocsBusy(false);
 		}
@@ -786,6 +895,7 @@ export function Supply(): JSX.Element {
 					removeDecision={removeDecision}
 					createDocs={() => void createDocs()}
 					onReceivePurchase={openReceivePurchase}
+					onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
 				/>
 			) : (
 				<main className="supply-main">
@@ -815,6 +925,7 @@ export function Supply(): JSX.Element {
 							docsBusy={docsBusy}
 							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
 							onReceivePurchase={openReceivePurchase}
+							onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
 						/>
 					) : (
 						<section className="supply-card supply-placeholder">
@@ -830,7 +941,7 @@ export function Supply(): JSX.Element {
 					<div className="supply-modal">
 						<header>
 							<div>
-								<h2>Приемка закупки</h2>
+								<h2>Оприходование закупки</h2>
 								<p>{receivingPurchase.name}</p>
 							</div>
 							<button type="button" onClick={closeReceivePurchase}>Закрыть</button>
@@ -847,7 +958,7 @@ export function Supply(): JSX.Element {
 						</div>
 						<footer>
 							<button type="button" onClick={closeReceivePurchase}>Отмена</button>
-							<button className="supply-primary" type="button" disabled={docsBusy} onClick={() => void submitReceivePurchase()}>{docsBusy ? 'Проводим...' : 'Провести приход'}</button>
+							<button className="supply-primary" type="button" disabled={docsBusy} onClick={() => void submitReceivePurchase()}>{docsBusy ? 'Проводим...' : 'Оприходовать'}</button>
 						</footer>
 					</div>
 				</div>

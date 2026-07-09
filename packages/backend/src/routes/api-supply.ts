@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, createSupplyPurchaseReceipt, SUPPLY_REQUEST_FIELD } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, type SupplyPurchaseStage } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 
 /**
@@ -33,7 +33,17 @@ interface TransferProgress {
 	shortageLines: TransferLine[];
 }
 interface PurchaseReceiptChild { name: string; status: string; lines: TransferLine[] }
-interface PurchaseChild { name: string; supplier: string; status: string; lines: TransferLine[]; receipts: PurchaseReceiptChild[] }
+interface PurchaseChild {
+	name: string;
+	supplier: string;
+	status: string;
+	supplyStage: string;
+	orderedAt: string;
+	expectedAt: string;
+	total: number;
+	lines: TransferLine[];
+	receipts: PurchaseReceiptChild[];
+}
 
 function parseTransferProgress(it: Record<string, unknown>): TransferProgress | null {
 	try {
@@ -103,6 +113,10 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 				name: String(h['name'] ?? ''),
 				supplier: String(h['supplier'] ?? ''),
 				status: String(h['status'] ?? ''),
+				supplyStage: String(full?.[SUPPLY_PURCHASE_STAGE_FIELD] ?? '') || 'draft',
+				orderedAt: String(full?.[SUPPLY_PURCHASE_ORDERED_AT_FIELD] ?? ''),
+				expectedAt: String(full?.[SUPPLY_PURCHASE_EXPECTED_AT_FIELD] ?? full?.['schedule_date'] ?? ''),
+				total: Number(full?.['grand_total'] ?? 0),
 				lines: rawItems
 					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0) }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
@@ -113,7 +127,7 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 		for (const [requestName, rows] of receipts.entries()) {
 			const purchases = out.get(requestName);
 			if (purchases?.[0]) purchases[0].receipts = rows;
-			else out.set(requestName, [{ name: 'Приходы без заказа поставщику', supplier: '', status: 'Received', lines: [], receipts: rows }]);
+			else out.set(requestName, [{ name: 'Приходы без заказа поставщику', supplier: '', status: 'Received', supplyStage: 'received', orderedAt: '', expectedAt: '', total: 0, lines: [], receipts: rows }]);
 		}
 	} catch {
 		// Старые инсталляции без поля b24_supply_request просто не покажут дочерние закупки.
@@ -241,6 +255,27 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			return { ok: true, name };
 		} catch (err) {
 			app.log.error({ dealId, requestName }, `[api/supply/purchase-order] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/supply/purchase-stage', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { purchaseOrder?: unknown; stage?: unknown; expectedAt?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
+		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
+		const stage = String(b.stage ?? '').trim() as SupplyPurchaseStage;
+		if (!['draft', 'approval', 'approved', 'ordered', 'cancelled'].includes(stage)) return reply.code(400).send({ ok: false, error: 'bad stage' });
+		const expectedAt = String(b.expectedAt ?? '').trim();
+		try {
+			const { name } = await updateSupplyPurchaseStage(erp, { purchaseOrder, stage, ...(expectedAt ? { expectedAt } : {}) });
+			app.log.info({ purchaseOrder, stage, name }, '[api/supply/purchase-stage] updated');
+			return { ok: true, name };
+		} catch (err) {
+			app.log.error({ purchaseOrder, stage }, `[api/supply/purchase-stage] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

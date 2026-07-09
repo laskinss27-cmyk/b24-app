@@ -14,6 +14,9 @@ const DEAL_FIELD = 'b24_deal_id';
 /** Документы, которым нужно поле сделки. */
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
+export const SUPPLY_PURCHASE_STAGE_FIELD = 'b24_supply_stage';
+export const SUPPLY_PURCHASE_ORDERED_AT_FIELD = 'b24_ordered_at';
+export const SUPPLY_PURCHASE_EXPECTED_AT_FIELD = 'b24_expected_at';
 const TECH_CUSTOMER = 'Б24 Розница';
 const TECH_SUPPLIER = 'Б24 Снабжение';
 const ITEM_GROUP = 'Каталог Б24';
@@ -489,6 +492,39 @@ async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
 			});
 		}
 	}
+	if (!(await erp.get('Custom Field', `Purchase Order-${SUPPLY_PURCHASE_STAGE_FIELD}`))) {
+		await erp.create('Custom Field', {
+			dt: 'Purchase Order',
+			fieldname: SUPPLY_PURCHASE_STAGE_FIELD,
+			label: 'B24 Supply Stage',
+			fieldtype: 'Select',
+			options: 'draft\napproval\napproved\nordered\ncancelled',
+			default: 'draft',
+			insert_after: SUPPLY_REQUEST_FIELD,
+			in_standard_filter: 1,
+			in_list_view: 1,
+		});
+	}
+	if (!(await erp.get('Custom Field', `Purchase Order-${SUPPLY_PURCHASE_ORDERED_AT_FIELD}`))) {
+		await erp.create('Custom Field', {
+			dt: 'Purchase Order',
+			fieldname: SUPPLY_PURCHASE_ORDERED_AT_FIELD,
+			label: 'B24 Ordered At',
+			fieldtype: 'Date',
+			insert_after: SUPPLY_PURCHASE_STAGE_FIELD,
+			in_standard_filter: 1,
+		});
+	}
+	if (!(await erp.get('Custom Field', `Purchase Order-${SUPPLY_PURCHASE_EXPECTED_AT_FIELD}`))) {
+		await erp.create('Custom Field', {
+			dt: 'Purchase Order',
+			fieldname: SUPPLY_PURCHASE_EXPECTED_AT_FIELD,
+			label: 'B24 Expected At',
+			fieldtype: 'Date',
+			insert_after: SUPPLY_PURCHASE_ORDERED_AT_FIELD,
+			in_standard_filter: 1,
+		});
+	}
 	purchaseFieldDone = true;
 }
 
@@ -511,6 +547,8 @@ export async function createPurchaseOrderDraft(
 		schedule_date: args.scheduleDate,
 		[DEAL_FIELD]: String(args.dealId),
 		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
+		[SUPPLY_PURCHASE_STAGE_FIELD]: 'draft',
+		[SUPPLY_PURCHASE_EXPECTED_AT_FIELD]: args.scheduleDate,
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -519,6 +557,20 @@ export async function createPurchaseOrderDraft(
 		})),
 	});
 	return { name: String(doc['name']) };
+}
+
+export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
+
+export async function updateSupplyPurchaseStage(
+	erp: ErpClient,
+	args: { purchaseOrder: string; stage: SupplyPurchaseStage; expectedAt?: string },
+): Promise<{ name: string }> {
+	await ensurePurchaseFields(erp);
+	const patch: Record<string, unknown> = { [SUPPLY_PURCHASE_STAGE_FIELD]: args.stage };
+	if (args.stage === 'ordered') patch[SUPPLY_PURCHASE_ORDERED_AT_FIELD] = new Date().toISOString().slice(0, 10);
+	if (args.expectedAt) patch[SUPPLY_PURCHASE_EXPECTED_AT_FIELD] = args.expectedAt;
+	const doc = await erp.update('Purchase Order', args.purchaseOrder, patch);
+	return { name: String(doc['name'] ?? args.purchaseOrder) };
 }
 
 export async function createSupplyPurchaseReceipt(

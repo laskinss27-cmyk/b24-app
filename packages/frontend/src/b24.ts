@@ -630,7 +630,8 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
 export interface SupplyTransferChild { id: number; name: string; status: string; fromStore: string; toStore: string; lines: TransferLineDto[]; receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[] }
 export interface SupplyPurchaseReceiptChild { name: string; status: string; lines: TransferLineDto[] }
-export interface SupplyPurchaseChild { name: string; supplier: string; status: string; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
+export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
+export interface SupplyPurchaseChild { name: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
 export interface SupplyOrderRow {
 	name: string;
 	dealId: string;
@@ -677,6 +678,17 @@ export async function createSupplyPurchaseOrder(requestName: string, dealId: num
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать черновик закупки');
+	return json.name ?? '';
+}
+
+export async function updateSupplyPurchaseStage(purchaseOrder: string, stage: SupplyPurchaseStage, expectedAt?: string): Promise<string> {
+	const res = await fetch('/api/supply/purchase-stage', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), purchaseOrder, stage, ...(expectedAt ? { expectedAt } : {}) }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось обновить статус закупки');
 	return json.name ?? '';
 }
 
