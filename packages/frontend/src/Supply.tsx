@@ -111,9 +111,9 @@ const orderStatusView = (order: SupplyOrderRow, decisions: DecisionMap = {}): { 
 	const documented = documentedQtyForOrder(order);
 	const docs = (order.transfers?.length ?? 0) + (order.purchases?.length ?? 0);
 	if (order.closed) return { label: 'закрыта', className: 'done', note: 'работа завершена' };
-	if (docs > 0 && planned > 0) return { label: documented + planned >= requested ? 'документы + план' : 'частично в работе', className: 'active', note: `в документах ${documented} шт, в плане ${planned} шт` };
-	if (docs > 0 && documented >= requested) return { label: 'документы созданы', className: 'active', note: `${docs} ${plural(docs, 'документ', 'документа', 'документов')} · ${documented} из ${requested} шт` };
-	if (docs > 0) return { label: 'часть в документах', className: 'active', note: `${docs} ${plural(docs, 'документ', 'документа', 'документов')} · ${documented} из ${requested} шт` };
+	if (docs > 0 && planned > 0) return { label: documented + planned >= requested ? 'заказано + план' : 'частично заказано', className: 'active', note: `в документах ${documented} шт, в плане ${planned} шт` };
+	if (docs > 0 && documented >= requested) return { label: 'заказано', className: 'active', note: `${docs} ${plural(docs, 'документ', 'документа', 'документов')} · ${documented} из ${requested} шт` };
+	if (docs > 0) return { label: 'частично заказано', className: 'active', note: `${docs} ${plural(docs, 'документ', 'документа', 'документов')} · ${documented} из ${requested} шт` };
 	if (planned >= requested && requested > 0) return { label: 'план готов', className: 'active', note: `запланировано ${planned} из ${requested}` };
 	if (planned > 0) return { label: 'в плане', className: 'draft', note: `запланировано ${planned} из ${requested}` };
 	return { label: statusLabel(order.status, order.closed), className: /pending/i.test(order.status) ? 'draft' : 'active', note: 'еще не разбирали' };
