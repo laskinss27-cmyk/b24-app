@@ -108,6 +108,11 @@ function ruDateTime(s: string): string {
 /** Отображаемый номер: наш короткий (со 100), для старых карточек без него — технический ID. */
 function repairNo(r: Repair): number { return r.repairNo && r.repairNo > 0 ? r.repairNo : r.id; }
 function money(n: number | null): string { return n == null ? '' : `${n.toLocaleString('ru-RU')} ₽`; }
+function repairPointLabel(r: Repair): string {
+	if (r.point) return r.point;
+	if (r.kind === 'presale') return r.sourceStore ?? r.issueStore ?? '';
+	return '';
+}
 
 /** Фото → ужатый data-URL (хранится в нашем store; Диск Б24 недоступен — нет scope). */
 async function fileToPhoto(file: File, maxPx = 1280, quality = 0.7): Promise<RepairPhoto> {
@@ -280,7 +285,7 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 		return repairs.filter((r) => {
 			if (st !== 'all' && r.status !== st) return false;
 			if (!words.length) return true;
-			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment}`.toLowerCase();
+			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment}`.toLowerCase();
 			return words.every((w) => hay.includes(w));
 		});
 	}, [repairs, q, st]);
@@ -317,13 +322,14 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 				<div className="table-wrap">
 					<table className="products-table report-table">
 						<thead>
-							<tr><th>№</th><th>Клиент</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Статус</th><th>Принят</th></tr>
+							<tr><th>№</th><th>Клиент</th><th>ТТ приема</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Статус</th><th>Принят</th></tr>
 						</thead>
 						<tbody>
 							{view.map((r) => (
 								<tr key={r.id} className={`repair-row${r.status === 'issued' ? ' done' : ''}`} onClick={() => onOpen(r)}>
 									<td><b>#{repairNo(r)}</b></td>
 									<td>{r.kind === 'presale' ? <span className="pay-badge presale">🛠 предпродажа</span> : (<>{r.client.name || <span className="muted">—</span>}{r.client.phone && <div className="muted small">{r.client.phone}</div>}</>)}</td>
+									<td className="nowrap">{repairPointLabel(r) || <span className="muted">—</span>}</td>
 									<td>{[r.device, r.model].filter(Boolean).join(' ') || <span className="muted">—</span>}</td>
 									<td className="nowrap">{r.serial || <span className="muted">—</span>}</td>
 									<td>{r.kind === 'presale' ? <span className="muted">—</span> : <span className={`pay-badge ${r.payType}`}>{r.payType === 'paid' ? 'платный' : 'гарантия'}</span>}</td>
