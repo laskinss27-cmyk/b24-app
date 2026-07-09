@@ -888,7 +888,7 @@ function RepairBlank({ repair, onBack }: { repair: Repair; onBack: () => void })
 
 function Shell({ children }: { children: JSX.Element }): JSX.Element {
 	return (
-		<div className="inv">
+		<div className="inv repairs-shell">
 			<header>
 				<h1>🔧 Ремонты</h1>
 				<p className="subtitle">Приём оборудования и сдача в ремонт · приём → отправлено → вернулось → выдано</p>

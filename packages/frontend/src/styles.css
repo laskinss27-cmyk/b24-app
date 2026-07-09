@@ -1785,6 +1785,16 @@ html, body, #root { height: 100%; }
 .products-table tr.goods-row.sel-row:hover { background: #e0edff; }
 
 /* ── Ремонты (RMA) ─────────────────────────────────────────── */
+.repairs-shell {
+	max-width: none;
+	padding: 24px 32px 36px;
+}
+.repairs-shell .table-wrap {
+	width: 100%;
+}
+.repairs-shell .report-table {
+	min-width: 1320px;
+}
 .repair-row { cursor: pointer; }
 .repair-row:hover { background: #f8fafc; }
 .repair-row.done { opacity: 0.5; }
