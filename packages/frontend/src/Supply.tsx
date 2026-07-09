@@ -263,6 +263,52 @@ function PreviewPanel({ order, decisions }: { order: SupplyOrderRow | null; deci
 	);
 }
 
+function PurchasesSection({ orders, loading, onOpenOrder, onReceivePurchase }: {
+	orders: SupplyOrderRow[];
+	loading: boolean;
+	onOpenOrder: (order: SupplyOrderRow) => void;
+	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
+}): JSX.Element {
+	const rows = orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ order, purchase })));
+	return (
+		<section className="supply-card supply-linked-docs">
+			<div className="supply-card-head">
+				<div>
+					<h2>Заявки поставщикам</h2>
+					<p>Все закупочные документы, созданные из заявок снабжения.</p>
+				</div>
+				<span className="supply-muted">{rows.length} {plural(rows.length, 'документ', 'документа', 'документов')}</span>
+			</div>
+			<div className="supply-linked-list">
+				{loading && <div className="supply-empty">Загрузка закупок из ядра...</div>}
+				{!loading && rows.length === 0 && <div className="supply-empty">Заявок поставщикам пока нет. Они появятся здесь после создания документов из заявки снабжения.</div>}
+				{rows.map(({ order, purchase }) => {
+					const status = supplierRequestStatus(purchase);
+					const ordered = purchaseOrderedQty(purchase);
+					const received = purchaseReceivedTotal(purchase);
+					return (
+						<div key={`${order.name}-${purchase.name}`} className="supply-linked-row">
+							<div>
+								<b>{purchase.name} · {purchase.supplier || DEFAULT_SUPPLIER}</b>
+								<small>{order.name} · Сделка #{order.dealId} · склад заявки: {order.toStore || '-'}</small>
+								<small>Заказано {ordered} · получено {received} · остаток {Math.max(ordered - received, 0)}</small>
+								<small>{linesSummary(purchase.lines)}</small>
+								{purchase.receipts.map((receipt) => <em key={receipt.name}>Приход {receipt.name}: {linesSummary(receipt.lines)}</em>)}
+							</div>
+							<div className="supply-linked-actions">
+								<i className={`supply-status ${status.className}`}>{status.label}</i>
+								<button type="button" onClick={() => printSupplierRequest(order, purchase)}>Печать</button>
+								<button type="button" onClick={() => onReceivePurchase(purchase)}>Принять</button>
+								<button type="button" onClick={() => onOpenOrder(order)}>Открыть заявку</button>
+							</div>
+						</div>
+					);
+				})}
+			</div>
+		</section>
+	);
+}
+
 function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase }: {
 	order: SupplyOrderRow;
 	decisions: DecisionMap;
@@ -699,6 +745,13 @@ export function Supply(): JSX.Element {
 								<PreviewPanel order={selectedPreview} decisions={decisions} />
 							</div>
 						</>
+					) : section === 'purchase' ? (
+						<PurchasesSection
+							orders={orders}
+							loading={loadingOrders}
+							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
+							onReceivePurchase={openReceivePurchase}
+						/>
 					) : (
 						<section className="supply-card supply-placeholder">
 							<h2>{STUB[section].title}</h2>
