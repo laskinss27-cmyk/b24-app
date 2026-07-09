@@ -30,6 +30,9 @@ const OFFER_IBLOCK = 26;
 const PARENT_TYPE = 3;
 /** type «услуга/работа» (catalog.product.list TYPE=7) — для фильтра «товары/услуги». */
 const SERVICE_TYPE = 7;
+const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
+const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
+const ENGINEER_VISIT_SERVICE_NAME = 'Выезд инженера';
 /** Тип цены «Розница». На портале он ОДИН — BASE (catalog.priceType.list → #2). */
 const RETAIL_PRICE_GROUP = 2;
 
@@ -217,6 +220,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 	for (const p of main) {
 		if (Number(p['type']) === PARENT_TYPE) continue;
 		const id = Number(p['id']);
+		if (id === B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID) continue;
 		const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
 		const { stockByStore, total } = stockOf(id);
 		rows.push({
@@ -239,6 +243,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 	// офферы (вариации): бренд/модель/раздел/фото добираем с родителя из mainById
 	for (const o of offers) {
 		const id = Number(o['id']);
+		if (id === B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID) continue;
 		const pid = parentIdOf(o);
 		const par = pid ? mainById.get(pid) : undefined;
 		const sid = (Number(o['iblockSectionId'] ?? 0) || undefined) ?? (par ? Number(par['iblockSectionId'] ?? 0) || undefined : undefined);
@@ -257,6 +262,20 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			photoPath: pictureUrl(o['detailPicture']) ?? pictureUrl(o['previewPicture']) ?? (par ? pictureUrl(par['detailPicture']) : undefined),
 			total,
 			stockByStore,
+		});
+	}
+
+	if (!rows.some((r) => r.id === CORE_ENGINEER_VISIT_SERVICE_ID)) {
+		rows.push({
+			id: CORE_ENGINEER_VISIT_SERVICE_ID,
+			iblockId: MAIN_IBLOCK,
+			name: ENGINEER_VISIT_SERVICE_NAME,
+			isService: true,
+			sectionName: 'Услуги',
+			retail: null,
+			purchase: null,
+			total: 0,
+			stockByStore: {},
 		});
 	}
 

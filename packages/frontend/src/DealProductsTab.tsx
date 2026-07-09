@@ -98,6 +98,9 @@ const MOCK_DATA: TableData = {
 	],
 };
 
+const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
+const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
+
 async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
@@ -138,13 +141,13 @@ async function loadAll(dealId: number): Promise<TableData> {
 		id: `plan-${p.productId}`,
 		productId: p.productId,
 		name: p.itemName || `#${p.productId}`,
-		type: 1,
+		type: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? 7 : 1,
 		price: p.rate,                                                  // итог за ед. (после скидки)
 		quantity: p.qty,
 		discountSum: Math.round((p.priceListRate - p.rate) * 100) / 100, // скидка ₽/ед = база − итог (база восстановима)
 		measure: 'шт',
-		stocks: mkStocks(p.productId),
-		purchasingPrice: enrich[p.productId]?.purchasingPrice ?? null,
+		stocks: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? [] : mkStocks(p.productId),
+		purchasingPrice: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? null : (enrich[p.productId]?.purchasingPrice ?? null),
 	}));
 	// Старые/ручные сделки могут содержать реальные товары только в строках Б24, без Sales Order
 	// в ядре. Не прячем их: показываем как товарные строки, пока пользователь не перенесёт/правит
@@ -485,7 +488,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const storeName = (id: number): string => data.stores.find((s) => s.id === id)?.title ?? `Склад #${id}`;
 	/** Незакрытое перемещение по этому товару (запрошено/в пути) — чтобы показать статус вместо кнопки. */
 	const activeTransferOf = (r: EnrichedRow): TransferDoc | null =>
-		dealTransfers.find((t) => (t.status === 'requested' || t.status === 'in_transit') && t.lines.some((l) => l.productId === r.productId)) ?? null;
+		dealTransfers.find((t) => (t.status === 'requested' || t.status === 'in_transit' || t.status === 'shortage') && t.lines.some((l) => l.productId === r.productId)) ?? null;
 	/** Полученное перемещение по товару: товар уже на складе Б, но остаток открытой вкладки мог не обновиться. */
 	const receivedTransferOf = (r: EnrichedRow): TransferDoc | null =>
 		dealTransfers.find((t) => t.status === 'received' && t.lines.some((l) => l.productId === r.productId)) ?? null;
@@ -515,14 +518,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
 	// монитор-вариация выпадал из «только TYPE 1» и был невидим при видимой сумме).
 	// ТОВАРЫ сделки = строки ПЛАНА (из ядра). На них работает весь движок реализации ниже.
-	const goods = data.planRows;
+	const goods = data.planRows.filter((r) => !isWorkRow(r.type));
+	const planWorks = data.planRows.filter((r) => isWorkRow(r.type));
 	const works = rows.filter((r) => isWorkRow(r.type));
 	// «Выезд инженера» (productId 9814) — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
-	const VYEZD_PID = 9814;
-	const realWorks = works.filter((r) => r.productId !== VYEZD_PID);
+	const realWorks = [...planWorks, ...works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)];
 	const sumRealWorks = realWorks.reduce((a, r) => a + line(r), 0);
 	const sumGoods = goods.reduce((a, r) => a + line(r), 0);
-	const sumWorks = works.reduce((a, r) => a + line(r), 0);
+	const sumWorks = sumRealWorks;
 
 	const discount = rows.reduce((a, r) => a + r.discountSum, 0);
 	const total = sumGoods + sumWorks;
@@ -686,7 +689,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							const active = activeTransferOf(r);
 							if (active) return (
 								<span className={`st-badge ${active.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${active.fromStore} → ${active.toStore}`}>
-									{active.status === 'in_transit' ? '🚚 в пути' : '⏳ запрошено'}
+									{active.status === 'shortage' ? '⚠ недовоз' : active.status === 'in_transit' ? '🚚 в пути' : '⏳ запрошено'}
 								</span>
 							);
 							if (receivedTransferOf(r)) return (
@@ -741,10 +744,19 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		setSupplyBusy(true);
 		setNotice(null);
 		try {
-			const lines = supplyGoods.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: '' }));
-			await createDealSupplyRequest(dealId, lines);
+			const byDest = new Map<number, typeof supplyGoods>();
+			for (const row of supplyGoods) {
+				const sid = storeOf(row);
+				byDest.set(sid, [...(byDest.get(sid) ?? []), row]);
+			}
+			let totalLines = 0;
+			for (const [sid, rows] of byDest.entries()) {
+				const lines = rows.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: '' }));
+				totalLines += lines.length;
+				await createDealSupplyRequest(dealId, lines, sid > 0 ? storeName(sid) : undefined);
+			}
 			setSelected({});
-			setNotice({ kind: 'ok', text: `Заказ сформирован: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')}. Он появился в дисплее снабжения.` });
+			setNotice({ kind: 'ok', text: `Заказ сформирован: ${totalLines} ${plural(totalLines, 'позиция', 'позиции', 'позиций')}. Он появился в дисплее снабжения.` });
 			await onReload();
 		} catch (err) {
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });

@@ -39,6 +39,7 @@ function errInfo(err: unknown): string {
 // сделки (товарный состав живёт в ядре, Sales Order). Услуга TYPE 7 — склад не трогает, сделка
 // закрывается без проводки по складу.
 const VYEZD_PRODUCT_ID = 9814;
+const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
 /** Поставить в Б24-сделку ОДНУ строку «Выезд инженера» на сумму total (или очистить, если total<=0). */
 async function setDealB24Service(client: B24Client, dealId: number, total: number): Promise<void> {
@@ -314,12 +315,17 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				for (const p of res?.products ?? []) {
 					const name = String(p['name'] ?? '');
 					const id = Number(p['id']);
+					if (id === VYEZD_PRODUCT_ID) continue;
 					if (name && id > 0 && !byName.has(name)) byName.set(name, { id, name });
 				}
 			}
-			const list = [...byName.values()].slice(0, 30);
-			const prices = await fetchBasePrices(client, list.map((p) => p.id));
-			const products = list.map((p) => ({ ...p, price: prices.get(p.id) ?? 0 }));
+			const list = [...byName.values()];
+			if ('выезд инженера'.includes(q.toLowerCase()) || q.toLowerCase().includes('выезд') || q.toLowerCase().includes('инженер')) {
+				list.unshift({ id: CORE_ENGINEER_VISIT_SERVICE_ID, name: 'Выезд инженера' });
+			}
+			const limited = list.slice(0, 30);
+			const prices = await fetchBasePrices(client, limited.filter((p) => p.id !== CORE_ENGINEER_VISIT_SERVICE_ID).map((p) => p.id));
+			const products = limited.map((p) => ({ ...p, price: p.id === CORE_ENGINEER_VISIT_SERVICE_ID ? 0 : (prices.get(p.id) ?? 0) }));
 			app.log.info({ count: products.length }, '[api/deal/search-products] ok');
 			return { ok: true, products };
 		} catch (err) {
@@ -339,7 +345,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const clean = items
 			.map((it) => it as { productId?: unknown; quantity?: unknown; price?: unknown; name?: unknown })
 			.map((it) => ({ productId: Number(it.productId), quantity: Number(it.quantity), price: Number(it.price), name: String(it.name ?? '') }))
-			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.quantity) && it.quantity > 0);
+			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && it.productId !== VYEZD_PRODUCT_ID && Number.isFinite(it.quantity) && it.quantity > 0);
 		if (!clean.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
 
 		try {
@@ -372,6 +378,9 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			// ФОЛБЭК (ядро не подключено): как раньше — товары в строки Б24.
 			let added = 0;
 			for (const it of priced) {
+				if (it.productId === CORE_ENGINEER_VISIT_SERVICE_ID) {
+					throw new Error('услуга «Выезд инженера» требует подключенного ядра склада');
+				}
 				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price: it.price, quantity: it.quantity } });
 				added++;
 			}

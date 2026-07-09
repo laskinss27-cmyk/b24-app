@@ -13,9 +13,11 @@ import { ErpClient } from './client.js';
 const DEAL_FIELD = 'b24_deal_id';
 /** Документы, которым нужно поле сделки. */
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
+export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
 const TECH_CUSTOMER = 'Б24 Розница';
 const TECH_SUPPLIER = 'Б24 Снабжение';
 const ITEM_GROUP = 'Каталог Б24';
+const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
 export interface ErpContext {
 	company: string;
@@ -66,12 +68,13 @@ export async function ensureCoreItem(erp: ErpClient, args: { productId: number; 
 	if (await erp.get('Item', code)) return;
 	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
 	if (!(await erp.get('Item Group', ITEM_GROUP))) await erp.create('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
+	const isService = args.productId === CORE_ENGINEER_VISIT_SERVICE_ID;
 	await erp.create('Item', {
 		item_code: code,
 		item_name: args.name || `#${code}`,
 		item_group: ITEM_GROUP,
 		stock_uom: UOM,
-		is_stock_item: 1,
+		is_stock_item: isService ? 0 : 1,
 		description: `Б24 productId=${args.productId} (создан из приёмки)`,
 	});
 }
@@ -295,7 +298,7 @@ async function ensurePlanField(erp: ErpClient): Promise<void> {
 
 // priceListRate = базовая цена (до скидки), discountPercent = скидка %. rate (итог) ERPNext считает сам.
 export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number }
-export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number }
+export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean }
 
 /** Черновик плана сделки (Sales Order docstatus 0 по b24_deal_id) — имя или null. */
 async function findDealPlan(erp: ErpClient, dealId: number): Promise<string | null> {
@@ -342,6 +345,7 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 		priceListRate: Number(it['price_list_rate'] ?? it['rate'] ?? 0),
 		discountPercent: Number(it['discount_percentage'] ?? 0),
 		delivered: Number(it['delivered_qty'] ?? 0),
+		isService: Number(it['item_code']) === CORE_ENGINEER_VISIT_SERVICE_ID,
 	}));
 }
 
@@ -385,6 +389,7 @@ export async function listSupplyOrders(erp: ErpClient): Promise<SupplyOrder[]> {
 // Менеджер из сделки отмечает товары, которых не хватает, → создаётся Material Request (потребность),
 // привязка b24_deal_id. Снабженец из неё делает закупку (Purchase Order) или перемещение (Stock Entry).
 let mrFieldDone = false;
+const MR_TO_STORE_FIELD = 'b24_to_store';
 async function ensureMrField(erp: ErpClient): Promise<void> {
 	if (mrFieldDone) return;
 	const cfName = `Material Request-${DEAL_FIELD}`;
@@ -394,13 +399,20 @@ async function ensureMrField(erp: ErpClient): Promise<void> {
 			insert_after: 'title', in_standard_filter: 1, in_list_view: 1,
 		});
 	}
+	const toStoreName = `Material Request-${MR_TO_STORE_FIELD}`;
+	if (!(await erp.get('Custom Field', toStoreName))) {
+		await erp.create('Custom Field', {
+			dt: 'Material Request', fieldname: MR_TO_STORE_FIELD, label: 'B24 To Store', fieldtype: 'Data',
+			insert_after: DEAL_FIELD, in_list_view: 1,
+		});
+	}
 	mrFieldDone = true;
 }
 
 export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string }
 
 /** Создать заявку в снабжение (Material Request, тип Purchase) по выбранным товарам сделки. */
-export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[] }): Promise<{ name: string }> {
+export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string }): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMrField(erp);
@@ -411,6 +423,7 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 		material_request_type: 'Purchase',
 		schedule_date: args.scheduleDate,
 		[DEAL_FIELD]: String(args.dealId),
+		...(args.toStore ? { [MR_TO_STORE_FIELD]: args.toStore } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -422,7 +435,7 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 }
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
-export interface SupplyRequest { name: string; dealId: string; date: string; status: string; items: SupplyReqItem[] }
+export interface SupplyRequest { name: string; dealId: string; date: string; status: string; toStore: string; items: SupplyReqItem[] }
 
 /** Все заявки снабжения из ядра (Material Request, кроме отменённых) с позициями, комментариями и остатками. */
 export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[]> {
@@ -449,10 +462,89 @@ export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[
 			dealId: String(h[DEAL_FIELD] ?? ''),
 			date: String(h['transaction_date'] ?? ''),
 			status: String(h['status'] ?? ''),
+			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
 			items,
 		});
 	}
 	return out;
+}
+
+let purchaseFieldDone = false;
+async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
+	if (purchaseFieldDone) return;
+	await ensureErpSetup(erp);
+	for (const dt of ['Purchase Order', 'Purchase Receipt']) {
+		const dealField = `${dt}-${DEAL_FIELD}`;
+		if (!(await erp.get('Custom Field', dealField))) {
+			await erp.create('Custom Field', {
+				dt, fieldname: DEAL_FIELD, label: 'B24 Deal', fieldtype: 'Data',
+				insert_after: 'supplier', in_standard_filter: 1, in_list_view: 1,
+			});
+		}
+		const requestField = `${dt}-${SUPPLY_REQUEST_FIELD}`;
+		if (!(await erp.get('Custom Field', requestField))) {
+			await erp.create('Custom Field', {
+				dt, fieldname: SUPPLY_REQUEST_FIELD, label: 'B24 Supply Request', fieldtype: 'Data',
+				insert_after: DEAL_FIELD, in_standard_filter: 1,
+			});
+		}
+	}
+	purchaseFieldDone = true;
+}
+
+export interface PurchaseDraftLine { productId: number; itemName?: string; qty: number; rate?: number }
+
+/** Черновик закупки по заявке снабжения. Не проводим: снабжение дальше выбирает поставщика/цены штатно. */
+export async function createPurchaseOrderDraft(
+	erp: ErpClient,
+	args: { dealId: number; supplyRequest: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string },
+): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensurePurchaseFields(erp);
+	if (!args.lines.length) throw new Error('пустая закупка');
+	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
+	const supplier = args.supplier ? await ensureSupplier(erp, args.supplier) : TECH_SUPPLIER;
+	const rates = await fetchErpPurchasing(erp, args.lines.map((l) => l.productId));
+	const doc = await erp.create('Purchase Order', {
+		company: ctx.company,
+		supplier,
+		schedule_date: args.scheduleDate,
+		[DEAL_FIELD]: String(args.dealId),
+		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
+		items: args.lines.map((l) => ({
+			item_code: String(l.productId),
+			qty: l.qty,
+			schedule_date: args.scheduleDate,
+			rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
+		})),
+	});
+	return { name: String(doc['name']) };
+}
+
+export async function createSupplyPurchaseReceipt(
+	erp: ErpClient,
+	args: { dealId: number; supplyRequest: string; purchaseOrder: string; toStore: string; lines: Array<{ productId: number; qty: number; rate: number }> },
+): Promise<{ name: string }> {
+	const ctx = await erpContext(erp);
+	await ensurePurchaseFields(erp);
+	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: `#${l.productId}` });
+	const doc = await erp.create('Purchase Receipt', {
+		company: ctx.company,
+		supplier: TECH_SUPPLIER,
+		set_posting_time: 1,
+		remarks: `Supply purchase order ${args.purchaseOrder}`,
+		[DEAL_FIELD]: String(args.dealId),
+		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
+		items: args.lines.map((l) => ({
+			item_code: String(l.productId),
+			qty: l.qty,
+			warehouse: erpWarehouse(ctx, args.toStore),
+			rate: Math.max(l.rate, 0.01),
+		})),
+	});
+	const name = String(doc['name']);
+	await erp.submit('Purchase Receipt', name);
+	return { name };
 }
 
 /** Перемещение между складами (Stock Entry: Material Transfer). Возвращает имя черновика. */

@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import {
-	listTransfers, shipTransfer, receiveTransfer, fetchMovements, openDeal,
+	listTransfers, shipTransfer, receiveTransfer, resolveTransferShortage, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	fetchDocDetail, fetchItemHistory,
@@ -275,12 +275,74 @@ function TransferDetailModal({ t, onClose }: { t: TransferDoc; onClose: () => vo
 					<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th></tr></thead>
 					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{l.qty}</td></tr>)}</tbody>
 				</table>
+				{t.receivedLines?.length ? (
+					<div style={{ marginTop: 10 }}>
+						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>Принято на склад:</div>
+						{t.receivedLines.map((l, i) => <div key={i} style={{ fontSize: 13 }}>✓ {l.name || ('#' + l.productId)} × {l.qty}</div>)}
+					</div>
+				) : null}
+				{t.shortageLines?.length ? (
+					<div style={{ marginTop: 10, color: '#9a3412' }}>
+						<div style={{ fontSize: 12, marginBottom: 2 }}>Недовоз, осталось в транзите:</div>
+						{t.shortageLines.map((l, i) => <div key={i} style={{ fontSize: 13 }}>⚠ {l.name || ('#' + l.productId)} × {l.qty}</div>)}
+					</div>
+				) : null}
+				{t.shortageReturnEntry ? <div style={{ marginTop: 10, fontSize: 13, color: '#1a7f37' }}>Хвост возвращен на склад отправки: {t.shortageReturnEntry}</div> : null}
 				{t.history && t.history.length > 0 ? (
 					<div style={{ marginTop: 10 }}>
 						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>История:</div>
 						{t.history.map((h, i) => <div key={i} style={{ fontSize: 13 }}>{(h.at || '').slice(0, 16).replace('T', ' ')} — {TRANSFER_STATUS[h.status] ?? h.status}{h.byName ? ` · ${h.byName}` : ''}{h.note ? ` (${h.note})` : ''}</div>)}
 					</div>
 				) : null}
+			</div>
+		</div>
+	);
+}
+
+function ReceiveTransferModal({ t, busy, onClose, onConfirm }: {
+	t: TransferDoc;
+	busy: boolean;
+	onClose: () => void;
+	onConfirm: (lines: Array<{ productId: number; qty: number }>) => void;
+}): JSX.Element {
+	const [qty, setQty] = useState<Record<number, number>>(() => Object.fromEntries(t.lines.map((l) => [l.productId, l.qty])));
+	const [err, setErr] = useState<string | null>(null);
+	const setLine = (productId: number, value: number): void => {
+		const max = t.lines.find((l) => l.productId === productId)?.qty ?? 0;
+		setQty((current) => ({ ...current, [productId]: Math.min(Math.max(Number(value) || 0, 0), max) }));
+	};
+	const confirm = (): void => {
+		const lines = t.lines.map((l) => ({ productId: l.productId, qty: qty[l.productId] ?? 0 }));
+		if (!lines.some((l) => l.qty > 0) && !window.confirm('Ничего не принято. Перемещение уйдет в недовоз, весь товар останется в транзите. Продолжить?')) return;
+		setErr(null);
+		onConfirm(lines);
+	};
+	const shortage = t.lines.some((l) => (qty[l.productId] ?? 0) < l.qty);
+	return (
+		<div style={{ ...overlay, zIndex: 1200 }}>
+			<div style={modalCard}>
+				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Приемка перемещения</h2>
+				<div style={{ color: '#7a8699', fontSize: 13, marginBottom: 8 }}>{t.fromStore} → {t.toStore}</div>
+				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+					<thead><tr><th style={TH}>Товар</th><th style={TH}>Отправлено</th><th style={TH}>Принято</th></tr></thead>
+					<tbody>
+						{t.lines.map((l) => (
+							<tr key={l.productId}>
+								<td style={TD}>{l.name || ('#' + l.productId)}</td>
+								<td style={TD}>{l.qty}</td>
+								<td style={TD}><input type="number" min="0" max={l.qty} step="any" style={{ ...inp, width: 90 }} value={qty[l.productId] ?? 0} onChange={(e) => setLine(l.productId, Number(e.target.value))} /></td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+				<p style={{ color: shortage ? '#9a3412' : '#1a7f37', fontSize: 13, margin: '8px 0 0' }}>
+					{shortage ? 'Есть недовоз: на склад попадет только принятое количество, остаток останется в транзите.' : 'Количество совпадает: перемещение закроется как полученное.'}
+				</p>
+				{err && <p className="error">⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+					<button style={btnGhost} disabled={busy} onClick={onClose}>Отмена</button>
+					<button className="btn-primary" disabled={busy} onClick={confirm}>{busy ? '…' : 'Подтвердить приемку'}</button>
+				</div>
 			</div>
 		</div>
 	);
@@ -376,12 +438,13 @@ export function StockLedger(): JSX.Element {
 	);
 }
 
-const TRANSFER_STATUS: Record<string, string> = { requested: '⏳ запрошено', in_transit: '🚚 в пути', received: '✅ получено', canceled: 'отменено' };
+const TRANSFER_STATUS: Record<string, string> = { requested: '⏳ запрошено', in_transit: '🚚 в пути', received: '✅ получено', shortage: '⚠️ недовоз', canceled: 'отменено' };
 const TRANSFER_STATUS_OPTS = [
 	{ value: 'all', label: 'Все статусы' },
 	{ value: 'requested', label: '⏳ Запрошено' },
 	{ value: 'in_transit', label: '🚚 В пути' },
 	{ value: 'received', label: '✅ Получено' },
+	{ value: 'shortage', label: '⚠️ Недовоз' },
 ];
 
 function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
@@ -398,6 +461,7 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 	const [showForm, setShowForm] = useState(false);
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openT, setOpenT] = useState<TransferDoc | null>(null);
+	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
 
 	const load = async (): Promise<void> => {
 		setLoading(true); setErr(null);
@@ -410,6 +474,19 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 	const act = async (t: TransferDoc, kind: 'ship' | 'receive'): Promise<void> => {
 		setBusy(t.id); setErr(null);
 		try { await (kind === 'ship' ? shipTransfer(t.id) : receiveTransfer(t.id)); await load(); }
+		catch (e) { setErr(errText(e)); }
+		finally { setBusy(null); }
+	};
+	const receiveActual = async (t: TransferDoc, lines: Array<{ productId: number; qty: number }>): Promise<void> => {
+		setBusy(t.id); setErr(null);
+		try { await receiveTransfer(t.id, lines); setReceiveT(null); await load(); }
+		catch (e) { setErr(errText(e)); }
+		finally { setBusy(null); }
+	};
+	const resolveShortage = async (t: TransferDoc): Promise<void> => {
+		if (!window.confirm(`Скорректировать недовоз и вернуть хвост из транзита на «${t.fromStore}»?`)) return;
+		setBusy(t.id); setErr(null);
+		try { await resolveTransferShortage(t.id); await load(); }
 		catch (e) { setErr(errText(e)); }
 		finally { setBusy(null); }
 	};
@@ -451,7 +528,8 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 								<td style={TD}>{TRANSFER_STATUS[t.status] ?? t.status}</td>
 								<td style={TD}>
 									{isSupply && t.status === 'requested' && <button className="btn-primary" disabled={busy != null} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'В пути'}</button>}
-									{isSupply && t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => void act(t, 'receive')}>{busy === t.id ? '…' : 'Получено'}</button>}
+									{isSupply && t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Получено'}</button>}
+									{isSupply && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
 								</td>
 							</tr>
 						))}
@@ -459,6 +537,7 @@ function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 				</table>
 			)}
 			{openT && <TransferDetailModal t={openT} onClose={() => setOpenT(null)} />}
+			{receiveT && <ReceiveTransferModal t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void receiveActual(receiveT, lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
 		</>
 	);

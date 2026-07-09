@@ -26,11 +26,13 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'canceled';
+export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'shortage' | 'canceled';
 
 interface TransferLine { productId: number; name: string; qty: number }
 
 interface TransferData {
+	/** Material Request, если перемещение создано из заявки снабжения. */
+	supplyRequest: string;
 	dealId: string;
 	/** Склад-получатель (склад реализации сделки) — название склада Б24. */
 	toStore: string;
@@ -44,6 +46,12 @@ interface TransferData {
 	/** Имена проведённых Stock Entry: отгрузка (А→транзит) и приёмка (транзит→Б). */
 	shipEntry: string | null;
 	receiveEntry: string | null;
+	/** Фактически принято на склад Б. Если меньше lines — статус shortage, хвост остается в транзите. */
+	receivedLines: TransferLine[];
+	/** Недовоз: сколько не приехало из отправленного. */
+	shortageLines: TransferLine[];
+	/** Проводка возврата хвоста из транзита на склад А при корректировке недовоза. */
+	shortageReturnEntry: string | null;
 	createdAt: string;
 	createdById: string;
 	createdByName: string;
@@ -87,15 +95,19 @@ function parseItem(it: Record<string, unknown>): (TransferData & { id: number; n
 	return {
 		id,
 		name: String(it['NAME'] ?? ''),
+		supplyRequest: String(data.supplyRequest ?? ''),
 		dealId: String(data.dealId ?? ''),
 		toStore: String(data.toStore ?? ''),
 		fromStore: String(data.fromStore ?? ''),
-		status: (['requested', 'in_transit', 'received', 'canceled'] as const).includes(data.status as TransferStatus) ? (data.status as TransferStatus) : 'requested',
+		status: (['requested', 'in_transit', 'received', 'shortage', 'canceled'] as const).includes(data.status as TransferStatus) ? (data.status as TransferStatus) : 'requested',
 		lines: Array.isArray(data.lines) ? data.lines : [],
 		note: typeof data.note === 'string' ? data.note : '',
 		taskId: typeof data.taskId === 'number' ? data.taskId : null,
 		shipEntry: data.shipEntry ?? null,
 		receiveEntry: data.receiveEntry ?? null,
+		receivedLines: Array.isArray(data.receivedLines) ? data.receivedLines : [],
+		shortageLines: Array.isArray(data.shortageLines) ? data.shortageLines : [],
+		shortageReturnEntry: data.shortageReturnEntry ?? null,
 		createdAt: data.createdAt ?? '',
 		createdById: data.createdById ?? '',
 		createdByName: data.createdByName ?? '',
@@ -147,9 +159,10 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 				if (!fromStore || fromStore === toStore || !lines.length) continue;
 
+				const supplyRequest = String(b['supplyRequest'] ?? '').trim();
 				const data: TransferData = {
-					dealId, toStore, fromStore, status: 'requested', lines, note: '',
-					taskId: null, shipEntry: null, receiveEntry: null,
+					supplyRequest, dealId, toStore, fromStore, status: 'requested', lines, note: '',
+					taskId: null, shipEntry: null, receiveEntry: null, receivedLines: [], shortageLines: [], shortageReturnEntry: null,
 					createdAt: now, createdById: me.id, createdByName: me.name,
 					history: [{ at: now, status: 'requested', byId: me.id, byName: me.name }],
 				};
@@ -212,8 +225,8 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!STOCK_CREATE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только канарейка' });
 			const now = new Date().toISOString();
 			const data: TransferData = {
-				dealId: '', toStore, fromStore, status: 'requested', lines, note,
-				taskId: null, shipEntry: null, receiveEntry: null,
+				supplyRequest: '', dealId: '', toStore, fromStore, status: 'requested', lines, note,
+				taskId: null, shipEntry: null, receiveEntry: null, receivedLines: [], shortageLines: [], shortageReturnEntry: null,
 				createdAt: now, createdById: me.id, createdByName: me.name,
 				history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: 'создано вручную в окне' }],
 			};
@@ -292,7 +305,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 
 	// ── Закупка: «Получено» (проводка транзит→Б) ─────────────────────────────────
 	app.post('/api/transfers/receive', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const id = Number(b.id);
@@ -306,20 +319,83 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const me = await currentUser(client);
 			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'двигать статус может только снабжение (закупка)' });
 			const did = Number(doc.dealId) || 0;
-			const { name: entryName } = await receiveTransferFromTransit(erp, {
-				...(did ? { dealId: did } : {}),
-				lines: doc.lines.map((l) => ({ productId: l.productId, qty: l.qty, toStore: doc.toStore })),
-			});
+			const actualByProduct = new Map<number, number>();
+			if (Array.isArray(b.lines)) {
+				for (const raw of b.lines as Array<Record<string, unknown>>) {
+					const productId = Number(raw['productId']);
+					const qty = Number(raw['qty']);
+					if (Number.isInteger(productId) && productId > 0 && Number.isFinite(qty)) actualByProduct.set(productId, Math.max(qty, 0));
+				}
+			}
+			const hasActual = actualByProduct.size > 0;
+			const receivedLines: TransferLine[] = [];
+			const shortageLines: TransferLine[] = [];
+			for (const l of doc.lines) {
+				const actual = hasActual ? Math.min(actualByProduct.get(l.productId) ?? 0, l.qty) : l.qty;
+				if (actual > 0) receivedLines.push({ productId: l.productId, name: l.name, qty: actual });
+				const shortage = Math.max(l.qty - actual, 0);
+				if (shortage > 0) shortageLines.push({ productId: l.productId, name: l.name, qty: shortage });
+			}
+			let entryName: string | null = null;
+			if (receivedLines.length) {
+				const res = await receiveTransferFromTransit(erp, {
+					...(did ? { dealId: did } : {}),
+					lines: receivedLines.map((l) => ({ productId: l.productId, qty: l.qty, toStore: doc.toStore })),
+				});
+				entryName = res.name;
+			}
 			const now = new Date().toISOString();
+			const nextStatus: TransferStatus = shortageLines.length ? 'shortage' : 'received';
+			const shortageNote = shortageLines.length ? `; недовоз: ${shortageLines.map((l) => `${l.name || '#' + l.productId} ×${l.qty}`).join(', ')}` : '';
 			const data: TransferData = {
-				...doc, status: 'received', receiveEntry: entryName,
-				history: [...doc.history, { at: now, status: 'received', byId: me.id, byName: me.name, note: `Stock Entry ${entryName}` }],
+				...doc, status: nextStatus, receiveEntry: entryName, receivedLines, shortageLines,
+				history: [...doc.history, { at: now, status: nextStatus, byId: me.id, byName: me.name, note: `${entryName ? `Stock Entry ${entryName}` : 'без проводки'}${shortageNote}` }],
 			};
 			await saveData(client, id, doc.name, data);
 			app.log.info({ id, entryName }, '[api/transfers/receive] ok');
 			return { ok: true, transfer: { id, name: doc.name, ...data } };
 		} catch (err) {
 			app.log.error({}, `[api/transfers/receive] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/transfers/resolve-shortage', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
+		try {
+			const doc = await loadOne(client, id);
+			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
+			if (doc.status !== 'shortage') return reply.code(409).send({ ok: false, error: `нельзя скорректировать недовоз из статуса ${doc.status}` });
+			if (!doc.shortageLines.length) return reply.code(409).send({ ok: false, error: 'у перемещения нет хвоста недовоза' });
+			const me = await currentUser(client);
+			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'корректировать недовоз может только снабжение (закупка)' });
+			const did = Number(doc.dealId) || 0;
+			const { name: returnEntry } = await receiveTransferFromTransit(erp, {
+				...(did ? { dealId: did } : {}),
+				lines: doc.shortageLines.map((l) => ({ productId: l.productId, qty: l.qty, toStore: doc.fromStore })),
+			});
+			const now = new Date().toISOString();
+			const correctedLines = doc.receivedLines.length ? doc.receivedLines : doc.lines.map((l) => ({ ...l, qty: Math.max(l.qty - (doc.shortageLines.find((s) => s.productId === l.productId)?.qty ?? 0), 0) })).filter((l) => l.qty > 0);
+			const returnedText = doc.shortageLines.map((l) => `${l.name || '#' + l.productId} ×${l.qty}`).join(', ');
+			const data: TransferData = {
+				...doc,
+				status: 'received',
+				lines: correctedLines,
+				shortageReturnEntry: returnEntry,
+				shortageLines: [],
+				history: [...doc.history, { at: now, status: 'received', byId: me.id, byName: me.name, note: `недовоз скорректирован: ${returnedText} возвращено ${doc.toStore ? 'из транзита' : ''} на ${doc.fromStore}; Stock Entry ${returnEntry}` }],
+			};
+			await saveData(client, id, doc.name, data);
+			app.log.info({ id, returnEntry }, '[api/transfers/resolve-shortage] ok');
+			return { ok: true, transfer: { id, name: doc.name, ...data } };
+		} catch (err) {
+			app.log.error({}, `[api/transfers/resolve-shortage] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

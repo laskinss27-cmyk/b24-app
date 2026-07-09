@@ -628,7 +628,22 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
-export interface SupplyOrderRow { name: string; dealId: string; dealTitle: string; date: string; status: string; closed: boolean; items: SupplyOrderItem[] }
+export interface SupplyTransferChild { id: number; name: string; status: string; fromStore: string; toStore: string; lines: TransferLineDto[]; receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[] }
+export interface SupplyPurchaseReceiptChild { name: string; status: string; lines: TransferLineDto[] }
+export interface SupplyPurchaseChild { name: string; supplier: string; status: string; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
+export interface SupplyOrderRow {
+	name: string;
+	dealId: string;
+	dealTitle: string;
+	date: string;
+	status: string;
+	closed: boolean;
+	toStore: string;
+	items: SupplyOrderItem[];
+	originalItems?: SupplyOrderItem[];
+	transfers?: SupplyTransferChild[];
+	purchases?: SupplyPurchaseChild[];
+}
 
 /** Все заявки снабжения из ядра (Material Request по сделкам) + название сделки из Б24. Ядро не подключено → []. */
 export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
@@ -643,14 +658,36 @@ export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 }
 
 /** Сформировать заказ в снабжение по выбранным чекбоксами товарам сделки. */
-export async function createDealSupplyRequest(dealId: number, lines: Array<{ productId: number; itemName: string; qty: number; note: string }>): Promise<string> {
+export async function createDealSupplyRequest(dealId: number, lines: Array<{ productId: number; itemName: string; qty: number; note: string }>, toStore?: string): Promise<string> {
 	const res = await fetch('/api/supply/request', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, lines }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, lines, ...(toStore ? { toStore } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать заявку в снабжение');
+	return json.name ?? '';
+}
+
+export async function createSupplyPurchaseOrder(requestName: string, dealId: number, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {
+	const res = await fetch('/api/supply/purchase-order', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, supplier, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось создать черновик закупки');
+	return json.name ?? '';
+}
+
+export async function receiveSupplyPurchase(requestName: string, dealId: number, purchaseOrder: string, toStore: string, lines: Array<{ productId: number; qty: number; rate: number }>): Promise<string> {
+	const res = await fetch('/api/supply/purchase-receive', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, purchaseOrder, toStore, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось принять закупку');
 	return json.name ?? '';
 }
 
@@ -666,6 +703,7 @@ export interface DealPlanItem {
 	/** Скидка, %. */
 	discountPercent: number;
 	delivered: number;
+	isService?: boolean;
 }
 
 /** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24.
@@ -845,11 +883,12 @@ export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise
 }
 
 // ── Перемещения (складской учёт) ─────────────────────────────────────────────
-export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'canceled';
-export interface TransferLineDto { productId: number; name: string; qty: number }
+export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'shortage' | 'canceled';
+export interface TransferLineDto { productId: number; name: string; qty: number; rate?: number }
 export interface TransferDoc {
 	id: number;
 	name: string;
+	supplyRequest: string;
 	dealId: string;
 	toStore: string;
 	fromStore: string;
@@ -859,6 +898,9 @@ export interface TransferDoc {
 	taskId: number | null;
 	shipEntry: string | null;
 	receiveEntry: string | null;
+	receivedLines: TransferLineDto[];
+	shortageLines: TransferLineDto[];
+	shortageReturnEntry: string | null;
 	createdAt: string;
 	createdById: string;
 	createdByName: string;
@@ -868,7 +910,7 @@ export interface TransferDoc {
 }
 
 /** Создать перемещение(я) из сделки: глобальный склад-получатель + группы по складам-источникам. */
-export async function createTransfers(args: { dealId: number; toStore: string; groups: Array<{ fromStore: string; lines: TransferLineDto[] }> }): Promise<TransferDoc[]> {
+export async function createTransfers(args: { dealId: number; toStore: string; groups: Array<{ fromStore: string; lines: TransferLineDto[] }>; supplyRequest?: string }): Promise<TransferDoc[]> {
 	const res = await fetch('/api/transfers/create', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...args }),
@@ -901,13 +943,23 @@ export async function shipTransfer(id: number): Promise<TransferDoc> {
 }
 
 /** Закупка: «Получено» (проводка транзит→Б). */
-export async function receiveTransfer(id: number): Promise<TransferDoc> {
+export async function receiveTransfer(id: number, lines?: Array<{ productId: number; qty: number }>): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/receive', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, ...(lines ? { lines } : {}) }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
+	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось принять');
+	return json.transfer;
+}
+
+export async function resolveTransferShortage(id: number): Promise<TransferDoc> {
+	const res = await fetch('/api/transfers/resolve-shortage', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), id }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
-	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось принять');
+	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось скорректировать недовоз');
 	return json.transfer;
 }
 

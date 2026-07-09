@@ -33,6 +33,8 @@ type Gate = 'checking' | 'beta' | 'plain' | 'error';
 type Mode = 'loading' | 'base' | 'inventory' | 'report' | 'realizations';
 
 const ALL = 'all';
+const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
+const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
 /** Короткое имя склада для чипов «остатки по складам». */
 function shortStore(title: string): string {
@@ -174,7 +176,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 
 	const view = useMemo(() => {
 		const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-		let list = rows.map((d) => {
+		let list = rows.filter((d) => d.id !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID).map((d) => {
 			const qty = isAll ? d.total : (d.stockByStore[sid as number] ?? 0);
 			// Показываем ВСЕ склады с остатком, включая выбранный (его подсветим) — чтобы не было
 			// «остаток 1, а по складам прочерк», когда товар лежит только на выбранном складе.
@@ -410,7 +412,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 						{view.length ? view.map(({ d, qty, others }) => {
 							const photo = d.photoPath ? photoFullUrl(d.photoPath) : null;
 							return (
-								<tr key={d.id} onClick={() => openProductCard(d.iblockId, d.id)} title="Открыть карточку товара">
+								<tr key={d.id} onClick={() => d.id !== CORE_ENGINEER_VISIT_SERVICE_ID && openProductCard(d.iblockId, d.id)} title={d.id === CORE_ENGINEER_VISIT_SERVICE_ID ? undefined : 'Открыть карточку товара'}>
 									<td className="num idcol">{d.id}</td>
 									<td className="ph-col">
 										{photo

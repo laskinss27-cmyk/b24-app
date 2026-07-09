@@ -2500,60 +2500,213 @@ html, body, #root { height: 100%; }
 .supply-preview-hint {
 	padding: 0 20px 18px;
 }
-.supply-summary {
+.supply-summary,
+.supply-flow {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 1px;
 	margin-bottom: 18px;
 	background: #d9dee7;
 }
-.supply-summary > div {
+.supply-summary > div,
+.supply-flow > div {
 	background: #fff;
 	padding: 18px 20px;
 }
-.supply-summary b {
+.supply-summary b,
+.supply-flow b {
+	display: block;
 	font-size: 18px;
+}
+.supply-flow-step span {
+	display: block;
+	margin-bottom: 8px;
+	color: #6b7280;
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+.supply-flow-step small {
+	display: block;
+	margin-top: 8px;
+	color: #6b7280;
+	font-size: 12px;
+	line-height: 1.45;
 }
 .supply-detail-table {
 	padding-bottom: 10px;
 }
-.supply-detail-head,
-.supply-detail-row {
+.supply-work-head {
+	align-items: flex-start;
+}
+.supply-linked-docs {
+	margin-bottom: 18px;
+}
+.supply-doc-head-actions {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+.supply-doc-head-actions button {
+	border: 1px solid #cfd6e3;
+	border-radius: 6px;
+	background: #fff;
+	color: #374151;
+	padding: 7px 10px;
+	font-size: 12px;
+}
+.supply-linked-list {
+	border-top: 1px solid #e5e7eb;
+}
+.supply-linked-row {
 	display: grid;
-	grid-template-columns: minmax(260px, 1fr) 92px 150px 70px 140px 130px 90px;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 14px;
+	align-items: center;
+	padding: 13px 20px;
+	border-bottom: 1px solid #edf0f4;
+}
+.supply-linked-row b,
+.supply-linked-row small,
+.supply-linked-row em {
+	display: block;
+}
+.supply-linked-row small {
+	margin-top: 4px;
+	color: #4b5563;
+	font-size: 12px;
+	line-height: 1.45;
+}
+.supply-linked-row em {
+	margin-top: 5px;
+	color: #b45309;
+	font-size: 12px;
+	font-style: normal;
+}
+.supply-linked-actions {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+}
+.supply-linked-actions button {
+	border: 1px solid #cfd6e3;
+	background: #fff;
+	color: #374151;
+	border-radius: 6px;
+	padding: 7px 10px;
+	font-size: 12px;
+}
+.supply-modal-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 1300;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding: 40px 16px;
+	background: rgba(17, 24, 39, .42);
+	overflow: auto;
+}
+.supply-modal {
+	width: min(680px, 100%);
+	background: #fff;
+	border-radius: 8px;
+	box-shadow: 0 18px 60px rgba(15, 23, 42, .28);
+}
+.supply-modal header,
+.supply-modal footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 18px 20px;
+}
+.supply-modal header {
+	border-bottom: 1px solid #e5e7eb;
+}
+.supply-modal footer {
+	border-top: 1px solid #e5e7eb;
+}
+.supply-modal h2 {
+	margin: 0;
+	font-size: 18px;
+}
+.supply-modal p {
+	margin: 4px 0 0;
+	color: #6b7280;
+	font-size: 12px;
+}
+.supply-modal button {
+	border: 1px solid #cfd6e3;
+	border-radius: 6px;
+	background: #fff;
+	color: #374151;
+	padding: 8px 12px;
+}
+.supply-receive-table {
+	padding: 10px 20px 18px;
+}
+.supply-receive-head,
+.supply-receive-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 90px 110px;
 	gap: 12px;
 	align-items: center;
 }
-.supply-detail-head {
-	padding: 16px 20px;
-	border-bottom: 1px solid #e5e7eb;
+.supply-receive-head {
+	padding: 8px 0;
 	color: #6b7280;
 	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
-	letter-spacing: .04em;
-	background: #fafbfc;
+}
+.supply-receive-row {
+	padding: 8px 0;
+	border-top: 1px solid #edf0f4;
+}
+.supply-receive-row input {
+	width: 100%;
+	box-sizing: border-box;
+	border: 1px solid #cfd6e3;
+	border-radius: 6px;
+	padding: 7px 8px;
+}
+.supply-detail-row {
+	display: grid;
+	grid-template-columns: minmax(250px, 1.25fr) 132px 180px minmax(330px, 1.2fr);
+	gap: 16px;
+	align-items: start;
 }
 .supply-item-block {
 	border-bottom: 1px solid #e5e7eb;
 }
 .supply-detail-row {
-	padding: 14px 20px;
+	padding: 18px 20px;
 }
 .supply-detail-row.is-done {
 	background: #fbfdfc;
 }
 .supply-detail-row b,
-.supply-detail-row small {
+.supply-detail-row small,
+.supply-detail-row label span,
+.supply-remaining-cell span,
+.supply-stock-cell span {
 	display: block;
 }
-.supply-detail-row small {
+.supply-detail-row small,
+.supply-detail-row label span,
+.supply-remaining-cell span,
+.supply-stock-cell span {
 	margin-top: 4px;
 	color: #6b7280;
 	font-size: 11px;
 }
+.supply-need-cell b {
+	font-size: 15px;
+	line-height: 1.3;
+}
 .supply-detail-row strong {
-	font-size: 13px;
+	font-size: 18px;
 }
 .supply-detail-row input,
 .supply-detail-row select {
@@ -2572,12 +2725,49 @@ html, body, #root { height: 100%; }
 	background: #f3f4f6;
 	color: #6b7280;
 }
+.supply-remaining-cell,
+.supply-stock-cell {
+	padding: 10px 12px;
+	border: 1px solid #edf0f4;
+	border-radius: 7px;
+	background: #fafbfc;
+}
+.supply-stock-cell b {
+	margin-top: 2px;
+	font-size: 15px;
+}
+.supply-plan-cell {
+	display: grid;
+	grid-template-columns: 88px 132px minmax(0, 1fr);
+	gap: 8px;
+	align-items: end;
+}
+.supply-plan-cell.is-complete {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	min-height: 62px;
+}
+.supply-purchase-fields {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 96px;
+	gap: 8px;
+	align-items: end;
+}
+.supply-wide-field {
+	min-width: 0;
+}
+.supply-plan-actions {
+	grid-column: 1 / -1;
+	display: flex;
+	justify-content: flex-end;
+}
 .supply-child-row {
-	margin: 0 20px 12px 52px;
-	padding: 9px 12px;
+	margin: 0 20px 14px 20px;
+	padding: 10px 12px;
 	border: 1px solid #e5e7eb;
 	border-radius: 6px;
-	background: #fff;
+	background: #f8fafc;
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto auto;
 	gap: 12px;
@@ -2630,16 +2820,26 @@ html, body, #root { height: 100%; }
 	}
 	.supply-content-grid,
 	.supply-kpis,
-	.supply-summary {
+	.supply-summary,
+	.supply-flow {
 		grid-template-columns: 1fr;
 	}
 	.supply-preview {
 		position: static;
 	}
 	.supply-tr,
-	.supply-detail-head,
 	.supply-detail-row {
 		grid-template-columns: 1fr;
+	}
+	.supply-plan-cell,
+	.supply-purchase-fields {
+		grid-template-columns: 1fr;
+	}
+	.supply-plan-actions {
+		justify-content: stretch;
+	}
+	.supply-plan-actions .supply-primary {
+		width: 100%;
 	}
 }
 
