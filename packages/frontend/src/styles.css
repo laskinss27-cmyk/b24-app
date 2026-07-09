@@ -757,18 +757,28 @@ h2.inv-h2 {
 
 /* Нижняя панель режима пикера «Базы» (выбор товаров в сделку). */
 .pick-bar {
-	position: sticky;
+	position: fixed;
+	left: 0;
+	right: 0;
 	bottom: 0;
+	z-index: 1200;
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	padding: 12px 16px;
-	margin-top: 8px;
+	box-sizing: border-box;
+	padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+	margin: 0;
 	background: #fff;
 	border-top: 2px solid #e7eaee;
-	box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.06);
+	box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.16);
 }
 .pick-count { font-size: 14px; color: #2b3441; }
+.base.is-picker {
+	padding-bottom: 86px;
+}
+.base.is-picker .base-tablewrap {
+	margin-bottom: 8px;
+}
 
 /* Шапка Базы: заголовок слева, кнопка «Реализации» справа в той же строке. */
 .base-head-row {

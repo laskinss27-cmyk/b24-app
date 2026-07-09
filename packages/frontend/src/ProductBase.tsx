@@ -355,7 +355,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	}
 
 	return (
-		<div className="base">
+		<div className={`base${pickMode ? ' is-picker' : ''}`}>
 			<header>
 				<div className="base-head-row">
 					<h1>{pickMode ? (picker?.title ?? 'Добавить товар в сделку') : 'База товаров'}</h1>
