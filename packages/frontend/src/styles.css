@@ -788,6 +788,16 @@ h2.inv-h2 {
 	gap: 12px;
 	flex-wrap: wrap;
 }
+.picker-head-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.picker-head-actions .pick-count {
+	margin-right: 4px;
+}
 
 /* ── Окно «Реализации ↔ сделки» ─────────────────────────────── */
 .nowrap { white-space: nowrap; }

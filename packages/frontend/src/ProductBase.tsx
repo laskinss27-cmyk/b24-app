@@ -360,7 +360,13 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 				<div className="base-head-row">
 					<h1>{pickMode ? (picker?.title ?? 'Добавить товар в сделку') : 'База товаров'}</h1>
 					{pickMode
-						? <button className="btn-secondary" onClick={() => picker?.onCancel()}>← Отмена</button>
+						? (
+							<div className="picker-head-actions">
+								<span className="pick-count">Выбрано: <b>{cart.size}</b></span>
+								<button className="btn-secondary" onClick={() => picker?.onCancel()}>← Отмена</button>
+								<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
+							</div>
+						)
 						: <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
 				</div>
 				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем «Готово» внизу — они добавятся в сделку.' : `Найти товар, посмотреть остатки/цены, запустить инвентаризацию.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
