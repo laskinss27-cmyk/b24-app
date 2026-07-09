@@ -126,6 +126,7 @@ interface SupplyCard {
 	title: string;
 	stageId: string;
 	source?: 'b24' | 'core';
+	productIds?: number[];
 }
 
 async function listSupplyCards(client: B24Client, dealId: number): Promise<SupplyCard[]> {
@@ -147,6 +148,7 @@ async function listCoreSupplyCards(dealId: number): Promise<SupplyCard[]> {
 		title: `${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`,
 		stageId: `CORE:${r.status || 'Draft'}`,
 		source: 'core',
+		productIds: r.productIds,
 	}));
 }
 

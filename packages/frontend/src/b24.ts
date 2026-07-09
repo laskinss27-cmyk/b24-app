@@ -828,6 +828,7 @@ export interface SupplyCard {
 	title: string;
 	stageId: string;
 	source?: 'b24' | 'core';
+	productIds?: number[];
 }
 
 export interface DealShippedInfo {

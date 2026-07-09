@@ -501,6 +501,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	/** Полученное перемещение по товару: товар уже на складе Б, но остаток открытой вкладки мог не обновиться. */
 	const receivedTransferOf = (r: EnrichedRow): TransferDoc | null =>
 		dealTransfers.find((t) => t.status === 'received' && t.lines.some((l) => l.productId === r.productId)) ?? null;
+	const activeSupplyOf = (r: EnrichedRow): SupplyCard | null =>
+		data.supply.find((s) => s.source === 'core' && !/stopped|closed|completed|success|fail/i.test(s.stageId) && (s.productIds ?? []).includes(r.productId)) ?? null;
 
 	// Удалить строку (товар/работу) из сделки. Подтверждение + перезагрузка таблицы.
 	const doRemove = async (r: EnrichedRow): Promise<void> => {
@@ -634,6 +636,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		));
 		if (left > 0) {
 			const status = rowStatus(r);
+			const activeSupply = activeSupplyOf(r);
 			out.push(
 				<tr key={r.id} className={`goods-row st-${status}${isSel(r) ? ' sel-row' : ''}`}>
 					<td className="check-col">
@@ -714,7 +717,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							return null;
 						})()}
 						{status === 'order' && (
-							<span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
+							activeSupply
+								? <span className="st-badge order" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>
+								: <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
 						)}
 					</td>
 				</tr>,

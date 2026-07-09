@@ -440,7 +440,7 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
 export interface SupplyRequest { name: string; dealId: string; date: string; status: string; toStore: string; items: SupplyReqItem[] }
-export interface SupplyRequestSummary { name: string; dealId: string; date: string; status: string; toStore: string }
+export interface SupplyRequestSummary { name: string; dealId: string; date: string; status: string; toStore: string; productIds: number[] }
 
 export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number): Promise<SupplyRequestSummary[]> {
 	await ensureMrField(erp);
@@ -456,6 +456,7 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 			date: String(h['transaction_date'] ?? ''),
 			status: String(h['status'] ?? ''),
 			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
+			productIds: ((mr?.['items'] as Array<Record<string, unknown>>) ?? []).map((it) => Number(it['item_code'] ?? 0)).filter((id) => Number.isInteger(id) && id > 0),
 		});
 	}
 	return out;
