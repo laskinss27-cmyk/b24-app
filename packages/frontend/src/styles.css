@@ -2691,6 +2691,15 @@ html, body, #root { height: 100%; }
 	margin-left: 14px;
 	padding-left: 44px;
 }
+.supply-tree-children::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 52px;
+	left: 3px;
+	border-left: 2px solid #9aa8bc;
+	border-radius: 999px;
+}
 .supply-tree-branch,
 .supply-tree-node.transfer,
 .supply-tree-empty {
@@ -2774,6 +2783,9 @@ html, body, #root { height: 100%; }
 	.supply-tree-children {
 		margin-left: 0;
 		padding-left: 36px;
+	}
+	.supply-tree-children::before {
+		left: 4px;
 	}
 	.supply-tree-connector {
 		left: -36px;
