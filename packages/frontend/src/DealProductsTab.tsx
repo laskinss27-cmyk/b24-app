@@ -162,6 +162,15 @@ const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractio
 
 /** Человеческая подпись стадии заявки снабжения (DT1110_114:NEW → «новая»). */
 const stageLabel = (stageId: string): string => {
+	if (stageId.startsWith('CORE:')) {
+		const status = stageId.slice(5).toLowerCase();
+		if (status.includes('draft')) return 'черновик';
+		if (status.includes('pending')) return 'новая';
+		if (status.includes('ordered')) return 'заказано';
+		if (status.includes('transferred') || status.includes('received') || status.includes('issued')) return 'выполнена';
+		if (status.includes('stopped') || status.includes('cancel')) return 'отменена';
+		return stageId.slice(5) || 'в ядре';
+	}
 	const tail = stageId.split(':')[1] ?? stageId;
 	if (tail === 'NEW') return 'новая';
 	if (tail === 'PREPARATION') return 'подготовка';
@@ -896,7 +905,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				<div className="supply-line">
 					<span>📦 Снабжение:</span>
 					{data.supply.map((s) => (
-						<button key={s.id} className="supply-chip" onClick={() => s.id > 0 && openSupplyCard(s.id)} title={`стадия: ${stageLabel(s.stageId)}`}>
+						<button key={`${s.source ?? 'b24'}-${s.id}-${s.title}`} className="supply-chip" onClick={() => s.id > 0 && openSupplyCard(s.id)} title={`${s.source === 'core' ? 'ядро' : 'стадия'}: ${stageLabel(s.stageId)}`}>
 							{s.title.slice(0, 48)} · {stageLabel(s.stageId)}
 						</button>
 					))}

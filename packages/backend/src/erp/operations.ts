@@ -440,6 +440,26 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
 export interface SupplyRequest { name: string; dealId: string; date: string; status: string; toStore: string; items: SupplyReqItem[] }
+export interface SupplyRequestSummary { name: string; dealId: string; date: string; status: string; toStore: string }
+
+export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number): Promise<SupplyRequestSummary[]> {
+	await ensureMrField(erp);
+	const heads = await erp.list('Material Request',
+		['name', DEAL_FIELD, 'transaction_date', 'status'],
+		[['docstatus', '!=', 2], [DEAL_FIELD, '=', String(dealId)]], 0, 'creation desc');
+	const out: SupplyRequestSummary[] = [];
+	for (const h of heads) {
+		const mr = await erp.get<Record<string, unknown>>('Material Request', String(h['name']));
+		out.push({
+			name: String(h['name']),
+			dealId: String(h[DEAL_FIELD] ?? ''),
+			date: String(h['transaction_date'] ?? ''),
+			status: String(h['status'] ?? ''),
+			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
+		});
+	}
+	return out;
+}
 
 /** Все заявки снабжения из ядра (Material Request, кроме отменённых) с позициями, комментариями и остатками. */
 export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[]> {

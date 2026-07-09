@@ -827,6 +827,7 @@ export interface SupplyCard {
 	id: number;
 	title: string;
 	stageId: string;
+	source?: 'b24' | 'core';
 }
 
 export interface DealShippedInfo {
@@ -871,14 +872,14 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts: number, ms: n
 /** Товар «нет на складах» → заявка снабжения (создаёт карточку «Поставка № …» или дополняет открытую).
  *  storeToName — «куда привезти»: уедет в поле «Склад поставки» заявки (если справочник читается)
  *  и строкой в перечень. */
-export async function requestSupply(dealId: number, items: { name: string; quantity: number; measure?: string }[], storeToName?: string): Promise<{ mode: 'created' | 'appended'; cardId: number; title: string }> {
+export async function requestSupply(dealId: number, items: { name: string; quantity: number; measure?: string }[], storeToName?: string): Promise<{ mode: 'created' | 'appended' | 'exists'; cardId: number; title: string }> {
 	const res = await fetch('/api/deal/supply-request', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), dealId, items, storeToName }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; mode?: 'created' | 'appended'; cardId?: number; title?: string };
-	if (!json.ok || !json.cardId) throw new Error(json.error ?? 'не удалось создать заявку снабжения');
+	const json = (await res.json()) as { ok: boolean; error?: string; mode?: 'created' | 'appended' | 'exists'; cardId?: number; title?: string };
+	if (!json.ok || json.cardId == null) throw new Error(json.error ?? 'не удалось создать заявку снабжения');
 	return { mode: json.mode ?? 'created', cardId: json.cardId, title: json.title ?? '' };
 }
 

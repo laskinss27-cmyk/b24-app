@@ -3,7 +3,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { createRealizationDraft, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan } from '../erp/operations.js';
+import { createRealizationDraft, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listSupplyRequestsForDeal } from '../erp/operations.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -125,6 +125,7 @@ interface SupplyCard {
 	id: number;
 	title: string;
 	stageId: string;
+	source?: 'b24' | 'core';
 }
 
 async function listSupplyCards(client: B24Client, dealId: number): Promise<SupplyCard[]> {
@@ -135,6 +136,18 @@ async function listSupplyCards(client: B24Client, dealId: number): Promise<Suppl
 		order: { id: 'desc' },
 	});
 	return (res?.items ?? []).map((i) => ({ id: Number(i['id']), title: String(i['title'] ?? ''), stageId: String(i['stageId'] ?? '') }));
+}
+
+async function listCoreSupplyCards(dealId: number): Promise<SupplyCard[]> {
+	const erp = ErpClient.fromEnv();
+	if (!erp) return [];
+	const requests = await listSupplyRequestsForDeal(erp, dealId);
+	return requests.map((r) => ({
+		id: 0,
+		title: `${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`,
+		stageId: `CORE:${r.status || 'Draft'}`,
+		source: 'core',
+	}));
 }
 
 /** Состояние «реализации» сделки: заказ (через crm.orderentity), корзина crm_pr_, отгружено по партиям. */
@@ -653,9 +666,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const [info, supply, rows] = await Promise.all([
+			const [info, b24Supply, coreSupply, rows] = await Promise.all([
 				loadDealOrderInfo(client, dealId),
 				listSupplyCards(client, dealId).catch(() => [] as SupplyCard[]),
+				listCoreSupplyCards(dealId).catch(() => [] as SupplyCard[]),
 				// Строки сделки серверным клиентом: фронтовый BX24 флапает (пустая вкладка после
 				// «Добавить товар»), чистый JSON-REST стабилен. null → фронт падает на BX24-фолбэк.
 				client.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', {
@@ -671,6 +685,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					measure: String(r['measureName'] ?? ''),
 				}))).catch((err) => { app.log.warn({ dealId }, `[api/deal/shipped] productrow.list не отдался — ${errInfo(err)}`); return null; }),
 			]);
+			const supply = [...coreSupply, ...b24Supply];
 			return {
 				ok: true,
 				orderId: info.orderId,
@@ -708,7 +723,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		let listText = items.map((it) => `${it.name} — ${it.quantity} ${it.measure}`).join('\n');
 		if (storeToName) listText += `\nПривезти на: ${storeToName}`;
 		try {
-			const existing = await listSupplyCards(client, dealId);
+			const [existing, coreExisting] = await Promise.all([
+				listSupplyCards(client, dealId),
+				listCoreSupplyCards(dealId).catch(() => [] as SupplyCard[]),
+			]);
 			const open = existing.find((c) => !/SUCCESS|FAIL/i.test(c.stageId)) ?? existing[0];
 			if (open) {
 				// Дополняем перечень открытой заявки (только append, чужой текст не трогаем).
@@ -724,6 +742,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				await client.call('crm.item.update', { entityTypeId: SUPPLY_TYPE_ID, id: open.id, fields });
 				app.log.info({ dealId, cardId: open.id }, '[api/deal/supply-request] appended');
 				return { ok: true, mode: 'appended', cardId: open.id, title: open.title };
+			}
+			const coreOpen = coreExisting.find((c) => !/stopped|closed|completed|success|fail/i.test(c.stageId)) ?? coreExisting[0];
+			if (coreOpen) {
+				return { ok: true, mode: 'exists', cardId: 0, title: coreOpen.title };
 			}
 
 			// Новая заявка: номер = max(счётчик свежих карточек)+1, название как у автоматики.
