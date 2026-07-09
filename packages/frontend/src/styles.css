@@ -2664,14 +2664,8 @@ html, body, #root { height: 100%; }
 .supply-tree-node.purchase {
 	border-color: #b9c7dc;
 }
-.supply-tree-node.transfer,
-.supply-tree-node.nested {
+.supply-tree-node.transfer {
 	border-color: #cfd6e3;
-}
-.supply-tree-node.nested {
-	position: relative;
-	margin-left: 110px;
-	background: #fbfcff;
 }
 .supply-tree-node b,
 .supply-tree-node small,
@@ -2700,10 +2694,13 @@ html, body, #root { height: 100%; }
 .supply-tree-children::before {
 	content: "";
 	position: absolute;
-	top: 0;
-	bottom: 22px;
-	left: 0;
-	border-left: 3px solid #111827;
+	top: 16px;
+	bottom: 32px;
+	left: 9px;
+	width: 18px;
+	border-left: 2px solid #9aa8bc;
+	border-bottom: 2px solid #9aa8bc;
+	border-bottom-left-radius: 14px;
 }
 .supply-tree-branch,
 .supply-tree-node.transfer,
@@ -2715,18 +2712,11 @@ html, body, #root { height: 100%; }
 .supply-tree-empty::before {
 	content: "";
 	position: absolute;
-	top: 31px;
-	left: -44px;
-	width: 38px;
-	border-top: 3px solid #111827;
-}
-.supply-tree-node.nested::before {
-	content: "";
-	position: absolute;
-	top: 31px;
-	left: -76px;
-	width: 70px;
-	border-top: 3px solid #111827;
+	top: 33px;
+	left: -35px;
+	width: 28px;
+	border-top: 2px solid #9aa8bc;
+	border-top-left-radius: 12px;
 }
 .supply-tree-branch {
 	display: grid;
@@ -2772,13 +2762,8 @@ html, body, #root { height: 100%; }
 		justify-content: flex-start;
 		flex-wrap: wrap;
 	}
-	.supply-tree-node.nested,
 	.supply-tree-details {
-		margin-left: 52px;
-	}
-	.supply-tree-node.nested::before {
-		left: -44px;
-		width: 38px;
+		margin-left: 32px;
 	}
 	.supply-purchase-line {
 		grid-template-columns: minmax(220px, 1.6fr) 84px 84px 84px 105px 115px;
@@ -2796,18 +2781,18 @@ html, body, #root { height: 100%; }
 		margin-left: 0;
 		padding-left: 12px;
 	}
+	.supply-tree-children::before {
+		left: 4px;
+		width: 7px;
+	}
 	.supply-tree-branch::before,
 	.supply-tree-node.transfer::before,
 	.supply-tree-empty::before {
 		left: -12px;
 		width: 10px;
 	}
-	.supply-tree-node.nested,
 	.supply-tree-details {
 		margin-left: 0;
-	}
-	.supply-tree-node.nested::before {
-		display: none;
 	}
 }
 .supply-purchase-lines-card {

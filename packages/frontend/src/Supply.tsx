@@ -246,13 +246,6 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 								</div>
 							</div>
 							{isExpanded && <PurchaseInlineDetails purchase={purchase} />}
-							<div className="supply-tree-node nested">
-								<div>
-									<b>Перемещение на точку после заказа</b>
-									<small>{received > 0 ? `После прихода нужно переместить ${received} шт на ${order.toStore || 'склад заявки'}` : 'появится после прихода товара на офисный склад'}</small>
-								</div>
-								<i className={`supply-status ${received > 0 ? 'active' : 'draft'}`}>{received > 0 ? 'ожидает перемещения' : 'ожидает приход'}</i>
-							</div>
 						</div>
 					);
 				})}
