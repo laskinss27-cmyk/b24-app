@@ -2575,6 +2575,27 @@ html, body, #root { height: 100%; }
 	padding: 7px 10px;
 	font-size: 12px;
 }
+.supply-top-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+.supply-top-actions button,
+.supply-purchase-lines-card .supply-card-head button {
+	border: 1px solid #cfd6e3;
+	border-radius: 6px;
+	background: #fff;
+	color: #374151;
+	padding: 8px 12px;
+	font-size: 12px;
+}
+.supply-top-actions .supply-primary {
+	background: #2563eb;
+	color: #fff;
+	border-color: #2563eb;
+}
 .supply-linked-list {
 	border-top: 1px solid #e5e7eb;
 }
@@ -2615,6 +2636,39 @@ html, body, #root { height: 100%; }
 	border-radius: 6px;
 	padding: 7px 10px;
 	font-size: 12px;
+}
+.supply-purchase-lines-card {
+	overflow: hidden;
+}
+.supply-purchase-lines {
+	overflow-x: auto;
+	border-top: 1px solid #e5e7eb;
+}
+.supply-purchase-line {
+	display: grid;
+	grid-template-columns: minmax(300px, 1.8fr) 96px 96px 96px 120px 130px;
+	gap: 12px;
+	align-items: center;
+	min-width: 860px;
+	padding: 12px 20px;
+	border-bottom: 1px solid #edf0f4;
+	font-size: 13px;
+}
+.supply-purchase-line.head {
+	background: #f8fafc;
+	color: #6b7280;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+.supply-purchase-line b,
+.supply-purchase-line small {
+	display: block;
+}
+.supply-purchase-line small {
+	margin-top: 3px;
+	color: #6b7280;
+	font-size: 11px;
 }
 .supply-modal-overlay {
 	position: fixed;
