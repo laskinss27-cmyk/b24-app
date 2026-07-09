@@ -64,6 +64,31 @@ async function fetchBasePrices(client: B24Client, ids: number[]): Promise<Map<nu
 	return map;
 }
 
+const normName = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+async function resolveDealSourceStoreId(client: B24Client, deal: Record<string, unknown> | null): Promise<number | null> {
+	const sourceId = String(deal?.['SOURCE_ID'] ?? '').trim();
+	if (!sourceId) return null;
+	try {
+		const [statuses, stores] = await Promise.all([
+			client.call<Array<Record<string, unknown>>>('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' }, order: { SORT: 'ASC' } }),
+			client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] }),
+		]);
+		const sourceName = String((statuses ?? []).find((s) => String(s['STATUS_ID']) === sourceId)?.['NAME'] ?? sourceId);
+		const sourceNorm = normName(sourceName);
+		const storeRows = stores?.stores ?? [];
+		const exact = storeRows.find((s) => normName(String(s['title'] ?? '')) === sourceNorm);
+		if (exact) return Number(exact['id'] ?? 0) || null;
+		const partial = storeRows.find((s) => {
+			const title = normName(String(s['title'] ?? ''));
+			return title.includes(sourceNorm) || sourceNorm.includes(title);
+		});
+		return partial ? Number(partial['id'] ?? 0) || null : null;
+	} catch {
+		return null;
+	}
+}
+
 // ── Снабжение (смарт-процесс «Снабжение», разведка 2026-06-11) ────────────────────────────────
 // Карточки «Поставка № N_<сделка>_<название>», parentId2 = сделка, перечень — текстовое поле.
 const SUPPLY_TYPE_ID = 1110;
@@ -141,6 +166,7 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 
 	// Оплата из «Кассы» (поля сделки) — приоритетный источник. total = оплачено + остаток.
 	const dealPay = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId }).catch(() => null);
+	info.sourceStoreId = await resolveDealSourceStoreId(client, dealPay);
 	const kassaPaidRaw = dealPay?.[KASSA_PAID_FIELD];
 	const kassaPayment = (kassaPaidRaw != null && kassaPaidRaw !== '')
 		? { total: (Number(kassaPaidRaw) || 0) + (Number(dealPay?.[KASSA_REMAIN_FIELD]) || 0), paid: Number(kassaPaidRaw) || 0 }
@@ -174,7 +200,7 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 		for (const s of stores) storeTally.set(s, (storeTally.get(s) ?? 0) + 1);
 	}
 	// Склад-источник сделки = самый частый склад в резервах (на него дефолтим «Склад реализации»).
-	info.sourceStoreId = [...storeTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+	info.sourceStoreId = [...storeTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? info.sourceStoreId;
 
 	const sh = await client.call<{ shipments?: Array<Record<string, unknown>> }>('sale.shipment.list', {
 		filter: { orderId, system: 'N' }, select: ['id', 'accountNumber', 'deducted'],

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
-import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, createTransfers, createSupplyPurchaseOrder, receiveSupplyPurchase, updateSupplyPurchaseStage, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyPurchaseStage, type TransferLineDto } from './b24.js';
+import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, fetchSupplySuppliers, createTransfers, createSupplyPurchaseOrder, receiveSupplyPurchase, updateSupplyPurchaseStage, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyPurchaseStage, type TransferLineDto } from './b24.js';
 
 type SectionKey = 'orders' | 'logistics' | 'purchase' | 'payment' | 'stock' | 'reports';
 const SECTIONS: Array<{ key: SectionKey; title: string; group: string }> = [
@@ -75,6 +75,7 @@ type DecisionMap = Record<string, Decision[]>;
 type DraftInput = Record<string, { qty: number; kind: DecisionKind; warehouse: string; supplier: string; rate: number }>;
 type ReceiveDraft = Record<string, number>;
 const DEFAULT_SUPPLIER = 'Поставщик не выбран';
+const DEFAULT_RECEIPT_STORE = 'Склад Прихода';
 
 const plural = (n: number, one: string, few: string, many: string): string => {
 	const m10 = n % 10;
@@ -240,12 +241,13 @@ function PurchaseInlineDetails({ purchase }: { purchase: SupplyPurchaseChild }):
 	);
 }
 
-function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage }: {
+function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	order: SupplyOrderRow;
 	docsBusy: boolean;
 	onOpenOrder?: (order: SupplyOrderRow) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
+	onCreateReceiptTransfer?: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
 }): JSX.Element {
 	const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null);
 	const view = orderStatusView(order);
@@ -298,7 +300,12 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUp
 										<b>Оприходование {receipt.name}</b>
 										<small>{receiptLinesSummary(receipt.lines)}</small>
 									</div>
-									<i className={`supply-status ${childStatusClass(receipt.status)}`}>{receipt.status || 'получено'}</i>
+									<div className="supply-linked-actions">
+										<i className={`supply-status ${childStatusClass(receipt.status)}`}>{receipt.status || 'получено'}</i>
+										{onCreateReceiptTransfer && receipt.lines.some((line) => line.warehouse && line.warehouse !== order.toStore) && (
+											<button type="button" disabled={docsBusy} onClick={() => onCreateReceiptTransfer(order, purchase, receipt)}>На точку</button>
+										)}
+									</div>
 								</div>
 							))}
 						</div>
@@ -425,13 +432,14 @@ const PURCHASE_FILTERS: Array<{ key: PurchaseFilter; label: string }> = [
 	{ key: 'received', label: 'Получено' },
 ];
 
-function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage }: {
+function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	orders: SupplyOrderRow[];
 	loading: boolean;
 	docsBusy: boolean;
 	onOpenOrder: (order: SupplyOrderRow) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
+	onCreateReceiptTransfer: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
 }): JSX.Element {
 	const [filter, setFilter] = useState<PurchaseFilter>('all');
 	const treeOrders = orders.filter((order) => (order.purchases?.length ?? 0) > 0 || (order.transfers?.length ?? 0) > 0);
@@ -489,7 +497,7 @@ function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePur
 				<div className="supply-tree-list">
 					{loading && <div className="supply-empty">Загрузка закупок из ядра...</div>}
 					{!loading && treeOrders.length === 0 && <div className="supply-empty">Документов пока нет. Они появятся здесь после создания закупок или перемещений из заявки снабжения.</div>}
-					{treeOrders.map((order) => <SupplyOrderTree key={order.name} order={order} docsBusy={docsBusy} onOpenOrder={onOpenOrder} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} />)}
+					{treeOrders.map((order) => <SupplyOrderTree key={order.name} order={order} docsBusy={docsBusy} onOpenOrder={onOpenOrder} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} onCreateReceiptTransfer={onCreateReceiptTransfer} />)}
 				</div>
 			</section>
 		</>
@@ -576,7 +584,7 @@ function StockDocumentsSection({ orders, loading, onOpenOrder }: { orders: Suppl
 	);
 }
 
-function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase, onUpdatePurchaseStage }: {
+function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	order: SupplyOrderRow;
 	decisions: DecisionMap;
 	drafts: DraftInput;
@@ -588,6 +596,7 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 	createDocs: () => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
+	onCreateReceiptTransfer: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
 }): JSX.Element {
 	const requestItems = requestItemsForOrder(order);
 	const requestedTotal = requestItems.reduce((sum, item) => sum + item.qty, 0);
@@ -644,7 +653,7 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 						</div>
 					</div>
 					<div className="supply-tree-list">
-						<SupplyOrderTree order={order} docsBusy={docsBusy} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} />
+						<SupplyOrderTree order={order} docsBusy={docsBusy} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} onCreateReceiptTransfer={onCreateReceiptTransfer} />
 					</div>
 				</section>
 			)}
@@ -707,7 +716,7 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 												<div className="supply-purchase-fields">
 													<label>
 														<span>Поставщик</span>
-														<input type="text" placeholder="Например, ТД Север" value={draft.supplier} onChange={(e) => setDraft(key, { supplier: e.target.value })} />
+														<input type="text" list="supply-suppliers" placeholder="Начни вводить поставщика" value={draft.supplier} onChange={(e) => setDraft(key, { supplier: e.target.value })} />
 													</label>
 													<label>
 														<span>Цена</span>
@@ -763,6 +772,8 @@ export function Supply(): JSX.Element {
 	const [receivingPurchase, setReceivingPurchase] = useState<SupplyPurchaseChild | null>(null);
 	const [receivingOrderName, setReceivingOrderName] = useState<string | null>(null);
 	const [receiveDraft, setReceiveDraft] = useState<ReceiveDraft>({});
+	const [receiveStore, setReceiveStore] = useState(DEFAULT_RECEIPT_STORE);
+	const [suppliers, setSuppliers] = useState<string[]>([]);
 
 	const refreshOrders = useCallback(async (silent = false): Promise<void> => {
 		if (ctx.__mock) return;
@@ -798,6 +809,11 @@ export function Supply(): JSX.Element {
 		const timer = window.setInterval(() => { void refreshOrders(true); }, 10000);
 		return () => window.clearInterval(timer);
 	}, [ctx.__mock, phase, refreshOrders, section]);
+
+	useEffect(() => {
+		if (ctx.__mock || phase !== 'ready') return;
+		void fetchSupplySuppliers().then(setSuppliers).catch(() => setSuppliers([]));
+	}, [ctx.__mock, phase]);
 
 	const selectedPreview = useMemo(() => orders.find((o) => o.name === previewName) ?? orders[0] ?? null, [orders, previewName]);
 	const detailOrder = useMemo(() => orders.find((o) => o.name === detailName) ?? null, [orders, detailName]);
@@ -847,6 +863,7 @@ export function Supply(): JSX.Element {
 		setReceivingPurchase(purchase);
 		setReceivingOrderName(detailOrder?.name ?? orders.find((order) => (order.purchases ?? []).some((doc) => doc.name === purchase.name))?.name ?? null);
 		setReceiveDraft(Object.fromEntries(purchase.lines.map((line) => [String(line.productId), line.qty])));
+		setReceiveStore(DEFAULT_RECEIPT_STORE);
 	};
 	const closeReceivePurchase = (): void => {
 		setReceivingPurchase(null);
@@ -877,8 +894,8 @@ export function Supply(): JSX.Element {
 		const purchase = receivingPurchase;
 		const order = detailOrder ?? orders.find((row) => row.name === receivingOrderName) ?? (purchase ? orders.find((row) => (row.purchases ?? []).some((doc) => doc.name === purchase.name)) : null);
 		if (!order || !purchase || docsBusy) return;
-		if (!order.toStore) {
-			setNotice('Для прихода нужен склад назначения заявки.');
+		if (!receiveStore.trim()) {
+			setNotice('Для прихода нужен склад оприходования.');
 			return;
 		}
 		const dealId = Number(order.dealId);
@@ -895,13 +912,48 @@ export function Supply(): JSX.Element {
 		}
 		setDocsBusy(true);
 		try {
-			const receipt = await receiveSupplyPurchase(order.name, dealId, purchase.name, order.toStore, lines);
+			const receipt = await receiveSupplyPurchase(order.name, dealId, purchase.name, receiveStore.trim(), lines);
 			setReceivingPurchase(null);
 			setReceivingOrderName(null);
 			await refreshOrders(true);
 			setNotice(`Приход создан: ${receipt}.`);
 		} catch (err) {
 			setNotice(err instanceof Error ? err.message : 'Не удалось оприходовать закупку.');
+		} finally {
+			setDocsBusy(false);
+		}
+	};
+	const createTransferFromReceipt = async (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]): Promise<void> => {
+		if (docsBusy) return;
+		const dealId = Number(order.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0 || !order.toStore) {
+			setNotice('Для перемещения нужен корректный склад заявки и сделка.');
+			return;
+		}
+		const groups = new Map<string, TransferLineDto[]>();
+		for (const line of receipt.lines) {
+			const fromStore = String(line.warehouse ?? '').trim();
+			if (!fromStore || fromStore === order.toStore) continue;
+			const rows = groups.get(fromStore) ?? [];
+			rows.push({ productId: line.productId, name: line.name, qty: line.qty, ...(line.rate != null ? { rate: line.rate } : {}) });
+			groups.set(fromStore, rows);
+		}
+		if (!groups.size) {
+			setNotice('В приходе нет строк со складом, отличным от склада заявки.');
+			return;
+		}
+		setDocsBusy(true);
+		try {
+			const docs = await createTransfers({
+				dealId,
+				toStore: order.toStore,
+				supplyRequest: order.name,
+				groups: [...groups.entries()].map(([fromStore, lines]) => ({ fromStore, lines })),
+			});
+			await refreshOrders(true);
+			setNotice(`Перемещение на точку создано: ${docs.map((doc) => doc.name || `#${doc.id}`).join(', ')}.`);
+		} catch (err) {
+			setNotice(err instanceof Error ? err.message : `Не удалось создать перемещение по приходу ${receipt.name} / ${purchase.name}.`);
 		} finally {
 			setDocsBusy(false);
 		}
@@ -996,6 +1048,7 @@ export function Supply(): JSX.Element {
 					createDocs={() => void createDocs()}
 					onReceivePurchase={openReceivePurchase}
 					onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
+					onCreateReceiptTransfer={(order, purchase, receipt) => void createTransferFromReceipt(order, purchase, receipt)}
 				/>
 			) : (
 				<main className="supply-main">
@@ -1026,6 +1079,7 @@ export function Supply(): JSX.Element {
 							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
 							onReceivePurchase={openReceivePurchase}
 							onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
+							onCreateReceiptTransfer={(order, purchase, receipt) => void createTransferFromReceipt(order, purchase, receipt)}
 						/>
 					) : section === 'logistics' ? (
 						<LogisticsSection
@@ -1058,6 +1112,10 @@ export function Supply(): JSX.Element {
 							</div>
 							<button type="button" onClick={closeReceivePurchase}>Закрыть</button>
 						</header>
+						<label className="supply-wide-field">
+							<span>Склад оприходования</span>
+							<input type="text" value={receiveStore} onChange={(e) => setReceiveStore(e.target.value)} />
+						</label>
 						<div className="supply-receive-table">
 							<div className="supply-receive-head"><span>Позиция</span><span>Заказано</span><span>Пришло</span></div>
 							{receivingPurchase.lines.map((line) => (
@@ -1075,6 +1133,7 @@ export function Supply(): JSX.Element {
 					</div>
 				</div>
 			)}
+			<datalist id="supply-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
 			{notice && <div className="supply-toast" onClick={() => setNotice(null)}>{notice}</div>}
 		</div>
 	);

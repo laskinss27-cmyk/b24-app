@@ -681,6 +681,17 @@ export async function createSupplyPurchaseOrder(requestName: string, dealId: num
 	return json.name ?? '';
 }
 
+export async function fetchSupplySuppliers(): Promise<string[]> {
+	const res = await fetch('/api/supply/suppliers', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth() }),
+	});
+	const json = (await res.json()) as { ok: boolean; suppliers?: string[] };
+	if (!json.ok) return [];
+	return json.suppliers ?? [];
+}
+
 export async function updateSupplyPurchaseStage(purchaseOrder: string, stage: SupplyPurchaseStage, expectedAt?: string): Promise<string> {
 	const res = await fetch('/api/supply/purchase-stage', {
 		method: 'POST',

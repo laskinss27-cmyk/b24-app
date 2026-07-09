@@ -45,6 +45,40 @@ interface PurchaseChild {
 	receipts: PurchaseReceiptChild[];
 }
 
+let supplierCatId: number | null = null;
+async function supplierCategoryId(client: B24Client): Promise<number> {
+	if (supplierCatId !== null) return supplierCatId;
+	try {
+		const r = await client.call<{ categories?: Array<{ id?: number; code?: string }> }>('crm.category.list', { entityTypeId: 4 });
+		const cat = (r?.categories ?? []).find((c) => c.code === 'CATALOG_CONTRACTOR_COMPANY');
+		supplierCatId = cat ? Number(cat.id) : 8;
+	} catch { supplierCatId = 8; }
+	return supplierCatId;
+}
+
+const supplierNorm = (name: string): string => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+async function fetchSupplierCompanies(client: B24Client): Promise<string[]> {
+	const out: string[] = [];
+	const categoryId = await supplierCategoryId(client);
+	for (let start = 0; start < 2000; start += 50) {
+		const r = await client.call<{ items?: Array<{ title?: string }> }>('crm.item.list', { entityTypeId: 4, filter: { categoryId }, select: ['id', 'title'], start });
+		const items = r?.items ?? [];
+		if (!items.length) break;
+		for (const it of items) { const t = String(it.title ?? '').trim(); if (t) out.push(t); }
+		if (items.length < 50) break;
+	}
+	return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+async function ensureB24SupplierCompany(client: B24Client, name: string): Promise<void> {
+	const clean = name.trim();
+	if (!clean || clean === 'Поставщик не выбран') return;
+	const suppliers = await fetchSupplierCompanies(client).catch(() => []);
+	if (suppliers.some((s) => supplierNorm(s) === supplierNorm(clean))) return;
+	const categoryId = await supplierCategoryId(client);
+	await client.call('crm.item.add', { entityTypeId: 4, fields: { title: clean, categoryId } });
+}
+
 function parseTransferProgress(it: Record<string, unknown>): TransferProgress | null {
 	try {
 		const data = it['DETAIL_TEXT'] ? JSON.parse(String(it['DETAIL_TEXT'])) as Record<string, unknown> : {};
@@ -174,29 +208,35 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				}).catch(() => [] as Array<Record<string, unknown>>);
 				for (const d of deals ?? []) titleMap.set(Number(d['ID']), String(d['TITLE'] ?? ''));
 			}
-			const covered = new Map<string, Map<number, number>>();
+			const planned = new Map<string, Map<number, number>>();
+			const fulfilled = new Map<string, Map<number, number>>();
 			const transfersByRequest = new Map<string, TransferProgress[]>();
 			try {
 				await ensureTransfersEntity(client);
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
 					transfersByRequest.set(t.supplyRequest, [...(transfersByRequest.get(t.supplyRequest) ?? []), t]);
+					addCovered(planned, t.supplyRequest, t.lines);
 					const lines = t.status === 'shortage' ? t.receivedLines : t.status === 'received' ? t.lines : [];
-					addCovered(covered, t.supplyRequest, lines);
+					addCovered(fulfilled, t.supplyRequest, lines);
 				}
 			} catch {
 				// Если старое хранилище перемещений недоступно, заявки всё равно покажем как есть.
 			}
 			const purchasesByRequest = await listPurchaseChildren(erp, reqs.map((o) => o.name));
 			for (const [requestName, purchases] of purchasesByRequest.entries()) {
-				for (const receipt of purchases.flatMap((p) => p.receipts)) addCovered(covered, requestName, receipt.lines);
+				for (const purchase of purchases) addCovered(planned, requestName, purchase.lines);
 			}
 			const enriched = reqs.map((o) => {
-				const byProduct = covered.get(o.name) ?? new Map<number, number>();
+				const byProduct = planned.get(o.name) ?? new Map<number, number>();
+				const fulfilledByProduct = fulfilled.get(o.name) ?? new Map<number, number>();
 				const remaining = o.items
 					.map((item) => ({ ...item, qty: Math.max(item.qty - (byProduct.get(item.productId) ?? 0), 0) }))
 					.filter((item) => item.qty > 0);
-				const closedByProgress = o.items.length > 0 && remaining.length === 0;
+				const unfulfilled = o.items
+					.map((item) => ({ ...item, qty: Math.max(item.qty - (fulfilledByProduct.get(item.productId) ?? 0), 0) }))
+					.filter((item) => item.qty > 0);
+				const closedByProgress = o.items.length > 0 && unfulfilled.length === 0;
 				return {
 					...o,
 					items: remaining,
@@ -241,6 +281,18 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		}
 	});
 
+	app.post('/api/supply/suppliers', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody;
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		try {
+			return { ok: true, suppliers: await fetchSupplierCompanies(client) };
+		} catch (err) {
+			app.log.error({}, `[api/supply/suppliers] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err), suppliers: [] });
+		}
+	});
+
 	app.post('/api/supply/purchase-order', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; supplier?: unknown; lines?: unknown };
 		const client = clientFrom(b);
@@ -259,6 +311,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций для закупки' });
 		try {
 			const scheduleDate = new Date().toISOString().slice(0, 10);
+			if (supplier) await ensureB24SupplierCompany(client, supplier);
 			const { name } = await createPurchaseOrderDraft(erp, { dealId, supplyRequest: requestName, scheduleDate, ...(supplier ? { supplier } : {}), lines });
 			app.log.info({ dealId, requestName, supplier, lines: lines.length, name }, '[api/supply/purchase-order] created');
 			return { ok: true, name };
