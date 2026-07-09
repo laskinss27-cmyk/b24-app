@@ -213,6 +213,11 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 	const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null);
 	const view = orderStatusView(order);
 	const docsCount = (order.purchases?.length ?? 0) + (order.transfers?.length ?? 0);
+	const connector = () => (
+		<svg className="supply-tree-connector" viewBox="0 0 44 44" aria-hidden="true" focusable="false">
+			<path d="M4 0 V22 Q4 34 16 34 H44" />
+		</svg>
+	);
 	return (
 		<div className="supply-tree">
 			<div className="supply-tree-node root">
@@ -233,6 +238,7 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 					const isExpanded = expandedPurchase === purchase.name;
 					return (
 						<div key={`tree-purchase-${purchase.name}`} className="supply-tree-branch">
+							{connector()}
 							<div className="supply-tree-node purchase">
 								<div>
 									<b>Заказ {purchase.name} · {purchase.supplier || DEFAULT_SUPPLIER}</b>
@@ -251,6 +257,7 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 				})}
 				{(order.transfers ?? []).map((doc) => (
 					<div key={`tree-transfer-${doc.id || doc.name}`} className="supply-tree-node transfer">
+						{connector()}
 						<div>
 							<b>Перемещение на точку с другой точки · {doc.name || `#${doc.id}`}</b>
 							<small>{doc.fromStore || 'склад отправки'} → {doc.toStore || order.toStore || 'склад получения'} · {linesSummary(doc.lines)}</small>
@@ -259,7 +266,7 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase }: {
 						<i className={`supply-status ${childStatusClass(doc.status)}`}>{transferStatusLabel(doc.status)}</i>
 					</div>
 				))}
-				{docsCount === 0 && <div className="supply-tree-empty">Документы по заявке еще не созданы.</div>}
+				{docsCount === 0 && <div className="supply-tree-empty">{connector()}Документы по заявке еще не созданы.</div>}
 			</div>
 		</div>
 	);
