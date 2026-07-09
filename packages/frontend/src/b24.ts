@@ -1318,6 +1318,8 @@ export interface Repair {
 	ourPrice: number | null;
 	/** ID созданной по ремонту сделки Б24 (null — ещё не создана). */
 	dealId: number | null;
+	/** ID задачи Б24 для снабжения/автора по этому ремонту. */
+	taskId?: number | null;
 	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
 	repairItemCode?: string | null;
 	/** Где аппарат лежит сейчас (название склада Б24). */

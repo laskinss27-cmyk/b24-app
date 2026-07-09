@@ -66,6 +66,21 @@ function normalizeStatus(s: unknown, kind: RepairKind = 'client'): RepairStatus 
  * Остальные цену видят, но не меняют. Б24 не отдаёт флаг «админ» на бэке — главные админы в списке поимённо. */
 const PRICE_EDITOR_IDS = new Set(['1', '1858', '986']);
 const PRICE_EDITOR_DEPTS = new Set([10]);
+const SUPPLY_DEPT = 10;
+
+let supplyHeadCache: number | null = null;
+async function supplyHead(client: B24Client): Promise<number> {
+	if (supplyHeadCache !== null) return supplyHeadCache;
+	try {
+		const deps = await client.call<Array<{ UF_HEAD?: unknown }>>('department.get', { ID: SUPPLY_DEPT });
+		const head = Number((Array.isArray(deps) ? deps[0] : undefined)?.UF_HEAD ?? 0) || 0;
+		supplyHeadCache = head;
+		return head;
+	} catch {
+		supplyHeadCache = 0;
+		return 0;
+	}
+}
 
 /** Поле сделки «Название объекта» (обязательное). Б24 собирает имя сделки по шаблону {{ID}}_{{это поле}},
  * а TITLE напрямую переопределить нельзя — глобальное автоназвание затирает (проверено). Поэтому пишем
@@ -99,6 +114,55 @@ async function currentUser(client: B24Client): Promise<CurrentUser> {
 	const depts = Array.isArray(me?.UF_DEPARTMENT) ? (me?.UF_DEPARTMENT as unknown[]).map(Number) : [];
 	const canEditPrice = PRICE_EDITOR_IDS.has(id) || depts.some((d) => PRICE_EDITOR_DEPTS.has(d));
 	return { id, name, canEditPrice };
+}
+
+async function createRepairNotifyTask(
+	client: B24Client,
+	data: RepairData,
+	repairId: number,
+	log: FastifyInstance['log'],
+): Promise<number | null> {
+	try {
+		const head = await supplyHead(client);
+		const author = Number(data.createdById) || 0;
+		const responsible = head || author;
+		if (!responsible) return null;
+		const accomplices = author && author !== responsible ? [author] : [];
+		const repairTitle = data.kind === 'presale' ? 'Предпродажный ремонт' : 'Ремонт клиента';
+		const pointLine = data.kind === 'presale'
+			? `Склад-источник: ${data.sourceStore || 'не указан'}`
+			: `ТТ приема: ${data.point || 'не указана'}`;
+		const clientLine = data.kind === 'presale'
+			? ''
+			: `Клиент: ${[data.client.name, data.client.phone].filter(Boolean).join(' · ') || 'не указан'}\n`;
+		const dealLine = data.dealId ? `Сделка ремонта: #${data.dealId}\n` : '';
+		const body = [
+			`${repairTitle} #${data.repairNo || repairId}`,
+			`Запись ремонта: #${repairId}`,
+			pointLine,
+			clientLine.trim(),
+			`Аппарат: ${[data.device, data.model].filter(Boolean).join(' ') || (data.productId ? `#${data.productId}` : 'не указан')}`,
+			data.serial ? `Серийный номер: ${data.serial}` : '',
+			data.defect ? `Неисправность: ${data.defect}` : '',
+			data.appearance ? `Внешний вид/комплект: ${data.appearance}` : '',
+			dealLine.trim(),
+			`Принял: ${data.createdByName || (data.createdById ? `#${data.createdById}` : 'не указан')}`,
+			'',
+			'Открой раздел «Ремонты», проверь карточку и двигай ремонт по статусам.',
+		].filter((line) => line !== '').join('\n');
+		const task = await client.call<{ task?: { id?: number | string } }>('tasks.task.add', {
+			fields: {
+				TITLE: `${repairTitle} #${data.repairNo || repairId}: ${[data.device, data.model].filter(Boolean).join(' ') || 'аппарат'}`,
+				DESCRIPTION: body,
+				RESPONSIBLE_ID: responsible,
+				...(accomplices.length ? { ACCOMPLICES: accomplices } : {}),
+			},
+		});
+		return Number(task?.task?.id ?? 0) || null;
+	} catch (err) {
+		log.warn({ repairId }, `[api/repairs] notify task failed — ${errInfo(err)}`);
+		return null;
+	}
 }
 
 /** Авто-сделка по платному ремонту. Создаётся ОДИН раз при простановке «Наша цена» (>0) на платном
@@ -333,6 +397,8 @@ interface RepairData {
 	ourPrice: number | null;
 	/** ID созданной по ремонту сделки Б24 (чтобы не задваивать; null — ещё не создана). */
 	dealId: number | null;
+	/** ID задачи Б24 для снабжения/автора по этому ремонту. */
+	taskId: number | null;
 	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
 	repairItemCode: string | null;
 	/** Где аппарат лежит сейчас (название склада Б24) — чтобы перемещать «откуда» при смене статуса. */
@@ -381,6 +447,7 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 		cost: payType === 'paid' && typeof data.cost === 'number' ? data.cost : null,
 		ourPrice: payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : null,
 		dealId: typeof data.dealId === 'number' && data.dealId > 0 ? data.dealId : null,
+		taskId: typeof data.taskId === 'number' && data.taskId > 0 ? data.taskId : null,
 		repairItemCode: typeof data.repairItemCode === 'string' && data.repairItemCode ? data.repairItemCode : null,
 		repairStore: typeof data.repairStore === 'string' && data.repairStore ? data.repairStore : null,
 		issueStore: typeof data.issueStore === 'string' && data.issueStore ? data.issueStore : null,
@@ -520,6 +587,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				cost,
 				ourPrice,
 				dealId: null,
+				taskId: null,
 				repairItemCode: null,
 				repairStore: null,
 				issueStore: null,
@@ -546,6 +614,11 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			});
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
+			const taskId = await createRepairNotifyTask(client, data, id, app.log);
+			if (taskId) {
+				data.taskId = taskId;
+				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: nameParts.join(' · ') || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
+			}
 			app.log.info({ id }, '[api/repairs/create] ok');
 			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
 		} catch (err) {
@@ -597,6 +670,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				device: itemName, model: '', serial: '', point: '',
 				appearance: '', defect: '',
 				payType: 'warranty', cost: null, ourPrice: null, dealId: null,
+				taskId: null,
 				repairItemCode: null,
 				repairStore: sourceStore, // товар сейчас на источнике; первый статус сдвинет в офис
 				issueStore: null,
@@ -613,6 +687,11 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: REPAIRS_ENTITY, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 			const newId = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!newId) throw new Error('entity.item.add не вернул id');
+			const taskId = await createRepairNotifyTask(client, data, newId, app.log);
+			if (taskId) {
+				data.taskId = taskId;
+				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: newId, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
+			}
 			app.log.info({ id: newId, productId, sourceStore }, '[api/repairs/create-presale] ok');
 			return { ok: true, id: newId, repair: { id: newId, name, ...data } };
 		} catch (err) {
