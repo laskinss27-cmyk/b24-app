@@ -2765,6 +2765,10 @@ html, body, #root { height: 100%; }
 	overflow: visible;
 	pointer-events: none;
 }
+.supply-tree-connector.nested {
+	top: 8px;
+	height: 28px;
+}
 .supply-tree-connector path {
 	fill: none;
 	stroke: #9aa8bc;

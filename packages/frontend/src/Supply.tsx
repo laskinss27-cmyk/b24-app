@@ -126,8 +126,15 @@ const transferStatusLabel = (status: string): string => {
 	if (status === 'canceled') return 'отменено';
 	return status || 'в работе';
 };
+const stockDocStatusLabel = (status: string): string => {
+	const normalized = status.toLowerCase();
+	if (!status || /completed|closed|received|submitted|to bill|to receive/i.test(status)) return 'получено';
+	if (normalized === 'draft') return 'черновик';
+	if (normalized.includes('cancel')) return 'отменено';
+	return status;
+};
 const childStatusClass = (status: string): string => {
-	if (status === 'received' || /completed|closed|to receive/i.test(status)) return 'done';
+	if (status === 'received' || /completed|closed|to bill|to receive/i.test(status)) return 'done';
 	if (status === 'shortage') return 'active';
 	return 'draft';
 };
@@ -252,9 +259,9 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUp
 	const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null);
 	const view = orderStatusView(order);
 	const docsCount = supplyDocumentCount(order);
-	const connector = () => (
-		<svg className="supply-tree-connector" viewBox="0 0 44 44" aria-hidden="true" focusable="false">
-			<path d="M4 0 V22 Q4 34 16 34 H44" />
+	const connector = (kind: 'branch' | 'nested' = 'branch') => (
+		<svg className={`supply-tree-connector ${kind}`} viewBox="0 0 44 44" aria-hidden="true" focusable="false">
+			<path d={kind === 'nested' ? 'M4 10 Q4 22 16 22 H44' : 'M4 0 V22 Q4 34 16 34 H44'} />
 		</svg>
 	);
 	return (
@@ -295,13 +302,13 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUp
 							{isExpanded && <PurchaseInlineDetails purchase={purchase} />}
 							{purchase.receipts.map((receipt) => (
 								<div key={`tree-receipt-${receipt.name}`} className="supply-tree-node receipt">
-									{connector()}
+									{connector('nested')}
 									<div>
 										<b>Оприходование {receipt.name}</b>
 										<small>{receiptLinesSummary(receipt.lines)}</small>
 									</div>
 									<div className="supply-linked-actions">
-										<i className={`supply-status ${childStatusClass(receipt.status)}`}>{receipt.status || 'получено'}</i>
+										<i className={`supply-status ${childStatusClass(receipt.status)}`}>{stockDocStatusLabel(receipt.status)}</i>
 										{onCreateReceiptTransfer && receipt.lines.some((line) => line.warehouse && line.warehouse !== order.toStore) && (
 											<button type="button" disabled={docsBusy} onClick={() => onCreateReceiptTransfer(order, purchase, receipt)}>На точку</button>
 										)}
@@ -561,7 +568,7 @@ function StockDocumentsSection({ orders, loading, onOpenOrder }: { orders: Suppl
 							<em>{receiptLinesSummary(receipt.lines)}</em>
 						</div>
 						<div className="supply-linked-actions">
-							<i className={`supply-status ${childStatusClass(receipt.status)}`}>{receipt.status || 'получено'}</i>
+							<i className={`supply-status ${childStatusClass(receipt.status)}`}>{stockDocStatusLabel(receipt.status)}</i>
 							<button type="button" onClick={() => onOpenOrder(order)}>Заявка</button>
 						</div>
 					</div>
