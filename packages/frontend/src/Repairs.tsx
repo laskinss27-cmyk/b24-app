@@ -677,7 +677,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	const costNum = (): number | null => (costVal.trim() !== '' && Number.isFinite(Number(costVal)) ? Number(costVal) : null);
 	const ourNum = (): number | null => (ourVal.trim() !== '' && Number.isFinite(Number(ourVal)) ? Number(ourVal) : null);
 	function reactDeal(res: { dealCreated: boolean; dealNoContact: boolean }): void {
-		if (res.dealCreated) setDealMsg('✓ Сделка по платному ремонту создана.');
+		if (res.dealCreated) setDealMsg('✓ Сделка по ремонту создана.');
 		else if (res.dealNoContact) setDealMsg('⚠ Сделка не создана: у ремонта клиент без привязки к контакту Б24. Привяжи клиента в редактировании.');
 		else setDealMsg(null);
 	}
@@ -727,6 +727,8 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 				</div>
 			</div>
 			{locked && <p className="muted small">🔒 Ремонт принят в офисе — изменения (поля, цены, статус) доступны только снабжению.</p>}
+			{repair.taskId ? <p className="muted small">📌 Задача: #{repair.taskId}</p> : null}
+			{repair.taskWarning ? <p className="error">⚠ {repair.taskWarning}</p> : null}
 
 			<div className="rc-status">
 				<span className="rc-label">Статус</span>
@@ -767,9 +769,9 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 					{payBusy && <span className="muted small">сохраняю…</span>}
 				</div>
 			)}
-			{!presale && repair.payType === 'paid' && (repair.dealId
+			{!presale && (repair.dealId
 				? <p className="muted small">🤝 Сделка: <button type="button" className="link-btn" onClick={() => openDeal(repair.dealId!)}>#{repair.dealId}</button></p>
-				: (repair.ourPrice != null && repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку по «нашей цене» — привяжи клиента к контакту Б24 (в редактировании).</p>))}
+				: (repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку ремонта — привяжи клиента к контакту Б24 (в редактировании).</p>))}
 			{dealMsg && <p className="muted small">{dealMsg}</p>}
 			{stErr && <p className="error">⛔ {stErr}</p>}
 

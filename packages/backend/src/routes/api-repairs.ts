@@ -105,6 +105,30 @@ async function resolveNames(client: B24Client, ids: Set<string>): Promise<void> 
 }
 
 interface CurrentUser { id: string; name: string; canEditPrice: boolean }
+interface TaskSyncResult { taskId: number | null; error: string | null }
+
+function repairNotifyTitle(data: RepairData, repairId: number): string {
+	const repairTitle = data.kind === 'presale' ? 'Предпродажный ремонт' : 'Ремонт клиента';
+	return `${repairTitle} #${data.repairNo || repairId}: ${[data.device, data.model].filter(Boolean).join(' ') || 'аппарат'}`;
+}
+
+function isFinishedRepair(data: RepairData): boolean {
+	const kind = data.kind === 'presale' ? 'presale' : 'client';
+	const status = normalizeStatus(data.status, kind);
+	return kind === 'presale' ? status === 'pre_at_tt' : status === 'issued';
+}
+
+async function findRepairNotifyTask(client: B24Client, data: RepairData, repairId: number): Promise<number | null> {
+	const title = repairNotifyTitle(data, repairId);
+	const res = await client.call<{ tasks?: Array<{ id?: number | string; title?: string }> }>('tasks.task.list', {
+		filter: { TITLE: title },
+		select: ['ID', 'TITLE'],
+		order: { ID: 'DESC' },
+	});
+	const tasks = Array.isArray(res?.tasks) ? res.tasks : [];
+	const exact = tasks.find((task) => String(task.title ?? '') === title) ?? tasks[0];
+	return Number(exact?.id ?? 0) || null;
+}
 
 /** Текущий пользователь (по его токену) + право на правку цены. user.current отдаёт UF_DEPARTMENT. */
 async function currentUser(client: B24Client): Promise<CurrentUser> {
@@ -121,12 +145,12 @@ async function createRepairNotifyTask(
 	data: RepairData,
 	repairId: number,
 	log: FastifyInstance['log'],
-): Promise<number | null> {
+): Promise<TaskSyncResult> {
 	try {
 		const head = await supplyHead(client);
 		const author = Number(data.createdById) || 0;
 		const responsible = head || author;
-		if (!responsible) return null;
+		if (!responsible) return { taskId: null, error: 'не найден ответственный для задачи' };
 		const accomplices = author && author !== responsible ? [author] : [];
 		const repairTitle = data.kind === 'presale' ? 'Предпродажный ремонт' : 'Ремонт клиента';
 		const pointLine = data.kind === 'presale'
@@ -152,25 +176,56 @@ async function createRepairNotifyTask(
 		].filter((line) => line !== '').join('\n');
 		const task = await client.call<{ task?: { id?: number | string } }>('tasks.task.add', {
 			fields: {
-				TITLE: `${repairTitle} #${data.repairNo || repairId}: ${[data.device, data.model].filter(Boolean).join(' ') || 'аппарат'}`,
+				TITLE: repairNotifyTitle(data, repairId),
 				DESCRIPTION: body,
 				RESPONSIBLE_ID: responsible,
 				...(accomplices.length ? { ACCOMPLICES: accomplices } : {}),
 			},
 		});
-		return Number(task?.task?.id ?? 0) || null;
+		const taskId = Number(task?.task?.id ?? 0) || null;
+		return { taskId, error: taskId ? null : 'Б24 не вернул ID задачи' };
 	} catch (err) {
-		log.warn({ repairId }, `[api/repairs] notify task failed — ${errInfo(err)}`);
-		return null;
+		const error = errInfo(err);
+		log.warn({ repairId }, `[api/repairs] notify task failed — ${error}`);
+		return { taskId: null, error };
 	}
 }
 
-/** Авто-сделка по платному ремонту. Создаётся ОДИН раз при простановке «Наша цена» (>0) на платном
- * ремонте с привязанным контактом-клиентом; dealId пишется в карточку → дубля нет. Если цена потом
- * меняется — обновляем сумму и позицию у уже созданной сделки (best-effort). Без контакта не создаём.
+async function ensureRepairNotifyTask(
+	client: B24Client,
+	repair: RepairData & { id: number; name: string },
+	log: FastifyInstance['log'],
+): Promise<TaskSyncResult> {
+	if (repair.taskId || isFinishedRepair(repair)) return { taskId: repair.taskId ?? null, error: null };
+	const { id, name, ...data } = repair;
+	try {
+		const found = await findRepairNotifyTask(client, data, id);
+		if (found) {
+			data.taskId = found;
+			repair.taskId = found;
+			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
+			return { taskId: found, error: null };
+		}
+	} catch (err) {
+		const error = errInfo(err);
+		log.warn({ repairId: id }, `[api/repairs] legacy task lookup failed — ${error}`);
+		return { taskId: null, error };
+	}
+	const created = await createRepairNotifyTask(client, data, id, log);
+	if (created.taskId) {
+		data.taskId = created.taskId;
+		repair.taskId = created.taskId;
+		await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
+	}
+	return created;
+}
+
+/** Авто-сделка по клиентскому ремонту. Создаётся ОДИН раз для ремонта с привязанным контактом:
+ * у платного сумма = «наша цена», у гарантийного сумма = 0; dealId пишется в карточку → дубля нет.
+ * Если вид/цена потом меняются — обновляем сумму и позицию у уже созданной сделки (best-effort). Без контакта не создаём.
  * Возвращает результат для подсказки на фронте. Мутирует data.dealId при создании. */
 /** Воронка сделок «Ремонты» (entityTypeId=2). Резолвим по имени (кэш на процесс), создаём если нет.
- * Туда льём сделки платных ремонтов — отдельно от продаж и без робота-переименователя «Объектов».
+ * Туда льём сделки ремонтов — отдельно от продаж и без робота-переименователя «Объектов».
  * undefined — ещё не выясняли; number — id; на ошибке не кэшируем (повторим позже). */
 let repairsCategoryId: number | undefined;
 async function ensureRepairsDealCategory(client: B24Client, log: FastifyInstance['log']): Promise<number | null> {
@@ -196,10 +251,12 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	const contactId = data.client?.contactId ?? null;
 	const rowName = data.payType === 'paid' ? 'Платный ремонт' : 'Гарантийный ремонт';
 	const rows = [{ PRODUCT_NAME: rowName, PRICE: price, QUANTITY: 1 }]; // свободная строка (PRODUCT_ID:0) — каталог не трогаем; номер ремонта — в названии сделки
+	const repairKind = data.payType === 'paid' ? 'Платный ремонт' : 'Гарантийный ремонт';
+	const objectName = [`${repairKind} №${data.repairNo}`, data.client?.name, [data.device, data.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
 	if (data.dealId) {
 		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
 		try {
-			await client.call('crm.deal.update', { id: data.dealId, fields: { OPPORTUNITY: price } });
+			await client.call('crm.deal.update', { id: data.dealId, fields: { TITLE: objectName, OPPORTUNITY: price, [DEAL_OBJECT_NAME_FIELD]: objectName } });
 			await client.call('crm.deal.productrows.set', { id: data.dealId, rows });
 		} catch (err) { log.warn({}, `[repairs] обновление сделки ${data.dealId} не удалось — ${errInfo(err)}`); }
 		return { dealId: data.dealId, created: false, noContact: false };
@@ -207,7 +264,6 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	if (!contactId) return { dealId: null, created: false, noContact: true }; // не на кого вешать
 	try {
 		// Имя сделки Б24 собирает как {{ID}}_{{Название объекта}} → кладём осмысленное в поле «Название объекта».
-		const objectName = [`Платный ремонт №${data.repairNo}`, data.client?.name, [data.device, data.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
 		const categoryId = await ensureRepairsDealCategory(client, log);
 		const fields: Record<string, unknown> = { TITLE: objectName, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB', [DEAL_OBJECT_NAME_FIELD]: objectName };
 		if (categoryId) fields['CATEGORY_ID'] = categoryId; // отдельная воронка «Ремонты»
@@ -216,7 +272,7 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 		if (!did) throw new Error('crm.deal.add не вернул id');
 		await client.call('crm.deal.productrows.set', { id: did, rows }).catch((e) => log.warn({}, `[repairs] productrows.set сделки ${did} — ${errInfo(e)}`));
 		data.dealId = did;
-		log.info({ dealId: did, repairNo: data.repairNo }, '[repairs] сделка по платному ремонту создана');
+		log.info({ dealId: did, repairNo: data.repairNo, payType: data.payType }, '[repairs] сделка по ремонту создана');
 		return { dealId: did, created: true, noContact: false };
 	} catch (err) {
 		log.error({}, `[repairs] создание сделки не удалось — ${errInfo(err)}`);
@@ -533,6 +589,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 					if (nm) h.byName = nm;
 				}
 			}
+			for (const r of repairs) {
+				if (r.taskId || isFinishedRepair(r)) continue;
+				await ensureRepairNotifyTask(client, r, app.log);
+			}
 			const me = await currentUser(client);
 			return { ok: true, repairs, canEditPrice: me.canEditPrice };
 		} catch (err) {
@@ -618,13 +678,13 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			});
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
-			const taskId = await createRepairNotifyTask(client, data, id, app.log);
-			if (taskId) {
-				data.taskId = taskId;
+			const taskSync = await createRepairNotifyTask(client, data, id, app.log);
+			if (taskSync.taskId) {
+				data.taskId = taskSync.taskId;
 				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: nameParts.join(' · ') || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
 			}
 			app.log.info({ id }, '[api/repairs/create] ok');
-			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
+			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact, taskCreated: Boolean(taskSync.taskId), taskError: taskSync.error };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/create] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -692,13 +752,13 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: REPAIRS_ENTITY, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 			const newId = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!newId) throw new Error('entity.item.add не вернул id');
-			const taskId = await createRepairNotifyTask(client, data, newId, app.log);
-			if (taskId) {
-				data.taskId = taskId;
+			const taskSync = await createRepairNotifyTask(client, data, newId, app.log);
+			if (taskSync.taskId) {
+				data.taskId = taskSync.taskId;
 				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: newId, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 			}
 			app.log.info({ id: newId, productId, sourceStore }, '[api/repairs/create-presale] ok');
-			return { ok: true, id: newId, repair: { id: newId, name, ...data } };
+			return { ok: true, id: newId, repair: { id: newId, name, ...data }, taskCreated: Boolean(taskSync.taskId), taskError: taskSync.error };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/create-presale] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -809,7 +869,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				if (prevOur !== data.ourPrice) parts.push(`наша цена: ${data.ourPrice == null ? '—' : `${data.ourPrice}₽`}`);
 				data.history.push({ at: new Date().toISOString(), status: data.status, byId: me.id, byName: me.name, note: parts.join(', ') });
 			}
-			// Платный + есть «Наша цена» → создать/обновить сделку.
+			// Сделка нужна и платному, и гарантийному ремонту: у гарантийного сумма будет 0.
 			const dealSync = await syncRepairDeal(client, data, app.log);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, payType, byPriceEditor: me.canEditPrice }, '[api/repairs/set-pay] ok');

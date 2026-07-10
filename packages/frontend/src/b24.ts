@@ -1331,6 +1331,8 @@ export interface Repair {
 	dealId: number | null;
 	/** ID задачи Б24 для снабжения/автора по этому ремонту. */
 	taskId?: number | null;
+	/** Временная подсказка после создания, если Б24 не дал создать задачу. В хранилище ремонта не пишется. */
+	taskWarning?: string;
 	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
 	repairItemCode?: string | null;
 	/** Где аппарат лежит сейчас (название склада Б24). */
@@ -1386,8 +1388,9 @@ export async function createRepair(input: NewRepairInput): Promise<Repair> {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...input }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; taskCreated?: boolean; taskError?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось принять в ремонт');
+	if ('taskCreated' in json && !json.taskCreated) json.repair.taskWarning = `Задача не создана: ${json.taskError || 'Б24 не вернул ID задачи'}`;
 	return json.repair;
 }
 
@@ -1408,8 +1411,9 @@ export async function createPresaleRepair(sourceStore: string, productId: number
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), sourceStore, productId, itemName }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; taskCreated?: boolean; taskError?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось создать предпродажный ремонт');
+	if ('taskCreated' in json && !json.taskCreated) json.repair.taskWarning = `Задача не создана: ${json.taskError || 'Б24 не вернул ID задачи'}`;
 	return json.repair;
 }
 
