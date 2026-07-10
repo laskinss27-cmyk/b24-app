@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
-import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, fetchSupplySuppliers, createTransfers, createSupplyPurchaseOrder, receiveSupplyPurchase, updateSupplyPurchaseStage, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyPurchaseStage, type TransferLineDto } from './b24.js';
+import { fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS, fetchSupplyOrders, fetchSupplySuppliers, createTransfers, createSupplyPurchaseOrder, updateSupplyPurchaseOrder, receiveSupplyPurchase, updateSupplyPurchaseStage, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyPurchaseStage, type TransferLineDto } from './b24.js';
 
 type SectionKey = 'orders' | 'logistics' | 'purchase' | 'payment' | 'stock' | 'reports';
 const SECTIONS: Array<{ key: SectionKey; title: string; group: string }> = [
@@ -87,6 +87,7 @@ interface PurchaseEditorLine {
 }
 interface PurchaseEditor {
 	orderName: string;
+	purchaseName?: string;
 	lines: PurchaseEditorLine[];
 }
 const DEFAULT_SUPPLIER = 'Поставщик не выбран';
@@ -263,10 +264,11 @@ function PurchaseInlineDetails({ purchase }: { purchase: SupplyPurchaseChild }):
 	);
 }
 
-function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
+function SupplyOrderTree({ order, docsBusy, onOpenOrder, onEditPurchase, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	order: SupplyOrderRow;
 	docsBusy: boolean;
 	onOpenOrder?: (order: SupplyOrderRow) => void;
+	onEditPurchase?: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 	onCreateReceiptTransfer?: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
@@ -309,6 +311,9 @@ function SupplyOrderTree({ order, docsBusy, onOpenOrder, onReceivePurchase, onUp
 								<div className="supply-linked-actions">
 									<i className={`supply-status ${status.className}`}>{status.label}</i>
 									<button type="button" onClick={() => setExpandedPurchase(isExpanded ? null : purchase.name)}>{isExpanded ? 'Свернуть' : 'Детали'}</button>
+									{onEditPurchase && ['draft', 'approval', 'approved'].includes(String(effectivePurchaseStage(purchase))) && (
+										<button type="button" disabled={docsBusy} onClick={() => onEditPurchase(order, purchase)}>Редактировать</button>
+									)}
 									<button type="button" onClick={() => printSupplierRequest(order, purchase)}>Печать</button>
 									{action?.stage && <button type="button" disabled={docsBusy} onClick={() => onUpdatePurchaseStage(purchase, action.stage!)}>{action.label}</button>}
 									{action?.receive && <button type="button" disabled={docsBusy} onClick={() => onReceivePurchase(purchase)}>{action.label}</button>}
@@ -454,11 +459,12 @@ const PURCHASE_FILTERS: Array<{ key: PurchaseFilter; label: string }> = [
 	{ key: 'received', label: 'Получено' },
 ];
 
-function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
+function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onEditPurchase, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	orders: SupplyOrderRow[];
 	loading: boolean;
 	docsBusy: boolean;
 	onOpenOrder: (order: SupplyOrderRow) => void;
+	onEditPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 	onCreateReceiptTransfer: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
@@ -500,6 +506,9 @@ function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePur
 								<span>{money(purchaseTotal(purchase))} ₽<small>{purchase.expectedAt ? `ожидаем ${purchase.expectedAt}` : 'без даты'}</small></span>
 								<div className="supply-linked-actions">
 									<button type="button" onClick={() => onOpenOrder(order)}>Заявка</button>
+									{['draft', 'approval', 'approved'].includes(String(effectivePurchaseStage(purchase))) && (
+										<button type="button" disabled={docsBusy} onClick={() => onEditPurchase(order, purchase)}>Редактировать</button>
+									)}
 									{action?.stage && <button type="button" disabled={docsBusy} onClick={() => onUpdatePurchaseStage(purchase, action.stage!)}>{action.label}</button>}
 									{action?.receive && <button type="button" disabled={docsBusy} onClick={() => onReceivePurchase(purchase)}>{action.label}</button>}
 								</div>
@@ -519,7 +528,7 @@ function PurchasesSection({ orders, loading, docsBusy, onOpenOrder, onReceivePur
 				<div className="supply-tree-list">
 					{loading && <div className="supply-empty">Загрузка закупок из ядра...</div>}
 					{!loading && treeOrders.length === 0 && <div className="supply-empty">Документов пока нет. Они появятся здесь после создания закупок или перемещений из заявки снабжения.</div>}
-					{treeOrders.map((order) => <SupplyOrderTree key={order.name} order={order} docsBusy={docsBusy} onOpenOrder={onOpenOrder} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} onCreateReceiptTransfer={onCreateReceiptTransfer} />)}
+					{treeOrders.map((order) => <SupplyOrderTree key={order.name} order={order} docsBusy={docsBusy} onOpenOrder={onOpenOrder} onEditPurchase={onEditPurchase} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} onCreateReceiptTransfer={onCreateReceiptTransfer} />)}
 				</div>
 			</section>
 		</>
@@ -606,7 +615,7 @@ function StockDocumentsSection({ orders, loading, onOpenOrder }: { orders: Suppl
 	);
 }
 
-function OrderDetail({ order, selectedKeys, warehouses, docsBusy, onBack, onToggleItem, onWarehouseChange, onCreateSelectedTransfers, onOpenPurchaseEditor, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
+function OrderDetail({ order, selectedKeys, warehouses, docsBusy, onBack, onToggleItem, onWarehouseChange, onCreateSelectedTransfers, onOpenPurchaseEditor, onEditPurchase, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	order: SupplyOrderRow;
 	selectedKeys: SelectionMap;
 	warehouses: WarehouseMap;
@@ -616,6 +625,7 @@ function OrderDetail({ order, selectedKeys, warehouses, docsBusy, onBack, onTogg
 	onWarehouseChange: (key: string, warehouse: string) => void;
 	onCreateSelectedTransfers: (order: SupplyOrderRow) => void;
 	onOpenPurchaseEditor: (order: SupplyOrderRow) => void;
+	onEditPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 	onCreateReceiptTransfer: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
@@ -671,7 +681,7 @@ function OrderDetail({ order, selectedKeys, warehouses, docsBusy, onBack, onTogg
 						</div>
 					</div>
 					<div className="supply-tree-list">
-						<SupplyOrderTree order={order} docsBusy={docsBusy} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} onCreateReceiptTransfer={onCreateReceiptTransfer} />
+						<SupplyOrderTree order={order} docsBusy={docsBusy} onEditPurchase={onEditPurchase} onReceivePurchase={onReceivePurchase} onUpdatePurchaseStage={onUpdatePurchaseStage} onCreateReceiptTransfer={onCreateReceiptTransfer} />
 					</div>
 				</section>
 			)}
@@ -870,6 +880,21 @@ export function Supply(): JSX.Element {
 		}
 		setPurchaseEditor({ orderName: order.name, lines });
 	};
+	const editPurchase = (order: SupplyOrderRow, purchase: SupplyPurchaseChild): void => {
+		setPurchaseEditor({
+			orderName: order.name,
+			purchaseName: purchase.name,
+			lines: purchase.lines.map((line, index) => ({
+				key: `${purchase.name}:${line.productId}:${index}`,
+				productId: line.productId,
+				itemName: line.name || `#${line.productId}`,
+				needQty: line.qty,
+				qty: line.qty,
+				rate: Number(line.rate ?? 0),
+				supplier: purchase.supplier || '',
+			})),
+		});
+	};
 	const updatePurchaseEditorLine = (key: string, patch: Partial<PurchaseEditorLine>): void => {
 		setPurchaseEditor((current) => current ? { ...current, lines: current.lines.map((line) => line.key === key ? { ...line, ...patch } : line) } : current);
 	};
@@ -935,18 +960,28 @@ export function Supply(): JSX.Element {
 			setNotice('В черновике закупки нет строк с количеством.');
 			return;
 		}
+		if (editor.purchaseName && groups.size > 1) {
+			setNotice('В одном существующем заказе поставщику можно оставить только одного поставщика. Для другого поставщика создай отдельный черновик.');
+			return;
+		}
 		setDocsBusy(true);
 		try {
 			const created: string[] = [];
-			for (const [supplier, lines] of groups.entries()) {
-				const po = await createSupplyPurchaseOrder(order.name, dealId, supplier, lines);
+			if (editor.purchaseName) {
+				const [supplier, lines] = [...groups.entries()][0]!;
+				const po = await updateSupplyPurchaseOrder(editor.purchaseName, supplier, lines);
 				created.push(po);
+			} else {
+				for (const [supplier, lines] of groups.entries()) {
+					const po = await createSupplyPurchaseOrder(order.name, dealId, supplier, lines);
+					created.push(po);
+				}
 			}
 			const usedKeys = new Set(editor.lines.map((line) => line.key));
 			setSelectedKeys((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !usedKeys.has(key))));
 			setPurchaseEditor(null);
 			await refreshOrders(true);
-			setNotice(`Черновики закупки созданы: ${created.join(', ')}.`);
+			setNotice(editor.purchaseName ? `Черновик закупки сохранен: ${created.join(', ')}.` : `Черновики закупки созданы: ${created.join(', ')}.`);
 		} catch (err) {
 			setNotice(err instanceof Error ? err.message : 'Не удалось создать черновик закупки.');
 		} finally {
@@ -1140,6 +1175,7 @@ export function Supply(): JSX.Element {
 					onWarehouseChange={setSupplyWarehouse}
 					onCreateSelectedTransfers={(order) => void createSelectedTransfers(order)}
 					onOpenPurchaseEditor={openPurchaseEditor}
+					onEditPurchase={editPurchase}
 					onReceivePurchase={openReceivePurchase}
 					onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
 					onCreateReceiptTransfer={(order, purchase, receipt) => void createTransferFromReceipt(order, purchase, receipt)}
@@ -1171,6 +1207,7 @@ export function Supply(): JSX.Element {
 							loading={loadingOrders}
 							docsBusy={docsBusy}
 							onOpenOrder={(order) => { setSection('orders'); setPreviewName(order.name); setDetailName(order.name); }}
+							onEditPurchase={editPurchase}
 							onReceivePurchase={openReceivePurchase}
 							onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
 							onCreateReceiptTransfer={(order, purchase, receipt) => void createTransferFromReceipt(order, purchase, receipt)}
@@ -1232,8 +1269,8 @@ export function Supply(): JSX.Element {
 					<div className="supply-modal supply-purchase-editor">
 						<header>
 							<div>
-								<h2>Черновик закупки</h2>
-								<p>{purchaseEditor.orderName} · заполни поставщика, количество и цену</p>
+								<h2>{purchaseEditor.purchaseName ? `Редактирование ${purchaseEditor.purchaseName}` : 'Черновик закупки'}</h2>
+								<p>{purchaseEditor.orderName} · {purchaseEditor.purchaseName ? 'можно изменить поставщика, количество и цену' : 'заполни поставщика, количество и цену'}</p>
 							</div>
 							<button type="button" onClick={() => setPurchaseEditor(null)}>Закрыть</button>
 						</header>
@@ -1254,7 +1291,7 @@ export function Supply(): JSX.Element {
 						</div>
 						<footer>
 							<button type="button" onClick={() => setPurchaseEditor(null)}>Отмена</button>
-							<button className="supply-primary" type="button" disabled={docsBusy} onClick={() => void submitPurchaseEditor()}>{docsBusy ? 'Создаем...' : 'Создать черновик'}</button>
+							<button className="supply-primary" type="button" disabled={docsBusy} onClick={() => void submitPurchaseEditor()}>{docsBusy ? 'Сохраняем...' : purchaseEditor.purchaseName ? 'Сохранить' : 'Создать черновик'}</button>
 						</footer>
 					</div>
 				</div>

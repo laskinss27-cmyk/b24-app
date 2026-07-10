@@ -590,6 +590,31 @@ export async function createPurchaseOrderDraft(
 	return { name: String(doc['name']) };
 }
 
+export async function updatePurchaseOrderDraft(
+	erp: ErpClient,
+	args: { purchaseOrder: string; supplier?: string; lines: PurchaseDraftLine[] },
+): Promise<{ name: string }> {
+	await ensurePurchaseFields(erp);
+	const current = await erp.get<Record<string, unknown>>('Purchase Order', args.purchaseOrder);
+	if (!current) throw new Error('закупка не найдена');
+	if (Number(current['docstatus'] ?? 0) !== 0) throw new Error('можно редактировать только черновик закупки');
+	if (!args.lines.length) throw new Error('пустая закупка');
+	const scheduleDate = String(current['schedule_date'] ?? new Date().toISOString().slice(0, 10));
+	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
+	const rates = await fetchErpPurchasing(erp, args.lines.map((l) => l.productId));
+	const patch: Record<string, unknown> = {
+		items: args.lines.map((l) => ({
+			item_code: String(l.productId),
+			qty: l.qty,
+			schedule_date: scheduleDate,
+			rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
+		})),
+	};
+	if (args.supplier) patch['supplier'] = await ensureSupplier(erp, args.supplier);
+	const doc = await erp.update('Purchase Order', args.purchaseOrder, patch);
+	return { name: String(doc['name'] ?? args.purchaseOrder) };
+}
+
 export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
 
 export async function updateSupplyPurchaseStage(

@@ -681,6 +681,17 @@ export async function createSupplyPurchaseOrder(requestName: string, dealId: num
 	return json.name ?? '';
 }
 
+export async function updateSupplyPurchaseOrder(purchaseOrder: string, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {
+	const res = await fetch('/api/supply/purchase-order/update', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), purchaseOrder, supplier, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить черновик закупки');
+	return json.name ?? '';
+}
+
 export async function fetchSupplySuppliers(): Promise<string[]> {
 	const res = await fetch('/api/supply/suppliers', {
 		method: 'POST',
