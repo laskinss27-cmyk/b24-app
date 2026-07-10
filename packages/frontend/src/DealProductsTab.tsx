@@ -101,6 +101,12 @@ const MOCK_DATA: TableData = {
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
+const requestB24FitWindow = (delay = 120): void => {
+	window.setTimeout(() => {
+		try { window.BX24?.fitWindow(); } catch { /* outside placement context */ }
+	}, delay);
+};
+
 async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
@@ -231,48 +237,13 @@ export function DealProductsTab(): JSX.Element {
 		});
 	}, [ctx]);
 
-	// Растягиваем фрейм приложения под контент, но не во время прокрутки: частый fitWindow внутри
-	// Б24 может перехватывать wheel и давать дрожь страницы при наведении на таблицу.
+	// Подгоняем высоту iframe только после загрузки вкладки. Постоянный ResizeObserver в Б24
+	// может дергать страницу во время прокрутки и ломать scroll.
 	useEffect(() => {
-		const bx = window.BX24;
-		if (!bx || ctx.__mock) return;
-		let last = 0;
-		let timer: number | null = null;
-		let wheelTimer: number | null = null;
-		let isWheel = false;
-		const fit = (): void => {
-			const h = document.body.scrollHeight;
-			if (Math.abs(h - last) < 24) return;
-			last = h;
-			try { bx.fitWindow(); } catch { /* вне placement-контекста — игнор */ }
-		};
-		const scheduleFit = (delay = 160): void => {
-			if (timer != null) window.clearTimeout(timer);
-			timer = window.setTimeout(() => {
-				timer = null;
-				if (!isWheel) fit();
-			}, delay);
-		};
-		const onWheel = (): void => {
-			isWheel = true;
-			if (wheelTimer != null) window.clearTimeout(wheelTimer);
-			wheelTimer = window.setTimeout(() => {
-				isWheel = false;
-				wheelTimer = null;
-				scheduleFit(220);
-			}, 260);
-		};
-		scheduleFit(60);
-		const ro = new ResizeObserver(() => scheduleFit());
-		ro.observe(document.body);
-		window.addEventListener('wheel', onWheel, { passive: true });
-		return () => {
-			ro.disconnect();
-			window.removeEventListener('wheel', onWheel);
-			if (timer != null) window.clearTimeout(timer);
-			if (wheelTimer != null) window.clearTimeout(wheelTimer);
-		};
-	}, [ctx]);
+		if (ctx.__mock || state.phase === 'init' || state.phase === 'loading') return;
+		requestB24FitWindow(80);
+		requestB24FitWindow(360);
+	}, [ctx.__mock, state.phase]);
 
 	if (state.phase === 'denied') {
 		return (
@@ -709,7 +680,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							<button
 								type="button"
 								className={`stock-toggle${isStockExpanded ? ' open' : ''}`}
-								onClick={() => setExpandedStocks((m) => ({ ...m, [r.id]: !m[r.id] }))}
+								onClick={() => {
+									setExpandedStocks((m) => ({ ...m, [r.id]: !m[r.id] }));
+									requestB24FitWindow(160);
+								}}
 								title={isStockExpanded ? 'Скрыть остатки по складам' : 'Показать остатки по складам'}
 							>
 								<span>всего <b>{totalStock(r)}</b></span>
