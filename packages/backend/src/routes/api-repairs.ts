@@ -71,6 +71,8 @@ const SUPPLY_DEPT = 10;
 let supplyHeadCache: number | null = null;
 async function supplyHead(client: B24Client): Promise<number> {
 	if (supplyHeadCache !== null) return supplyHeadCache;
+	const env = Number(process.env['REPAIR_SUPPLY_RESPONSIBLE_ID'] ?? process.env['TRANSFER_PURCHASER_ID'] ?? 0) || 0;
+	if (env) { supplyHeadCache = env; return env; }
 	try {
 		const deps = await client.call<Array<{ UF_HEAD?: unknown }>>('department.get', { ID: SUPPLY_DEPT });
 		const head = Number((Array.isArray(deps) ? deps[0] : undefined)?.UF_HEAD ?? 0) || 0;
@@ -78,6 +80,20 @@ async function supplyHead(client: B24Client): Promise<number> {
 		return head;
 	} catch {
 		supplyHeadCache = 0;
+		return 0;
+	}
+}
+
+async function supplyResponsible(client: B24Client, authorId: number): Promise<number> {
+	const head = await supplyHead(client);
+	if (head) return head;
+	try {
+		const users = await client.call<Array<{ ID?: string | number }>>('user.get', {
+			FILTER: { ACTIVE: true, UF_DEPARTMENT: SUPPLY_DEPT },
+		});
+		const ids = (Array.isArray(users) ? users : []).map((u) => Number(u.ID ?? 0)).filter((id) => id > 0);
+		return ids.find((id) => id !== authorId) ?? ids[0] ?? 0;
+	} catch {
 		return 0;
 	}
 }
@@ -147,11 +163,9 @@ async function createRepairNotifyTask(
 	log: FastifyInstance['log'],
 ): Promise<TaskSyncResult> {
 	try {
-		const head = await supplyHead(client);
 		const author = Number(data.createdById) || 0;
-		const responsible = head || author;
-		if (!responsible) return { taskId: null, error: 'не найден ответственный для задачи' };
-		const accomplices = author && author !== responsible ? [author] : [];
+		const responsible = await supplyResponsible(client, author);
+		if (!responsible) return { taskId: null, error: 'не найден исполнитель из отдела снабжения' };
 		const repairTitle = data.kind === 'presale' ? 'Предпродажный ремонт' : 'Ремонт клиента';
 		const pointLine = data.kind === 'presale'
 			? `Склад-источник: ${data.sourceStore || 'не указан'}`
@@ -178,8 +192,8 @@ async function createRepairNotifyTask(
 			fields: {
 				TITLE: repairNotifyTitle(data, repairId),
 				DESCRIPTION: body,
+				...(author ? { CREATED_BY: author } : {}),
 				RESPONSIBLE_ID: responsible,
-				...(accomplices.length ? { ACCOMPLICES: accomplices } : {}),
 			},
 		});
 		const taskId = Number(task?.task?.id ?? 0) || null;
