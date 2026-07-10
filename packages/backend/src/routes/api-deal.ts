@@ -632,10 +632,9 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
 			const contactId = Number(deal?.['CONTACT_ID'] ?? 0);
 			const assignedId = Number(deal?.['ASSIGNED_BY_ID'] ?? 0);
-			const [contact, mgrRaw, rowsRes] = await Promise.all([
+			const [contact, mgrRaw] = await Promise.all([
 				contactId ? client.call<Record<string, unknown>>('crm.contact.get', { id: contactId }).catch(() => null) : Promise.resolve(null),
 				assignedId ? client.call<unknown>('user.get', { ID: assignedId }).then((r) => (Array.isArray(r) ? r[0] : r) as Record<string, unknown> | null).catch(() => null) : Promise.resolve(null),
-				client.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', { filter: { '=ownerType': 'D', ownerId: dealId } }).catch(() => ({ productRows: [] as Array<Record<string, unknown>> })),
 			]);
 			const clientName = contact ? [contact['NAME'], contact['LAST_NAME']].filter(Boolean).join(' ').trim() : '';
 			const phones = contact?.['PHONE'] as Array<{ VALUE?: string }> | undefined;
@@ -648,25 +647,40 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const m = /([A-Za-zА-Яа-я0-9][A-Za-z0-9\-/.]{3,})\s*$/.exec(name.trim());
 				return m && m[1] && /\d/.test(m[1]) ? m[1] : '';
 			};
-			// Новый API (crm.item.productrow.list) у ЧАСТИ сделок пуст — тогда фолбэк на старый
-			// (crm.deal.productrows.get), как во вкладке сделки. Поля старого: PRODUCT_NAME/TYPE/PRICE/QUANTITY.
-			let raw = (rowsRes?.productRows ?? []).map((r) => ({
-				productId: Number(r['productId'] ?? 0), name: String(r['productName'] ?? ''),
-				type: Number(r['type'] ?? 0), qty: Number(r['quantity'] ?? 0), price: Number(r['price'] ?? 0),
-			}));
+			// КП должно смотреть на НАШ состав сделки из ядра (Sales Order), а не на нативные строки Б24:
+			// в Б24 мы специально держим одну служебную строку «Выезд инженера» на всю сумму.
+			const erp = ErpClient.fromEnv();
+			let source: 'core' | 'b24-fallback' = 'core';
+			let raw = erp
+				? (await listDealPlan(erp, dealId).catch((err) => {
+					app.log.warn({ dealId }, `[api/deal/kp] core plan failed — ${errInfo(err)}`);
+					return [];
+				})).map((r) => ({
+					productId: r.productId,
+					name: r.itemName || `#${r.productId}`,
+					type: r.isService ? 7 : 1,
+					qty: r.qty,
+					price: r.rate,
+				}))
+				: [];
 			if (!raw.length) {
+				source = 'b24-fallback';
 				const old = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId }).catch(() => [] as Array<Record<string, unknown>>);
-				raw = (old ?? []).map((r) => ({
-					productId: Number(r['PRODUCT_ID'] ?? 0), name: String(r['PRODUCT_NAME'] ?? ''),
-					type: Number(r['TYPE'] ?? 0), qty: Number(r['QUANTITY'] ?? 0), price: Number(r['PRICE'] ?? 0),
-				}));
+				raw = (old ?? [])
+					.map((r) => ({
+						productId: Number(r['PRODUCT_ID'] ?? 0), name: String(r['PRODUCT_NAME'] ?? ''),
+						type: Number(r['TYPE'] ?? 0), qty: Number(r['QUANTITY'] ?? 0), price: Number(r['PRICE'] ?? 0),
+					}))
+					.filter((r) => r.productId !== VYEZD_PRODUCT_ID);
 			}
-			const rows = raw.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7 }));
+			const rows = raw
+				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
+				.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7 }));
 			const goods = rows.filter((r) => !r.isWork);
 			const works = rows.filter((r) => r.isWork);
 			const sumGoods = goods.reduce((a, r) => a + r.sum, 0);
 			const sumWorks = works.reduce((a, r) => a + r.sum, 0);
-			app.log.info({ dealId, goods: goods.length, works: works.length }, '[api/deal/kp] ok');
+			app.log.info({ dealId, source, goods: goods.length, works: works.length }, '[api/deal/kp] ok');
 			return {
 				ok: true,
 				kp: {
