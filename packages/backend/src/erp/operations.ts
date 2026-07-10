@@ -67,12 +67,16 @@ const UOM = 'шт';
 
 /** Завести товар в ЯДРЕ — зеркало нового продукта Б24 (code = productId). Идемпотентно: уже есть → ничего.
  *  Для «Создать товар» в форме прихода: продукт сперва создан в каталоге Б24 (получил productId), тут — Item ядра. */
-export async function ensureCoreItem(erp: ErpClient, args: { productId: number; name: string }): Promise<void> {
+export async function ensureCoreItem(erp: ErpClient, args: { productId: number; name: string; isService?: boolean }): Promise<void> {
 	const code = String(args.productId);
-	if (await erp.get('Item', code)) return;
+	const existing = await erp.get<Record<string, unknown>>('Item', code);
+	if (existing) {
+		if (args.isService && Number(existing['is_stock_item'] ?? 1) !== 0) await erp.update('Item', code, { is_stock_item: 0 });
+		return;
+	}
 	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
 	if (!(await erp.get('Item Group', ITEM_GROUP))) await erp.create('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
-	const isService = args.productId === CORE_ENGINEER_VISIT_SERVICE_ID;
+	const isService = Boolean(args.isService) || args.productId === CORE_ENGINEER_VISIT_SERVICE_ID;
 	await erp.create('Item', {
 		item_code: code,
 		item_name: args.name || `#${code}`,
@@ -301,7 +305,7 @@ async function ensurePlanField(erp: ErpClient): Promise<void> {
 }
 
 // priceListRate = базовая цена (до скидки), discountPercent = скидка %. rate (итог) ERPNext считает сам.
-export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number }
+export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
 export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean }
 
 /** Черновик плана сделки (Sales Order docstatus 0 по b24_deal_id) — имя или null. */
@@ -321,7 +325,7 @@ export async function upsertDealPlan(erp: ErpClient, dealId: number, lines: Plan
 		if (existing) await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(existing)}`);
 		return { name: null };
 	}
-	for (const l of lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
+	for (const l of lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}`, ...(l.isService !== undefined ? { isService: l.isService } : {}) });
 	// Скидку храним нативно: price_list_rate (база) + discount_percentage → rate ERPNext посчитает сам.
 	const items = lines.map((l) => ({ item_code: String(l.productId), qty: l.qty, price_list_rate: l.priceListRate, discount_percentage: l.discountPercent, delivery_date: deliveryDate }));
 	if (existing) {
@@ -341,6 +345,12 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 	if (!name) return [];
 	const so = await erp.get<Record<string, unknown>>('Sales Order', name);
 	const items = (so?.['items'] as Array<Record<string, unknown>>) ?? [];
+	const ids = [...new Set(items.map((it) => String(it['item_code'] ?? '')).filter(Boolean))];
+	const serviceById = new Map<string, boolean>();
+	for (let i = 0; i < ids.length; i += 100) {
+		const rows = await erp.list('Item', ['name', 'is_stock_item'], [['name', 'in', ids.slice(i, i + 100)]]);
+		for (const row of rows) serviceById.set(String(row['name']), Number(row['is_stock_item'] ?? 1) === 0);
+	}
 	return items.map((it) => ({
 		productId: Number(it['item_code']),
 		itemName: String(it['item_name'] ?? ''),
@@ -349,7 +359,7 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 		priceListRate: Number(it['price_list_rate'] ?? it['rate'] ?? 0),
 		discountPercent: Number(it['discount_percentage'] ?? 0),
 		delivered: Number(it['delivered_qty'] ?? 0),
-		isService: Number(it['item_code']) === CORE_ENGINEER_VISIT_SERVICE_ID,
+		isService: Number(it['item_code']) === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
 	}));
 }
 

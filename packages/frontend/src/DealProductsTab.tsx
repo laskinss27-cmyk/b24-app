@@ -299,7 +299,7 @@ export function DealProductsTab(): JSX.Element {
 					title: `Добавить товар в сделку #${dealId}`,
 					onCancel: () => setAdding(false),
 					onDone: async (items) => {
-						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name })));
+						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })));
 						setAdding(false);
 						await reload();
 					},

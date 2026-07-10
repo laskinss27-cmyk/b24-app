@@ -95,7 +95,7 @@ function QtyInput({ value, onChange }: { value: number; onChange: (n: number) =>
 }
 
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
-export interface ProductPickItem { productId: number; name: string; quantity: number; price: number }
+export interface ProductPickItem { productId: number; name: string; quantity: number; price: number; isService?: boolean }
 export interface ProductPicker {
 	onDone: (items: ProductPickItem[]) => Promise<void>;
 	onCancel: () => void;
@@ -301,7 +301,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	async function handleDone(): Promise<void> {
 		if (!picker) return;
 		setSaleErr(null);
-		const items: ProductPickItem[] = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0 }));
+		const items: ProductPickItem[] = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0, isService: c.row.isService }));
 		if (!items.length) { picker.onCancel(); return; }
 		setDone(true);
 		try {

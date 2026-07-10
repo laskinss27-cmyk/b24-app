@@ -64,6 +64,21 @@ async function fetchBasePrices(client: B24Client, ids: number[]): Promise<Map<nu
 	return map;
 }
 
+async function fetchServiceProductIds(client: B24Client, ids: number[]): Promise<Set<number>> {
+	const out = new Set<number>();
+	const uniq = [...new Set(ids.filter((x) => x > 0 && x !== CORE_ENGINEER_VISIT_SERVICE_ID))];
+	if (!uniq.length) return out;
+	const calls: Record<string, BatchCall> = {};
+	for (const id of uniq) calls[`p${id}`] = { method: 'catalog.product.get', params: { id } };
+	const res = await client.callBatch(calls);
+	for (const id of uniq) {
+		const product = (res.result[`p${id}`] as { product?: Record<string, unknown> } | undefined)?.product;
+		if (Number(product?.['type'] ?? 0) === 7) out.add(id);
+	}
+	out.add(CORE_ENGINEER_VISIT_SERVICE_ID);
+	return out;
+}
+
 const normName = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 async function resolveDealSourceStoreId(client: B24Client, deal: Record<string, unknown> | null): Promise<number | null> {
@@ -384,28 +399,31 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const items = Array.isArray(b.items) ? b.items : [];
 		const clean = items
-			.map((it) => it as { productId?: unknown; quantity?: unknown; price?: unknown; name?: unknown })
-			.map((it) => ({ productId: Number(it.productId), quantity: Number(it.quantity), price: Number(it.price), name: String(it.name ?? '') }))
+			.map((it) => it as { productId?: unknown; quantity?: unknown; price?: unknown; name?: unknown; isService?: unknown })
+			.map((it) => ({ productId: Number(it.productId), quantity: Number(it.quantity), price: Number(it.price), name: String(it.name ?? ''), isService: Boolean(it.isService) }))
 			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && it.productId !== VYEZD_PRODUCT_ID && Number.isFinite(it.quantity) && it.quantity > 0);
 		if (!clean.length) return reply.code(400).send({ ok: false, error: 'no valid items' });
 
 		try {
 			// Цены, которых нет в запросе, добираем из BASE одним батчем.
 			const need = clean.filter((it) => !Number.isFinite(it.price) || it.price < 0).map((it) => it.productId);
-			const basePrices = need.length ? await fetchBasePrices(client, need) : new Map<number, number>();
-			const priced = clean.map((it) => ({ ...it, price: Number.isFinite(it.price) && it.price >= 0 ? it.price : (basePrices.get(it.productId) ?? 0) }));
+			const [basePrices, serviceIds] = await Promise.all([
+				need.length ? fetchBasePrices(client, need) : Promise.resolve(new Map<number, number>()),
+				fetchServiceProductIds(client, clean.map((it) => it.productId)),
+			]);
+			const priced = clean.map((it) => ({ ...it, isService: it.isService || serviceIds.has(it.productId), price: Number.isFinite(it.price) && it.price >= 0 ? it.price : (basePrices.get(it.productId) ?? 0) }));
 
 			const erp = ErpClient.fromEnv();
 			if (erp) {
 				// ПОКРЫВАЛО: состав сделки → ПЛАН в ядре (Sales Order), а Б24 несёт ОДНУ свёрнутую
 				// услугу «Выезд инженера». Новые товары мёржим в план по productId (кол-во суммируем).
-				const byId = new Map<number, { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number }>();
-				for (const p of await listDealPlan(erp, dealId)) byId.set(p.productId, { productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent });
+				const byId = new Map<number, { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }>();
+				for (const p of await listDealPlan(erp, dealId)) byId.set(p.productId, { productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent, isService: p.isService });
 				for (const it of priced) {
 					const prev = byId.get(it.productId);
 					// Новый товар добавляется БЕЗ скидки (база = цена из пикера). Существующий — копим кол-во, цену обновляем, скидку сохраняем.
-					if (prev) { prev.qty += it.quantity; prev.priceListRate = it.price; }
-					else byId.set(it.productId, { productId: it.productId, qty: it.quantity, priceListRate: it.price, discountPercent: 0, ...(it.name ? { itemName: it.name } : {}) });
+					if (prev) { prev.qty += it.quantity; prev.priceListRate = it.price; prev.isService = prev.isService || it.isService; }
+					else byId.set(it.productId, { productId: it.productId, qty: it.quantity, priceListRate: it.price, discountPercent: 0, isService: it.isService, ...(it.name ? { itemName: it.name } : {}) });
 				}
 				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
@@ -422,7 +440,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				if (it.productId === CORE_ENGINEER_VISIT_SERVICE_ID) {
 					throw new Error('услуга «Выезд инженера» требует подключенного ядра склада');
 				}
-				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price: it.price, quantity: it.quantity } });
+				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price: it.price, quantity: it.quantity, ...(it.isService ? { type: 7 } : {}) } });
 				added++;
 			}
 			app.log.info({ dealId, added }, '[api/deal/add-products] ok (b24 fallback)');
@@ -564,6 +582,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (!erp) return { ok: true, items: [] as unknown[] };
 		try {
 			const items = await listDealPlan(erp, dealId);
+			const serviceIds = await fetchServiceProductIds(client, items.map((item) => item.productId));
+			for (const item of items) item.isService = item.isService || serviceIds.has(item.productId);
 			return { ok: true, items };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/plan] failed — ${errInfo(err)}`);
@@ -582,12 +602,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const lines = (Array.isArray(b.items) ? b.items : [])
-			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown })
-			.map((it) => ({ productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent) || 0 }))
+			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown; isService?: unknown })
+			.map((it) => ({ productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent) || 0, isService: Boolean(it.isService) }))
 			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.qty) && it.qty > 0 && Number.isFinite(it.priceListRate) && it.priceListRate >= 0 && it.discountPercent >= 0 && it.discountPercent <= 100);
 		try {
+			const serviceIds = await fetchServiceProductIds(client, lines.map((l) => l.productId));
+			for (const line of lines) line.isService = line.isService || serviceIds.has(line.productId);
 			const today = new Date().toISOString().slice(0, 10);
-			await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
+			await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
 			const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
 			app.log.info({ dealId, lines: lines.length, total }, '[api/deal/plan-set] ok');
