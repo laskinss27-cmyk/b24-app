@@ -231,23 +231,47 @@ export function DealProductsTab(): JSX.Element {
 		});
 	}, [ctx]);
 
-	// Растягиваем фрейм приложения под контент — иначе Б24 держит ~половину страницы и появляется внутренний
-	// скролл. fitWindow подгоняет высоту iframe под содержимое; ResizeObserver ловит подгрузку данных, раскрытие
-	// строк, открытие модалок. Дёргаем только при реальном изменении высоты (без петли — fitWindow не меняет scrollHeight).
+	// Растягиваем фрейм приложения под контент, но не во время прокрутки: частый fitWindow внутри
+	// Б24 может перехватывать wheel и давать дрожь страницы при наведении на таблицу.
 	useEffect(() => {
 		const bx = window.BX24;
 		if (!bx || ctx.__mock) return;
 		let last = 0;
+		let timer: number | null = null;
+		let wheelTimer: number | null = null;
+		let isWheel = false;
 		const fit = (): void => {
 			const h = document.body.scrollHeight;
-			if (Math.abs(h - last) < 2) return;
+			if (Math.abs(h - last) < 24) return;
 			last = h;
 			try { bx.fitWindow(); } catch { /* вне placement-контекста — игнор */ }
 		};
-		fit();
-		const ro = new ResizeObserver(() => fit());
+		const scheduleFit = (delay = 160): void => {
+			if (timer != null) window.clearTimeout(timer);
+			timer = window.setTimeout(() => {
+				timer = null;
+				if (!isWheel) fit();
+			}, delay);
+		};
+		const onWheel = (): void => {
+			isWheel = true;
+			if (wheelTimer != null) window.clearTimeout(wheelTimer);
+			wheelTimer = window.setTimeout(() => {
+				isWheel = false;
+				wheelTimer = null;
+				scheduleFit(220);
+			}, 260);
+		};
+		scheduleFit(60);
+		const ro = new ResizeObserver(() => scheduleFit());
 		ro.observe(document.body);
-		return () => ro.disconnect();
+		window.addEventListener('wheel', onWheel, { passive: true });
+		return () => {
+			ro.disconnect();
+			window.removeEventListener('wheel', onWheel);
+			if (timer != null) window.clearTimeout(timer);
+			if (wheelTimer != null) window.clearTimeout(wheelTimer);
+		};
 	}, [ctx]);
 
 	if (state.phase === 'denied') {
