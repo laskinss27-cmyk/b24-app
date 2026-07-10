@@ -67,7 +67,7 @@ const MOCK: Repair[] = [
 		id: 1042, repairNo: 102, name: 'Видеодомофон CTV-M5702 · Иванов', status: 'received_tt',
 		client: { contactId: 16001, name: 'Иванов Пётр Сергеевич', phone: '+7 921 100-20-30' },
 		device: 'Видеодомофон', model: 'CTV-M5702', serial: 'M5702-AB-7781', point: 'Дунайский 64', appearance: 'Царапина на рамке снизу. Комплект: монитор',
-		defect: 'Не включается экран, питание есть', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: '', photos: [], files: [],
+		defect: 'Не включается экран, питание есть', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: '', internalComment: 'Клиент просил позвонить после диагностики.', photos: [], files: [],
 		createdAt: new Date().toISOString(), createdById: '1858', createdByName: 'Сергей Ласкин',
 		history: [{ at: new Date().toISOString(), status: 'received_tt', byId: '1858' }],
 	},
@@ -75,7 +75,7 @@ const MOCK: Repair[] = [
 		id: 1039, repairNo: 101, name: 'Контроллер Shelly Pro 4PM · ООО Дом', status: 'sent',
 		client: { contactId: null, name: 'ООО «Умный дом»', phone: '+7 812 700-10-10' },
 		device: 'Контроллер', model: 'Shelly Pro 4PM', serial: 'SH-4PM-55012', point: 'Измайловский 18Д', appearance: 'Без видимых повреждений. Комплект: контроллер, б/п',
-		defect: 'Не отвечает по сети после грозы', payType: 'paid', cost: 3500, ourPrice: 5200, dealId: null, comment: 'СЦ: вне гарантии — замена платы питания', photos: [], files: [],
+		defect: 'Не отвечает по сети после грозы', payType: 'paid', cost: 3500, ourPrice: 5200, dealId: null, comment: 'СЦ: вне гарантии — замена платы питания', internalComment: 'Согласовать цену с клиентом до отправки.', photos: [], files: [],
 		createdAt: new Date(Date.now() - 3 * 864e5).toISOString(), createdById: '1858', createdByName: 'Сергей Ласкин',
 		history: [
 			{ at: new Date(Date.now() - 3 * 864e5).toISOString(), status: 'received_tt', byId: '986', byName: 'Игорь Бекасов' },
@@ -87,7 +87,7 @@ const MOCK: Repair[] = [
 		id: 1031, repairNo: 100, name: 'IP-камера Dahua · Петров', status: 'issued',
 		client: { contactId: 16044, name: 'Петров Иван', phone: '+7 905 222-33-44' },
 		device: 'IP-камера', model: 'Dahua IPC-HFW2', serial: 'DH-2230-91кп', point: 'Дунайский 64', appearance: 'Потёртости корпуса. Комплект: камера, кронштейн',
-		defect: 'Засветы по ИК-подсветке', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: 'СЦ: неисправность не подтвердилась, прошивка обновлена', photos: [], files: [],
+		defect: 'Засветы по ИК-подсветке', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: 'СЦ: неисправность не подтвердилась, прошивка обновлена', internalComment: '', photos: [], files: [],
 		createdAt: new Date(Date.now() - 20 * 864e5).toISOString(), createdById: '986', createdByName: 'Игорь Бекасов',
 		history: [],
 	},
@@ -285,7 +285,7 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 		return repairs.filter((r) => {
 			if (st !== 'all' && r.status !== st) return false;
 			if (!words.length) return true;
-			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment}`.toLowerCase();
+			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment} ${r.internalComment ?? ''}`.toLowerCase();
 			return words.every((w) => hay.includes(w));
 		});
 	}, [repairs, q, st]);
@@ -306,7 +306,7 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 						{STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
 					</select>
 				</label>
-				<label className="tb-field tb-search">Поиск (№ · клиент · серийник · модель · неисправность)
+				<label className="tb-field tb-search">Поиск (№ · клиент · серийник · модель · комментарий)
 					<input type="search" value={q} placeholder="1042, иванов, M5702…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 				</label>
 				<div className="tb-spacer" />
@@ -322,7 +322,7 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 				<div className="table-wrap">
 					<table className="products-table report-table">
 						<thead>
-							<tr><th>№</th><th>Клиент</th><th>ТТ приема</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Статус</th><th>Принят</th></tr>
+							<tr><th>№</th><th>Клиент</th><th>ТТ приема</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Комментарий</th><th>Статус</th><th>Принят</th></tr>
 						</thead>
 						<tbody>
 							{view.map((r) => (
@@ -335,6 +335,7 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 									<td>{r.kind === 'presale' ? <span className="muted">—</span> : <span className={`pay-badge ${r.payType}`}>{r.payType === 'paid' ? 'платный' : 'гарантия'}</span>}</td>
 									<td className="nowrap">{r.payType === 'paid' && r.ourPrice != null ? <b>{money(r.ourPrice)}</b> : <span className="muted">—</span>}</td>
 									<td className="repair-comment">{r.defect ? <span title={r.defect}>{r.defect}</span> : <span className="muted">—</span>}</td>
+									<td className="repair-comment">{r.internalComment ? <span title={r.internalComment}>{r.internalComment}</span> : <span className="muted">—</span>}</td>
 									<td>{r.status === 'issued' ? <span className="status-done">завершён</span> : <span className={`repair-st st-${r.status}`}>{STATUS_LABEL[r.status]}</span>}</td>
 									<td className="muted nowrap">{ruDate(r.createdAt)}</td>
 								</tr>
@@ -373,6 +374,7 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [appearance, setAppearance] = useState(initial?.appearance ?? '');
 	const [defect, setDefect] = useState(initial?.defect ?? '');
+	const [internalComment, setInternalComment] = useState(initial?.internalComment ?? '');
 	const [comment, setComment] = useState(initial?.comment ?? '');
 	const [payType, setPayType] = useState<'warranty' | 'paid'>(initial?.payType ?? 'warranty');
 	const [cost, setCost] = useState<string>(initial?.cost != null ? String(initial.cost) : '');
@@ -436,7 +438,7 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 			const input: NewRepairInput = {
 				client: { contactId, name: clientName.trim(), phone: clientPhone.trim() },
 				device: device.trim(), model: model.trim(), serial: serial.trim(), point: point.trim(),
-				appearance: appearance.trim(), defect: defect.trim(), comment: comment.trim(), payType,
+				appearance: appearance.trim(), defect: defect.trim(), internalComment: internalComment.trim(), comment: comment.trim(), payType,
 				cost: payType === 'paid' && cost.trim() !== '' && Number.isFinite(Number(cost)) ? Number(cost) : null,
 				ourPrice: payType === 'paid' && ourPrice.trim() !== '' && Number.isFinite(Number(ourPrice)) ? Number(ourPrice) : null,
 				photos, files,
@@ -507,6 +509,10 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 				</label>
 				<label className="rf-field rf-wide">Описание неисправности
 					<textarea value={defect} rows={2} placeholder="со слов клиента" onChange={(e) => setDefect(e.target.value)} />
+				</label>
+				<label className="rf-field rf-wide">Внутренний комментарий
+					<textarea value={internalComment} rows={2} placeholder="для себя: что уточнить, кому позвонить, особенности ремонта…" onChange={(e) => setInternalComment(e.target.value)} />
+					<span className="muted small">виден в карточке и общем списке, в печатный акт не попадает</span>
 				</label>
 				<label className="rf-field rf-wide">Комментарий сервисного центра
 					<textarea value={comment} rows={2} disabled={!canEditPrice} placeholder={canEditPrice ? 'диагностика / итог ремонта — заполняется после возврата' : 'заполняет отдел снабжения'} onChange={(e) => setComment(e.target.value)} />
@@ -606,7 +612,7 @@ function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () =
 		setSaving(true); setErr(null);
 		try {
 			if (mock) {
-				await onDone({ id: Math.floor(1000 + Math.random() * 9000), name: `[предпродажа] ${picked.name}`, kind: 'presale', status: 'pre_office', repairNo: 100, client: { contactId: null, name: '', phone: '' }, device: picked.name, model: '', serial: '', point: '', appearance: '', defect: '', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: '', photos: [], files: [], createdAt: new Date().toISOString(), createdById: 'dev', createdByName: 'dev (mock)', history: [], productId: picked.productId, sourceStore, repairStore: 'Измайловский 18Д', issueStore: null } as Repair);
+				await onDone({ id: Math.floor(1000 + Math.random() * 9000), name: `[предпродажа] ${picked.name}`, kind: 'presale', status: 'pre_office', repairNo: 100, client: { contactId: null, name: '', phone: '' }, device: picked.name, model: '', serial: '', point: '', appearance: '', defect: '', payType: 'warranty', cost: null, ourPrice: null, dealId: null, comment: '', internalComment: '', photos: [], files: [], createdAt: new Date().toISOString(), createdById: 'dev', createdByName: 'dev (mock)', history: [], productId: picked.productId, sourceStore, repairStore: 'Измайловский 18Д', issueStore: null } as Repair);
 				return;
 			}
 			const r = await createPresaleRepair(sourceStore, picked.productId, picked.name);
@@ -775,6 +781,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 						{row('Аппарат', repair.device || (repair.productId != null ? `#${repair.productId}` : ''))}
 						{row('Склад-источник', repair.sourceStore ?? '')}
 						{row('Сейчас на складе', repair.repairStore ?? '')}
+						{row('Внутренний комментарий', repair.internalComment ?? '')}
 						{row('Принят', ruDateTime(repair.createdAt))}
 						{repair.createdByName && row('Принял', repair.createdByName)}
 					</>
@@ -789,6 +796,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 						{repair.payType === 'paid' && row('Наша цена', repair.ourPrice != null ? money(repair.ourPrice) : '—')}
 						{row('Внешний вид и комплектация', repair.appearance)}
 						{row('Неисправность', repair.defect)}
+						{row('Внутренний комментарий', repair.internalComment ?? '')}
 						{row('Комментарий СЦ', repair.comment)}
 						{row('Принят', ruDateTime(repair.createdAt))}
 						{repair.createdByName && row('Принял', repair.createdByName)}

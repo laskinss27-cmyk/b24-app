@@ -1343,6 +1343,8 @@ export interface Repair {
 	sourceStore?: string | null;
 	/** Комментарий сервисного центра (диагностика/итог) — заполняется после возврата. */
 	comment: string;
+	/** Внутренний комментарий по ремонту: виден в карточке и списке, в печатный акт не попадает. */
+	internalComment?: string;
 	photos: RepairPhoto[];
 	files: RepairFile[];
 	createdAt: string;
@@ -1364,6 +1366,7 @@ export interface NewRepairInput {
 	cost: number | null;
 	ourPrice: number | null;
 	comment: string;
+	internalComment: string;
 	photos: RepairPhoto[];
 	files: RepairFile[];
 }

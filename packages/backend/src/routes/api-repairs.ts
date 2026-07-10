@@ -413,6 +413,8 @@ interface RepairData {
 	sourceStore: string | null;
 	/** Комментарий сервисного центра (диагностика/итог ремонта) — заполняется после возврата. */
 	comment: string;
+	/** Внутренний комментарий по ремонту: виден в карточке и списке, в печатный акт не попадает. */
+	internalComment: string;
 	photos: RepairPhoto[];
 	files: RepairFile[];
 	createdAt: string;
@@ -455,6 +457,7 @@ function parseItem(it: Record<string, unknown>): (RepairData & { id: number; nam
 		productId: typeof data.productId === 'number' && data.productId > 0 ? data.productId : null,
 		sourceStore: typeof data.sourceStore === 'string' && data.sourceStore ? data.sourceStore : null,
 		comment: data.comment ?? '',
+		internalComment: data.internalComment ?? '',
 		photos: Array.isArray(data.photos) ? data.photos : [],
 		files: Array.isArray(data.files) ? data.files : [],
 		createdAt: data.createdAt ?? '',
@@ -596,6 +599,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				sourceStore: null,
 				// Комментарий СЦ заполняет/правит только снабжение+ (у менеджеров поле неактивно).
 				comment: me.canEditPrice ? s(b['comment']) : '',
+				internalComment: s(b['internalComment']),
 				photos,
 				files,
 				createdAt: now,
@@ -649,7 +653,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 	// Принять в ПРЕДПРОДАЖНЫЙ ремонт: наш товар со склада-источника (productId из остатков) уходит в ремонт.
 	// Без клиента/цен/сделки. Создаётся в статусе «принято в офисе» + перемещение источник→Измайловский.
 	app.post('/api/repairs/create-presale', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { sourceStore?: unknown; productId?: unknown; itemName?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { sourceStore?: unknown; productId?: unknown; itemName?: unknown; internalComment?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const s = (v: unknown): string => String(v ?? '').trim();
@@ -677,6 +681,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				repairDeliveryNote: null,
 				productId, sourceStore,
 				comment: '',
+				internalComment: s(b['internalComment']),
 				photos: [], files: [],
 				createdAt: now, createdById: me.id, createdByName: me.name,
 				history: [{ at: now, status: 'pre_office', byId: me.id, byName: me.name }],
@@ -731,6 +736,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.point = s(b['point']);
 			data.appearance = s(b['appearance']);
 			data.defect = s(b['defect']);
+			data.internalComment = s(b['internalComment']);
 			data.payType = b['payType'] === 'paid' ? 'paid' : 'warranty';
 			// Цены меняет только тот, кому разрешено; иначе оставляем прежние (warranty всё обнуляет).
 			const reqCost = b['cost'] != null && b['cost'] !== '' && Number.isFinite(Number(b['cost'])) ? Number(b['cost']) : null;
