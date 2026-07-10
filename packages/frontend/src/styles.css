@@ -3010,7 +3010,7 @@ html, body, #root { height: 100%; }
 }
 .supply-detail-row {
 	display: grid;
-	grid-template-columns: minmax(250px, 1.25fr) 132px 180px minmax(330px, 1.2fr);
+	grid-template-columns: minmax(310px, 1.35fr) 132px 220px minmax(260px, .9fr);
 	gap: 16px;
 	align-items: start;
 }
@@ -3041,6 +3041,18 @@ html, body, #root { height: 100%; }
 .supply-need-cell b {
 	font-size: 15px;
 	line-height: 1.3;
+}
+.supply-check-cell {
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr);
+	gap: 10px;
+	align-items: start;
+}
+.supply-check-cell input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	margin-top: 1px;
+	padding: 0;
 }
 .supply-detail-row strong {
 	font-size: 18px;
@@ -3099,6 +3111,18 @@ html, body, #root { height: 100%; }
 	display: flex;
 	justify-content: flex-end;
 }
+.supply-work-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 8px;
+}
+.supply-source-field {
+	align-self: stretch;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
 .supply-child-row {
 	margin: 0 20px 14px 20px;
 	padding: 10px 12px;
@@ -3119,6 +3143,57 @@ html, body, #root { height: 100%; }
 }
 .supply-child-row button:hover {
 	color: #b91c1c;
+}
+.supply-purchase-editor {
+	width: min(980px, calc(100vw - 48px));
+}
+.supply-purchase-editor-table {
+	display: grid;
+	gap: 0;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	overflow: hidden;
+}
+.supply-purchase-editor-head,
+.supply-purchase-editor-row {
+	display: grid;
+	grid-template-columns: minmax(260px, 1.4fr) minmax(180px, 1fr) 90px 110px 110px;
+	gap: 10px;
+	align-items: center;
+	padding: 10px 12px;
+}
+.supply-purchase-editor-head {
+	background: #f8fafc;
+	color: #6b7280;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+.supply-purchase-editor-row {
+	border-top: 1px solid #edf0f4;
+	font-size: 13px;
+}
+.supply-purchase-editor-row b,
+.supply-purchase-editor-row small {
+	display: block;
+}
+.supply-purchase-editor-row small {
+	margin-top: 4px;
+	color: #6b7280;
+	font-size: 11px;
+}
+.supply-purchase-editor-row input {
+	width: 100%;
+	min-width: 0;
+	box-sizing: border-box;
+	border: 1px solid #cfd6e3;
+	border-radius: 6px;
+	padding: 7px 8px;
+	font: inherit;
+	font-size: 12px;
+}
+.supply-purchase-editor-row strong {
+	text-align: right;
 }
 .supply-placeholder {
 	max-width: 760px;

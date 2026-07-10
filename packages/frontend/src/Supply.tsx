@@ -74,6 +74,21 @@ interface Decision {
 type DecisionMap = Record<string, Decision[]>;
 type DraftInput = Record<string, { qty: number; kind: DecisionKind; warehouse: string; supplier: string; rate: number }>;
 type ReceiveDraft = Record<string, number>;
+type SelectionMap = Record<string, boolean>;
+type WarehouseMap = Record<string, string>;
+interface PurchaseEditorLine {
+	key: string;
+	productId: number;
+	itemName: string;
+	needQty: number;
+	qty: number;
+	rate: number;
+	supplier: string;
+}
+interface PurchaseEditor {
+	orderName: string;
+	lines: PurchaseEditorLine[];
+}
 const DEFAULT_SUPPLIER = 'Поставщик не выбран';
 const DEFAULT_RECEIPT_STORE = 'Склад Прихода';
 
@@ -591,32 +606,29 @@ function StockDocumentsSection({ orders, loading, onOpenOrder }: { orders: Suppl
 	);
 }
 
-function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, addDecision, removeDecision, createDocs, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
+function OrderDetail({ order, selectedKeys, warehouses, docsBusy, onBack, onToggleItem, onWarehouseChange, onCreateSelectedTransfers, onOpenPurchaseEditor, onReceivePurchase, onUpdatePurchaseStage, onCreateReceiptTransfer }: {
 	order: SupplyOrderRow;
-	decisions: DecisionMap;
-	drafts: DraftInput;
+	selectedKeys: SelectionMap;
+	warehouses: WarehouseMap;
 	docsBusy: boolean;
 	onBack: () => void;
-	setDraft: (key: string, patch: Partial<DraftInput[string]>) => void;
-	addDecision: (key: string, item: SupplyOrderItem, index: number) => void;
-	removeDecision: (key: string, id: string) => void;
-	createDocs: () => void;
+	onToggleItem: (key: string, checked: boolean) => void;
+	onWarehouseChange: (key: string, warehouse: string) => void;
+	onCreateSelectedTransfers: (order: SupplyOrderRow) => void;
+	onOpenPurchaseEditor: (order: SupplyOrderRow) => void;
 	onReceivePurchase: (purchase: SupplyPurchaseChild) => void;
 	onUpdatePurchaseStage: (purchase: SupplyPurchaseChild, stage: SupplyPurchaseStage) => void;
 	onCreateReceiptTransfer: (order: SupplyOrderRow, purchase: SupplyPurchaseChild, receipt: SupplyPurchaseChild['receipts'][number]) => void;
 }): JSX.Element {
 	const requestItems = requestItemsForOrder(order);
 	const requestedTotal = requestItems.reduce((sum, item) => sum + item.qty, 0);
-	const plannedTotal = order.items.reduce((sum, item, index) => {
-		const key = itemKey(order.name, item.productId, index);
-		return sum + (decisions[key] ?? []).reduce((a, d) => a + d.qty, 0);
-	}, 0);
 	const remainingTotals = order.items.reduce((sum, item) => sum + item.qty, 0);
-	const allDone = remainingTotals > 0 && plannedTotal >= remainingTotals;
 	const existingDocs = supplyDocumentCount(order);
-	const plannedTransfers = Object.values(decisions).flat().filter((row) => row.kind === 'transfer').reduce((sum, row) => sum + row.qty, 0);
-	const plannedPurchases = Object.values(decisions).flat().filter((row) => row.kind === 'purchase').reduce((sum, row) => sum + row.qty, 0);
-	const nextAction = remainingTotals === 0 ? 'Остаток закрыт документами' : allDone ? 'Можно создать перемещения и заявки поставщикам' : `Распредели еще ${Math.max(remainingTotals - plannedTotal, 0)} шт`;
+	const selectedItems = order.items
+		.map((item, index) => ({ item, index, key: itemKey(order.name, item.productId, index) }))
+		.filter((row) => selectedKeys[row.key]);
+	const selectedWithStock = selectedItems.filter((row) => stockEntries(row.item).length > 0);
+	const nextAction = remainingTotals === 0 ? 'Остаток закрыт документами' : selectedItems.length ? `Выбрано строк: ${selectedItems.length}` : 'Отметь строки и выбери действие';
 
 	return (
 		<div className="supply-main supply-detail">
@@ -626,7 +638,6 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 					<h1>{order.name} · {order.dealTitle || `Сделка #${order.dealId}`}</h1>
 					<p>Сделка #{order.dealId} · Получить на склад: {order.toStore || 'не указан'} · {order.date || 'без даты'}</p>
 				</div>
-				<button className="supply-primary" type="button" disabled={!allDone || docsBusy} onClick={createDocs}>{docsBusy ? 'Создаем...' : 'Создать документы'}</button>
 			</header>
 
 			<section className="supply-card supply-flow">
@@ -636,14 +647,14 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 					<small>Это то, что запросила сделка.</small>
 				</div>
 				<div className="supply-flow-step">
-					<span>2. План закрытия</span>
-					<b>{plannedTotal} из {remainingTotals} шт выбрано</b>
-					<small>{plannedTransfers > 0 ? `Переместить: ${plannedTransfers} шт. ` : ''}{plannedPurchases > 0 ? `Купить: ${plannedPurchases} шт.` : 'Ниже выбери перемещение или закупку.'}</small>
+					<span>2. Выбор строк</span>
+					<b>{selectedItems.length} из {order.items.length} строк выбрано</b>
+					<small>Для перемещения выбери склад отправки в строке.</small>
 				</div>
 				<div className="supply-flow-step">
 					<span>3. Следующее действие</span>
 					<b>{nextAction}</b>
-					<small>{existingDocs > 0 ? `Уже создано документов: ${existingDocs}.` : 'Документы появятся ниже после создания.'}</small>
+					<small>{existingDocs > 0 ? `Уже создано документов: ${existingDocs}.` : 'Документы появятся в дереве после действия.'}</small>
 				</div>
 			</section>
 
@@ -669,36 +680,33 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 				<div className="supply-card-head supply-work-head">
 					<div>
 						<h2>Что сделать с остатком</h2>
-						<p>По каждой строке выбери: забрать с другой точки или создать заявку поставщику. Закупку можно ставить больше потребности, заявка на сделку от этого не переполнится.</p>
+						<p>Отметь строки. Для перемещения выбери склад-источник, для закупки открой черновик и внеси поставщика, количество и цену.</p>
+					</div>
+					<div className="supply-work-actions">
+						<button type="button" disabled={docsBusy || !selectedWithStock.length || !order.toStore} onClick={() => onCreateSelectedTransfers(order)}>Переместить выбранное</button>
+						<button className="supply-primary" type="button" disabled={docsBusy || !selectedItems.length} onClick={() => onOpenPurchaseEditor(order)}>Закупить выбранное</button>
 					</div>
 				</div>
 				{order.items.length === 0 && <div className="supply-empty">Остатка по заявке нет. Ниже уже нечего распределять, смотри созданные документы выше.</div>}
 				{order.items.map((item, index) => {
 					const key = itemKey(order.name, item.productId, index);
-					const rows = decisions[key] ?? [];
-					const used = rows.reduce((a, d) => a + d.qty, 0);
-					const remaining = Math.max(item.qty - used, 0);
+					const remaining = item.qty;
 					const stocks = stockEntries(item);
-					const draft = drafts[key] ?? { qty: remaining || 1, kind: stocks.length ? 'transfer' : 'purchase', warehouse: stocks[0]?.[0] ?? '', supplier: '', rate: 0 };
-					const selectedWarehouse = draft.warehouse || stocks[0]?.[0] || '';
-					const stockOptions = stocks.map(([name, qty]) => {
-						const planned = rows
-							.filter((row) => row.kind === 'transfer' && row.warehouse === name)
-							.reduce((sum, row) => sum + row.qty, 0);
-						return { name, qty, available: Math.max(qty - planned, 0) };
-					});
-					const selectedStock = stockOptions.find((stock) => stock.name === selectedWarehouse);
-					const transferLimit = Math.max(Math.min(remaining, selectedStock?.available ?? remaining), 0);
+					const selectedWarehouse = warehouses[key] || stocks[0]?.[0] || '';
+					const checked = Boolean(selectedKeys[key]);
 					return (
 						<div key={key} className="supply-item-block">
 							<div className={`supply-detail-row ${remaining === 0 ? 'is-done' : ''}`}>
-								<div className="supply-need-cell">
-									<b>{item.itemName || `#${item.productId}`}</b>
-									<small>{item.note || 'строка из заявки'}</small>
+								<div className="supply-need-cell supply-check-cell">
+									<input aria-label="Выбрать строку" type="checkbox" checked={checked} onChange={(e) => onToggleItem(key, e.target.checked)} />
+									<div>
+										<b>{item.itemName || `#${item.productId}`}</b>
+										<small>{item.note || 'строка из заявки'}</small>
+									</div>
 								</div>
 								<div className="supply-remaining-cell">
 									<span>Осталось решить</span>
-									<strong>{remaining} из {item.qty}</strong>
+									<strong>{remaining} шт</strong>
 								</div>
 								<div className="supply-stock-cell">
 									<span>Наличие</span>
@@ -706,56 +714,18 @@ function OrderDetail({ order, decisions, drafts, docsBusy, onBack, setDraft, add
 									<small>{stocks.length ? stocks.map(([name, qty]) => `${name}: ${qty}`).join(', ') : 'нужно закупать'}</small>
 								</div>
 								{remaining > 0 ? (
-									<>
-										<div className="supply-plan-cell">
-											<label>
-												<span>Количество</span>
-												<input type="number" min={draft.kind === 'transfer' && transferLimit === 0 ? '0' : '1'} max={draft.kind === 'transfer' ? transferLimit : undefined} value={draft.kind === 'transfer' ? (transferLimit > 0 ? Math.min(draft.qty, transferLimit) : 0) : draft.qty} onChange={(e) => setDraft(key, { qty: Number(e.target.value) })} />
-											</label>
-											<label>
-												<span>Решение</span>
-												<select value={draft.kind} onChange={(e) => setDraft(key, { kind: e.target.value as DecisionKind })}>
-													<option value="transfer">Переместить</option>
-													<option value="purchase">Купить</option>
-												</select>
-											</label>
-											{draft.kind === 'purchase' ? (
-												<div className="supply-purchase-fields">
-													<label>
-														<span>Поставщик</span>
-														<input type="text" list="supply-suppliers" placeholder="Начни вводить поставщика" value={draft.supplier} onChange={(e) => setDraft(key, { supplier: e.target.value })} />
-													</label>
-													<label>
-														<span>Цена</span>
-														<input type="number" min="0" step="any" placeholder="0" value={draft.rate} onChange={(e) => setDraft(key, { rate: Number(e.target.value) })} />
-													</label>
-												</div>
-											) : (
-												<label className="supply-wide-field">
-													<span>Склад отправки</span>
-													<select value={selectedWarehouse} onChange={(e) => setDraft(key, { warehouse: e.target.value })}>
-														{stockOptions.map(({ name, qty, available }) => <option key={name} value={name}>{name} (доступно {available} из {qty})</option>)}
-													</select>
-												</label>
-											)}
-											<div className="supply-plan-actions">
-												<button className="supply-primary small" type="button" onClick={() => addDecision(key, item, index)}>Добавить в план</button>
-											</div>
-										</div>
-									</>
+									<label className="supply-wide-field supply-source-field">
+										<span>Склад для перемещения</span>
+										<select value={selectedWarehouse} disabled={!stocks.length} onChange={(e) => onWarehouseChange(key, e.target.value)}>
+											{stocks.length ? stocks.map(([name, qty]) => <option key={name} value={name}>{name} · доступно {qty}</option>) : <option value="">нет доступных остатков</option>}
+										</select>
+									</label>
 								) : (
 									<div className="supply-plan-cell is-complete">
 										<i className="supply-status done">готово</i>
 									</div>
 								)}
 							</div>
-							{rows.map((row) => (
-								<div key={row.id} className="supply-child-row">
-									<span>{row.kind === 'transfer' ? 'Перемещение' : 'Заявка поставщику'} · {row.qty} шт · {row.kind === 'transfer' ? `${row.warehouse ?? ''} → ${order.toStore || 'склад назначения'}` : `${row.supplier || DEFAULT_SUPPLIER} · ${row.rate ?? 0} ₽`}</span>
-									<i className="supply-status draft">черновик</i>
-									<button type="button" onClick={() => removeDecision(key, row.id)}>удалить</button>
-								</div>
-							))}
 						</div>
 					);
 				})}
@@ -774,6 +744,9 @@ export function Supply(): JSX.Element {
 	const [detailName, setDetailName] = useState<string | null>(null);
 	const [decisions, setDecisions] = useState<DecisionMap>({});
 	const [drafts, setDrafts] = useState<DraftInput>({});
+	const [selectedKeys, setSelectedKeys] = useState<SelectionMap>({});
+	const [warehouses, setWarehouses] = useState<WarehouseMap>({});
+	const [purchaseEditor, setPurchaseEditor] = useState<PurchaseEditor | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [docsBusy, setDocsBusy] = useState(false);
 	const [receivingPurchase, setReceivingPurchase] = useState<SupplyPurchaseChild | null>(null);
@@ -865,6 +838,120 @@ export function Supply(): JSX.Element {
 	};
 	const removeDecision = (key: string, id: string): void => {
 		setDecisions((current) => ({ ...current, [key]: (current[key] ?? []).filter((row) => row.id !== id) }));
+	};
+	const toggleSupplyItem = (key: string, checked: boolean): void => {
+		setSelectedKeys((current) => {
+			const next = { ...current };
+			if (checked) next[key] = true;
+			else delete next[key];
+			return next;
+		});
+	};
+	const setSupplyWarehouse = (key: string, warehouse: string): void => {
+		setWarehouses((current) => ({ ...current, [key]: warehouse }));
+	};
+	const selectedRowsForOrder = (order: SupplyOrderRow): Array<{ key: string; item: SupplyOrderItem; index: number }> =>
+		order.items
+			.map((item, index) => ({ key: itemKey(order.name, item.productId, index), item, index }))
+			.filter((row) => selectedKeys[row.key]);
+	const openPurchaseEditor = (order: SupplyOrderRow): void => {
+		const lines = selectedRowsForOrder(order).map(({ key, item }) => ({
+			key,
+			productId: item.productId,
+			itemName: item.itemName || `#${item.productId}`,
+			needQty: item.qty,
+			qty: item.qty,
+			rate: 0,
+			supplier: '',
+		}));
+		if (!lines.length) {
+			setNotice('Отметь строки, которые нужно закупить.');
+			return;
+		}
+		setPurchaseEditor({ orderName: order.name, lines });
+	};
+	const updatePurchaseEditorLine = (key: string, patch: Partial<PurchaseEditorLine>): void => {
+		setPurchaseEditor((current) => current ? { ...current, lines: current.lines.map((line) => line.key === key ? { ...line, ...patch } : line) } : current);
+	};
+	const createSelectedTransfers = async (order: SupplyOrderRow): Promise<void> => {
+		if (docsBusy) return;
+		const dealId = Number(order.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0 || !order.toStore) {
+			setNotice('Для перемещения нужен корректный склад заявки и сделка.');
+			return;
+		}
+		const groups = new Map<string, TransferLineDto[]>();
+		for (const { key, item } of selectedRowsForOrder(order)) {
+			const stocks = stockEntries(item);
+			const fromStore = warehouses[key] || stocks[0]?.[0] || '';
+			const available = Number(item.stocks?.[fromStore] ?? 0);
+			const qty = Math.min(item.qty, available);
+			if (!fromStore || qty <= 0) continue;
+			const lines = groups.get(fromStore) ?? [];
+			lines.push({ productId: item.productId, name: item.itemName || `#${item.productId}`, qty });
+			groups.set(fromStore, lines);
+		}
+		if (!groups.size) {
+			setNotice('В выбранных строках нет доступного остатка для перемещения. Их можно отправить в закупку.');
+			return;
+		}
+		setDocsBusy(true);
+		try {
+			const docs = await createTransfers({
+				dealId,
+				toStore: order.toStore,
+				supplyRequest: order.name,
+				groups: [...groups.entries()].map(([fromStore, lines]) => ({ fromStore, lines })),
+			});
+			const usedKeys = new Set(selectedRowsForOrder(order).map((row) => row.key));
+			setSelectedKeys((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !usedKeys.has(key))));
+			await refreshOrders(true);
+			setNotice(`Перемещения созданы: ${docs.map((doc) => doc.name || `#${doc.id}`).join(', ')}.`);
+		} catch (err) {
+			setNotice(err instanceof Error ? err.message : 'Не удалось создать перемещения.');
+		} finally {
+			setDocsBusy(false);
+		}
+	};
+	const submitPurchaseEditor = async (): Promise<void> => {
+		const editor = purchaseEditor;
+		const order = editor ? orders.find((row) => row.name === editor.orderName) : null;
+		if (!editor || !order || docsBusy) return;
+		const dealId = Number(order.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) {
+			setNotice('У заявки нет корректной сделки.');
+			return;
+		}
+		const groups = new Map<string, Array<{ productId: number; itemName: string; qty: number; rate: number }>>();
+		for (const line of editor.lines) {
+			const qty = Number(line.qty);
+			if (!Number.isFinite(qty) || qty <= 0) continue;
+			const supplier = line.supplier.trim() || DEFAULT_SUPPLIER;
+			const rows = groups.get(supplier) ?? [];
+			rows.push({ productId: line.productId, itemName: line.itemName, qty, rate: Math.max(Number(line.rate) || 0, 0) });
+			groups.set(supplier, rows);
+		}
+		if (!groups.size) {
+			setNotice('В черновике закупки нет строк с количеством.');
+			return;
+		}
+		setDocsBusy(true);
+		try {
+			const created: string[] = [];
+			for (const [supplier, lines] of groups.entries()) {
+				const po = await createSupplyPurchaseOrder(order.name, dealId, supplier, lines);
+				created.push(po);
+			}
+			const usedKeys = new Set(editor.lines.map((line) => line.key));
+			setSelectedKeys((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !usedKeys.has(key))));
+			setPurchaseEditor(null);
+			await refreshOrders(true);
+			setNotice(`Черновики закупки созданы: ${created.join(', ')}.`);
+		} catch (err) {
+			setNotice(err instanceof Error ? err.message : 'Не удалось создать черновик закупки.');
+		} finally {
+			setDocsBusy(false);
+		}
 	};
 	const openReceivePurchase = (purchase: SupplyPurchaseChild): void => {
 		setReceivingPurchase(purchase);
@@ -1045,14 +1132,14 @@ export function Supply(): JSX.Element {
 			{section === 'orders' && detailOrder ? (
 				<OrderDetail
 					order={detailOrder}
-					decisions={decisions}
-					drafts={drafts}
+					selectedKeys={selectedKeys}
+					warehouses={warehouses}
 					docsBusy={docsBusy}
 					onBack={() => setDetailName(null)}
-					setDraft={setDraft}
-					addDecision={addDecision}
-					removeDecision={removeDecision}
-					createDocs={() => void createDocs()}
+					onToggleItem={toggleSupplyItem}
+					onWarehouseChange={setSupplyWarehouse}
+					onCreateSelectedTransfers={(order) => void createSelectedTransfers(order)}
+					onOpenPurchaseEditor={openPurchaseEditor}
 					onReceivePurchase={openReceivePurchase}
 					onUpdatePurchaseStage={(purchase, stage) => void changePurchaseStage(purchase, stage)}
 					onCreateReceiptTransfer={(order, purchase, receipt) => void createTransferFromReceipt(order, purchase, receipt)}
@@ -1136,6 +1223,38 @@ export function Supply(): JSX.Element {
 						<footer>
 							<button type="button" onClick={closeReceivePurchase}>Отмена</button>
 							<button className="supply-primary" type="button" disabled={docsBusy} onClick={() => void submitReceivePurchase()}>{docsBusy ? 'Проводим...' : 'Оприходовать'}</button>
+						</footer>
+					</div>
+				</div>
+			)}
+			{purchaseEditor && (
+				<div className="supply-modal-overlay">
+					<div className="supply-modal supply-purchase-editor">
+						<header>
+							<div>
+								<h2>Черновик закупки</h2>
+								<p>{purchaseEditor.orderName} · заполни поставщика, количество и цену</p>
+							</div>
+							<button type="button" onClick={() => setPurchaseEditor(null)}>Закрыть</button>
+						</header>
+						<div className="supply-purchase-editor-table">
+							<div className="supply-purchase-editor-head"><span>Позиция</span><span>Поставщик</span><span>Кол-во</span><span>Цена</span><span>Сумма</span></div>
+							{purchaseEditor.lines.map((line) => (
+								<div key={line.key} className="supply-purchase-editor-row">
+									<div>
+										<b>{line.itemName}</b>
+										<small>Нужно по заявке: {line.needQty} шт</small>
+									</div>
+									<input type="text" list="supply-suppliers" placeholder="Поставщик" value={line.supplier} onChange={(e) => updatePurchaseEditorLine(line.key, { supplier: e.target.value })} />
+									<input type="number" min="0" step="any" value={line.qty} onChange={(e) => updatePurchaseEditorLine(line.key, { qty: Number(e.target.value) })} />
+									<input type="number" min="0" step="any" value={line.rate} onChange={(e) => updatePurchaseEditorLine(line.key, { rate: Number(e.target.value) })} />
+									<strong>{money((Number(line.qty) || 0) * (Number(line.rate) || 0))} ₽</strong>
+								</div>
+							))}
+						</div>
+						<footer>
+							<button type="button" onClick={() => setPurchaseEditor(null)}>Отмена</button>
+							<button className="supply-primary" type="button" disabled={docsBusy} onClick={() => void submitPurchaseEditor()}>{docsBusy ? 'Создаем...' : 'Создать черновик'}</button>
 						</footer>
 					</div>
 				</div>
