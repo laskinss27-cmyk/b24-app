@@ -444,6 +444,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const [rowStore, setRowStore] = useState<Record<string, number>>({});
 	/** Отмеченные галочкой строки — универсальный выбор для действий: реализация, заказ и дальше. */
 	const [selected, setSelected] = useState<Record<string, boolean>>({});
+	/** Раскрытые остатки по складам: не распираем товарную строку при наведении. */
+	const [expandedStocks, setExpandedStocks] = useState<Record<string, boolean>>({});
 	/** Фаза реализации: idle → drafted (черновики ядра созданы по складам, ждут «Провести»). */
 	const [realizePhase, setRealizePhase] = useState<'idle' | 'drafted'>('idle');
 	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
@@ -637,6 +639,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		if (left > 0) {
 			const status = rowStatus(r);
 			const activeSupply = activeSupplyOf(r);
+			const sortedStocks = [...r.stocks].sort((a, b) => b.amount - a.amount);
+			const isStockExpanded = Boolean(expandedStocks[r.id]);
 			out.push(
 				<tr key={r.id} className={`goods-row st-${status}${isSel(r) ? ' sel-row' : ''}`}>
 					<td className="check-col">
@@ -678,12 +682,15 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 					<td className="row-store">
 						{r.stocks.length ? (
-							<span className="stock-chips" title="Остатки по складам — наведи на строку, чтобы раскрыть все.">
-								{[...r.stocks].sort((a, b) => b.amount - a.amount).map((s) => (
-									<span key={s.storeId} className={`stock-chip${s.storeId === storeOf(r) ? ' sel' : ''}`}>{s.storeName}: <b>{s.amount}</b></span>
-								))}
-								{r.stocks.length > 2 && <span className="stock-more">+{r.stocks.length - 2}</span>}
-							</span>
+							<button
+								type="button"
+								className={`stock-toggle${isStockExpanded ? ' open' : ''}`}
+								onClick={() => setExpandedStocks((m) => ({ ...m, [r.id]: !m[r.id] }))}
+								title={isStockExpanded ? 'Скрыть остатки по складам' : 'Показать остатки по складам'}
+							>
+								<span>всего <b>{totalStock(r)}</b></span>
+								<small>{r.stocks.length} {plural(r.stocks.length, 'склад', 'склада', 'складов')}</small>
+							</button>
 						) : <span className="none">нет нигде</span>}
 					</td>
 					<td className="realize-cell">
@@ -724,6 +731,20 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					</td>
 				</tr>,
 			);
+			if (isStockExpanded && sortedStocks.length) {
+				out.push(
+					<tr key={`${r.id}-stocks`} className="stock-detail-row">
+						<td className="check-col"></td>
+						<td colSpan={9}>
+							<div className="stock-detail-list">
+								{sortedStocks.map((s) => (
+									<span key={s.storeId} className={`stock-chip${s.storeId === storeOf(r) ? ' sel' : ''}`}>{s.storeName}: <b>{s.amount}</b></span>
+								))}
+							</div>
+						</td>
+					</tr>,
+				);
+			}
 		}
 		return out;
 	};

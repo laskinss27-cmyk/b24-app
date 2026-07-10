@@ -372,9 +372,45 @@ body {
 .stock-chip b {
 	color: #0f172a;
 }
-/* Свёрнутые остатки: показываем первые 2 склада, остальные — при наведении на строку (строка раздвигается). */
-.stock-chips .stock-chip:nth-child(n+3) { display: none; }
-tr:hover .stock-chips .stock-chip:nth-child(n+3) { display: inline-block; }
+.stock-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 170px;
+	border: 1px solid #d7dde7;
+	border-radius: 7px;
+	background: #fff;
+	color: #334155;
+	padding: 4px 8px;
+	font: inherit;
+	font-size: 12px;
+	line-height: 1.2;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.stock-toggle:hover,
+.stock-toggle.open {
+	border-color: #9db6d8;
+	background: #f8fbff;
+}
+.stock-toggle b {
+	color: #0f172a;
+}
+.stock-toggle small {
+	color: #64748b;
+	font-size: 11px;
+}
+.stock-detail-row td {
+	background: #fbfdff;
+	padding-top: 6px;
+	padding-bottom: 8px;
+}
+.stock-detail-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 2px 0 2px 4px;
+}
 .stock-more {
 	font-size: 11px;
 	color: #7a8699;
@@ -383,7 +419,6 @@ tr:hover .stock-chips .stock-chip:nth-child(n+3) { display: inline-block; }
 	padding: 1px 7px;
 	align-self: center;
 }
-tr:hover .stock-more { display: none; }
 .supply-to {
 	max-width: 150px;
 	font-size: 12px;
