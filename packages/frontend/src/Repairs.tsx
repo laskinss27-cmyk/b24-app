@@ -266,7 +266,6 @@ export function Repairs(): JSX.Element {
 				loading={loading}
 				err={err}
 				onAdd={() => setScreen({ k: 'form' })}
-				onAddPresale={() => setScreen({ k: 'presale' })}
 				onOpen={(r) => setScreen({ k: 'card', repair: r })}
 				onReload={() => void load()}
 			/>
@@ -274,9 +273,9 @@ export function Repairs(): JSX.Element {
 	);
 }
 
-function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onReload }: {
+function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 	repairs: Repair[]; loading: boolean; err: string | null;
-	onAdd: () => void; onAddPresale: () => void; onOpen: (r: Repair) => void; onReload: () => void;
+	onAdd: () => void; onOpen: (r: Repair) => void; onReload: () => void;
 }): JSX.Element {
 	const [q, setQ] = useState('');
 	const [st, setSt] = useState<RepairStatus | 'all'>('all');
@@ -297,8 +296,8 @@ function RepairList({ repairs, loading, err, onAdd, onAddPresale, onOpen, onRelo
 				<button className="btn-primary" onClick={onAdd}>➕ Принять в ремонт</button>
 				<button
 					className="btn-secondary"
-					onClick={onAddPresale}
-					title="Наш товар со склада уходит в ремонт: выбери склад-источник и аппарат. Движение по складам — в ядре, Битрикс не трогаем."
+					disabled
+					title="Временно отключено: предпродажный ремонт двигает товар в ядре, а этот контур пока не используем."
 				>🛠 Предпродажный ремонт</button>
 				<label className="tb-field">Статус
 					<select value={st} onChange={(e) => setSt(e.target.value as RepairStatus | 'all')}>
