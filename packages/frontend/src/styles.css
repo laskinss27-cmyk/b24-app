@@ -1849,15 +1849,28 @@ html, body, #root { height: 100%; }
 .rf-suggest-item.active { background: #e0edff; font-weight: 600; }
 .small { font-size: 12px; }
 
+.repair-form { max-width: 980px; }
 .repair-form h2, .repair-card h2 { font-size: 18px; margin: 8px 0 12px; }
-.rf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
-.rf-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #475569; position: relative; }
-.rf-field.rf-wide { grid-column: 1 / -1; }
+.rf-grid { display: grid; grid-template-columns: minmax(260px, 420px) minmax(260px, 420px); gap: 12px 16px; align-items: start; }
+.rf-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #334155; position: relative; }
+.rf-field.rf-wide { grid-column: 1 / -1; max-width: 760px; }
 /* Две цены (СЦ + наша) — рядом в одной строке, а не одна под другой. */
 .rf-field.rf-prices { flex-direction: row; gap: 16px; align-items: flex-start; }
 .rf-prices .rf-price-col { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #475569; }
 .rf-field input[type=text], .rf-field input[type=search], .rf-field textarea, .rf-field select, .rc-status select {
-	border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 9px; font-size: 14px; color: #1a1a1a; font-family: inherit;
+	background: #fff;
+	border: 1px solid #94a3b8;
+	border-radius: 6px;
+	box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+	color: #0f172a;
+	font-family: inherit;
+	font-size: 14px;
+	padding: 7px 9px;
+}
+.rf-field input[type=text]:focus, .rf-field input[type=search]:focus, .rf-field textarea:focus, .rf-field select:focus, .rc-status select:focus {
+	border-color: #2563eb;
+	box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+	outline: none;
 }
 .rf-field textarea { resize: vertical; }
 .rf-radio { display: flex; gap: 16px; padding-top: 4px; font-size: 14px; color: #1a1a1a; }
@@ -1903,7 +1916,8 @@ html, body, #root { height: 100%; }
 .rc-hist-what { color: #1a1a1a; }
 .rc-hist-who { color: #475569; text-align: right; }
 
-.rf-field input[type=number] { border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 9px; font-size: 14px; color: #1a1a1a; font-family: inherit; }
+.rf-field input[type=number] { background: #fff; border: 1px solid #94a3b8; border-radius: 6px; box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04); padding: 7px 9px; font-size: 14px; color: #0f172a; font-family: inherit; }
+.rf-field input[type=number]:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); outline: none; }
 .rf-files { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; }
 .rf-file { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f8fafc; border: 1px solid #e6e6e6; border-radius: 8px; font-size: 13px; }
 .rf-file-ic { flex: none; }
