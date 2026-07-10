@@ -201,6 +201,16 @@ export function DealProductsTab(): JSX.Element {
 	const [showKp, setShowKp] = useState(false);
 
 	useEffect(() => {
+		document.documentElement.classList.add('deal-placement-html');
+		document.body.classList.add('deal-placement-body');
+		requestB24FitWindow(80);
+		return () => {
+			document.documentElement.classList.remove('deal-placement-html');
+			document.body.classList.remove('deal-placement-body');
+		};
+	}, []);
+
+	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
 		if (ctx.__mock) {
 			setState({ phase: 'ready', data: MOCK_DATA, viewer: 'dev (mock)', dev: true, canReturn: true });

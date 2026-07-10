@@ -1970,13 +1970,27 @@ html, body, #root { height: 100%; }
 .pay-none { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
 
 /* ── Сделка: строгая рабочая вкладка товаров ─────────────────────────────── */
+html.deal-placement-html,
+body.deal-placement-body {
+	height: auto;
+	min-height: 0;
+	overflow-y: hidden;
+}
+
+body.deal-placement-body #root {
+	height: auto;
+	min-height: 0;
+	overflow: visible;
+}
+
 .deal-products-tab {
 	max-width: none;
-	min-height: 100vh;
+	min-height: 0;
 	margin: 0;
 	padding: 24px 28px 36px;
 	background: #f5f6f8;
 	color: #111827;
+	box-sizing: border-box;
 }
 .deal-head {
 	display: flex;
