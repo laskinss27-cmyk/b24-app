@@ -99,7 +99,10 @@ export async function ensureSupplier(erp: ErpClient, name: string): Promise<stri
 
 /** Имя склада ERPNext из названия склада Б24. */
 export function erpWarehouse(ctx: ErpContext, b24StoreTitle: string): string {
-	return `${b24StoreTitle} - ${ctx.abbr}`;
+	const suffix = ` - ${ctx.abbr}`;
+	let title = b24StoreTitle.trim();
+	while (title.endsWith(suffix)) title = title.slice(0, -suffix.length).trimEnd();
+	return `${title} - ${ctx.abbr}`;
 }
 
 /** Название склада Б24 из имени склада ERPNext (срез суффикса компании). */

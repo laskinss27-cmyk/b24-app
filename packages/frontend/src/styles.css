@@ -4107,6 +4107,17 @@ body.deal-placement-body #root {
 	font-weight: 700;
 }
 
+.supply-document-facts input,
+.supply-document-facts select,
+.supply-document-modal-footer select {
+	width: 100%;
+	border: 1px solid #cdd5e0;
+	border-radius: 6px;
+	padding: 6px 8px;
+	background: #fff;
+	font: inherit;
+}
+
 .supply-document-lines {
 	overflow: auto;
 	border: 1px solid #e3e8ef;
@@ -4149,6 +4160,33 @@ body.deal-placement-body #root {
 	font-size: 11px;
 }
 
+.supply-document-lines input {
+	width: 110px;
+	border: 1px solid #cdd5e0;
+	border-radius: 6px;
+	padding: 6px 8px;
+	background: #fff;
+	font: inherit;
+}
+
+.supply-document-remove-line {
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 1px solid #d7dee8;
+	border-radius: 6px;
+	background: #fff;
+	color: #7a8699;
+	cursor: pointer;
+	font-size: 18px;
+	line-height: 1;
+}
+
+.supply-document-remove-line:hover {
+	border-color: #b54a4a;
+	color: #b42318;
+}
+
 .supply-document-receipts {
 	margin-top: 16px;
 }
@@ -4169,6 +4207,21 @@ body.deal-placement-body #root {
 
 .supply-document-receipts small {
 	color: #66758a;
+}
+
+.supply-document-modal-footer {
+	justify-content: space-between !important;
+	align-items: center !important;
+}
+
+.supply-document-modal-footer > div {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.supply-document-modal-footer select {
+	min-width: 170px;
 }
 
 .supply-order-docs .primary,
