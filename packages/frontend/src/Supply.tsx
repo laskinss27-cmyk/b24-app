@@ -160,6 +160,74 @@ function documentsSummary(order: SupplyOrderRow): JSX.Element {
 	return <Pill tone="info">{`${docs} документ(а)`}</Pill>;
 }
 
+type OpenSupplyDocument =
+	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
+	| { kind: 'transfer'; order: SupplyOrderRow; transfer: SupplyTransferChild };
+
+function DocumentDetail({ document, onClose }: { document: OpenSupplyDocument; onClose: () => void }): JSX.Element {
+	if (document.kind === 'purchase') {
+		const { order, purchase } = document;
+		const status = purchaseStatus(purchase);
+		const total = purchase.lines.reduce((sum, line) => {
+			const rate = Number(line.rate || 0);
+			return sum + (rate > 0.01 ? Number(line.qty || 0) * rate : 0);
+		}, 0);
+		return (
+			<div className="supply-proto-overlay">
+				<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Заявка поставщику ${purchase.name}`}>
+					<header>
+						<div><span className="supply-document-eyebrow">Заявка поставщику</span><h2>{purchase.name}</h2><p>{order.name} · сделка #{order.dealId}</p></div>
+						<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
+					</header>
+					<dl className="supply-document-facts">
+						<div><dt>Поставщик</dt><dd>{purchase.supplier || 'Не указан'}</dd></div>
+						<div><dt>Склад заявки</dt><dd>{order.toStore || 'Не указан'}</dd></div>
+						<div><dt>Ожидаем</dt><dd>{purchase.expectedAt || 'Дата не указана'}</dd></div>
+						<div><dt>Сумма</dt><dd>{total > 0.01 ? `${money(total)} ₽` : '—'}</dd></div>
+					</dl>
+					<div className="supply-document-lines">
+						<table><thead><tr><th>Позиция</th><th>Количество</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>
+							{purchase.lines.map((line, index) => {
+								const rate = Number(line.rate || 0);
+								return <tr key={`${line.productId}-${index}`}><td><b>{line.name || `#${line.productId}`}</b><small>#{line.productId}</small></td><td>{line.qty}</td><td>{rate > 0.01 ? `${money(rate)} ₽` : '—'}</td><td>{rate > 0.01 ? `${money(rate * line.qty)} ₽` : '—'}</td></tr>;
+							})}
+						</tbody></table>
+					</div>
+					{purchase.receipts.length > 0 && <section className="supply-document-receipts"><h3>Оприходования</h3>{purchase.receipts.map((receipt) => <div key={receipt.name}><b>{receipt.name}</b><span>{documentAmount(receipt.lines)}</span><small>{receipt.lines.map(lineTitle).join(' · ')}</small></div>)}</section>}
+					<footer><button type="button" onClick={onClose}>Закрыть</button></footer>
+				</section>
+			</div>
+		);
+	}
+
+	const { order, transfer } = document;
+	const status = transferStatus(transfer);
+	const receivedByProduct = new Map(transfer.receivedLines.map((line) => [line.productId, line.qty]));
+	const shortageByProduct = new Map(transfer.shortageLines.map((line) => [line.productId, line.qty]));
+	return (
+		<div className="supply-proto-overlay">
+			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={transfer.name || `Перемещение #${transfer.id}`}>
+				<header>
+					<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transfer.name || `#${transfer.id}`}</h2><p>{order.name} · сделка #{order.dealId}</p></div>
+					<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
+				</header>
+				<dl className="supply-document-facts">
+					<div><dt>Откуда</dt><dd>{transfer.fromStore}</dd></div>
+					<div><dt>Куда</dt><dd>{transfer.toStore}</dd></div>
+					<div><dt>Позиций</dt><dd>{transfer.lines.length}</dd></div>
+					<div><dt>Количество</dt><dd>{transfer.lines.reduce((sum, line) => sum + line.qty, 0)}</dd></div>
+				</dl>
+				<div className="supply-document-lines">
+					<table><thead><tr><th>Позиция</th><th>Отправлено</th><th>Получено</th><th>Недовоз</th></tr></thead><tbody>
+						{transfer.lines.map((line, index) => <tr key={`${line.productId}-${index}`}><td><b>{line.name || `#${line.productId}`}</b><small>#{line.productId}</small></td><td>{line.qty}</td><td>{receivedByProduct.get(line.productId) ?? '—'}</td><td>{shortageByProduct.get(line.productId) ?? '—'}</td></tr>)}
+					</tbody></table>
+				</div>
+				<footer><button type="button" onClick={onClose}>Закрыть</button></footer>
+			</section>
+		</div>
+	);
+}
+
 function DecisionRows({
 	order,
 	item,
@@ -277,6 +345,8 @@ function OrdersView({
 	onReview,
 	onCancelReview,
 	onCreate,
+	onOpenPurchase,
+	onOpenTransfer,
 }: {
 	orders: SupplyOrderRow[];
 	sort: SortKey;
@@ -293,6 +363,8 @@ function OrdersView({
 	onReview: (name: string) => void;
 	onCancelReview: () => void;
 	onCreate: (order: SupplyOrderRow) => void;
+	onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void;
+	onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void;
 }): JSX.Element {
 	return (
 		<section className="supply-proto-card">
@@ -375,10 +447,10 @@ function OrdersView({
 												const status = transferStatus(transfer);
 												return (
 													<div key={`t-${transfer.id}`} className="supply-document-branch">
-														<div className="supply-document-row">
+														<button className="supply-document-row" type="button" onClick={() => onOpenTransfer(order, transfer)}>
 															<div><span className="kind">Перемещение</span><b>{transfer.fromStore} → {transfer.toStore}</b><small>{transfer.name || `#${transfer.id}`}</small></div>
 															<div className="supply-document-meta"><span>{documentAmount(transfer.lines)}</span><span className="status">{status.label}</span></div>
-														</div>
+														</button>
 													</div>
 												);
 											})}
@@ -386,10 +458,10 @@ function OrdersView({
 												const status = purchaseStatus(purchase);
 												return (
 													<div key={`p-${purchase.name}`} className="supply-document-branch">
-														<div className="supply-document-row">
+														<button className="supply-document-row" type="button" onClick={() => onOpenPurchase(order, purchase)}>
 															<div><span className="kind">Заявка поставщику</span><b>{purchase.supplier || 'Поставщик не выбран'}</b><small>{purchase.name}</small></div>
 															<div className="supply-document-meta"><span>{documentAmount(purchase.lines)}</span><span className="status">{status.label}</span></div>
-														</div>
+														</button>
 													</div>
 												);
 											})}
@@ -449,7 +521,7 @@ function OrdersView({
 	);
 }
 
-function TreeView({ orders }: { orders: SupplyOrderRow[] }): JSX.Element {
+function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
 	return (
 		<section className="supply-proto-card">
 			<div className="supply-proto-card-head">
@@ -471,8 +543,8 @@ function TreeView({ orders }: { orders: SupplyOrderRow[] }): JSX.Element {
 								const status = purchaseStatus(purchase);
 								return (
 									<div key={`${order.name}-${purchase.name}`} className="supply-proto-node">
-										<div className="node-top">
-											<div><span className="kind">заявка поставщику</span> {purchase.name} · {purchase.supplier || 'поставщик не выбран'}</div>
+									<div className="node-top">
+										<div><span className="kind">заявка поставщику</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenPurchase(order, purchase)}>{purchase.name}</button> · {purchase.supplier || 'поставщик не выбран'}</div>
 											<Pill tone={status.tone}>{status.label}</Pill>
 										</div>
 										<p>{purchase.lines.map(lineTitle).join(' · ')}</p>
@@ -484,8 +556,8 @@ function TreeView({ orders }: { orders: SupplyOrderRow[] }): JSX.Element {
 								const status = transferStatus(transfer);
 								return (
 									<div key={`${order.name}-${transfer.id}`} className="supply-proto-node">
-										<div className="node-top">
-											<div><span className="kind">перемещение</span> {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
+									<div className="node-top">
+										<div><span className="kind">перемещение</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transfer.name || `#${transfer.id}`}</button> · {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
 											<Pill tone={status.tone}>{status.label}</Pill>
 										</div>
 										<p>{transfer.lines.map(lineTitle).join(' · ')}</p>
@@ -505,7 +577,7 @@ type RegistryRow =
 	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
 	| { kind: 'logistics'; order: SupplyOrderRow; transfer: SupplyTransferChild };
 
-function RegistryView({ orders, kind }: { orders: SupplyOrderRow[]; kind: ViewKey }): JSX.Element {
+function RegistryView({ orders, kind, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; kind: ViewKey; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
 	const rows: RegistryRow[] = kind === 'purchase'
 		? orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ kind: 'purchase' as const, order, purchase })))
 		: kind === 'logistics'
@@ -529,10 +601,10 @@ function RegistryView({ orders, kind }: { orders: SupplyOrderRow[]; kind: ViewKe
 							{rows.length === 0 ? <tr><td colSpan={5} className="empty">Пока пусто.</td></tr> : rows.map((row) => {
 								if (row.kind === 'purchase') {
 									const status = purchaseStatus(row.purchase);
-									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><b>{row.purchase.name}</b></td><td>#{row.order.dealId}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>#{row.order.dealId}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 								}
 								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><b>{row.transfer.name || `#${row.transfer.id}`}</b></td><td>#{row.order.dealId}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{row.transfer.name || `#${row.transfer.id}`}</button></td><td>#{row.order.dealId}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 							})}
 						</tbody>
 					</table>
@@ -554,6 +626,7 @@ export function Supply(): JSX.Element {
 	const [decisions, setDecisions] = useState<DecisionMap>({});
 	const [busy, setBusy] = useState<string | null>(null);
 	const [reviewing, setReviewing] = useState('');
+	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const reload = async (): Promise<void> => {
@@ -688,10 +761,11 @@ export function Supply(): JSX.Element {
 				<Metrics orders={orders} />
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={sortedOrders} sort={sort} expanded={expanded} decisions={decisions} suppliers={suppliers} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} />}
-				{view === 'tree' && <TreeView orders={orders} />}
-				{(view === 'purchase' || view === 'logistics' || view === 'stock') && <RegistryView orders={orders} kind={view} />}
+				{view === 'orders' && <OrdersView orders={sortedOrders} sort={sort} expanded={expanded} decisions={decisions} suppliers={suppliers} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{view === 'tree' && <TreeView orders={orders} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{(view === 'purchase' || view === 'logistics' || view === 'stock') && <RegistryView orders={orders} kind={view} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 			</main>
+			{openDocument && <DocumentDetail document={openDocument} onClose={() => setOpenDocument(null)} />}
 		</div>
 	);
 }
