@@ -3,6 +3,8 @@ import { getContext } from './b24-context.js';
 import {
 	BETA_USER_IDS,
 	createSupplyDocuments,
+	deleteSupplyPurchaseOrder,
+	deleteTransfer,
 	fetchCurrentUserId,
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
@@ -178,11 +180,13 @@ const PURCHASE_STAGE_OPTIONS: Array<{ value: SupplyPurchaseStage; label: string 
 	{ value: 'cancelled', label: 'Отменено' },
 ];
 
-function DocumentDetail({ document, suppliers, busy, onClose, onSavePurchase, onSetPurchaseStage, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
+function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onSetPurchaseStage, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
 	document: OpenSupplyDocument;
 	suppliers: string[];
 	busy: boolean;
+	canDelete: boolean;
 	onClose: () => void;
+	onDelete: () => void;
 	onSavePurchase: (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>) => void;
 	onSetPurchaseStage: (stage: SupplyPurchaseStage, expectedAt: string) => void;
 	onShipTransfer: () => void;
@@ -234,7 +238,7 @@ function DocumentDetail({ document, suppliers, busy, onClose, onSavePurchase, on
 					{currentPurchase.receipts.length > 0 && <section className="supply-document-receipts"><h3>Оприходования</h3>{currentPurchase.receipts.map((receipt) => <div key={receipt.name}><b>{receipt.name}</b><span>{documentAmount(receipt.lines)}</span><small>{receipt.lines.map(lineTitle).join(' · ')}</small></div>)}</section>}
 					<datalist id="supply-document-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
 					<footer className="supply-document-modal-footer">
-						<div><select value={purchaseStage} onChange={(e) => setPurchaseStage(e.target.value as SupplyPurchaseStage)}>{PURCHASE_STAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><button type="button" disabled={busy || purchaseStage === (currentPurchase.supplyStage || 'draft')} onClick={() => onSetPurchaseStage(purchaseStage, expectedAt)}>Изменить статус</button></div>
+						<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}<select value={purchaseStage} onChange={(e) => setPurchaseStage(e.target.value as SupplyPurchaseStage)}>{PURCHASE_STAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><button type="button" disabled={busy || purchaseStage === (currentPurchase.supplyStage || 'draft')} onClick={() => onSetPurchaseStage(purchaseStage, expectedAt)}>Изменить статус</button></div>
 						<div><button type="button" onClick={onClose}>Закрыть</button><button className="primary" type="button" disabled={busy || !supplier.trim() || !purchaseLines.some((line) => line.qty > 0)} onClick={() => onSavePurchase(supplier.trim(), purchaseLines.filter((line) => line.qty > 0).map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty, rate })))}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></div>
 					</footer>
 				</section>
@@ -265,7 +269,7 @@ function DocumentDetail({ document, suppliers, busy, onClose, onSavePurchase, on
 					</tbody></table>
 				</div>
 				<footer className="supply-document-modal-footer">
-					<div />
+					<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}</div>
 					<div>
 						<button type="button" onClick={onClose}>Закрыть</button>
 						{transfer.status === 'requested' && <button className="primary" type="button" disabled={busy} onClick={onShipTransfer}>{busy ? 'Провожу...' : 'В путь'}</button>}
@@ -678,6 +682,7 @@ export function Supply(): JSX.Element {
 	const [reviewing, setReviewing] = useState('');
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
 	const [documentBusy, setDocumentBusy] = useState(false);
+	const [currentUserId, setCurrentUserId] = useState('');
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const reload = async (): Promise<void> => {
@@ -740,6 +745,26 @@ export function Supply(): JSX.Element {
 		} finally { setDocumentBusy(false); }
 	};
 
+	const deleteOpenDocument = async (): Promise<void> => {
+		const target = openDocument;
+		if (!target || documentBusy || currentUserId !== '1858') return;
+		const title = target.kind === 'purchase' ? target.purchase.name : (target.transfer.name || `Перемещение #${target.transfer.id}`);
+		const detail = target.kind === 'purchase'
+			? 'Связанные оприходования будут отменены.'
+			: 'Все проведённые складские движения этого перемещения будут отменены.';
+		if (!window.confirm(`Удалить ${title}?\n\n${detail}`)) return;
+		setDocumentBusy(true);
+		try {
+			if (target.kind === 'purchase') await deleteSupplyPurchaseOrder(target.purchase.name);
+			else await deleteTransfer(target.transfer.id);
+			setOpenDocument(null);
+			await reload();
+			setNotice(`${title}: удалено.`);
+		} catch (err) {
+			setNotice(err instanceof Error ? err.message : 'Не удалось удалить документ.');
+		} finally { setDocumentBusy(false); }
+	};
+
 	useEffect(() => {
 		if (ctx.__mock) { setPhase('ready'); return; }
 		const bx = window.BX24;
@@ -752,6 +777,7 @@ export function Supply(): JSX.Element {
 		bx.init(() => {
 			void (async () => {
 				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
+				setCurrentUserId(uid);
 				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) { setPhase('denied'); return; }
 				setPhase('ready');
 				try {
@@ -876,7 +902,9 @@ export function Supply(): JSX.Element {
 				document={openDocument}
 				suppliers={suppliers}
 				busy={documentBusy}
+				canDelete={currentUserId === '1858'}
 				onClose={() => setOpenDocument(null)}
+				onDelete={() => void deleteOpenDocument()}
 				onSavePurchase={(supplier, lines) => void saveOpenPurchase(supplier, lines)}
 				onSetPurchaseStage={(stage, expectedAt) => void setOpenPurchaseStage(stage, expectedAt)}
 				onShipTransfer={() => void moveOpenTransfer('ship')}

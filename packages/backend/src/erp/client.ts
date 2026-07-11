@@ -99,6 +99,10 @@ export class ErpClient {
 		return (r.json['data'] as Record<string, unknown>) ?? {};
 	}
 
+	async delete(doctype: string, name: string): Promise<void> {
+		await this.request('DELETE', `/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`);
+	}
+
 	/** Проведение документа. Бросает, если docstatus в ответе не стал 1. */
 	async submit(doctype: string, name: string): Promise<void> {
 		const data = await this.update(doctype, name, { docstatus: 1 });

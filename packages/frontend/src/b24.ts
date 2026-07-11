@@ -724,6 +724,16 @@ export async function updateSupplyPurchaseOrder(purchaseOrder: string, supplier:
 	return json.name ?? '';
 }
 
+export async function deleteSupplyPurchaseOrder(purchaseOrder: string): Promise<void> {
+	const res = await fetch('/api/supply/purchase-order/delete', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), purchaseOrder }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить заявку поставщику');
+}
+
 export async function fetchSupplySuppliers(): Promise<string[]> {
 	const res = await fetch('/api/supply/suppliers', {
 		method: 'POST',
@@ -1029,6 +1039,15 @@ export async function resolveTransferShortage(id: number): Promise<TransferDoc> 
 	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
 	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось скорректировать недовоз');
 	return json.transfer;
+}
+
+export async function deleteTransfer(id: number): Promise<void> {
+	const res = await fetch('/api/transfers/delete', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить перемещение');
 }
 
 /** Журнал движений для окна «Складской учёт»: списания/оприходования/реализации. */

@@ -62,6 +62,7 @@ interface TransferData {
  *  Только они двигают статусы перемещения (В пути/Получено). */
 const SUPPLY_DEPT = 10;
 const SUPPLY_ADMIN_IDS = new Set(['1', '1858', '986']);
+const TRANSFER_DELETE_IDS = new Set(['1858']);
 
 interface CurrentUser { id: string; name: string; isSupply: boolean }
 async function currentUser(client: B24Client): Promise<CurrentUser> {
@@ -396,6 +397,36 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			return { ok: true, transfer: { id, name: doc.name, ...data } };
 		} catch (err) {
 			app.log.error({}, `[api/transfers/resolve-shortage] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/transfers/delete', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		const me = await currentUser(client);
+		if (!TRANSFER_DELETE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
+		try {
+			const doc = await loadOne(client, id);
+			if (!doc) return { ok: true };
+			const entries = [doc.shortageReturnEntry, doc.receiveEntry, doc.shipEntry].filter((name): name is string => Boolean(name));
+			for (const name of entries) {
+				const entry = await erp.get<Record<string, unknown>>('Stock Entry', name);
+				if (!entry) continue;
+				const docstatus = Number(entry['docstatus'] ?? 0);
+				if (docstatus === 1) await erp.cancel('Stock Entry', name);
+				else if (docstatus === 0) await erp.delete('Stock Entry', name);
+			}
+			await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: id });
+			app.log.info({ id, by: me.id, entries }, '[api/transfers/delete] removed');
+			return { ok: true };
+		} catch (err) {
+			app.log.error({ id, by: me.id }, `[api/transfers/delete] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

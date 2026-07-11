@@ -4224,6 +4224,16 @@ body.deal-placement-body #root {
 	min-width: 170px;
 }
 
+.supply-proto-modal .danger {
+	border-color: #d8a4a4;
+	color: #a32626;
+}
+
+.supply-proto-modal .danger:hover:not(:disabled) {
+	background: #fff4f4;
+	border-color: #c56f6f;
+}
+
 .supply-order-docs .primary,
 .supply-order-plan button,
 .supply-order-review-actions button {

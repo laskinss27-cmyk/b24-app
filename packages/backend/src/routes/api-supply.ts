@@ -53,6 +53,7 @@ interface SupplyDecisionLine {
 	supplier: string;
 }
 interface CurrentUser { id: string; name: string }
+const SUPPLY_DOCUMENT_DELETE_IDS = new Set(['1858']);
 
 let supplierCatId: number | null = null;
 const supplyCreationLocks = new Set<string>();
@@ -528,6 +529,45 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			return { ok: true, name };
 		} catch (err) {
 			app.log.error({ purchaseOrder }, `[api/supply/purchase-order/update] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/supply/purchase-order/delete', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { purchaseOrder?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const me = await currentUser(client);
+		if (!SUPPLY_DOCUMENT_DELETE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
+		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
+		try {
+			const order = await erp.get<Record<string, unknown>>('Purchase Order', purchaseOrder);
+			if (!order) return { ok: true };
+			if (!String(order[SUPPLY_REQUEST_FIELD] ?? '').trim()) {
+				return reply.code(403).send({ ok: false, error: 'можно удалить только заявку поставщику, созданную из снабжения' });
+			}
+			const receipts = await erp.list<Record<string, unknown>>(
+				'Purchase Receipt',
+				['name', 'docstatus'],
+				[[SUPPLY_PURCHASE_ORDER_FIELD, '=', purchaseOrder], ['docstatus', '!=', 2]],
+			);
+			for (const receipt of receipts) {
+				const name = String(receipt['name'] ?? '');
+				const docstatus = Number(receipt['docstatus'] ?? 0);
+				if (!name) continue;
+				if (docstatus === 1) await erp.cancel('Purchase Receipt', name);
+				else if (docstatus === 0) await erp.delete('Purchase Receipt', name);
+			}
+			const docstatus = Number(order['docstatus'] ?? 0);
+			if (docstatus === 1) await erp.cancel('Purchase Order', purchaseOrder);
+			else if (docstatus === 0) await erp.delete('Purchase Order', purchaseOrder);
+			app.log.info({ purchaseOrder, by: me.id, receipts: receipts.length }, '[api/supply/purchase-order/delete] removed');
+			return { ok: true };
+		} catch (err) {
+			app.log.error({ purchaseOrder, by: me.id }, `[api/supply/purchase-order/delete] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
