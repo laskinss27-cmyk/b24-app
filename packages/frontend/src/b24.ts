@@ -646,6 +646,20 @@ export interface SupplyOrderRow {
 	purchases?: SupplyPurchaseChild[];
 }
 
+export type SupplyDecisionAction = 'transfer' | 'purchase';
+export interface SupplyDecisionLine {
+	productId: number;
+	itemName: string;
+	qty: number;
+	action: SupplyDecisionAction;
+	fromStore?: string;
+	supplier?: string;
+}
+export interface SupplyCreatedDocuments {
+	transfers: TransferDoc[];
+	purchases: string[];
+}
+
 /** Все заявки снабжения из ядра (Material Request по сделкам) + название сделки из Б24. Ядро не подключено → []. */
 export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 	const res = await fetch('/api/supply/orders', {
@@ -668,6 +682,24 @@ export async function createDealSupplyRequest(dealId: number, lines: Array<{ pro
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать заявку в снабжение');
 	return json.name ?? '';
+}
+
+export async function createSupplyDocuments(args: { requestName: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {
+	const res = await fetch('/api/supply/create-documents', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...args }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; partial?: boolean; transfers?: TransferDoc[]; purchases?: string[] };
+	if (!json.ok) {
+		const created = [
+			...(json.transfers ?? []).map((transfer) => transfer.name || `перемещение #${transfer.id}`),
+			...(json.purchases ?? []),
+		];
+		const suffix = created.length ? ` Уже созданы: ${created.join(', ')}. Список заявки обновлён.` : '';
+		throw new Error(`${json.error ?? 'не удалось создать документы снабжения'}.${suffix}`);
+	}
+	return { transfers: json.transfers ?? [], purchases: json.purchases ?? [] };
 }
 
 export async function createSupplyPurchaseOrder(requestName: string, dealId: number, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {

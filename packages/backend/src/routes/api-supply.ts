@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, type SupplyPurchaseStage } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, shipTransferToTransit, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, type SupplyPurchaseStage } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 
 /**
@@ -44,8 +44,18 @@ interface PurchaseChild {
 	lines: TransferLine[];
 	receipts: PurchaseReceiptChild[];
 }
+interface SupplyDecisionLine {
+	productId: number;
+	itemName: string;
+	qty: number;
+	action: 'transfer' | 'purchase';
+	fromStore: string;
+	supplier: string;
+}
+interface CurrentUser { id: string; name: string }
 
 let supplierCatId: number | null = null;
+const supplyCreationLocks = new Set<string>();
 async function supplierCategoryId(client: B24Client): Promise<number> {
 	if (supplierCatId !== null) return supplierCatId;
 	try {
@@ -184,6 +194,12 @@ function addCovered(covered: Map<string, Map<number, number>>, requestName: stri
 	covered.set(requestName, byProduct);
 }
 
+async function currentUser(client: B24Client): Promise<CurrentUser> {
+	const me = await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current', {}).catch(() => null);
+	const id = String(me?.ID ?? '');
+	return { id, name: `${me?.NAME ?? ''} ${me?.LAST_NAME ?? ''}`.trim() };
+}
+
 export function registerApiSupplyRoute(app: FastifyInstance): void {
 	const clientFrom = (b: AuthBody): B24Client | null => {
 		if (!b.domain || !b.accessToken) return null;
@@ -216,7 +232,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
 					transfersByRequest.set(t.supplyRequest, [...(transfersByRequest.get(t.supplyRequest) ?? []), t]);
-					addCovered(planned, t.supplyRequest, t.lines);
+					if (t.status !== 'canceled') addCovered(planned, t.supplyRequest, t.lines);
 					const lines = t.status === 'shortage' ? t.receivedLines : t.status === 'received' ? t.lines : [];
 					addCovered(fulfilled, t.supplyRequest, lines);
 				}
@@ -225,7 +241,9 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			}
 			const purchasesByRequest = await listPurchaseChildren(erp, reqs.map((o) => o.name));
 			for (const [requestName, purchases] of purchasesByRequest.entries()) {
-				for (const purchase of purchases) addCovered(planned, requestName, purchase.lines);
+				for (const purchase of purchases) {
+					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestName, purchase.lines);
+				}
 			}
 			const enriched = reqs.map((o) => {
 				const byProduct = planned.get(o.name) ?? new Map<number, number>();
@@ -278,6 +296,174 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.error({ dealId }, `[api/supply/request] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/supply/create-documents', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; toStore?: unknown; lines?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const requestName = String(b.requestName ?? '').trim();
+		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
+		const toStore = String(b.toStore ?? '').trim();
+		if (!toStore) return reply.code(400).send({ ok: false, error: 'bad toStore' });
+		const lines: SupplyDecisionLine[] = (Array.isArray(b.lines) ? b.lines : [])
+			.map((l) => l as Record<string, unknown>)
+			.map((l) => ({
+				productId: Number(l['productId']),
+				itemName: String(l['itemName'] ?? ''),
+				qty: Number(l['qty']),
+				action: String(l['action'] ?? '') === 'transfer' ? 'transfer' as const : String(l['action'] ?? '') === 'purchase' ? 'purchase' as const : '' as never,
+				fromStore: String(l['fromStore'] ?? '').trim(),
+				supplier: String(l['supplier'] ?? '').trim(),
+			}))
+			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0 && (l.action === 'transfer' || l.action === 'purchase'));
+		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет строк для создания документов' });
+		const badTransfer = lines.find((l) => l.action === 'transfer' && (!l.fromStore || l.fromStore === toStore));
+		if (badTransfer) return reply.code(400).send({ ok: false, error: `для перемещения нужен другой склад-источник: ${badTransfer.itemName || badTransfer.productId}` });
+		const badPurchase = lines.find((l) => l.action === 'purchase' && !l.supplier);
+		if (badPurchase) return reply.code(400).send({ ok: false, error: `для закупки нужен поставщик: ${badPurchase.itemName || badPurchase.productId}` });
+		const lockKey = `${normalizeDomain(b.domain ?? '')}:${requestName}`;
+		if (supplyCreationLocks.has(lockKey)) {
+			return reply.code(200).send({ ok: false, error: 'Документы по этой заявке уже создаются. Дождись результата текущей операции.' });
+		}
+		supplyCreationLocks.add(lockKey);
+		const createdTransfers: unknown[] = [];
+		const createdPurchases: string[] = [];
+
+		try {
+			await ensureTransfersEntity(client);
+			const request = (await listSupplyRequests(erp)).find((item) => item.name === requestName);
+			if (!request) throw new Error('заявка не найдена в ядре');
+			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
+			if (request.toStore && request.toStore !== toStore) throw new Error(`склад назначения заявки изменился: ${request.toStore}`);
+
+			const requested = new Map<number, number>();
+			for (const item of request.items) requested.set(item.productId, (requested.get(item.productId) ?? 0) + item.qty);
+			const planned = new Map<number, number>();
+			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
+				if (transfer.supplyRequest !== requestName || transfer.status === 'canceled') continue;
+				for (const line of transfer.lines) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
+			}
+			const existingPurchases = (await listPurchaseChildren(erp, [requestName])).get(requestName) ?? [];
+			for (const purchase of existingPurchases) {
+				if (purchase.supplyStage === 'cancelled') continue;
+				for (const line of purchase.lines) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
+			}
+			const incomingProducts = new Set(lines.map((line) => line.productId));
+			const incomingTransfers = new Map<number, number>();
+			for (const line of lines.filter((item) => item.action === 'transfer')) {
+				incomingTransfers.set(line.productId, (incomingTransfers.get(line.productId) ?? 0) + line.qty);
+			}
+			for (const productId of incomingProducts) {
+				const remaining = Math.max((requested.get(productId) ?? 0) - (planned.get(productId) ?? 0), 0);
+				const title = lines.find((line) => line.productId === productId)?.itemName || `#${productId}`;
+				if (remaining <= 0) throw new Error(`заявка уже изменилась: позиция «${title}» полностью распределена`);
+				const transferQty = incomingTransfers.get(productId) ?? 0;
+				if (transferQty > remaining + 0.0001) throw new Error(`для «${title}» осталось распределить ${remaining}, перемещением выбрано ${transferQty}`);
+			}
+			const transferByProductStore = new Map<string, number>();
+			for (const line of lines.filter((item) => item.action === 'transfer')) {
+				const key = `${line.productId}:${line.fromStore}`;
+				transferByProductStore.set(key, (transferByProductStore.get(key) ?? 0) + line.qty);
+			}
+			for (const [key, qty] of transferByProductStore.entries()) {
+				const separator = key.indexOf(':');
+				const productId = Number(key.slice(0, separator));
+				const fromStore = key.slice(separator + 1);
+				const requestItem = request.items.find((item) => item.productId === productId);
+				const available = Number(requestItem?.stocks?.[fromStore] ?? 0);
+				if (qty > available + 0.0001) {
+					throw new Error(`остаток изменился: на складе «${fromStore}» доступно ${available}, выбрано ${qty}`);
+				}
+			}
+
+			const me = await currentUser(client);
+			const now = new Date().toISOString();
+			const scheduleDate = now.slice(0, 10);
+
+			const purchasesBySupplier = new Map<string, SupplyDecisionLine[]>();
+			for (const line of lines.filter((l) => l.action === 'purchase')) {
+				purchasesBySupplier.set(line.supplier, [...(purchasesBySupplier.get(line.supplier) ?? []), line]);
+			}
+			for (const [supplier, supplierLines] of purchasesBySupplier.entries()) {
+				await ensureB24SupplierCompany(client, supplier);
+				const { name } = await createPurchaseOrderDraft(erp, {
+					dealId,
+					supplyRequest: requestName,
+					scheduleDate,
+					supplier,
+					lines: supplierLines.map((l) => ({ productId: l.productId, itemName: l.itemName, qty: l.qty, rate: 0 })),
+				});
+				createdPurchases.push(name);
+			}
+
+			const transfersByStore = new Map<string, SupplyDecisionLine[]>();
+			for (const line of lines.filter((l) => l.action === 'transfer')) {
+				transfersByStore.set(line.fromStore, [...(transfersByStore.get(line.fromStore) ?? []), line]);
+			}
+			for (const [fromStore, storeLines] of transfersByStore.entries()) {
+				const transferLines = storeLines.map((l) => ({ productId: l.productId, name: l.itemName || `#${l.productId}`, qty: l.qty }));
+				const baseData = {
+					supplyRequest: requestName,
+					dealId: String(dealId),
+					toStore,
+					fromStore,
+					status: 'requested',
+					lines: transferLines,
+					note: '',
+					taskId: null,
+					shipEntry: null,
+					receiveEntry: null,
+					receivedLines: [],
+					shortageLines: [],
+					shortageReturnEntry: null,
+					createdAt: now,
+					createdById: me.id,
+					createdByName: me.name,
+					history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: 'создано из дисплея снабжения' }],
+				};
+				const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
+				const added = await client.call<number | { id?: number }>('entity.item.add', {
+					ENTITY: TRANSFERS_ENTITY,
+					NAME: itemName,
+					DETAIL_TEXT: JSON.stringify(baseData),
+				});
+				const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+				if (!id) throw new Error('entity.item.add не вернул id');
+				const { name: shipEntry } = await shipTransferToTransit(erp, {
+					dealId,
+					lines: transferLines.map((l) => ({ productId: l.productId, qty: l.qty, fromStore })),
+				});
+				const shippedAt = new Date().toISOString();
+				const shippedData = {
+					...baseData,
+					status: 'in_transit',
+					shipEntry,
+					history: [...baseData.history, { at: shippedAt, status: 'in_transit', byId: me.id, byName: me.name, note: `Stock Entry ${shipEntry}` }],
+				};
+				await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: itemName, DETAIL_TEXT: JSON.stringify(shippedData) });
+				createdTransfers.push({ id, name: itemName, ...shippedData });
+			}
+
+			app.log.info({ requestName, dealId, transfers: createdTransfers.length, purchases: createdPurchases.length }, '[api/supply/create-documents] ok');
+			return { ok: true, transfers: createdTransfers, purchases: createdPurchases };
+		} catch (err) {
+			app.log.error({ requestName, dealId }, `[api/supply/create-documents] failed — ${errInfo(err)}`);
+			return reply.code(200).send({
+				ok: false,
+				error: errInfo(err),
+				partial: createdTransfers.length > 0 || createdPurchases.length > 0,
+				transfers: createdTransfers,
+				purchases: createdPurchases,
+			});
+		} finally {
+			supplyCreationLocks.delete(lockKey);
 		}
 	});
 
