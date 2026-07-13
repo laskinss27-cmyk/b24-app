@@ -163,6 +163,11 @@ const transferStatus = (transfer: SupplyTransferChild): { label: string; tone: s
 	return { label: 'Создано', tone: 'muted' };
 };
 
+const transferDocumentLabel = (transfer: SupplyTransferChild): string => {
+	const entries = [transfer.shipEntry, transfer.receiveEntry || transfer.shortageReturnEntry].filter((name): name is string => Boolean(name));
+	return entries.length ? entries.join(' → ') : `#${transfer.id}`;
+};
+
 const lineTitle = (line: { name?: string; itemName?: string; productId: number; qty: number }): string =>
 	`${line.name || line.itemName || `#${line.productId}`} ×${line.qty}`;
 const documentAmount = (lines: Array<{ qty: number }>): string => {
@@ -320,9 +325,9 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 	const shortageByProduct = new Map(transfer.shortageLines.map((line) => [line.productId, line.qty]));
 	return (
 		<div className="supply-proto-overlay">
-			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={transfer.name || `Перемещение #${transfer.id}`}>
+			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferDocumentLabel(transfer)}`}>
 				<header>
-					<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transfer.name || `#${transfer.id}`}</h2><p>{order.name} · сделка #{order.dealId}</p></div>
+					<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transferDocumentLabel(transfer)}</h2><p>{transfer.fromStore} → {transfer.toStore} · сделка #{order.dealId}</p></div>
 					<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 				</header>
 				<dl className="supply-document-facts">
@@ -684,7 +689,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 								return (
 									<div key={`${order.name}-${transfer.id}`} className="supply-proto-node">
 									<div className="node-top">
-										<div><span className="kind">перемещение</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transfer.name || `#${transfer.id}`}</button> · {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
+										<div><span className="kind">перемещение</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transferDocumentLabel(transfer)}</button> · {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
 											<Pill tone={status.tone}>{status.label}</Pill>
 										</div>
 										<p>{transfer.lines.map(lineTitle).join(' · ')}</p>
@@ -731,7 +736,7 @@ function RegistryView({ orders, kind, onOpenPurchase, onOpenTransfer }: { orders
 									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>#{row.order.dealId}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 								}
 								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{row.transfer.name || `#${row.transfer.id}`}</button></td><td>#{row.order.dealId}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>#{row.order.dealId}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 							})}
 						</tbody>
 					</table>

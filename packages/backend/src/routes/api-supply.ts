@@ -32,6 +32,9 @@ interface TransferProgress {
 	status: string;
 	fromStore: string;
 	toStore: string;
+	shipEntry: string;
+	receiveEntry: string;
+	shortageReturnEntry: string;
 	lines: TransferLine[];
 	receivedLines: TransferLine[];
 	shortageLines: TransferLine[];
@@ -115,6 +118,9 @@ function parseTransferProgress(it: Record<string, unknown>): TransferProgress | 
 			status,
 			fromStore: String(data['fromStore'] ?? ''),
 			toStore: String(data['toStore'] ?? ''),
+			shipEntry: String(data['shipEntry'] ?? ''),
+			receiveEntry: String(data['receiveEntry'] ?? ''),
+			shortageReturnEntry: String(data['shortageReturnEntry'] ?? ''),
 			lines: rawLines.map(mapLine).filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 			receivedLines: rawReceived.map(mapLine).filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 			shortageLines: rawShortage.map(mapLine).filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
