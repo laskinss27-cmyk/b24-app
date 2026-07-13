@@ -776,7 +776,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
 		const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
 		// В реализацию идут ТОЛЬКО отмеченные галочкой строки (дефолт — ничего не отмечено).
-		const readyGoods = goods.filter((r) => canRealize(r) && isSel(r));
+		const selectedGoods = goods.filter((r) => isSel(r) && remaining(r) > 0);
+		const blockedSelectedGoods = selectedGoods.filter((r) => !canRealize(r));
+		const readyGoods = selectedGoods.filter(canRealize);
 	const realizeGroups = new Map<number, EnrichedRow[]>();
 	for (const r of readyGoods) {
 		const s = storeOf(r);
@@ -819,6 +821,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
 	const doDraft = async (): Promise<void> => {
 		if (dealId == null || busy || supplyBusy || !realizeGroups.size) return;
+		if (blockedSelectedGoods.length) {
+			const details = blockedSelectedGoods.map((row) => {
+				const selectedStore = storeOf(row);
+				return `«${row.name}»: на складе «${storeName(selectedStore)}» ${amountAt(row, selectedStore)}, нужно ${qtyOf(row)}`;
+			}).join('; ');
+			setNotice({ kind: 'err', text: `Реализация не создана. Не готовы отмеченные позиции: ${details}.` });
+			return;
+		}
 		const groups: RealizeCoreGroup[] = [...realizeGroups.entries()].map(([sid, rs]) => ({
 			storeTitle: storeName(sid),
 			lines: rs.map((r) => ({ productId: r.productId, qty: qtyOf(r), rate: r.price })),
