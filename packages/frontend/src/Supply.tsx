@@ -580,7 +580,7 @@ function OrdersView({
 												return (
 													<div key={`t-${transfer.id}`} className="supply-document-branch">
 														<button className="supply-document-row" type="button" onClick={() => onOpenTransfer(order, transfer)}>
-															<div><span className="kind">Перемещение</span><b>{transfer.fromStore} → {transfer.toStore}</b><small>{transfer.name || `#${transfer.id}`}</small></div>
+													<div><span className="kind">Перемещение</span><b>{transferDocumentLabel(transfer)}</b><small>{transfer.fromStore} → {transfer.toStore}{transfer.purchaseOrder ? ` · ${transfer.purchaseOrder}` : ''}</small></div>
 															<div className="supply-document-meta"><span>{documentAmount(transfer.lines)}</span><span className="status">{status.label}</span></div>
 														</button>
 													</div>
@@ -818,7 +818,7 @@ export function Supply(): JSX.Element {
 		try {
 			const transfer = await createSupplyPurchaseTransfer(target.order.name, target.order.requestKey, Number(target.order.dealId), target.purchase.name, lines);
 			await refreshOpenDocument(target);
-			setNotice(`${transfer.name || `Перемещение #${transfer.id}`}: товар отправлен в транзит на ${target.order.toStore}.`);
+			setNotice(`${transferDocumentLabel(transfer)}: товар отправлен в транзит на ${target.order.toStore}.`);
 		} catch (err) {
 			await refreshOpenDocument(target).catch(() => undefined);
 			setNotice(err instanceof Error ? err.message : 'Не удалось создать перемещение на точку.');
@@ -834,7 +834,7 @@ export function Supply(): JSX.Element {
 			else if (action === 'receive') await receiveTransfer(target.transfer.id, lines);
 			else await resolveTransferShortage(target.transfer.id);
 			await refreshOpenDocument(target);
-			setNotice(`${target.transfer.name || `Перемещение #${target.transfer.id}`}: статус обновлён.`);
+			setNotice(`${transferDocumentLabel(target.transfer)}: статус обновлён.`);
 		} catch (err) {
 			setNotice(err instanceof Error ? err.message : 'Не удалось изменить статус перемещения.');
 		} finally { setDocumentBusy(false); }
@@ -843,7 +843,7 @@ export function Supply(): JSX.Element {
 	const deleteOpenDocument = async (): Promise<void> => {
 		const target = openDocument;
 		if (!target || documentBusy || currentUserId !== '1858') return;
-		const title = target.kind === 'purchase' ? target.purchase.name : (target.transfer.name || `Перемещение #${target.transfer.id}`);
+		const title = target.kind === 'purchase' ? target.purchase.name : `Перемещение ${transferDocumentLabel(target.transfer)}`;
 		const detail = target.kind === 'purchase'
 			? 'Связанные оприходования будут отменены.'
 			: 'Все проведённые складские движения этого перемещения будут отменены.';
