@@ -666,7 +666,7 @@ export async function updatePurchaseOrderDraft(
 		const productId = Number(raw['item_code']);
 		if (!Number.isInteger(productId) || productId <= 0) continue;
 		const stored = raw[SUPPLY_PURCHASE_REQUEST_QTY_FIELD];
-		const requestQty = stored == null ? Number(raw['qty'] ?? 0) : Number(stored);
+		const requestQty = Number(stored) > 0 ? Number(stored) : Number(raw['qty'] ?? 0);
 		requestQtyByProduct.set(productId, [...(requestQtyByProduct.get(productId) ?? []), Math.max(requestQty, 0)]);
 	}
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });

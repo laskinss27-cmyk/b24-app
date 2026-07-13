@@ -190,7 +190,7 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 					.map((l) => {
 						const qty = Number(l['qty'] ?? 0);
 						const storedRequestQty = l[SUPPLY_PURCHASE_REQUEST_QTY_FIELD];
-						return { productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty, rate: Number(l['rate'] ?? 0), requestQty: storedRequestQty == null ? qty : Math.max(Number(storedRequestQty), 0) };
+						return { productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty, rate: Number(l['rate'] ?? 0), requestQty: Number(storedRequestQty) > 0 ? Number(storedRequestQty) : qty };
 					})
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 				receipts: [],
@@ -722,7 +722,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 					itemNames.set(productId, String(line['item_name'] ?? line['item_code'] ?? ''));
 					const qty = Number(line['qty'] ?? 0);
 					const storedRequestQty = line[SUPPLY_PURCHASE_REQUEST_QTY_FIELD];
-					const requestQty = storedRequestQty == null ? qty : Math.max(Number(storedRequestQty), 0);
+					const requestQty = Number(storedRequestQty) > 0 ? Number(storedRequestQty) : qty;
 					allocated.set(productId, (allocated.get(productId) ?? 0) + Math.min(qty, requestQty));
 				}
 			}
