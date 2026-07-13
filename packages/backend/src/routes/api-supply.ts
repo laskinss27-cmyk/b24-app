@@ -124,19 +124,13 @@ function parseTransferProgress(it: Record<string, unknown>): TransferProgress | 
 	}
 }
 
-function createdAtMs(value: string): number {
-	const ms = Date.parse(value.replace(' ', 'T'));
-	return Number.isFinite(ms) ? ms : 0;
-}
-
-function belongsToRequest(request: SupplyRequest, requestKey: string, dealId: string, createdAt: string): boolean {
-	if (requestKey) return requestKey === request.requestKey;
-	return dealId === request.dealId && createdAtMs(createdAt) >= createdAtMs(request.createdAt);
+function belongsToRequest(request: SupplyRequest, requestKey: string): boolean {
+	return Boolean(requestKey) && requestKey === request.requestKey;
 }
 
 function transferBelongsToRequest(transfer: TransferProgress, request: SupplyRequest): boolean {
 	return transfer.supplyRequest === request.name
-		&& belongsToRequest(request, transfer.supplyRequestKey, transfer.dealId, transfer.createdAt);
+		&& belongsToRequest(request, transfer.supplyRequestKey);
 }
 
 async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): Promise<Map<string, PurchaseChild[]>> {
@@ -158,7 +152,7 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 			const request = byName.get(requestName);
 			if (!request) continue;
 			const full = await erp.get<Record<string, unknown>>('Purchase Receipt', String(h['name']));
-			if (!full || !belongsToRequest(request, String(full[SUPPLY_REQUEST_KEY_FIELD] ?? ''), String(full['b24_deal_id'] ?? ''), String(full['creation'] ?? ''))) continue;
+			if (!full || !belongsToRequest(request, String(full[SUPPLY_REQUEST_KEY_FIELD] ?? ''))) continue;
 			const rawItems = Array.isArray(full?.['items']) ? full['items'] as Array<Record<string, unknown>> : [];
 			const child: PurchaseReceiptChild = {
 				name: String(h['name'] ?? ''),
@@ -182,7 +176,7 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 			const request = byName.get(requestName);
 			if (!request) continue;
 			const full = await erp.get<Record<string, unknown>>('Purchase Order', String(h['name']));
-			if (!full || !belongsToRequest(request, String(full[SUPPLY_REQUEST_KEY_FIELD] ?? ''), String(full['b24_deal_id'] ?? ''), String(full['creation'] ?? ''))) continue;
+			if (!full || !belongsToRequest(request, String(full[SUPPLY_REQUEST_KEY_FIELD] ?? ''))) continue;
 			const rawItems = Array.isArray(full?.['items']) ? full['items'] as Array<Record<string, unknown>> : [];
 			const child: PurchaseChild = {
 				name: String(h['name'] ?? ''),
