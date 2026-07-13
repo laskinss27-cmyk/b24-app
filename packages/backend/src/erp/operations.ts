@@ -14,6 +14,7 @@ const DEAL_FIELD = 'b24_deal_id';
 /** Документы, которым нужно поле сделки. */
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
+export const SUPPLY_REQUEST_KEY_FIELD = 'b24_supply_request_key';
 export const SUPPLY_PURCHASE_ORDER_FIELD = 'b24_purchase_order';
 export const SUPPLY_PURCHASE_STAGE_FIELD = 'b24_supply_stage';
 export const SUPPLY_PURCHASE_ORDERED_AT_FIELD = 'b24_ordered_at';
@@ -452,8 +453,12 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 }
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
-export interface SupplyRequest { name: string; dealId: string; date: string; status: string; toStore: string; items: SupplyReqItem[] }
-export interface SupplyRequestSummary { name: string; dealId: string; date: string; status: string; toStore: string; productIds: number[] }
+export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; status: string; toStore: string; items: SupplyReqItem[] }
+export interface SupplyRequestSummary { name: string; requestKey: string; createdAt: string; dealId: string; date: string; status: string; toStore: string; productIds: number[] }
+
+function materialRequestKey(name: string, creation: unknown): string {
+	return `${name}@${String(creation ?? '')}`;
+}
 
 export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number): Promise<SupplyRequestSummary[]> {
 	await ensureMrField(erp);
@@ -465,6 +470,8 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 		const mr = await erp.get<Record<string, unknown>>('Material Request', String(h['name']));
 		out.push({
 			name: String(h['name']),
+			requestKey: materialRequestKey(String(h['name']), mr?.['creation']),
+			createdAt: String(mr?.['creation'] ?? ''),
 			dealId: String(h[DEAL_FIELD] ?? ''),
 			date: String(h['transaction_date'] ?? ''),
 			status: String(h['status'] ?? ''),
@@ -497,6 +504,8 @@ export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[
 		});
 		out.push({
 			name: String(h['name']),
+			requestKey: materialRequestKey(String(h['name']), mr?.['creation']),
+			createdAt: String(mr?.['creation'] ?? ''),
 			dealId: String(h[DEAL_FIELD] ?? ''),
 			date: String(h['transaction_date'] ?? ''),
 			status: String(h['status'] ?? ''),
@@ -526,12 +535,19 @@ async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
 				insert_after: DEAL_FIELD, in_standard_filter: 1,
 			});
 		}
+		const requestKeyField = `${dt}-${SUPPLY_REQUEST_KEY_FIELD}`;
+		if (!(await erp.get('Custom Field', requestKeyField))) {
+			await erp.create('Custom Field', {
+				dt, fieldname: SUPPLY_REQUEST_KEY_FIELD, label: 'B24 Supply Request Key', fieldtype: 'Data',
+				insert_after: SUPPLY_REQUEST_FIELD, in_standard_filter: 1,
+			});
+		}
 		if (dt === 'Purchase Receipt') {
 			const purchaseOrderField = `${dt}-${SUPPLY_PURCHASE_ORDER_FIELD}`;
 			if (!(await erp.get('Custom Field', purchaseOrderField))) {
 				await erp.create('Custom Field', {
 					dt, fieldname: SUPPLY_PURCHASE_ORDER_FIELD, label: 'B24 Purchase Order', fieldtype: 'Data',
-					insert_after: SUPPLY_REQUEST_FIELD, in_standard_filter: 1,
+					insert_after: SUPPLY_REQUEST_KEY_FIELD, in_standard_filter: 1,
 				});
 			}
 		}
@@ -578,7 +594,8 @@ async function ensureSupplyTransferFields(erp: ErpClient): Promise<void> {
 	await ensureErpSetup(erp);
 	for (const [fieldname, label, insertAfter] of [
 		[SUPPLY_REQUEST_FIELD, 'B24 Supply Request', DEAL_FIELD],
-		[SUPPLY_PURCHASE_ORDER_FIELD, 'B24 Purchase Order', SUPPLY_REQUEST_FIELD],
+		[SUPPLY_REQUEST_KEY_FIELD, 'B24 Supply Request Key', SUPPLY_REQUEST_FIELD],
+		[SUPPLY_PURCHASE_ORDER_FIELD, 'B24 Purchase Order', SUPPLY_REQUEST_KEY_FIELD],
 	] as const) {
 		const name = `Stock Entry-${fieldname}`;
 		if (!(await erp.get('Custom Field', name))) {
@@ -595,7 +612,7 @@ export interface PurchaseDraftLine { productId: number; itemName?: string; qty: 
 /** Черновик закупки по заявке снабжения. Не проводим: снабжение дальше выбирает поставщика/цены штатно. */
 export async function createPurchaseOrderDraft(
 	erp: ErpClient,
-	args: { dealId: number; supplyRequest: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string },
+	args: { dealId: number; supplyRequest: string; supplyRequestKey: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensurePurchaseFields(erp);
@@ -609,6 +626,7 @@ export async function createPurchaseOrderDraft(
 		schedule_date: args.scheduleDate,
 		[DEAL_FIELD]: String(args.dealId),
 		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
+		[SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey,
 		[SUPPLY_PURCHASE_STAGE_FIELD]: 'draft',
 		[SUPPLY_PURCHASE_EXPECTED_AT_FIELD]: args.scheduleDate,
 		items: args.lines.map((l) => ({
@@ -662,7 +680,7 @@ export async function updateSupplyPurchaseStage(
 
 export async function createSupplyPurchaseReceipt(
 	erp: ErpClient,
-	args: { dealId: number; supplyRequest: string; purchaseOrder: string; toStore: string; lines: Array<{ productId: number; qty: number; rate: number }> },
+	args: { dealId: number; supplyRequest: string; supplyRequestKey: string; purchaseOrder: string; toStore: string; lines: Array<{ productId: number; qty: number; rate: number }> },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensurePurchaseFields(erp);
@@ -670,6 +688,8 @@ export async function createSupplyPurchaseReceipt(
 	if (!order) throw new Error('заказ поставщику не найден');
 	if (String(order[DEAL_FIELD] ?? '') !== String(args.dealId)) throw new Error('заказ поставщику не относится к этой сделке');
 	if (String(order[SUPPLY_REQUEST_FIELD] ?? '') !== args.supplyRequest) throw new Error('заказ поставщику не относится к этой заявке');
+	const orderRequestKey = String(order[SUPPLY_REQUEST_KEY_FIELD] ?? '');
+	if (orderRequestKey && orderRequestKey !== args.supplyRequestKey) throw new Error('заказ поставщику относится к другой версии заявки');
 	if (String(order[SUPPLY_PURCHASE_STAGE_FIELD] ?? '') !== 'ordered') throw new Error('оприходовать можно только заказ со статусом «Заказано»');
 	const orderedByProduct = new Map<number, number>();
 	const rateByProduct = new Map<number, number>();
@@ -703,6 +723,7 @@ export async function createSupplyPurchaseReceipt(
 		remarks: `Supply purchase order ${args.purchaseOrder}`,
 		[DEAL_FIELD]: String(args.dealId),
 		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
+		[SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey,
 		[SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder,
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
@@ -751,7 +772,7 @@ const TRANSIT_STORE = 'Goods In Transit';
  */
 export async function shipTransferToTransit(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; supplyRequest?: string; purchaseOrder?: string },
+	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; supplyRequest?: string; supplyRequestKey?: string; purchaseOrder?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureSupplyTransferFields(erp);
@@ -761,6 +782,7 @@ export async function shipTransferToTransit(
 		stock_entry_type: 'Material Transfer',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
 		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
+		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
@@ -785,7 +807,7 @@ export async function shipTransferToTransit(
  */
 export async function receiveTransferFromTransit(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; dealId?: number; supplyRequest?: string; purchaseOrder?: string },
+	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; dealId?: number; supplyRequest?: string; supplyRequestKey?: string; purchaseOrder?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureSupplyTransferFields(erp);
@@ -795,6 +817,7 @@ export async function receiveTransferFromTransit(
 		stock_entry_type: 'Material Transfer',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
 		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
+		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),

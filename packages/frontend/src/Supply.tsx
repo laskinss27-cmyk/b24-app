@@ -29,6 +29,7 @@ import {
 const MOCK_ORDERS: SupplyOrderRow[] = [
 	{
 		name: 'MAT-MR-2026-0001',
+		requestKey: 'MAT-MR-2026-0001@demo',
 		dealId: '36766',
 		dealTitle: '37204_тест ERP',
 		date: '2026-07-10',
@@ -44,6 +45,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 	},
 	{
 		name: 'MAT-MR-2026-0002',
+		requestKey: 'MAT-MR-2026-0002@demo',
 		dealId: '36801',
 		dealTitle: 'СКУД офис',
 		date: '2026-07-11',
@@ -796,7 +798,7 @@ export function Supply(): JSX.Element {
 		if (!target || target.kind !== 'purchase' || documentBusy || !lines.length) return;
 		setDocumentBusy(true);
 		try {
-			const receipt = await receiveSupplyPurchase(target.order.name, Number(target.order.dealId), target.purchase.name, lines);
+			const receipt = await receiveSupplyPurchase(target.order.name, target.order.requestKey, Number(target.order.dealId), target.purchase.name, lines);
 			await refreshOpenDocument(target);
 			setNotice(`${receipt}: оприходовано на Склад Прихода.`);
 		} catch (err) {
@@ -809,7 +811,7 @@ export function Supply(): JSX.Element {
 		if (!target || target.kind !== 'purchase' || documentBusy || !lines.length) return;
 		setDocumentBusy(true);
 		try {
-			const transfer = await createSupplyPurchaseTransfer(target.order.name, Number(target.order.dealId), target.purchase.name, lines);
+			const transfer = await createSupplyPurchaseTransfer(target.order.name, target.order.requestKey, Number(target.order.dealId), target.purchase.name, lines);
 			await refreshOpenDocument(target);
 			setNotice(`${transfer.name || `Перемещение #${transfer.id}`}: товар отправлен в транзит на ${target.order.toStore}.`);
 		} catch (err) {
@@ -932,7 +934,7 @@ export function Supply(): JSX.Element {
 					purchases: [...(row.purchases ?? []), ...purchasePlan.map((group, i) => ({ name: `PUR-DEMO-${i + 1}`, supplier: group.key, status: 'Draft', supplyStage: 'draft', lines: group.lines.map((line) => ({ productId: line.productId, name: line.itemName, qty: line.qty, rate: 0 })), receipts: [] }))],
 				} : row));
 			} else {
-				const created = await createSupplyDocuments({ requestName: order.name, dealId: Number(order.dealId), toStore: order.toStore, lines });
+				const created = await createSupplyDocuments({ requestName: order.name, requestKey: order.requestKey, dealId: Number(order.dealId), toStore: order.toStore, lines });
 				createdTransferCount = created.transfers.length;
 				createdPurchaseCount = created.purchases.length;
 				await reload();

@@ -634,6 +634,7 @@ export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' 
 export interface SupplyPurchaseChild { name: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
 export interface SupplyOrderRow {
 	name: string;
+	requestKey: string;
 	dealId: string;
 	dealTitle: string;
 	date: string;
@@ -684,7 +685,7 @@ export async function createDealSupplyRequest(dealId: number, lines: Array<{ pro
 	return json.name ?? '';
 }
 
-export async function createSupplyDocuments(args: { requestName: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {
+export async function createSupplyDocuments(args: { requestName: string; requestKey: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {
 	const res = await fetch('/api/supply/create-documents', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -702,11 +703,11 @@ export async function createSupplyDocuments(args: { requestName: string; dealId:
 	return { transfers: json.transfers ?? [], purchases: json.purchases ?? [] };
 }
 
-export async function createSupplyPurchaseOrder(requestName: string, dealId: number, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {
+export async function createSupplyPurchaseOrder(requestName: string, requestKey: string, dealId: number, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {
 	const res = await fetch('/api/supply/purchase-order', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, supplier, lines }),
+		body: JSON.stringify({ ...bx24Auth(), requestName, requestKey, dealId, supplier, lines }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать черновик закупки');
@@ -756,22 +757,22 @@ export async function updateSupplyPurchaseStage(purchaseOrder: string, stage: Su
 	return json.name ?? '';
 }
 
-export async function receiveSupplyPurchase(requestName: string, dealId: number, purchaseOrder: string, lines: Array<{ productId: number; qty: number; rate: number }>): Promise<string> {
+export async function receiveSupplyPurchase(requestName: string, requestKey: string, dealId: number, purchaseOrder: string, lines: Array<{ productId: number; qty: number; rate: number }>): Promise<string> {
 	const res = await fetch('/api/supply/purchase-receive', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, purchaseOrder, lines }),
+		body: JSON.stringify({ ...bx24Auth(), requestName, requestKey, dealId, purchaseOrder, lines }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось принять закупку');
 	return json.name ?? '';
 }
 
-export async function createSupplyPurchaseTransfer(requestName: string, dealId: number, purchaseOrder: string, lines: Array<{ productId: number; qty: number }>): Promise<SupplyTransferChild> {
+export async function createSupplyPurchaseTransfer(requestName: string, requestKey: string, dealId: number, purchaseOrder: string, lines: Array<{ productId: number; qty: number }>): Promise<SupplyTransferChild> {
 	const res = await fetch('/api/supply/purchase-transfer', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, purchaseOrder, lines }),
+		body: JSON.stringify({ ...bx24Auth(), requestName, requestKey, dealId, purchaseOrder, lines }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: SupplyTransferChild };
 	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось создать перемещение на точку');
@@ -978,6 +979,7 @@ export interface TransferDoc {
 	id: number;
 	name: string;
 	supplyRequest: string;
+	supplyRequestKey?: string;
 	dealId: string;
 	toStore: string;
 	fromStore: string;
@@ -999,7 +1001,7 @@ export interface TransferDoc {
 }
 
 /** Создать перемещение(я) из сделки: глобальный склад-получатель + группы по складам-источникам. */
-export async function createTransfers(args: { dealId: number; toStore: string; groups: Array<{ fromStore: string; lines: TransferLineDto[] }>; supplyRequest?: string }): Promise<TransferDoc[]> {
+export async function createTransfers(args: { dealId: number; toStore: string; groups: Array<{ fromStore: string; lines: TransferLineDto[] }>; supplyRequest?: string; supplyRequestKey?: string }): Promise<TransferDoc[]> {
 	const res = await fetch('/api/transfers/create', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...args }),

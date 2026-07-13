@@ -33,6 +33,8 @@ interface TransferLine { productId: number; name: string; qty: number }
 interface TransferData {
 	/** Material Request, если перемещение создано из заявки снабжения. */
 	supplyRequest: string;
+	/** Неизменяемый ключ конкретного экземпляра заявки. */
+	supplyRequestKey: string;
 	/** Заказ поставщику, если перемещение создано после оприходования закупки. */
 	purchaseOrder: string;
 	dealId: string;
@@ -99,6 +101,7 @@ function parseItem(it: Record<string, unknown>): (TransferData & { id: number; n
 		id,
 		name: String(it['NAME'] ?? ''),
 		supplyRequest: String(data.supplyRequest ?? ''),
+		supplyRequestKey: String(data.supplyRequestKey ?? ''),
 		purchaseOrder: String(data.purchaseOrder ?? ''),
 		dealId: String(data.dealId ?? ''),
 		toStore: String(data.toStore ?? ''),
@@ -164,8 +167,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				if (!fromStore || fromStore === toStore || !lines.length) continue;
 
 				const supplyRequest = String(b['supplyRequest'] ?? '').trim();
+				const supplyRequestKey = String(b['supplyRequestKey'] ?? '').trim();
 				const data: TransferData = {
-					supplyRequest, purchaseOrder: '', dealId, toStore, fromStore, status: 'requested', lines, note: '',
+					supplyRequest, supplyRequestKey, purchaseOrder: '', dealId, toStore, fromStore, status: 'requested', lines, note: '',
 					taskId: null, shipEntry: null, receiveEntry: null, receivedLines: [], shortageLines: [], shortageReturnEntry: null,
 					createdAt: now, createdById: me.id, createdByName: me.name,
 					history: [{ at: now, status: 'requested', byId: me.id, byName: me.name }],
@@ -229,7 +233,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!STOCK_CREATE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только канарейка' });
 			const now = new Date().toISOString();
 			const data: TransferData = {
-				supplyRequest: '', purchaseOrder: '', dealId: '', toStore, fromStore, status: 'requested', lines, note,
+				supplyRequest: '', supplyRequestKey: '', purchaseOrder: '', dealId: '', toStore, fromStore, status: 'requested', lines, note,
 				taskId: null, shipEntry: null, receiveEntry: null, receivedLines: [], shortageLines: [], shortageReturnEntry: null,
 				createdAt: now, createdById: me.id, createdByName: me.name,
 				history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: 'создано вручную в окне' }],
@@ -292,6 +296,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const { name: entryName } = await shipTransferToTransit(erp, {
 				...(did ? { dealId: did } : {}),
 				...(doc.supplyRequest ? { supplyRequest: doc.supplyRequest } : {}),
+				...(doc.supplyRequestKey ? { supplyRequestKey: doc.supplyRequestKey } : {}),
 				...(doc.purchaseOrder ? { purchaseOrder: doc.purchaseOrder } : {}),
 				lines: doc.lines.map((l) => ({ productId: l.productId, qty: l.qty, fromStore: doc.fromStore })),
 			});
@@ -347,6 +352,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				const res = await receiveTransferFromTransit(erp, {
 					...(did ? { dealId: did } : {}),
 					...(doc.supplyRequest ? { supplyRequest: doc.supplyRequest } : {}),
+					...(doc.supplyRequestKey ? { supplyRequestKey: doc.supplyRequestKey } : {}),
 					...(doc.purchaseOrder ? { purchaseOrder: doc.purchaseOrder } : {}),
 					lines: receivedLines.map((l) => ({ productId: l.productId, qty: l.qty, toStore: doc.toStore })),
 				});
@@ -387,6 +393,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const { name: returnEntry } = await receiveTransferFromTransit(erp, {
 				...(did ? { dealId: did } : {}),
 				...(doc.supplyRequest ? { supplyRequest: doc.supplyRequest } : {}),
+				...(doc.supplyRequestKey ? { supplyRequestKey: doc.supplyRequestKey } : {}),
 				...(doc.purchaseOrder ? { purchaseOrder: doc.purchaseOrder } : {}),
 				lines: doc.shortageLines.map((l) => ({ productId: l.productId, qty: l.qty, toStore: doc.fromStore })),
 			});

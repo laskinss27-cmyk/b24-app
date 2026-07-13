@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, shipTransferToTransit, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, type SupplyPurchaseStage } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, shipTransferToTransit, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 
 /**
@@ -25,6 +25,9 @@ interface TransferProgress {
 	id: number;
 	name: string;
 	supplyRequest: string;
+	supplyRequestKey: string;
+	dealId: string;
+	createdAt: string;
 	purchaseOrder: string;
 	status: string;
 	fromStore: string;
@@ -105,6 +108,9 @@ function parseTransferProgress(it: Record<string, unknown>): TransferProgress | 
 			id: Number(it['ID'] ?? it['id'] ?? 0),
 			name: String(it['NAME'] ?? it['name'] ?? ''),
 			supplyRequest,
+			supplyRequestKey: String(data['supplyRequestKey'] ?? ''),
+			dealId: String(data['dealId'] ?? ''),
+			createdAt: String(data['createdAt'] ?? ''),
 			purchaseOrder: String(data['purchaseOrder'] ?? ''),
 			status,
 			fromStore: String(data['fromStore'] ?? ''),
@@ -118,9 +124,26 @@ function parseTransferProgress(it: Record<string, unknown>): TransferProgress | 
 	}
 }
 
-async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Promise<Map<string, PurchaseChild[]>> {
+function createdAtMs(value: string): number {
+	const ms = Date.parse(value.replace(' ', 'T'));
+	return Number.isFinite(ms) ? ms : 0;
+}
+
+function belongsToRequest(request: SupplyRequest, requestKey: string, dealId: string, createdAt: string): boolean {
+	if (requestKey) return requestKey === request.requestKey;
+	return dealId === request.dealId && createdAtMs(createdAt) >= createdAtMs(request.createdAt);
+}
+
+function transferBelongsToRequest(transfer: TransferProgress, request: SupplyRequest): boolean {
+	return transfer.supplyRequest === request.name
+		&& belongsToRequest(request, transfer.supplyRequestKey, transfer.dealId, transfer.createdAt);
+}
+
+async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): Promise<Map<string, PurchaseChild[]>> {
 	const out = new Map<string, PurchaseChild[]>();
-	if (!requestNames.length) return out;
+	if (!requests.length) return out;
+	const requestNames = requests.map((request) => request.name);
+	const byName = new Map(requests.map((request) => [request.name, request]));
 	try {
 		const receipts = new Map<string, PurchaseReceiptChild[]>();
 		const receiptHeaders = await erp.list<Record<string, unknown>>(
@@ -132,8 +155,10 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 		);
 		for (const h of receiptHeaders) {
 			const requestName = String(h[SUPPLY_REQUEST_FIELD] ?? '');
-			if (!requestName) continue;
+			const request = byName.get(requestName);
+			if (!request) continue;
 			const full = await erp.get<Record<string, unknown>>('Purchase Receipt', String(h['name']));
+			if (!full || !belongsToRequest(request, String(full[SUPPLY_REQUEST_KEY_FIELD] ?? ''), String(full['b24_deal_id'] ?? ''), String(full['creation'] ?? ''))) continue;
 			const rawItems = Array.isArray(full?.['items']) ? full['items'] as Array<Record<string, unknown>> : [];
 			const child: PurchaseReceiptChild = {
 				name: String(h['name'] ?? ''),
@@ -143,7 +168,7 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0), warehouse: String(l['warehouse'] ?? '') }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 			};
-			receipts.set(requestName, [...(receipts.get(requestName) ?? []), child]);
+			receipts.set(request.requestKey, [...(receipts.get(request.requestKey) ?? []), child]);
 		}
 		const headers = await erp.list<Record<string, unknown>>(
 			'Purchase Order',
@@ -154,8 +179,10 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 		);
 		for (const h of headers) {
 			const requestName = String(h[SUPPLY_REQUEST_FIELD] ?? '');
-			if (!requestName) continue;
+			const request = byName.get(requestName);
+			if (!request) continue;
 			const full = await erp.get<Record<string, unknown>>('Purchase Order', String(h['name']));
+			if (!full || !belongsToRequest(request, String(full[SUPPLY_REQUEST_KEY_FIELD] ?? ''), String(full['b24_deal_id'] ?? ''), String(full['creation'] ?? ''))) continue;
 			const rawItems = Array.isArray(full?.['items']) ? full['items'] as Array<Record<string, unknown>> : [];
 			const child: PurchaseChild = {
 				name: String(h['name'] ?? ''),
@@ -170,7 +197,7 @@ async function listPurchaseChildren(erp: ErpClient, requestNames: string[]): Pro
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 				receipts: [],
 			};
-			out.set(requestName, [...(out.get(requestName) ?? []), child]);
+			out.set(request.requestKey, [...(out.get(request.requestKey) ?? []), child]);
 		}
 		for (const [requestName, rows] of receipts.entries()) {
 			const purchases = out.get(requestName);
@@ -195,6 +222,13 @@ function addCovered(covered: Map<string, Map<number, number>>, requestName: stri
 	const byProduct = covered.get(requestName) ?? new Map<number, number>();
 	for (const l of lines) byProduct.set(l.productId, (byProduct.get(l.productId) ?? 0) + l.qty);
 	covered.set(requestName, byProduct);
+}
+
+function currentRequest(requests: SupplyRequest[], requestName: string, requestKey: string): SupplyRequest {
+	const request = requests.find((item) => item.name === requestName);
+	if (!request) throw new Error('заявка не найдена в ядре');
+	if (requestKey && request.requestKey !== requestKey) throw new Error('заявка была пересоздана; обнови список и повтори действие');
+	return request;
 }
 
 async function currentUser(client: B24Client): Promise<CurrentUser> {
@@ -234,23 +268,25 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				await ensureTransfersEntity(client);
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
-					transfersByRequest.set(t.supplyRequest, [...(transfersByRequest.get(t.supplyRequest) ?? []), t]);
-					if (t.status !== 'canceled') addCovered(planned, t.supplyRequest, t.lines);
+					const request = reqs.find((candidate) => transferBelongsToRequest(t, candidate));
+					if (!request) continue;
+					transfersByRequest.set(request.requestKey, [...(transfersByRequest.get(request.requestKey) ?? []), t]);
+					if (t.status !== 'canceled') addCovered(planned, request.requestKey, t.lines);
 					const lines = t.status === 'shortage' ? t.receivedLines : t.status === 'received' ? t.lines : [];
-					addCovered(fulfilled, t.supplyRequest, lines);
+					addCovered(fulfilled, request.requestKey, lines);
 				}
 			} catch {
 				// Если старое хранилище перемещений недоступно, заявки всё равно покажем как есть.
 			}
-			const purchasesByRequest = await listPurchaseChildren(erp, reqs.map((o) => o.name));
-			for (const [requestName, purchases] of purchasesByRequest.entries()) {
+			const purchasesByRequest = await listPurchaseChildren(erp, reqs);
+			for (const [requestKey, purchases] of purchasesByRequest.entries()) {
 				for (const purchase of purchases) {
-					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestName, purchase.lines);
+					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestKey, purchase.lines);
 				}
 			}
 			const enriched = reqs.map((o) => {
-				const byProduct = planned.get(o.name) ?? new Map<number, number>();
-				const fulfilledByProduct = fulfilled.get(o.name) ?? new Map<number, number>();
+				const byProduct = planned.get(o.requestKey) ?? new Map<number, number>();
+				const fulfilledByProduct = fulfilled.get(o.requestKey) ?? new Map<number, number>();
 				const remaining = o.items
 					.map((item) => ({ ...item, qty: Math.max(item.qty - (byProduct.get(item.productId) ?? 0), 0) }))
 					.filter((item) => item.qty > 0);
@@ -262,8 +298,8 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 					...o,
 					items: remaining,
 					originalItems: o.items,
-					transfers: transfersByRequest.get(o.name) ?? [],
-					purchases: purchasesByRequest.get(o.name) ?? [],
+					transfers: transfersByRequest.get(o.requestKey) ?? [],
+					purchases: purchasesByRequest.get(o.requestKey) ?? [],
 					dealTitle: titleMap.get(Number(o.dealId)) ?? '',
 					closed: MR_DONE.has(o.status) || closedByProgress,
 				};
@@ -303,7 +339,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 	});
 
 	app.post('/api/supply/create-documents', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; toStore?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; toStore?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -312,6 +348,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
+		const requestKey = String(b.requestKey ?? '').trim();
 		const toStore = String(b.toStore ?? '').trim();
 		if (!toStore) return reply.code(400).send({ ok: false, error: 'bad toStore' });
 		const lines: SupplyDecisionLine[] = (Array.isArray(b.lines) ? b.lines : [])
@@ -330,7 +367,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (badTransfer) return reply.code(400).send({ ok: false, error: `для перемещения нужен другой склад-источник: ${badTransfer.itemName || badTransfer.productId}` });
 		const badPurchase = lines.find((l) => l.action === 'purchase' && !l.supplier);
 		if (badPurchase) return reply.code(400).send({ ok: false, error: `для закупки нужен поставщик: ${badPurchase.itemName || badPurchase.productId}` });
-		const lockKey = `${normalizeDomain(b.domain ?? '')}:${requestName}`;
+		const lockKey = `${normalizeDomain(b.domain ?? '')}:${requestKey || requestName}`;
 		if (supplyCreationLocks.has(lockKey)) {
 			return reply.code(200).send({ ok: false, error: 'Документы по этой заявке уже создаются. Дождись результата текущей операции.' });
 		}
@@ -340,8 +377,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 
 		try {
 			await ensureTransfersEntity(client);
-			const request = (await listSupplyRequests(erp)).find((item) => item.name === requestName);
-			if (!request) throw new Error('заявка не найдена в ядре');
+			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			if (request.toStore && request.toStore !== toStore) throw new Error(`склад назначения заявки изменился: ${request.toStore}`);
 
@@ -350,10 +386,10 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const planned = new Map<number, number>();
 			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
-				if (transfer.supplyRequest !== requestName || transfer.status === 'canceled') continue;
+				if (!transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
 				for (const line of transfer.lines) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
 			}
-			const existingPurchases = (await listPurchaseChildren(erp, [requestName])).get(requestName) ?? [];
+			const existingPurchases = (await listPurchaseChildren(erp, [request])).get(request.requestKey) ?? [];
 			for (const purchase of existingPurchases) {
 				if (purchase.supplyStage === 'cancelled') continue;
 				for (const line of purchase.lines) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
@@ -399,6 +435,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				const { name } = await createPurchaseOrderDraft(erp, {
 					dealId,
 					supplyRequest: requestName,
+					supplyRequestKey: request.requestKey,
 					scheduleDate,
 					supplier,
 					lines: supplierLines.map((l) => ({ productId: l.productId, itemName: l.itemName, qty: l.qty, rate: 0 })),
@@ -414,6 +451,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				const transferLines = storeLines.map((l) => ({ productId: l.productId, name: l.itemName || `#${l.productId}`, qty: l.qty }));
 				const baseData = {
 					supplyRequest: requestName,
+					supplyRequestKey: request.requestKey,
 					purchaseOrder: '',
 					dealId: String(dealId),
 					toStore,
@@ -443,6 +481,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				const { name: shipEntry } = await shipTransferToTransit(erp, {
 					dealId,
 					supplyRequest: requestName,
+					supplyRequestKey: request.requestKey,
 					lines: transferLines.map((l) => ({ productId: l.productId, qty: l.qty, fromStore })),
 				});
 				const shippedAt = new Date().toISOString();
@@ -485,7 +524,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 	});
 
 	app.post('/api/supply/purchase-order', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; supplier?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; supplier?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -494,6 +533,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
+		const requestKey = String(b.requestKey ?? '').trim();
 		const supplier = String(b.supplier ?? '').trim();
 		const lines = (Array.isArray(b.lines) ? b.lines : [])
 			.map((l) => l as { productId?: unknown; itemName?: unknown; qty?: unknown; rate?: unknown })
@@ -501,9 +541,11 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0);
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций для закупки' });
 		try {
+			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
+			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			const scheduleDate = new Date().toISOString().slice(0, 10);
 			if (supplier) await ensureB24SupplierCompany(client, supplier);
-			const { name } = await createPurchaseOrderDraft(erp, { dealId, supplyRequest: requestName, scheduleDate, ...(supplier ? { supplier } : {}), lines });
+			const { name } = await createPurchaseOrderDraft(erp, { dealId, supplyRequest: requestName, supplyRequestKey: request.requestKey, scheduleDate, ...(supplier ? { supplier } : {}), lines });
 			app.log.info({ dealId, requestName, supplier, lines: lines.length, name }, '[api/supply/purchase-order] created');
 			return { ok: true, name };
 		} catch (err) {
@@ -598,7 +640,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 	});
 
 	app.post('/api/supply/purchase-receive', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; purchaseOrder?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; purchaseOrder?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -607,6 +649,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
+		const requestKey = String(b.requestKey ?? '').trim();
 		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
 		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
 		const toStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
@@ -616,7 +659,9 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0);
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет фактически полученных позиций' });
 		try {
-			const { name } = await createSupplyPurchaseReceipt(erp, { dealId, supplyRequest: requestName, purchaseOrder, toStore, lines });
+			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
+			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
+			const { name } = await createSupplyPurchaseReceipt(erp, { dealId, supplyRequest: requestName, supplyRequestKey: request.requestKey, purchaseOrder, toStore, lines });
 			app.log.info({ dealId, requestName, purchaseOrder, lines: lines.length, name }, '[api/supply/purchase-receive] received');
 			return { ok: true, name };
 		} catch (err) {
@@ -626,7 +671,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 	});
 
 	app.post('/api/supply/purchase-transfer', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; purchaseOrder?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; purchaseOrder?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -635,6 +680,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
+		const requestKey = String(b.requestKey ?? '').trim();
 		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
 		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
 		const incoming = new Map<number, number>();
@@ -651,8 +697,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		supplyCreationLocks.add(lockKey);
 		try {
 			await ensureTransfersEntity(client);
-			const request = (await listSupplyRequests(erp)).find((item) => item.name === requestName);
-			if (!request) throw new Error('заявка не найдена в ядре');
+			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			const toStore = String(request.toStore ?? '').trim();
 			if (!toStore) throw new Error('у заявки не указан склад точки');
@@ -663,6 +708,8 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			if (!order) throw new Error('заказ поставщику не найден');
 			if (String(order['b24_deal_id'] ?? '') !== String(dealId)) throw new Error('заказ поставщику не относится к этой сделке');
 			if (String(order[SUPPLY_REQUEST_FIELD] ?? '') !== requestName) throw new Error('заказ поставщику не относится к этой заявке');
+			const orderRequestKey = String(order[SUPPLY_REQUEST_KEY_FIELD] ?? '');
+			if (orderRequestKey && orderRequestKey !== request.requestKey) throw new Error('заказ поставщику относится к другой версии заявки');
 			const itemNames = new Map<number, string>();
 			for (const line of Array.isArray(order['items']) ? order['items'] as Array<Record<string, unknown>> : []) {
 				const productId = Number(line['item_code']);
@@ -689,7 +736,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const forwarded = new Map<number, number>();
 			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
-				if (transfer.supplyRequest !== requestName || transfer.status === 'canceled') continue;
+				if (!transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
 				for (const line of transfer.lines) {
 					covered.set(line.productId, (covered.get(line.productId) ?? 0) + line.qty);
 					if (transfer.purchaseOrder === purchaseOrder) forwarded.set(line.productId, (forwarded.get(line.productId) ?? 0) + line.qty);
@@ -708,6 +755,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const transferLines = [...incoming.entries()].map(([productId, qty]) => ({ productId, name: itemNames.get(productId) || `#${productId}`, qty }));
 			const baseData = {
 				supplyRequest: requestName,
+				supplyRequestKey: request.requestKey,
 				purchaseOrder,
 				dealId: String(dealId),
 				toStore,
@@ -737,6 +785,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const { name: shipEntry } = await shipTransferToTransit(erp, {
 				dealId,
 				supplyRequest: requestName,
+				supplyRequestKey: request.requestKey,
 				purchaseOrder,
 				lines: transferLines.map((line) => ({ productId: line.productId, qty: line.qty, fromStore })),
 			});
