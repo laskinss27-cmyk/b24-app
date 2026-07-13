@@ -1566,6 +1566,8 @@ html, body, #root { height: 100%; }
 .purchase-hint { font-size: 11px; color: #7a8699; font-weight: 400; margin-top: 2px; white-space: nowrap; }
 .purchase-hint.danger { color: #c0392b; font-weight: 600; }
 .purchase-hint.muted-hint { color: #aab4c2; }
+.goods-name-line { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.goods-ordered-mark { display: inline-flex; align-items: center; min-height: 18px; box-sizing: border-box; border: 1px solid #b8c7db; border-radius: 5px; padding: 1px 6px; background: #f3f6fa; color: #52657d; font-size: 10px; font-weight: 600; white-space: nowrap; }
 /* Инлайн-правка строки сделки: цена · скидка · кол-во прямо в ячейках. */
 .cell-edit { vertical-align: top; }
 .cell-price { display: inline-flex; align-items: center; gap: 3px; justify-content: flex-end; }

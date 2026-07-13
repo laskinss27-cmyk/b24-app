@@ -669,7 +669,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							/>
 						</div>
 					</td>
-					<td>{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}</td>
+					<td>
+						<span className="goods-name-line">{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}{activeSupply && <span className="goods-ordered-mark" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>}</span>
+					</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
 						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
@@ -784,7 +786,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
-	const supplyGoods = goods.filter((r) => isSel(r) && remaining(r) > 0);
+	const supplyGoods = goods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
 	const doCreateSupply = async (): Promise<void> => {
 		if (dealId == null || !supplyGoods.length || supplyBusy || busy || realizePhase !== 'idle') return;
 		setSupplyBusy(true);
