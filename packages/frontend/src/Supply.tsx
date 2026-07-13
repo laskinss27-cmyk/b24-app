@@ -3,6 +3,7 @@ import { getContext } from './b24-context.js';
 import {
 	BETA_USER_IDS,
 	createSupplyDocuments,
+	createSupplyPurchaseTransfer,
 	deleteSupplyPurchaseOrder,
 	deleteTransfer,
 	fetchCurrentUserId,
@@ -129,6 +130,27 @@ const purchaseStatus = (purchase: SupplyPurchaseChild): { label: string; tone: s
 	return { label: 'Черновик', tone: 'muted' };
 };
 
+function purchaseTransferAvailable(order: SupplyOrderRow, purchase: SupplyPurchaseChild): Map<number, number> {
+	const requested = new Map<number, number>();
+	for (const line of order.originalItems ?? order.items) requested.set(line.productId, (requested.get(line.productId) ?? 0) + Number(line.qty || 0));
+	const covered = new Map<number, number>();
+	const forwarded = new Map<number, number>();
+	for (const transfer of order.transfers ?? []) {
+		if (transfer.status === 'canceled') continue;
+		for (const line of transfer.lines) {
+			covered.set(line.productId, (covered.get(line.productId) ?? 0) + Number(line.qty || 0));
+			if (transfer.purchaseOrder === purchase.name) forwarded.set(line.productId, (forwarded.get(line.productId) ?? 0) + Number(line.qty || 0));
+		}
+	}
+	const received = new Map<number, number>();
+	for (const receipt of purchase.receipts) for (const line of receipt.lines) received.set(line.productId, (received.get(line.productId) ?? 0) + Number(line.qty || 0));
+	return new Map(purchase.lines.map((line) => {
+		const onReceiptStore = Math.max((received.get(line.productId) ?? 0) - (forwarded.get(line.productId) ?? 0), 0);
+		const neededAtPoint = Math.max((requested.get(line.productId) ?? 0) - (covered.get(line.productId) ?? 0), 0);
+		return [line.productId, Math.min(onReceiptStore, neededAtPoint)];
+	}));
+}
+
 const transferStatus = (transfer: SupplyTransferChild): { label: string; tone: string } => {
 	if (transfer.status === 'received') return { label: 'Получено', tone: 'ok' };
 	if (transfer.status === 'shortage') return { label: 'Недовоз', tone: 'warn' };
@@ -181,7 +203,7 @@ const PURCHASE_STAGE_OPTIONS: Array<{ value: SupplyPurchaseStage; label: string 
 	{ value: 'cancelled', label: 'Отменено' },
 ];
 
-function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onSetPurchaseStage, onReceivePurchase, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
+function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onSetPurchaseStage, onReceivePurchase, onCreatePurchaseTransfer, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
 	document: OpenSupplyDocument;
 	suppliers: string[];
 	busy: boolean;
@@ -191,6 +213,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 	onSavePurchase: (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>) => void;
 	onSetPurchaseStage: (stage: SupplyPurchaseStage, expectedAt: string) => void;
 	onReceivePurchase: (lines: Array<{ productId: number; qty: number; rate: number }>) => void;
+	onCreatePurchaseTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
 	onShipTransfer: () => void;
 	onReceiveTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
 	onResolveShortage: () => void;
@@ -214,12 +237,17 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		for (const receipt of purchase.receipts) for (const line of receipt.lines) received.set(line.productId, (received.get(line.productId) ?? 0) + Number(line.qty || 0));
 		return Object.fromEntries(purchase.lines.map((line) => [String(line.productId), Math.max(Number(line.qty || 0) - (received.get(line.productId) ?? 0), 0)]));
 	});
+	const [purchaseTransferLines, setPurchaseTransferLines] = useState<Record<string, number>>(() => {
+		if (!purchase || document.kind !== 'purchase') return {};
+		return Object.fromEntries(purchaseTransferAvailable(document.order, purchase));
+	});
 	useEffect(() => {
 		if (!purchase) return;
 		const received = new Map<number, number>();
 		for (const receipt of purchase.receipts) for (const line of receipt.lines) received.set(line.productId, (received.get(line.productId) ?? 0) + Number(line.qty || 0));
 		setPurchaseReceiveLines(Object.fromEntries(purchase.lines.map((line) => [String(line.productId), Math.max(Number(line.qty || 0) - (received.get(line.productId) ?? 0), 0)])));
-	}, [purchase]);
+		if (document.kind === 'purchase') setPurchaseTransferLines(Object.fromEntries(purchaseTransferAvailable(document.order, purchase)));
+	}, [document, purchase]);
 
 	if (document.kind === 'purchase') {
 		const { order, purchase: currentPurchase } = document;
@@ -228,10 +256,16 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		const receivedByProduct = new Map<number, number>();
 		for (const receipt of currentPurchase.receipts) for (const line of receipt.lines) receivedByProduct.set(line.productId, (receivedByProduct.get(line.productId) ?? 0) + Number(line.qty || 0));
 		const canReceivePurchase = currentPurchase.supplyStage === 'ordered' && purchaseLines.some((line) => Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0) > 0);
+		const transferAvailable = purchaseTransferAvailable(order, currentPurchase);
+		const canCreatePurchaseTransfer = [...transferAvailable.values()].some((qty) => qty > 0);
 		const receivePurchasePayload = purchaseLines.map((line) => ({
 			productId: line.productId,
 			qty: Math.max(0, Math.min(Number(purchaseReceiveLines[String(line.productId)] ?? 0), Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0))),
 			rate: line.rate,
+		})).filter((line) => line.qty > 0);
+		const purchaseTransferPayload = purchaseLines.map((line) => ({
+			productId: line.productId,
+			qty: Math.max(0, Math.min(Number(purchaseTransferLines[String(line.productId)] ?? 0), transferAvailable.get(line.productId) ?? 0)),
 		})).filter((line) => line.qty > 0);
 		return (
 			<div className="supply-proto-overlay">
@@ -247,22 +281,26 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 						<div><dt>Сумма</dt><dd>{total > 0.01 ? `${money(total)} ₽` : '—'}</dd></div>
 					</dl>
 					<div className="supply-document-lines">
-						<table><thead><tr><th>Позиция</th><th>Количество</th><th>Цена</th><th>Сумма</th>{canReceivePurchase && <th>К приходу</th>}<th aria-label="Удалить" /></tr></thead><tbody>
-							{purchaseLines.map((line) => <tr key={line.key}>
-								<td><b>{line.itemName}</b><small>#{line.productId}</small></td>
-								<td><input type="number" min="0" step="any" value={line.qty} onChange={(e) => setPurchaseLines((current) => current.map((row) => row.key === line.key ? { ...row, qty: Number(e.target.value) } : row))} /></td>
-								<td><input type="number" min="0" step="any" value={line.rate} onChange={(e) => setPurchaseLines((current) => current.map((row) => row.key === line.key ? { ...row, rate: Number(e.target.value) } : row))} /></td>
-								<td>{line.rate > 0 ? `${money(line.rate * line.qty)} ₽` : '—'}</td>
-								{canReceivePurchase && <td><input type="number" min="0" max={Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0)} step="any" value={purchaseReceiveLines[String(line.productId)] ?? 0} onChange={(e) => setPurchaseReceiveLines((current) => ({ ...current, [String(line.productId)]: Math.max(0, Math.min(Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0), Number(e.target.value) || 0)) }))} /><small>осталось {Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0)}</small></td>}
-								<td>{purchaseLines.length > 1 && <button className="supply-document-remove-line" type="button" title="Удалить позицию" aria-label="Удалить позицию" onClick={() => setPurchaseLines((current) => current.filter((row) => row.key !== line.key))}>×</button>}</td>
-							</tr>)}
+						<table><thead><tr><th>Позиция</th><th>Количество</th><th>Цена</th><th>Сумма</th>{canReceivePurchase && <th>К приходу</th>}{canCreatePurchaseTransfer && <th>К перемещению</th>}<th aria-label="Удалить" /></tr></thead><tbody>
+							{purchaseLines.map((line) => {
+								const transferMax = transferAvailable.get(line.productId) ?? 0;
+								return <tr key={line.key}>
+									<td><b>{line.itemName}</b><small>#{line.productId}</small></td>
+									<td><input type="number" min="0" step="any" value={line.qty} onChange={(e) => setPurchaseLines((current) => current.map((row) => row.key === line.key ? { ...row, qty: Number(e.target.value) } : row))} /></td>
+									<td><input type="number" min="0" step="any" value={line.rate} onChange={(e) => setPurchaseLines((current) => current.map((row) => row.key === line.key ? { ...row, rate: Number(e.target.value) } : row))} /></td>
+									<td>{line.rate > 0 ? `${money(line.rate * line.qty)} ₽` : '—'}</td>
+									{canReceivePurchase && <td><input type="number" min="0" max={Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0)} step="any" value={purchaseReceiveLines[String(line.productId)] ?? 0} onChange={(e) => setPurchaseReceiveLines((current) => ({ ...current, [String(line.productId)]: Math.max(0, Math.min(Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0), Number(e.target.value) || 0)) }))} /><small>осталось {Math.max(line.qty - (receivedByProduct.get(line.productId) ?? 0), 0)}</small></td>}
+									{canCreatePurchaseTransfer && <td>{transferMax > 0 ? <input type="number" min="0" max={transferMax} step="any" value={purchaseTransferLines[String(line.productId)] ?? 0} onChange={(e) => setPurchaseTransferLines((current) => ({ ...current, [String(line.productId)]: Math.max(0, Math.min(transferMax, Number(e.target.value) || 0)) }))} /> : '—'}</td>}
+									<td>{purchaseLines.length > 1 && <button className="supply-document-remove-line" type="button" title="Удалить позицию" aria-label="Удалить позицию" onClick={() => setPurchaseLines((current) => current.filter((row) => row.key !== line.key))}>×</button>}</td>
+								</tr>;
+							})}
 						</tbody></table>
 					</div>
 					{currentPurchase.receipts.length > 0 && <section className="supply-document-receipts"><h3>Оприходования</h3>{currentPurchase.receipts.map((receipt) => <div key={receipt.name}><b>{receipt.name}</b><span>{documentAmount(receipt.lines)}</span><small>{receipt.lines.map(lineTitle).join(' · ')}</small></div>)}</section>}
 					<datalist id="supply-document-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
 					<footer className="supply-document-modal-footer">
 						<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}<select value={purchaseStage} onChange={(e) => setPurchaseStage(e.target.value as SupplyPurchaseStage)}>{PURCHASE_STAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><button type="button" disabled={busy || purchaseStage === (currentPurchase.supplyStage || 'draft')} onClick={() => onSetPurchaseStage(purchaseStage, expectedAt)}>Изменить статус</button></div>
-						<div>{canReceivePurchase && <button type="button" disabled={busy || !receivePurchasePayload.length} title="Оприходовать фактически полученное на Склад Прихода" onClick={() => onReceivePurchase(receivePurchasePayload)}>{busy ? 'Провожу...' : 'Оприходовать'}</button>}<button type="button" onClick={onClose}>Закрыть</button><button className="primary" type="button" disabled={busy || !supplier.trim() || !purchaseLines.some((line) => line.qty > 0)} onClick={() => onSavePurchase(supplier.trim(), purchaseLines.filter((line) => line.qty > 0).map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty, rate })))}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></div>
+						<div>{canCreatePurchaseTransfer && <button type="button" disabled={busy || !purchaseTransferPayload.length} title={`Создать перемещение на ${order.toStore}`} onClick={() => onCreatePurchaseTransfer(purchaseTransferPayload)}>{busy ? 'Провожу...' : 'Создать перемещение'}</button>}{canReceivePurchase && <button type="button" disabled={busy || !receivePurchasePayload.length} title="Оприходовать фактически полученное на Склад Прихода" onClick={() => onReceivePurchase(receivePurchasePayload)}>{busy ? 'Провожу...' : 'Оприходовать'}</button>}<button type="button" onClick={onClose}>Закрыть</button><button className="primary" type="button" disabled={busy || !supplier.trim() || !purchaseLines.some((line) => line.qty > 0)} onClick={() => onSavePurchase(supplier.trim(), purchaseLines.filter((line) => line.qty > 0).map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty, rate })))}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></div>
 					</footer>
 				</section>
 			</div>
@@ -766,6 +804,20 @@ export function Supply(): JSX.Element {
 		} finally { setDocumentBusy(false); }
 	};
 
+	const createOpenPurchaseTransfer = async (lines: Array<{ productId: number; qty: number }>): Promise<void> => {
+		const target = openDocument;
+		if (!target || target.kind !== 'purchase' || documentBusy || !lines.length) return;
+		setDocumentBusy(true);
+		try {
+			const transfer = await createSupplyPurchaseTransfer(target.order.name, Number(target.order.dealId), target.purchase.name, lines);
+			await refreshOpenDocument(target);
+			setNotice(`${transfer.name || `Перемещение #${transfer.id}`}: товар отправлен в транзит на ${target.order.toStore}.`);
+		} catch (err) {
+			await refreshOpenDocument(target).catch(() => undefined);
+			setNotice(err instanceof Error ? err.message : 'Не удалось создать перемещение на точку.');
+		} finally { setDocumentBusy(false); }
+	};
+
 	const moveOpenTransfer = async (action: 'ship' | 'receive' | 'resolve', lines: Array<{ productId: number; qty: number }> = []): Promise<void> => {
 		const target = openDocument;
 		if (!target || target.kind !== 'transfer' || documentBusy) return;
@@ -944,6 +996,7 @@ export function Supply(): JSX.Element {
 				onSavePurchase={(supplier, lines) => void saveOpenPurchase(supplier, lines)}
 				onSetPurchaseStage={(stage, expectedAt) => void setOpenPurchaseStage(stage, expectedAt)}
 				onReceivePurchase={(lines) => void receiveOpenPurchase(lines)}
+				onCreatePurchaseTransfer={(lines) => void createOpenPurchaseTransfer(lines)}
 				onShipTransfer={() => void moveOpenTransfer('ship')}
 				onReceiveTransfer={(lines) => void moveOpenTransfer('receive', lines)}
 				onResolveShortage={() => void moveOpenTransfer('resolve')}

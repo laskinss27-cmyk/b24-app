@@ -572,6 +572,24 @@ async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
 	purchaseFieldDone = true;
 }
 
+let supplyTransferFieldDone = false;
+async function ensureSupplyTransferFields(erp: ErpClient): Promise<void> {
+	if (supplyTransferFieldDone) return;
+	await ensureErpSetup(erp);
+	for (const [fieldname, label, insertAfter] of [
+		[SUPPLY_REQUEST_FIELD, 'B24 Supply Request', DEAL_FIELD],
+		[SUPPLY_PURCHASE_ORDER_FIELD, 'B24 Purchase Order', SUPPLY_REQUEST_FIELD],
+	] as const) {
+		const name = `Stock Entry-${fieldname}`;
+		if (!(await erp.get('Custom Field', name))) {
+			await erp.create('Custom Field', {
+				dt: 'Stock Entry', fieldname, label, fieldtype: 'Data', insert_after: insertAfter, in_standard_filter: 1,
+			});
+		}
+	}
+	supplyTransferFieldDone = true;
+}
+
 export interface PurchaseDraftLine { productId: number; itemName?: string; qty: number; rate?: number }
 
 /** Черновик закупки по заявке снабжения. Не проводим: снабжение дальше выбирает поставщика/цены штатно. */
@@ -728,15 +746,17 @@ const TRANSIT_STORE = 'Goods In Transit';
  */
 export async function shipTransferToTransit(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number },
+	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; supplyRequest?: string; purchaseOrder?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
-	await ensureErpSetup(erp);
+	await ensureSupplyTransferFields(erp);
 	if (!args.lines.length) throw new Error('пустая отгрузка');
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
+		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -755,15 +775,17 @@ export async function shipTransferToTransit(
  */
 export async function receiveTransferFromTransit(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; dealId?: number },
+	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; dealId?: number; supplyRequest?: string; purchaseOrder?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
-	await ensureErpSetup(erp);
+	await ensureSupplyTransferFields(erp);
 	if (!args.lines.length) throw new Error('пустая приёмка');
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
+		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,

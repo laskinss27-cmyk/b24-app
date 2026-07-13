@@ -628,7 +628,7 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
-export interface SupplyTransferChild { id: number; name: string; status: string; fromStore: string; toStore: string; lines: TransferLineDto[]; receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[] }
+export interface SupplyTransferChild { id: number; name: string; purchaseOrder?: string; status: string; fromStore: string; toStore: string; lines: TransferLineDto[]; receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[] }
 export interface SupplyPurchaseReceiptChild { name: string; status: string; purchaseOrder?: string; lines: TransferLineDto[] }
 export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
 export interface SupplyPurchaseChild { name: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
@@ -765,6 +765,17 @@ export async function receiveSupplyPurchase(requestName: string, dealId: number,
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось принять закупку');
 	return json.name ?? '';
+}
+
+export async function createSupplyPurchaseTransfer(requestName: string, dealId: number, purchaseOrder: string, lines: Array<{ productId: number; qty: number }>): Promise<SupplyTransferChild> {
+	const res = await fetch('/api/supply/purchase-transfer', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, purchaseOrder, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: SupplyTransferChild };
+	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось создать перемещение на точку');
+	return json.transfer;
 }
 
 /** Строка плана сделки из ядра (черновик Sales Order). delivered — сколько уже отгружено. */
