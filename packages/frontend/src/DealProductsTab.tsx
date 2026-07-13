@@ -459,6 +459,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const [draftNames, setDraftNames] = useState<string[]>([]);
 	/** Идёт создание заявки в снабжение. */
 	const [supplyBusy, setSupplyBusy] = useState(false);
+	/** Подтверждение заказа снабжению и комментарии по выбранным позициям. */
+	const [showSupplyOrder, setShowSupplyOrder] = useState(false);
+	const [supplyNotes, setSupplyNotes] = useState<Record<string, string>>({});
 	/** id строки, по которой создаётся перемещение. */
 	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
 	/** Открыто модальное окно возврата от клиента. */
@@ -794,11 +797,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			}
 			let totalLines = 0;
 			for (const [sid, rows] of byDest.entries()) {
-				const lines = rows.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: '' }));
+				const lines = rows.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: String(supplyNotes[r.id] ?? '').trim() }));
 				totalLines += lines.length;
 				await createDealSupplyRequest(dealId, lines, sid > 0 ? storeName(sid) : undefined);
 			}
 			setSelected({});
+			setSupplyNotes({});
+			setShowSupplyOrder(false);
 			setNotice({ kind: 'ok', text: `Заказ сформирован: ${totalLines} ${plural(totalLines, 'позиция', 'позиции', 'позиций')}. Он появился в дисплее снабжения.` });
 			await onReload();
 		} catch (err) {
@@ -975,11 +980,41 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
 					)}
 					{realizePhase === 'idle' && supplyGoods.length > 0 && (
-						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => void doCreateSupply()}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
+						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => setShowSupplyOrder(true)}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
 					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>
+
+			{showSupplyOrder && (
+				<div className="deal-supply-order-overlay" onClick={() => !supplyBusy && setShowSupplyOrder(false)}>
+					<section className="deal-supply-order-modal" role="dialog" aria-modal="true" aria-label="Заказ снабжению" onClick={(e) => e.stopPropagation()}>
+						<header>
+							<div><h2>Заказ снабжению</h2><span>{supplyGoods.length} {plural(supplyGoods.length, 'позиция', 'позиции', 'позиций')}</span></div>
+							<button type="button" aria-label="Закрыть" title="Закрыть" disabled={supplyBusy} onClick={() => setShowSupplyOrder(false)}>×</button>
+						</header>
+						<div className="deal-supply-order-lines">
+							{supplyGoods.map((row) => (
+								<label key={row.id} className="deal-supply-order-line">
+									<span className="deal-supply-order-line-head"><b>{row.name}</b><small>{remaining(row)} {row.measure} · {storeName(storeOf(row))}</small></span>
+									<textarea
+										value={supplyNotes[row.id] ?? ''}
+										maxLength={500}
+										rows={2}
+										placeholder="Комментарий к позиции"
+										disabled={supplyBusy}
+										onChange={(e) => setSupplyNotes((notes) => ({ ...notes, [row.id]: e.target.value }))}
+									/>
+								</label>
+							))}
+						</div>
+						<footer>
+							<button type="button" disabled={supplyBusy} onClick={() => setShowSupplyOrder(false)}>Отмена</button>
+							<button className="primary" type="button" disabled={supplyBusy} onClick={() => void doCreateSupply()}>{supplyBusy ? 'Создаю…' : 'Создать заказ'}</button>
+						</footer>
+					</section>
+				</div>
+			)}
 
 			{splitRow && dealId != null && (() => {
 				const dest = storeOf(splitRow);

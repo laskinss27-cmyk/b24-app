@@ -769,6 +769,136 @@ h2.inv-h2 {
 	margin: 10px 0 12px;
 }
 .deal-addbar .hint { color: #97a1ad; font-size: 12px; }
+
+.deal-supply-order-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 1400;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 28px;
+	background: rgba(18, 28, 45, 0.42);
+}
+
+.deal-supply-order-modal {
+	display: flex;
+	flex-direction: column;
+	width: min(760px, calc(100vw - 56px));
+	max-height: calc(100vh - 56px);
+	box-sizing: border-box;
+	padding: 20px;
+	border: 1px solid #d8dee8;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: 0 20px 60px rgba(15, 23, 42, 0.24);
+}
+
+.deal-supply-order-modal header,
+.deal-supply-order-modal footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex: 0 0 auto;
+}
+
+.deal-supply-order-modal header {
+	padding-bottom: 14px;
+	border-bottom: 1px solid #e4e8ef;
+}
+
+.deal-supply-order-modal h2 {
+	margin: 0 0 3px;
+	font-size: 19px;
+}
+
+.deal-supply-order-modal header span {
+	color: #66758a;
+	font-size: 12px;
+}
+
+.deal-supply-order-modal button {
+	border: 1px solid #cdd5e0;
+	border-radius: 7px;
+	padding: 7px 13px;
+	background: #fff;
+	color: #1a2231;
+	font: inherit;
+	cursor: pointer;
+}
+
+.deal-supply-order-modal header > button {
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	font-size: 20px;
+}
+
+.deal-supply-order-lines {
+	overflow-y: auto;
+	min-height: 0;
+	padding: 4px 2px;
+}
+
+.deal-supply-order-line {
+	display: grid;
+	grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1.2fr);
+	align-items: center;
+	gap: 18px;
+	padding: 12px 4px;
+	border-bottom: 1px solid #edf0f4;
+}
+
+.deal-supply-order-line-head {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.deal-supply-order-line-head b {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+}
+
+.deal-supply-order-line-head small {
+	color: #66758a;
+	font-size: 11px;
+}
+
+.deal-supply-order-line textarea {
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 54px;
+	resize: vertical;
+	border: 1px solid #aeb9c8;
+	border-radius: 6px;
+	padding: 8px 10px;
+	background: #fff;
+	color: #172033;
+	font: inherit;
+	font-size: 13px;
+}
+
+.deal-supply-order-line textarea:focus {
+	border-color: #2673c9;
+	outline: 2px solid rgba(38, 115, 201, 0.14);
+}
+
+.deal-supply-order-modal footer {
+	justify-content: flex-end;
+	padding-top: 14px;
+	border-top: 1px solid #e4e8ef;
+}
+
+.deal-supply-order-modal .primary {
+	border-color: #1769c2;
+	background: #1769c2;
+	color: #fff;
+}
 .add-search {
 	width: 100%;
 	padding: 9px 12px;
