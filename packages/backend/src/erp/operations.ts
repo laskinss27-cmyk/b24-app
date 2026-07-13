@@ -712,7 +712,12 @@ export async function createSupplyPurchaseReceipt(
 		})),
 	});
 	const name = String(doc['name']);
-	await erp.submit('Purchase Receipt', name);
+	try {
+		await erp.submit('Purchase Receipt', name);
+	} catch (err) {
+		await erp.delete('Purchase Receipt', name).catch(() => undefined);
+		throw err;
+	}
 	return { name };
 }
 
@@ -765,7 +770,12 @@ export async function shipTransferToTransit(
 		})),
 	});
 	const name = String(doc['name']);
-	await erp.submit('Stock Entry', name);
+	try {
+		await erp.submit('Stock Entry', name);
+	} catch (err) {
+		await erp.delete('Stock Entry', name).catch(() => undefined);
+		throw err;
+	}
 	return { name };
 }
 
@@ -794,7 +804,12 @@ export async function receiveTransferFromTransit(
 		})),
 	});
 	const name = String(doc['name']);
-	await erp.submit('Stock Entry', name);
+	try {
+		await erp.submit('Stock Entry', name);
+	} catch (err) {
+		await erp.delete('Stock Entry', name).catch(() => undefined);
+		throw err;
+	}
 	return { name };
 }
 
