@@ -173,7 +173,7 @@ function Pill({ tone, children }: { tone: string; children: string }): JSX.Eleme
 }
 
 function Metrics({ orders }: { orders: SupplyOrderRow[] }): JSX.Element {
-	const openOrders = orders.filter((order) => requestItemsForOrder(order).length > 0).length;
+	const openOrders = orders.filter((order) => !order.closed).length;
 	const purchaseCount = orders.reduce((sum, order) => sum + (order.purchases?.length ?? 0), 0);
 	const receiptCount = orders.reduce((sum, order) => sum + (order.purchases ?? []).reduce((a, purchase) => a + purchase.receipts.length, 0), 0);
 	const transferCount = orders.reduce((sum, order) => sum + (order.transfers?.length ?? 0), 0);
@@ -528,6 +528,11 @@ function OrdersView({
 						return count + (transferTotal > item.qty ? 1 : 0) + storeErrors;
 					}, 0);
 					const canCreate = items.length > 0 && readyLines.length > 0 && incompleteCount === 0 && allocationErrorCount === 0 && Boolean(order.toStore) && !busy;
+					const requestState = order.closed
+						? { label: 'закрыто', tone: 'ok' as const }
+						: items.length
+							? { label: `${items.length} строк`, tone: 'warn' as const }
+							: { label: 'в исполнении', tone: 'info' as const };
 					const isReviewing = reviewing === order.name;
 					return (
 						<article key={order.name} className={`supply-order-card${isOpen ? ' open' : ''}`}>
@@ -537,7 +542,7 @@ function OrdersView({
 									<small>#{order.dealId} · {order.toStore || 'склад не указан'} · {order.date || 'без даты'}</small>
 								</div>
 								<div className="supply-order-head-meta">
-									<Pill tone={items.length ? 'warn' : 'ok'}>{items.length ? `${items.length} строк` : 'закрыто'}</Pill>
+									<Pill tone={requestState.tone}>{requestState.label}</Pill>
 									{documentsSummary(order)}
 								</div>
 							</button>
@@ -547,7 +552,7 @@ function OrdersView({
 										<table className="supply-proto-table supply-decision-table">
 											<thead><tr><th>Позиция</th><th>Нужно</th><th>Остатки</th><th>Действие</th><th>Откуда / поставщик</th><th>Кол-во</th></tr></thead>
 											<tbody>
-												{items.length === 0 ? <tr><td colSpan={6} className="empty">По этой заявке всё закрыто документами.</td></tr> : items.map((item, index) => {
+											{items.length === 0 ? <tr><td colSpan={6} className="empty">{order.closed ? 'Заявка выполнена.' : 'Все позиции распределены. Ожидается исполнение документов.'}</td></tr> : items.map((item, index) => {
 													const key = rowKey(order.name, item.productId, index);
 													const rowDecisions = decisionsForRow(decisions, key, item.qty);
 													const assigned = rowDecisions.filter(decisionReady).reduce((sum, decision) => sum + decision.qty, 0);
@@ -584,7 +589,7 @@ function OrdersView({
 											})}
 										</div>}
 								</div>
-								<div className="supply-order-plan">
+								{items.length > 0 && <div className="supply-order-plan">
 									<div>
 										<b>{readyLines.length ? `Распределений: ${readyLines.length}` : 'Решения ещё не выбраны'}</b>
 										<span>
@@ -598,7 +603,7 @@ function OrdersView({
 										</span>
 									</div>
 									<button className="primary" type="button" disabled={!canCreate} onClick={() => onReview(order.name)}>Создать документы</button>
-								</div>
+								</div>}
 								{isReviewing && (
 									<div className="supply-order-review">
 										<div className="supply-order-review-head">
@@ -653,7 +658,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 					<div key={order.name} className="supply-proto-deal">
 						<div className="supply-proto-deal-head">
 							<div><b>{order.name}</b><small>#{order.dealId} · {order.dealTitle || order.toStore}</small></div>
-							<Pill tone={requestItemsForOrder(order).length ? 'info' : 'ok'}>{requestItemsForOrder(order).length ? 'в работе' : 'закрыто'}</Pill>
+							<Pill tone={order.closed ? 'ok' : 'info'}>{order.closed ? 'закрыто' : requestItemsForOrder(order).length ? 'требует решения' : 'в исполнении'}</Pill>
 						</div>
 						<div className="supply-proto-thread">
 							{(order.purchases ?? []).map((purchase) => {

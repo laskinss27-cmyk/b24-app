@@ -13,7 +13,7 @@ import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
  * Канарейку режет фронт. Токен юзера, домен — allowlist портала.
  */
 // «Обеспечено» — снабженец отработал заявку (статусы Material Request).
-const MR_DONE = new Set(['Ordered', 'Transferred', 'Issued', 'Received', 'Stopped']);
+const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 interface AuthBody { domain?: string; accessToken?: string }
 
 function errInfo(err: unknown): string {
