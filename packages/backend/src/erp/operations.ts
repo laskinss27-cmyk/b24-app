@@ -19,6 +19,7 @@ export const SUPPLY_PURCHASE_ORDER_FIELD = 'b24_purchase_order';
 export const SUPPLY_PURCHASE_STAGE_FIELD = 'b24_supply_stage';
 export const SUPPLY_PURCHASE_ORDERED_AT_FIELD = 'b24_ordered_at';
 export const SUPPLY_PURCHASE_EXPECTED_AT_FIELD = 'b24_expected_at';
+export const SUPPLY_PURCHASE_REQUEST_QTY_FIELD = 'b24_request_qty';
 const TECH_CUSTOMER = 'Б24 Розница';
 const TECH_SUPPLIER = 'Б24 Снабжение';
 const ITEM_GROUP = 'Каталог Б24';
@@ -585,6 +586,16 @@ async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
 			in_standard_filter: 1,
 		});
 	}
+	if (!(await erp.get('Custom Field', `Purchase Order Item-${SUPPLY_PURCHASE_REQUEST_QTY_FIELD}`))) {
+		await erp.create('Custom Field', {
+			dt: 'Purchase Order Item',
+			fieldname: SUPPLY_PURCHASE_REQUEST_QTY_FIELD,
+			label: 'B24 Request Qty',
+			fieldtype: 'Float',
+			insert_after: 'qty',
+			read_only: 1,
+		});
+	}
 	purchaseFieldDone = true;
 }
 
@@ -607,7 +618,7 @@ async function ensureSupplyTransferFields(erp: ErpClient): Promise<void> {
 	supplyTransferFieldDone = true;
 }
 
-export interface PurchaseDraftLine { productId: number; itemName?: string; qty: number; rate?: number }
+export interface PurchaseDraftLine { productId: number; itemName?: string; qty: number; rate?: number; requestQty?: number }
 
 /** Черновик закупки по заявке снабжения. Не проводим: снабжение дальше выбирает поставщика/цены штатно. */
 export async function createPurchaseOrderDraft(
@@ -632,6 +643,7 @@ export async function createPurchaseOrderDraft(
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
+			[SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: Math.max(l.requestQty ?? l.qty, 0),
 			schedule_date: args.scheduleDate,
 			rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
 		})),
@@ -649,15 +661,27 @@ export async function updatePurchaseOrderDraft(
 	if (Number(current['docstatus'] ?? 0) !== 0) throw new Error('можно редактировать только черновик закупки');
 	if (!args.lines.length) throw new Error('пустая закупка');
 	const scheduleDate = String(current['schedule_date'] ?? new Date().toISOString().slice(0, 10));
+	const requestQtyByProduct = new Map<number, number[]>();
+	for (const raw of Array.isArray(current['items']) ? current['items'] as Array<Record<string, unknown>> : []) {
+		const productId = Number(raw['item_code']);
+		if (!Number.isInteger(productId) || productId <= 0) continue;
+		const stored = raw[SUPPLY_PURCHASE_REQUEST_QTY_FIELD];
+		const requestQty = stored == null ? Number(raw['qty'] ?? 0) : Number(stored);
+		requestQtyByProduct.set(productId, [...(requestQtyByProduct.get(productId) ?? []), Math.max(requestQty, 0)]);
+	}
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
 	const rates = await fetchErpPurchasing(erp, args.lines.map((l) => l.productId));
 	const patch: Record<string, unknown> = {
-		items: args.lines.map((l) => ({
-			item_code: String(l.productId),
-			qty: l.qty,
-			schedule_date: scheduleDate,
-			rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
-		})),
+		items: args.lines.map((l) => {
+			const existing = requestQtyByProduct.get(l.productId)?.shift();
+			return {
+				item_code: String(l.productId),
+				qty: l.qty,
+				[SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: Math.max(l.requestQty ?? existing ?? 0, 0),
+				schedule_date: scheduleDate,
+				rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
+			};
+		}),
 	};
 	if (args.supplier) patch['supplier'] = await ensureSupplier(erp, args.supplier);
 	const doc = await erp.update('Purchase Order', args.purchaseOrder, patch);

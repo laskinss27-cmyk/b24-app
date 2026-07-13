@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, shipTransferToTransit, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, shipTransferToTransit, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 
 /**
@@ -20,7 +20,7 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string }
+interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string; requestQty?: number }
 interface TransferProgress {
 	id: number;
 	name: string;
@@ -187,7 +187,11 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 				expectedAt: String(full?.[SUPPLY_PURCHASE_EXPECTED_AT_FIELD] ?? full?.['schedule_date'] ?? ''),
 				total: Number(full?.['grand_total'] ?? 0),
 				lines: rawItems
-					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0) }))
+					.map((l) => {
+						const qty = Number(l['qty'] ?? 0);
+						const storedRequestQty = l[SUPPLY_PURCHASE_REQUEST_QTY_FIELD];
+						return { productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty, rate: Number(l['rate'] ?? 0), requestQty: storedRequestQty == null ? qty : Math.max(Number(storedRequestQty), 0) };
+					})
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 				receipts: [],
 			};
@@ -216,6 +220,12 @@ function addCovered(covered: Map<string, Map<number, number>>, requestName: stri
 	const byProduct = covered.get(requestName) ?? new Map<number, number>();
 	for (const l of lines) byProduct.set(l.productId, (byProduct.get(l.productId) ?? 0) + l.qty);
 	covered.set(requestName, byProduct);
+}
+
+function purchaseRequestLines(lines: TransferLine[]): TransferLine[] {
+	return lines
+		.map((line) => ({ ...line, qty: Math.min(line.qty, line.requestQty ?? line.qty) }))
+		.filter((line) => line.qty > 0);
 }
 
 function currentRequest(requests: SupplyRequest[], requestName: string, requestKey: string): SupplyRequest {
@@ -275,7 +285,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const purchasesByRequest = await listPurchaseChildren(erp, reqs);
 			for (const [requestKey, purchases] of purchasesByRequest.entries()) {
 				for (const purchase of purchases) {
-					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestKey, purchase.lines);
+					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestKey, purchaseRequestLines(purchase.lines));
 				}
 			}
 			const enriched = reqs.map((o) => {
@@ -705,9 +715,16 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const orderRequestKey = String(order[SUPPLY_REQUEST_KEY_FIELD] ?? '');
 			if (orderRequestKey && orderRequestKey !== request.requestKey) throw new Error('заказ поставщику относится к другой версии заявки');
 			const itemNames = new Map<number, string>();
+			const allocated = new Map<number, number>();
 			for (const line of Array.isArray(order['items']) ? order['items'] as Array<Record<string, unknown>> : []) {
 				const productId = Number(line['item_code']);
-				if (Number.isInteger(productId) && productId > 0) itemNames.set(productId, String(line['item_name'] ?? line['item_code'] ?? ''));
+				if (Number.isInteger(productId) && productId > 0) {
+					itemNames.set(productId, String(line['item_name'] ?? line['item_code'] ?? ''));
+					const qty = Number(line['qty'] ?? 0);
+					const storedRequestQty = line[SUPPLY_PURCHASE_REQUEST_QTY_FIELD];
+					const requestQty = storedRequestQty == null ? qty : Math.max(Number(storedRequestQty), 0);
+					allocated.set(productId, (allocated.get(productId) ?? 0) + Math.min(qty, requestQty));
+				}
 			}
 
 			const received = new Map<number, number>();
@@ -739,9 +756,11 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			for (const [productId, qty] of incoming.entries()) {
 				const available = Math.max((received.get(productId) ?? 0) - (forwarded.get(productId) ?? 0), 0);
 				const needed = Math.max((requested.get(productId) ?? 0) - (covered.get(productId) ?? 0), 0);
+				const allocatedRemaining = Math.max((allocated.get(productId) ?? 0) - (forwarded.get(productId) ?? 0), 0);
 				const title = itemNames.get(productId) || `#${productId}`;
 				if (qty > available + 0.000001) throw new Error(`для «${title}» оприходовано и ещё не перемещено ${available}, указано ${qty}`);
 				if (qty > needed + 0.000001) throw new Error(`для точки по «${title}» осталось получить ${needed}, указано ${qty}`);
+				if (qty > allocatedRemaining + 0.000001) throw new Error(`из этой заявки поставщику для «${title}» к перемещению по исходной заявке осталось ${allocatedRemaining}, указано ${qty}`);
 			}
 
 			const me = await currentUser(client);

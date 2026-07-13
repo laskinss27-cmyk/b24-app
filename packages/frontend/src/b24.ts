@@ -974,7 +974,7 @@ export async function realizeDeal(dealId: number, items: RealizeItem[]): Promise
 
 // ── Перемещения (складской учёт) ─────────────────────────────────────────────
 export type TransferStatus = 'requested' | 'in_transit' | 'received' | 'shortage' | 'canceled';
-export interface TransferLineDto { productId: number; name: string; qty: number; rate?: number; warehouse?: string }
+export interface TransferLineDto { productId: number; name: string; qty: number; rate?: number; warehouse?: string; requestQty?: number }
 export interface TransferDoc {
 	id: number;
 	name: string;

@@ -147,9 +147,11 @@ function purchaseTransferAvailable(order: SupplyOrderRow, purchase: SupplyPurcha
 	const received = new Map<number, number>();
 	for (const receipt of purchase.receipts) for (const line of receipt.lines) received.set(line.productId, (received.get(line.productId) ?? 0) + Number(line.qty || 0));
 	return new Map(purchase.lines.map((line) => {
-		const onReceiptStore = Math.max((received.get(line.productId) ?? 0) - (forwarded.get(line.productId) ?? 0), 0);
+		const alreadyForwarded = forwarded.get(line.productId) ?? 0;
+		const onReceiptStore = Math.max((received.get(line.productId) ?? 0) - alreadyForwarded, 0);
 		const neededAtPoint = Math.max((requested.get(line.productId) ?? 0) - (covered.get(line.productId) ?? 0), 0);
-		return [line.productId, Math.min(onReceiptStore, neededAtPoint)];
+		const allocatedRemaining = Math.max(Math.min(Number(line.qty || 0), Number(line.requestQty ?? line.qty)) - alreadyForwarded, 0);
+		return [line.productId, Math.min(onReceiptStore, neededAtPoint, allocatedRemaining)];
 	}));
 }
 
