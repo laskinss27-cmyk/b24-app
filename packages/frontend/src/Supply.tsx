@@ -205,15 +205,14 @@ const PURCHASE_STAGE_OPTIONS: Array<{ value: SupplyPurchaseStage; label: string 
 	{ value: 'cancelled', label: 'Отменено' },
 ];
 
-function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onSetPurchaseStage, onReceivePurchase, onCreatePurchaseTransfer, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
+function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onReceivePurchase, onCreatePurchaseTransfer, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
 	document: OpenSupplyDocument;
 	suppliers: string[];
 	busy: boolean;
 	canDelete: boolean;
 	onClose: () => void;
 	onDelete: () => void;
-	onSavePurchase: (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>) => void;
-	onSetPurchaseStage: (stage: SupplyPurchaseStage, expectedAt: string) => void;
+	onSavePurchase: (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>, stage: SupplyPurchaseStage, expectedAt: string) => void;
 	onReceivePurchase: (lines: Array<{ productId: number; qty: number; rate: number }>) => void;
 	onCreatePurchaseTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
 	onShipTransfer: () => void;
@@ -301,8 +300,8 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 					{currentPurchase.receipts.length > 0 && <section className="supply-document-receipts"><h3>Оприходования</h3>{currentPurchase.receipts.map((receipt) => <div key={receipt.name}><b>{receipt.name}</b><span>{documentAmount(receipt.lines)}</span><small>{receipt.lines.map(lineTitle).join(' · ')}</small></div>)}</section>}
 					<datalist id="supply-document-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
 					<footer className="supply-document-modal-footer">
-						<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}<select value={purchaseStage} onChange={(e) => setPurchaseStage(e.target.value as SupplyPurchaseStage)}>{PURCHASE_STAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><button type="button" disabled={busy || purchaseStage === (currentPurchase.supplyStage || 'draft')} onClick={() => onSetPurchaseStage(purchaseStage, expectedAt)}>Изменить статус</button></div>
-						<div>{canCreatePurchaseTransfer && <button type="button" disabled={busy || !purchaseTransferPayload.length} title={`Создать перемещение на ${order.toStore}`} onClick={() => onCreatePurchaseTransfer(purchaseTransferPayload)}>{busy ? 'Провожу...' : 'Создать перемещение'}</button>}{canReceivePurchase && <button type="button" disabled={busy || !receivePurchasePayload.length} title="Оприходовать фактически полученное на Склад Прихода" onClick={() => onReceivePurchase(receivePurchasePayload)}>{busy ? 'Провожу...' : 'Оприходовать'}</button>}<button type="button" onClick={onClose}>Закрыть</button><button className="primary" type="button" disabled={busy || !supplier.trim() || !purchaseLines.some((line) => line.qty > 0)} onClick={() => onSavePurchase(supplier.trim(), purchaseLines.filter((line) => line.qty > 0).map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty, rate })))}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></div>
+						<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}<select value={purchaseStage} onChange={(e) => setPurchaseStage(e.target.value as SupplyPurchaseStage)}>{PURCHASE_STAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
+						<div>{canCreatePurchaseTransfer && <button type="button" disabled={busy || !purchaseTransferPayload.length} title={`Создать перемещение на ${order.toStore}`} onClick={() => onCreatePurchaseTransfer(purchaseTransferPayload)}>{busy ? 'Провожу...' : 'Создать перемещение'}</button>}{canReceivePurchase && <button type="button" disabled={busy || !receivePurchasePayload.length} title="Оприходовать фактически полученное на Склад Прихода" onClick={() => onReceivePurchase(receivePurchasePayload)}>{busy ? 'Провожу...' : 'Оприходовать'}</button>}<button type="button" onClick={onClose}>Закрыть</button><button className="primary" type="button" disabled={busy || !supplier.trim() || !purchaseLines.some((line) => line.qty > 0)} onClick={() => onSavePurchase(supplier.trim(), purchaseLines.filter((line) => line.qty > 0).map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty, rate })), purchaseStage, expectedAt)}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></div>
 					</footer>
 				</section>
 			</div>
@@ -772,29 +771,19 @@ export function Supply(): JSX.Element {
 		setOpenDocument(transfer ? { kind: 'transfer', order, transfer } : null);
 	};
 
-	const saveOpenPurchase = async (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<void> => {
+	const saveOpenPurchase = async (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>, stage: SupplyPurchaseStage, expectedAt: string): Promise<void> => {
 		const target = openDocument;
 		if (!target || target.kind !== 'purchase' || documentBusy) return;
 		setDocumentBusy(true);
 		try {
 			await updateSupplyPurchaseOrder(target.purchase.name, supplier, lines);
+			if (stage !== (target.purchase.supplyStage || 'draft') || expectedAt !== (target.purchase.expectedAt || '')) {
+				await updateSupplyPurchaseStage(target.purchase.name, stage, expectedAt);
+			}
 			await refreshOpenDocument(target);
-			setNotice(`${target.purchase.name}: сохранено.`);
+			setNotice(`${target.purchase.name}: сохранено, статус «${PURCHASE_STAGE_OPTIONS.find((option) => option.value === stage)?.label ?? stage}».`);
 		} catch (err) {
 			setNotice(err instanceof Error ? err.message : 'Не удалось сохранить заявку поставщику.');
-		} finally { setDocumentBusy(false); }
-	};
-
-	const setOpenPurchaseStage = async (stage: SupplyPurchaseStage, expectedAt: string): Promise<void> => {
-		const target = openDocument;
-		if (!target || target.kind !== 'purchase' || documentBusy) return;
-		setDocumentBusy(true);
-		try {
-			await updateSupplyPurchaseStage(target.purchase.name, stage, expectedAt);
-			await refreshOpenDocument(target);
-			setNotice(`${target.purchase.name}: ${PURCHASE_STAGE_OPTIONS.find((option) => option.value === stage)?.label ?? stage}.`);
-		} catch (err) {
-			setNotice(err instanceof Error ? err.message : 'Не удалось изменить статус заявки поставщику.');
 		} finally { setDocumentBusy(false); }
 	};
 
@@ -1000,8 +989,7 @@ export function Supply(): JSX.Element {
 				canDelete={currentUserId === '1858'}
 				onClose={() => setOpenDocument(null)}
 				onDelete={() => void deleteOpenDocument()}
-				onSavePurchase={(supplier, lines) => void saveOpenPurchase(supplier, lines)}
-				onSetPurchaseStage={(stage, expectedAt) => void setOpenPurchaseStage(stage, expectedAt)}
+				onSavePurchase={(supplier, lines, stage, expectedAt) => void saveOpenPurchase(supplier, lines, stage, expectedAt)}
 				onReceivePurchase={(lines) => void receiveOpenPurchase(lines)}
 				onCreatePurchaseTransfer={(lines) => void createOpenPurchaseTransfer(lines)}
 				onShipTransfer={() => void moveOpenTransfer('ship')}
