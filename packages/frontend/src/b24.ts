@@ -756,11 +756,11 @@ export async function updateSupplyPurchaseStage(purchaseOrder: string, stage: Su
 	return json.name ?? '';
 }
 
-export async function receiveSupplyPurchase(requestName: string, dealId: number, purchaseOrder: string, toStore: string, lines: Array<{ productId: number; qty: number; rate: number }>): Promise<string> {
+export async function receiveSupplyPurchase(requestName: string, dealId: number, purchaseOrder: string, lines: Array<{ productId: number; qty: number; rate: number }>): Promise<string> {
 	const res = await fetch('/api/supply/purchase-receive', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, purchaseOrder, toStore, lines }),
+		body: JSON.stringify({ ...bx24Auth(), requestName, dealId, purchaseOrder, lines }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось принять закупку');

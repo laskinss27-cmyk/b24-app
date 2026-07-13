@@ -648,10 +648,39 @@ export async function createSupplyPurchaseReceipt(
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensurePurchaseFields(erp);
+	const order = await erp.get<Record<string, unknown>>('Purchase Order', args.purchaseOrder);
+	if (!order) throw new Error('заказ поставщику не найден');
+	if (String(order[DEAL_FIELD] ?? '') !== String(args.dealId)) throw new Error('заказ поставщику не относится к этой сделке');
+	if (String(order[SUPPLY_REQUEST_FIELD] ?? '') !== args.supplyRequest) throw new Error('заказ поставщику не относится к этой заявке');
+	if (String(order[SUPPLY_PURCHASE_STAGE_FIELD] ?? '') !== 'ordered') throw new Error('оприходовать можно только заказ со статусом «Заказано»');
+	const orderedByProduct = new Map<number, number>();
+	const rateByProduct = new Map<number, number>();
+	for (const line of (Array.isArray(order['items']) ? order['items'] as Array<Record<string, unknown>> : [])) {
+		const productId = Number(line['item_code']);
+		if (Number.isInteger(productId) && productId > 0) {
+			orderedByProduct.set(productId, (orderedByProduct.get(productId) ?? 0) + Number(line['qty'] ?? 0));
+			rateByProduct.set(productId, Number(line['rate'] ?? 0));
+		}
+	}
+	const receivedByProduct = new Map<number, number>();
+	const receiptHeaders = await erp.list<Record<string, unknown>>('Purchase Receipt', ['name'], [[SUPPLY_PURCHASE_ORDER_FIELD, '=', args.purchaseOrder], ['docstatus', '!=', 2]]);
+	for (const header of receiptHeaders) {
+		const receipt = await erp.get<Record<string, unknown>>('Purchase Receipt', String(header['name'] ?? ''));
+		for (const line of (Array.isArray(receipt?.['items']) ? receipt['items'] as Array<Record<string, unknown>> : [])) {
+			const productId = Number(line['item_code']);
+			if (Number.isInteger(productId) && productId > 0) receivedByProduct.set(productId, (receivedByProduct.get(productId) ?? 0) + Number(line['qty'] ?? 0));
+		}
+	}
+	const incomingByProduct = new Map<number, number>();
+	for (const line of args.lines) incomingByProduct.set(line.productId, (incomingByProduct.get(line.productId) ?? 0) + line.qty);
+	for (const [productId, incoming] of incomingByProduct.entries()) {
+		const remaining = Math.max((orderedByProduct.get(productId) ?? 0) - (receivedByProduct.get(productId) ?? 0), 0);
+		if (incoming > remaining + 0.000001) throw new Error(`нельзя оприходовать товар #${productId}: осталось ${remaining}, указано ${incoming}`);
+	}
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: `#${l.productId}` });
 	const doc = await erp.create('Purchase Receipt', {
 		company: ctx.company,
-		supplier: TECH_SUPPLIER,
+		supplier: String(order['supplier'] ?? '') || TECH_SUPPLIER,
 		set_posting_time: 1,
 		remarks: `Supply purchase order ${args.purchaseOrder}`,
 		[DEAL_FIELD]: String(args.dealId),
@@ -661,7 +690,7 @@ export async function createSupplyPurchaseReceipt(
 			item_code: String(l.productId),
 			qty: l.qty,
 			warehouse: erpWarehouse(ctx, args.toStore),
-			rate: Math.max(l.rate, 0.01),
+			rate: Math.max(rateByProduct.get(l.productId) ?? l.rate, 0.01),
 		})),
 	});
 	const name = String(doc['name']);

@@ -32,6 +32,7 @@
 | `POST /api/deal/realize` | `dealId, items[{rowId,productId,quantity,rowQuantity,price,name}]` | черновик-партия реализации (цикл см. features.md); ответ `{orderId, orderReused, shipmentId, accountNumber, dupRemoved}`; при ошибке `{ok:false, error, created{...}}` — артефакты для ручной зачистки |
 | `POST /api/deal/supply-request` | `dealId, items[{name,quantity,measure}], storeToName?` | заявка снабжения: append в открытую или создание «Поставка № N_…» (+галка на сделке против робота); ответ `{mode:'created'\|'appended', cardId, title}` |
 | `POST /api/supply/create-documents` | `requestName, dealId, toStore, lines[{productId,itemName,qty,action,fromStore?,supplier?}]` | создаёт сгруппированные документы по решению снабжения: перемещения сразу в транзит, закупки черновиками; повторно сверяет незакрытое количество и остатки |
+| `POST /api/supply/purchase-receive` | `requestName, dealId, purchaseOrder, lines[{productId,qty,rate}]` | частично или полностью приходует заказ на серверно заданный приходный склад; проверяет статус «Заказано», связь документов и остаток к приёмке |
 
 ## Снаб
 

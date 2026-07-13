@@ -594,7 +594,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 	});
 
 	app.post('/api/supply/purchase-receive', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; purchaseOrder?: unknown; toStore?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; purchaseOrder?: unknown; lines?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -605,8 +605,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
 		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
 		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
-		const toStore = String(b.toStore ?? '').trim();
-		if (!toStore) return reply.code(400).send({ ok: false, error: 'bad toStore' });
+		const toStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
 		const lines = (Array.isArray(b.lines) ? b.lines : [])
 			.map((l) => l as { productId?: unknown; qty?: unknown; rate?: unknown })
 			.map((l) => ({ productId: Number(l.productId), qty: Number(l.qty), rate: Number(l.rate ?? 0) }))
