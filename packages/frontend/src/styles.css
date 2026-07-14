@@ -4271,6 +4271,23 @@ body.deal-placement-body #root {
 	font-size: 13px;
 }
 
+.supply-order-printbar {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: 8px;
+}
+
+.supply-order-printbar button {
+	border: 1px solid #cdd5e0;
+	border-radius: 7px;
+	padding: 6px 11px;
+	background: #fff;
+	color: #1a2231;
+	cursor: pointer;
+	font: inherit;
+	font-size: 12px;
+}
+
 .supply-document-tree {
 	margin-top: 10px;
 	padding-left: 28px;
@@ -4805,6 +4822,147 @@ body.deal-placement-body #root {
 	margin-top: 12px;
 }
 
+/* Печатные формы закупки: на экране не занимают места, при печати становятся единственным листом. */
+.supply-print {
+	display: none;
+	color: #111;
+	font-family: Arial, sans-serif;
+	font-size: 11pt;
+}
+
+.supply-print-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 24px;
+	padding-bottom: 14px;
+	border-bottom: 2px solid #111;
+}
+
+.supply-print-header span,
+.supply-print-number span {
+	display: block;
+	margin-bottom: 4px;
+	color: #555;
+	font-size: 9pt;
+}
+
+.supply-print-header h1 {
+	margin: 0;
+	font-size: 20pt;
+	letter-spacing: 0;
+}
+
+.supply-print-number {
+	min-width: 210px;
+	text-align: right;
+}
+
+.supply-print-number b {
+	display: block;
+	margin-bottom: 5px;
+	font-size: 12pt;
+}
+
+.supply-print-facts {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	margin: 16px 0;
+	border: 1px solid #bbb;
+}
+
+.supply-print-facts > div {
+	display: grid;
+	grid-template-columns: 130px 1fr;
+	min-height: 30px;
+	border-bottom: 1px solid #ddd;
+}
+
+.supply-print-facts > div:nth-child(odd) {
+	border-right: 1px solid #ddd;
+}
+
+.supply-print-facts > div:nth-last-child(-n+2) {
+	border-bottom: 0;
+}
+
+.supply-print-facts dt,
+.supply-print-facts dd {
+	margin: 0;
+	padding: 7px 9px;
+}
+
+.supply-print-facts dt {
+	background: #f2f2f2;
+	color: #555;
+}
+
+.supply-print-facts dd {
+	font-weight: 600;
+}
+
+.supply-print-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.supply-print-table th,
+.supply-print-table td {
+	padding: 7px 8px;
+	border: 1px solid #aaa;
+	text-align: left;
+	vertical-align: top;
+}
+
+.supply-print-table th {
+	background: #ededed;
+	font-size: 9pt;
+}
+
+.supply-print-table .num {
+	text-align: right;
+	white-space: nowrap;
+}
+
+.supply-print-table tfoot td,
+.supply-print-table .subtotal-row td {
+	font-weight: 700;
+	text-align: right;
+}
+
+.supply-print-table .supplier-row td {
+	padding-top: 10px;
+	background: #f5f5f5;
+}
+
+.supply-print-table .supplier-row span {
+	float: right;
+	color: #555;
+	font-size: 9pt;
+}
+
+.supply-print-table td small {
+	display: block;
+	margin-top: 3px;
+	color: #8a4b08;
+	font-size: 8pt;
+}
+
+.supply-print-note {
+	margin: 14px 0 30px;
+}
+
+.supply-print-signatures {
+	display: flex;
+	justify-content: space-between;
+	gap: 40px;
+	margin-top: 36px;
+}
+
+.supply-print-signatures span {
+	min-width: 260px;
+}
+
 .supply-order-review-actions button {
 	border-color: #cdd5e0;
 	background: #fff;
@@ -4847,8 +5005,11 @@ body.deal-placement-body #root {
 	body * { visibility: hidden; }
 	/* .inv добавлен: этот глобальный `body * {hidden}` (для Ремонтов/КП) иначе прячет
 	   и печать инвентаризации → пустые листы. Хром .inv скрыт display:none в 1-м @media print. */
-	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv *, .stock-blank, .stock-blank * { visibility: visible; }
+	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv *, .stock-blank, .stock-blank *, .supply-print, .supply-print * { visibility: visible; }
 	.stock-blank { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
+	.supply-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
+	.supply-print-table thead { display: table-header-group; }
+	.supply-print-table .supplier-row, .supply-print-table .subtotal-row { break-inside: avoid; page-break-inside: avoid; }
 	.repair-blank { position: absolute; left: 0; top: 0; width: 100%; }
 	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
 	.no-print { display: none !important; }
