@@ -27,7 +27,8 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
  *  - Реализации — read-only журнал (создаются из сделки).
  *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
  */
-type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery' | 'return' | 'ledger' | 'inventory';
+export type StockMovementKind = 'issue' | 'receipt' | 'delivery' | 'return';
+type Tab = 'transfers' | StockMovementKind | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'transfers', label: 'Перемещения' },
 	{ key: 'issue', label: 'Списания' },
@@ -441,9 +442,9 @@ export function StockLedger(): JSX.Element {
 				))}
 			</div>
 			{tab === 'inventory' ? <InventoryHome />
-				: tab === 'transfers' ? <TransfersTab form={form} />
+				: tab === 'transfers' ? <StockTransfersTab form={form} />
 				: tab === 'ledger' ? <LedgerTab />
-				: <MovementsTab kind={tab} form={form} />}
+				: <StockMovementsTab kind={tab} form={form} />}
 		</div>
 	);
 }
@@ -457,7 +458,7 @@ const TRANSFER_STATUS_OPTS = [
 	{ value: 'shortage', label: '⚠️ Недовоз' },
 ];
 
-function TransfersTab({ form }: { form: StockForm | null }): JSX.Element {
+export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Element {
 	const [list, setList] = useState<TransferDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
 	const [busy, setBusy] = useState<number | null>(null);
@@ -559,7 +560,7 @@ const MOVE_STATUS_OPTS = [
 	{ value: 'draft', label: 'Черновик' },
 ];
 
-function MovementsTab({ kind, form }: { kind: 'issue' | 'receipt' | 'delivery' | 'return'; form: StockForm | null }): JSX.Element {
+export function StockMovementsTab({ kind, form }: { kind: StockMovementKind; form: StockForm | null }): JSX.Element {
 	const [list, setList] = useState<CoreMovement[] | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);

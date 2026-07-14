@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
-import { LedgerTab } from './StockLedger.js';
+import { LedgerTab, StockMovementsTab, StockTransfersTab, type StockMovementKind } from './StockLedger.js';
 import {
 	BETA_USER_IDS,
 	createManualTransfer,
@@ -64,7 +64,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 ];
 
 type Phase = 'init' | 'denied' | 'ready';
-type ViewKey = 'orders' | 'purchase' | 'logistics' | 'ledger';
+type ViewKey = 'orders' | 'purchase' | 'logistics' | StockMovementKind | 'ledger';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 
 interface DecisionState {
@@ -862,7 +862,7 @@ type RegistryRow =
 	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
 	| { kind: 'logistics'; order: SupplyOrderRow; transfer: SupplyTransferChild };
 
-function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; kind: ViewKey; search: string; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
+function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; kind: 'purchase' | 'logistics'; search: string; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
 	const rows: RegistryRow[] = (kind === 'purchase'
 		? orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ kind: 'purchase' as const, order, purchase })))
 		: orders.flatMap((order) => (order.transfers ?? []).map((transfer) => ({ kind: 'logistics' as const, order, transfer }))))
@@ -1043,7 +1043,8 @@ export function Supply(): JSX.Element {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', purchase: '', logistics: '', ledger: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', purchase: '', logistics: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
+	const [stockRefresh, setStockRefresh] = useState(0);
 
 	useEffect(() => {
 		if (!printApprovalOrder) return;
@@ -1280,6 +1281,10 @@ export function Supply(): JSX.Element {
 				<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
 				<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
 				<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
+				<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
+				<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
+				<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
+				<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
 				<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>
@@ -1287,19 +1292,33 @@ export function Supply(): JSX.Element {
 				<header className="supply-proto-top">
 					<div>
 						<h1>Снабжение</h1>
-						<p>{view === 'ledger' ? 'История прихода, перемещения, реализации и инвентаризации по выбранному товару.' : 'Заявка раскрывается в строки, снабжение вручную выбирает закупку или перемещение.'}</p>
+						<p>{view === 'ledger'
+							? 'История прихода, перемещения, реализации и инвентаризации по выбранному товару.'
+							: view === 'logistics'
+								? 'Все перемещения: самостоятельные и созданные по заявкам или закупкам.'
+								: view === 'issue'
+									? 'Списания со склада, с привязкой к сделке там, где она есть.'
+									: view === 'receipt'
+										? 'Все оприходования: поставщик, склад, состав документа и связанная сделка.'
+										: view === 'delivery'
+											? 'Реализации товаров по сделкам и самостоятельные документы.'
+											: view === 'return'
+												? 'Возвраты клиентов с исходной сделкой и составом документа.'
+												: 'Заявка раскрывается в строки, снабжение вручную выбирает закупку или перемещение.'}</p>
 					</div>
 					<div className="supply-proto-actions"><button type="button" onClick={() => setCreateKind('transfer')}>Перемещение</button><button className="primary" type="button" onClick={() => setCreateKind('purchase')}>Заявка поставщику</button></div>
 				</header>
-				{view !== 'ledger' && <Metrics orders={orders} view={view} />}
-				{view !== 'ledger' && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
+				{(view === 'orders' || view === 'purchase' || view === 'logistics') && <Metrics orders={orders} view={view} />}
+				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
 				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
-				{(view === 'purchase' || view === 'logistics') && <RegistryView orders={orders} kind={view} search={searches[view]} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{view === 'logistics' && <div className="supply-proto-card"><StockTransfersTab key={stockRefresh} form={null} /></div>}
+				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card"><StockMovementsTab kind={view} form={null} /></div>}
 				{view === 'ledger' && <div className="supply-proto-card"><LedgerTab /></div>}
 			</main>
-			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); void reload(); }} />}
+			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}
 			{openDocument && <DocumentDetail
 				key={openDocument.kind === 'purchase' ? `purchase-${openDocument.purchase.name}` : `transfer-${openDocument.transfer.id}`}
 				document={openDocument}
