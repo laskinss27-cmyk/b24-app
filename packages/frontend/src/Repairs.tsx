@@ -154,6 +154,7 @@ type Screen =
 	| { k: 'presale' }
 	| { k: 'card'; repair: Repair }
 	| { k: 'print'; repair: Repair }
+	| { k: 'issue-print'; repair: Repair }
 	| { k: 'dispatch-print'; repairs: Repair[] };
 
 export function Repairs(): JSX.Element {
@@ -213,6 +214,7 @@ export function Repairs(): JSX.Element {
 	if (phase.k === 'init') return <Shell><p className="base-load">Загрузка…</p></Shell>;
 
 	if (screen.k === 'print') return <RepairBlank repair={screen.repair} onBack={() => setScreen({ k: 'card', repair: screen.repair })} />;
+	if (screen.k === 'issue-print') return <RepairIssueBlank repair={screen.repair} onBack={() => setScreen({ k: 'card', repair: screen.repair })} />;
 	if (screen.k === 'dispatch-print') return <RepairDispatchBlank repairs={screen.repairs} contact={dispatchContact} onBack={() => setScreen({ k: 'list' })} />;
 
 	if (screen.k === 'form') {
@@ -268,8 +270,10 @@ export function Repairs(): JSX.Element {
 					onBack={() => setScreen({ k: 'list' })}
 					onEdit={() => setScreen({ k: 'form', initial: screen.repair })}
 					onPrint={() => setScreen({ k: 'print', repair: screen.repair })}
+					onIssuePrint={() => setScreen({ k: 'issue-print', repair: screen.repair })}
 					onStatus={async (st) => {
-						const next = { ...screen.repair, status: st };
+						const historyRow = { at: new Date().toISOString(), status: st, byId: 'current' };
+						const next = { ...screen.repair, status: st, history: [...screen.repair.history, historyRow] };
 						if (!ctx.__mock) await updateRepairStatus(screen.repair.id, st);
 						setScreen({ k: 'card', repair: next });
 						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
@@ -721,8 +725,8 @@ function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () =
 	);
 }
 
-function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onStatus, onSetPay, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onDelete: () => Promise<void>;
+function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIssuePrint, onStatus, onSetPay, onDelete }: {
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
@@ -735,6 +739,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 	const [issueBusy, setIssueBusy] = useState(false);
 	useEffect(() => { if (!mock) fetchStores().then((s) => setIssueStores(s.filter((x) => x.active))).catch(() => setIssueStores([])); }, [mock]);
 	const presale = repair.kind === 'presale';
+	const canPrintIssue = !presale && (repair.status === 'ready_tt' || repair.status === 'issued');
 	// Заморозка: с «принято в офисе» КЛИЕНТСКУЮ карточку трогает только снабжение+. Предпродажный не замораживаем.
 	const locked = isLockedStatus(repair.status) && !canEditPrice;
 	// Финальная точка: для клиентского — «склад выдачи» (при «Готово к выдаче»); для предпродажного — «склад точки»
@@ -788,7 +793,8 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 				<h2>Ремонт #{repairNo(repair)}{repair.status === 'issued' && <span className="status-done"> · завершён</span>}</h2>
 				<div className="rc-head-actions">
 					<button className="btn-secondary" onClick={onEdit} disabled={locked || presale} title={presale ? 'Предпродажный — ведётся статусами, без правки полей' : locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ Редактировать</button>
-					<button className="btn-primary" onClick={onPrint}>🖨 Напечатать бланк</button>
+					<button className="btn-secondary" onClick={onPrint}>Акт приёма</button>
+					{canPrintIssue && <button className="btn-primary" onClick={onIssuePrint}>Акт выдачи</button>}
 					<button className="btn-danger" disabled={busy || locked} onClick={() => void remove()} title={locked ? 'Принят в офисе — удалить может только снабжение' : 'Удалить ремонт (необратимо)'}>🗑 Удалить</button>
 				</div>
 			</div>
@@ -939,6 +945,105 @@ function RepairDispatchBlank({ repairs, contact, onBack }: { repairs: Repair[]; 
 						))}
 					</tbody>
 				</table>
+			</div>
+		</div>
+	);
+}
+
+function repairHistoryDate(repair: Repair, status: RepairStatus): string {
+	const entry = repair.history.find((row) => row.status === status && !row.note);
+	return entry?.at ? ruDate(entry.at) : '';
+}
+
+/** Акт передачи клиенту: два экземпляра, только известные системе факты без сведений о деталях СЦ. */
+function RepairIssueBlank({ repair, onBack }: { repair: Repair; onBack: () => void }): JSX.Element {
+	const acceptedAt = ruDate(repair.createdAt);
+	const completedAt = repairHistoryDate(repair, 'ready_tt');
+	const issuedAt = repairHistoryDate(repair, 'issued') || ruDate(new Date().toISOString());
+	const equipment = [repair.device, repair.model].filter(Boolean).join(' ') || '—';
+	const issuePoint = repair.issueStore || repair.point || '—';
+	const repairPrice = repair.payType === 'paid' && repair.ourPrice != null ? money(repair.ourPrice) : '0 ₽';
+	const workText = repair.comment.trim() || '—';
+	const copy = (label: string): JSX.Element => (
+		<div className="blank-copy repair-issue-copy">
+			<div className="blank-head repair-issue-head">
+				<div>
+					<img className="blank-logo" src={REPAIR_LOGO} alt="Умный дом" />
+					<div className="repair-issue-org">{ACT_REQUISITE}</div>
+					<div className="repair-issue-muted">Торговая точка выдачи: {issuePoint}</div>
+				</div>
+				<span className="blank-copylabel">Ремонт № {repairNo(repair)} · {label}</span>
+			</div>
+
+			<div className="blank-title repair-issue-title">Акт выдачи оборудования после ремонта № {repairNo(repair)}</div>
+			<div className="repair-issue-subtitle">Составлен {issuedAt} в двух экземплярах</div>
+
+			<div className="repair-issue-parties">
+				<div><span>Исполнитель</span><b>{ACT_REQUISITE}</b></div>
+				<div><span>Клиент</span><b>{repair.client.name || '—'}</b><small>{repair.client.phone}</small></div>
+			</div>
+
+			<table className="blank-table repair-issue-table">
+				<tbody>
+					<tr><th>Оборудование</th><td>{equipment}</td><th>Серийный номер</th><td>{repair.serial || '—'}</td></tr>
+					<tr><th>Принято от клиента</th><td>{acceptedAt || '—'}</td><th>Выдано клиенту</th><td>{issuedAt}</td></tr>
+					<tr><th>Ремонт завершён</th><td colSpan={3}>{completedAt || '—'}</td></tr>
+				</tbody>
+			</table>
+
+			<div className="repair-issue-section">
+				<span>Заявленная неисправность</span>
+				<p>{repair.defect || '—'}</p>
+			</div>
+			<div className="repair-issue-section">
+				<span>Состояние и комплектность при приёме</span>
+				<p>{repair.appearance || '—'}</p>
+			</div>
+			<div className="repair-issue-section">
+				<span>Выполненные работы</span>
+				<p>{workText}</p>
+			</div>
+
+			<div className="repair-issue-terms">
+				<div><span>Вид ремонта</span><b>{repair.payType === 'warranty' ? '☑ Гарантийный   ☐ Платный' : '☐ Гарантийный   ☑ Платный'}</b></div>
+				<div><span>Стоимость ремонта</span><b>{repairPrice}</b></div>
+			</div>
+
+			<div className="repair-issue-section repair-issue-handover">
+				<span>Передача клиенту</span>
+				<p><b>Комплектность и внешний вид:</b> соответствуют состоянию, зафиксированному при приёме, кроме замечаний ниже.</p>
+				<p><b>Проверка:</b> ☐ проведена в присутствии клиента &nbsp;&nbsp; ☐ клиент отказался от проверки.</p>
+				<p><b>Замечания клиента при выдаче:</b> __________________________________________________________</p>
+			</div>
+
+			<div className="repair-issue-receipt">
+				Оборудование и один экземпляр настоящего акта получил. Комплектность и внешний вид при выдаче проверены,
+				результат выполненных работ продемонстрирован в объёме, доступном в месте выдачи. Подпись подтверждает
+				факт передачи оборудования и зафиксированные выше обстоятельства, но не ограничивает права клиента
+				в отношении скрытых недостатков и иные права, предусмотренные законом.
+			</div>
+
+			<div className="repair-issue-signatures">
+				<div><span>Выдал, представитель исполнителя</span><p>____________ / ________________________</p></div>
+				<div><span>Получил, клиент</span><p>____________ / {repair.client.name || '________________________'}</p></div>
+			</div>
+
+			<div className="repair-issue-footer">
+				При повторном обращении по той же неисправности рекомендуется предъявить этот акт.
+			</div>
+		</div>
+	);
+
+	return (
+		<div className="repair-blank-wrap repair-issue-wrap">
+			<div className="blank-toolbar no-print">
+				<button className="btn-secondary" onClick={onBack}>← Назад</button>
+				<span className="muted small">Два экземпляра: клиенту и торговой точке</span>
+				<button className="btn-primary" onClick={() => window.print()}>Печать</button>
+			</div>
+			<div className="repair-blank repair-issue-blank">
+				<div className="blank-page">{copy('экземпляр клиента')}</div>
+				<div className="blank-page">{copy('экземпляр точки')}</div>
 			</div>
 		</div>
 	);
