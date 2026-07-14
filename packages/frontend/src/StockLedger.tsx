@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
+import { InventoryHome } from './InventoryHome.js';
 import {
 	listTransfers, shipTransfer, receiveTransfer, resolveTransferShortage, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
@@ -24,8 +25,9 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
  *  - Перемещения — список + кнопки «В пути»/«Получено» (снабжение) + «Создать перемещение» (канарейка);
  *  - Списания / Оприходования — журнал ядра + формы создания (черновик → «Провести»);
  *  - Реализации — read-only журнал (создаются из сделки).
+ *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
  */
-type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery' | 'return' | 'ledger';
+type Tab = 'transfers' | 'issue' | 'receipt' | 'delivery' | 'return' | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'transfers', label: 'Перемещения' },
 	{ key: 'issue', label: 'Списания' },
@@ -33,6 +35,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'delivery', label: 'Реализации' },
 	{ key: 'return', label: 'Возвраты' },
 	{ key: 'ledger', label: 'Отчёт по движению товара' },
+	{ key: 'inventory', label: 'Инвентаризация' },
 ];
 /** doctype ядра по типу вкладки (для раскрытия документа). */
 const KIND_DOCTYPE: Record<'issue' | 'receipt' | 'delivery' | 'return', string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note', return: 'Delivery Note' };
@@ -399,21 +402,26 @@ export function StockLedger(): JSX.Element {
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
 	const [tab, setTab] = useState<Tab>('transfers');
 	const [form, setForm] = useState<StockForm | null>(null);
+	const [fullAccess, setFullAccess] = useState(false);
 
-	// Канарейка: окно видит только BETA_USER_IDS / админ портала (как База/Реализации).
+	// Складские документы остаются канарейкой; инвентаризация доступна прежнему кругу пользователей.
 	useEffect(() => {
 		if (ctx.__mock) {
+			setFullAccess(true);
 			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true });
 			setPhase({ k: 'ready' });
 			return;
 		}
 		const bx = window.BX24;
-		if (!bx) { setPhase({ k: 'ready' }); return; }
+		if (!bx) { setFullAccess(true); setPhase({ k: 'ready' }); return; }
 		bx.init(() => {
 			void (async () => {
 				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
-				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) { setPhase({ k: 'denied' }); return; }
+				const canUseStockDocuments = isPortalAdmin() || BETA_USER_IDS.includes(uid);
+				setFullAccess(canUseStockDocuments);
+				if (!canUseStockDocuments) setTab('inventory');
 				setPhase({ k: 'ready' });
+				if (!canUseStockDocuments) return;
 				// Справочники форм — best-effort (ядро может быть недоступно: формы просто не покажут селекторы).
 				fetchStockFormData().then(setForm).catch(() => setForm({ stores: [], suppliers: [], canCreate: false }));
 			})().catch(() => setPhase({ k: 'denied' }));
@@ -423,15 +431,17 @@ export function StockLedger(): JSX.Element {
 
 	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>🔒 Раздел в обкатке — доступен ограниченному кругу.</div>;
+	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'inventory');
 	return (
-		<div style={{ maxWidth: 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
+		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
 			<div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e3e8ef', marginBottom: 14, flexWrap: 'wrap' }}>
-				{TABS.map((t) => (
+				{tabs.map((t) => (
 					<button key={t.key} style={tabStyle(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
 				))}
 			</div>
-			{tab === 'transfers' ? <TransfersTab form={form} />
+			{tab === 'inventory' ? <InventoryHome />
+				: tab === 'transfers' ? <TransfersTab form={form} />
 				: tab === 'ledger' ? <LedgerTab />
 				: <MovementsTab kind={tab} form={form} />}
 		</div>

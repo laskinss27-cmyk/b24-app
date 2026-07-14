@@ -17,7 +17,6 @@ import {
 	type CatalogProductCandidate,
 	type StoreInfo,
 } from './b24.js';
-import { InventoryHome } from './InventoryHome.js';
 import { SalesReport } from './SalesReport.js';
 import { Realizations } from './Realizations.js';
 
@@ -25,14 +24,14 @@ import { Realizations } from './Realizations.js';
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
  * удобный браузер). Таблица ID·Фото·Название·Модель·Производитель·Раздел·Розница·Закупка·
  * Остаток(склад)·по-складам; выбор склада + «Все», поиск, фильтр остаток>0, сортировка по
- * колонке, клик по строке → нативная карточка товара. «Создать инвентаризацию» — отсюда.
+ * колонке, клик по строке → нативная карточка товара.
  *
- * Канарейка: Базу видит только бета-юзер (Сергей 1858); остальные — текущий GA-модуль
- * инвентаризации (InventoryHome) без изменений.
+ * Канарейка: Базу видит только бета-юзер (Сергей 1858). Инвентаризация живёт отдельной
+ * вкладкой в «Складском учёте».
  */
 
 type Gate = 'checking' | 'beta' | 'plain' | 'error';
-type Mode = 'loading' | 'base' | 'inventory' | 'report' | 'realizations';
+type Mode = 'loading' | 'base' | 'report' | 'realizations';
 
 const ALL = 'all';
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
@@ -308,7 +307,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 				// Сергей ловил «таймаут 15с» в пикере) → каждому по 2 попытки со своим таймаутом.
 				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
 				if (!BETA_USER_IDS.includes(uid) && !pickMode) {
-					setGate('plain'); // не бета — отдаём текущий GA-модуль инвентаризации
+					setGate('plain');
 					return;
 				}
 				setGate('beta');
@@ -495,19 +494,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	// ── рендер ──────────────────────────────────────────────────────────────────
 	if (gate === 'checking') return <div className="base"><header><h1>База товаров</h1></header><p className="base-load">Загрузка…</p></div>;
 	if (gate === 'error') return <div className="base"><header><h1>База товаров</h1></header><p className="error">⛔ {errMsg}</p></div>;
-	if (gate === 'plain') return <InventoryHome />;
-
-	// Бета: переключение База ↔ Инвентаризация
-	if (mode === 'inventory') {
-		return (
-			<div>
-				<div className="base-backbar">
-					<button className="btn-secondary" onClick={() => setMode('base')}>← База товаров</button>
-				</div>
-				<InventoryHome />
-			</div>
-		);
-	}
+	if (gate === 'plain') return <div className="base"><header><h1>Продажи</h1></header><p className="base-load">Инвентаризация перенесена в раздел «Складской учёт».</p></div>;
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}
@@ -538,7 +525,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 						)
 						: <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
 				</div>
-				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем нажмите «Готово».' : `Найти товар, посмотреть остатки/цены, запустить инвентаризацию.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
+				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем нажмите «Готово».' : `Найти товар, посмотреть остатки и цены.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
 			</header>
 
 			<div className="base-toolbar">
@@ -563,7 +550,6 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 				)}
 				{pickMode && kind !== 'services' && <button className="btn-secondary" disabled={q.trim().length < 2} onClick={() => setShowNewProduct(true)}>Новый товар</button>}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
-				{!pickMode && <button className="btn-primary" onClick={() => setMode('inventory')}>📋 Инвентаризации</button>}
 				{!pickMode && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
 
