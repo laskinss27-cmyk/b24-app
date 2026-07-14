@@ -19,6 +19,7 @@ import {
 	receiveTransfer,
 	resolveTransferShortage,
 	shipTransfer,
+	updateTransferDestination,
 	updateSupplyPurchaseOrder,
 	updateSupplyPurchaseStage,
 	type SupplyDecisionAction,
@@ -363,7 +364,7 @@ function SupplyApprovalPrint({ order }: { order: SupplyOrderRow }): JSX.Element 
 	);
 }
 
-function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onReceivePurchase, onCreatePurchaseTransfer, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
+function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onReceivePurchase, onCreatePurchaseTransfer, onChangeTransferDestination, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
 	document: OpenSupplyDocument;
 	suppliers: string[];
 	busy: boolean;
@@ -373,6 +374,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 	onSavePurchase: (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>, stage: SupplyPurchaseStage, expectedAt: string) => void;
 	onReceivePurchase: (lines: Array<{ productId: number; qty: number; rate: number }>) => void;
 	onCreatePurchaseTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
+	onChangeTransferDestination: (toStore: string) => Promise<SupplyTransferChild>;
 	onShipTransfer: () => void;
 	onReceiveTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
 	onResolveShortage: () => void;
@@ -390,6 +392,10 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		rate: Number(line.rate || 0) > 0.01 ? Number(line.rate) : 0,
 	})));
 	const [receiveLines, setReceiveLines] = useState<Record<string, NumericDraft>>(() => Object.fromEntries((initialTransfer?.lines ?? []).map((line) => [String(line.productId), line.qty])));
+	const [destinationStores, setDestinationStores] = useState<string[]>([]);
+	const [toStore, setToStore] = useState(initialTransfer?.toStore ?? '');
+	const [savingDestination, setSavingDestination] = useState(false);
+	const [destinationError, setDestinationError] = useState<string | null>(null);
 	const [purchaseReceiveLines, setPurchaseReceiveLines] = useState<Record<string, NumericDraft>>(() => {
 		if (!purchase) return {};
 		const received = new Map<number, number>();
@@ -407,6 +413,24 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		setPurchaseReceiveLines(Object.fromEntries(purchase.lines.map((line) => [String(line.productId), Math.max(Number(line.qty || 0) - (received.get(line.productId) ?? 0), 0)])));
 		if (document.kind === 'purchase') setPurchaseTransferLines(Object.fromEntries(purchaseTransferAvailable(document.order, purchase)));
 	}, [document, purchase]);
+	useEffect(() => {
+		if (!initialTransfer || (initialTransfer.status !== 'requested' && initialTransfer.status !== 'in_transit')) return;
+		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch((error) => setDestinationError(error instanceof Error ? error.message : String(error)));
+	}, [initialTransfer]);
+	useEffect(() => setToStore(initialTransfer?.toStore ?? ''), [initialTransfer?.toStore]);
+	const saveDestination = async (): Promise<void> => {
+		if (!initialTransfer || !toStore || toStore === initialTransfer.toStore || savingDestination) return;
+		setSavingDestination(true);
+		setDestinationError(null);
+		try {
+			const updated = await onChangeTransferDestination(toStore);
+			setToStore(updated.toStore);
+		} catch (error) {
+			setDestinationError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setSavingDestination(false);
+		}
+	};
 
 	if (document.kind === 'purchase') {
 		const { order, purchase: currentPurchase } = document;
@@ -471,6 +495,8 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 	const status = transferStatus(transfer);
 	const receivedByProduct = new Map(transfer.receivedLines.map((line) => [line.productId, line.qty]));
 	const shortageByProduct = new Map(transfer.shortageLines.map((line) => [line.productId, line.qty]));
+	const canEditDestination = transfer.status === 'requested' || transfer.status === 'in_transit';
+	const selectableStores = destinationStores.includes(transfer.toStore) ? destinationStores : [transfer.toStore, ...destinationStores];
 	return (
 		<div className="supply-proto-overlay">
 			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferDocumentLabel(transfer)}`}>
@@ -478,11 +504,20 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 						<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transferDocumentLabel(transfer)}</h2><p>{transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
 					<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 				</header>
+				<div className="transfer-destination">
+					<div className="transfer-destination-field"><span>Откуда</span><strong>{transfer.fromStore}</strong></div>
+					<span className="transfer-destination-arrow" aria-hidden="true">→</span>
+					<div className="transfer-destination-field"><span>Куда</span>{canEditDestination
+						? <select value={toStore} disabled={savingDestination} onChange={(event) => setToStore(event.target.value)}>{selectableStores.filter((store) => store !== transfer.fromStore).map((store) => <option key={store} value={store}>{store}</option>)}</select>
+						: <strong>{transfer.toStore}</strong>}</div>
+					{canEditDestination && <button className="transfer-destination-save" type="button" disabled={savingDestination || !toStore || toStore === transfer.toStore} onClick={() => void saveDestination()}>{savingDestination ? 'Сохраняю...' : 'Изменить'}</button>}
+				</div>
+				{destinationError && <p className="supply-standalone-error">{destinationError}</p>}
 				<dl className="supply-document-facts">
-					<div><dt>Откуда</dt><dd>{transfer.fromStore}</dd></div>
-					<div><dt>Куда</dt><dd>{transfer.toStore}</dd></div>
 					<div><dt>Позиций</dt><dd>{transfer.lines.length}</dd></div>
 					<div><dt>Количество</dt><dd>{transfer.lines.reduce((sum, line) => sum + line.qty, 0)}</dd></div>
+					<div><dt>Сделка</dt><dd>{order.standalone ? 'Без сделки' : `#${order.dealId}`}</dd></div>
+					<div><dt>Основание</dt><dd>{transfer.purchaseOrder || order.name}</dd></div>
 				</dl>
 				<div className="supply-document-lines">
 					<table><thead><tr><th>Позиция</th><th>Отправлено</th><th>Получено</th><th>Недовоз</th></tr></thead><tbody>
@@ -1124,6 +1159,24 @@ export function Supply(): JSX.Element {
 		} finally { setDocumentBusy(false); }
 	};
 
+	const changeOpenTransferDestination = async (toStore: string): Promise<SupplyTransferChild> => {
+		const target = openDocument;
+		if (!target || target.kind !== 'transfer') throw new Error('перемещение больше не открыто');
+		const updated = ctx.__mock
+			? { ...target.transfer, toStore, name: `Перемещение #${target.order.dealId}: ${target.transfer.fromStore} → ${toStore}` }
+			: await updateTransferDestination(target.transfer.id, toStore);
+		const nextTransfer: SupplyTransferChild = { ...target.transfer, name: updated.name, toStore: updated.toStore };
+		const patchOrder = (order: SupplyOrderRow): SupplyOrderRow => ({
+			...order,
+			transfers: (order.transfers ?? []).map((transfer) => transfer.id === nextTransfer.id ? nextTransfer : transfer),
+		});
+		const nextOrder = patchOrder(target.order);
+		setOrders((current) => current.map(patchOrder));
+		setOpenDocument({ kind: 'transfer', order: nextOrder, transfer: nextTransfer });
+		setNotice(`${transferDocumentLabel(nextTransfer)}: склад назначения изменён на «${toStore}».`);
+		return nextTransfer;
+	};
+
 	const moveOpenTransfer = async (action: 'ship' | 'receive' | 'resolve', lines: Array<{ productId: number; qty: number }> = []): Promise<void> => {
 		const target = openDocument;
 		if (!target || target.kind !== 'transfer' || documentBusy) return;
@@ -1330,6 +1383,7 @@ export function Supply(): JSX.Element {
 				onSavePurchase={(supplier, lines, stage, expectedAt) => void saveOpenPurchase(supplier, lines, stage, expectedAt)}
 				onReceivePurchase={(lines) => void receiveOpenPurchase(lines)}
 				onCreatePurchaseTransfer={(lines) => void createOpenPurchaseTransfer(lines)}
+				onChangeTransferDestination={changeOpenTransferDestination}
 				onShipTransfer={() => void moveOpenTransfer('ship')}
 				onReceiveTransfer={(lines) => void moveOpenTransfer('receive', lines)}
 				 onResolveShortage={() => void moveOpenTransfer('resolve')}

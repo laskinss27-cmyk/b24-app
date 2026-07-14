@@ -4444,6 +4444,74 @@ body.deal-placement-body #root {
 	width: min(960px, calc(100vw - 40px));
 }
 
+.transfer-destination {
+	display: grid;
+	grid-template-columns: minmax(160px, 1fr) 24px minmax(220px, 1.2fr) auto;
+	align-items: end;
+	gap: 10px;
+	margin: 10px 0 12px;
+	padding: 10px 12px;
+	border: 1px solid #d9e1ec;
+	border-radius: 6px;
+	background: #f7f9fc;
+}
+
+.transfer-destination-field {
+	display: grid;
+	min-width: 0;
+	gap: 4px;
+}
+
+.transfer-destination-field > span {
+	color: #718096;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.transfer-destination-field strong {
+	min-height: 32px;
+	display: flex;
+	align-items: center;
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.transfer-destination-field select {
+	box-sizing: border-box;
+	min-width: 0;
+	width: 100%;
+	height: 34px;
+	border: 1px solid #b9c6d8;
+	border-radius: 5px;
+	padding: 0 9px;
+	background: #fff;
+	color: #172033;
+	font: inherit;
+}
+
+.transfer-destination-arrow {
+	align-self: center;
+	color: #7a8ba3;
+	font-size: 18px;
+	text-align: center;
+}
+
+.transfer-destination-save {
+	height: 34px;
+	border: 1px solid #2468b4;
+	border-radius: 5px;
+	padding: 0 14px;
+	background: #2468b4;
+	color: #fff;
+	font-weight: 600;
+}
+
+.transfer-destination-save:disabled {
+	border-color: #d2d9e3;
+	background: #e5e9ef;
+	color: #8995a6;
+}
+
 .supply-standalone-modal {
 	width: min(820px, calc(100vw - 40px));
 }

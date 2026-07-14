@@ -3,7 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { shipTransferToTransit, receiveTransferFromTransit } from '../erp/operations.js';
+import { listActiveStoreTitles, shipTransferToTransit, receiveTransferFromTransit } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 import { STOCK_CREATE_IDS } from './api-stock.js';
 
@@ -273,6 +273,68 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			return { ok: true, transfers: transfers.map((t) => ({ ...t, ownerName: owners.get(t.dealId) ?? '' })), isSupply: me.isSupply };
 		} catch (err) {
 			app.log.error({}, `[api/transfers/list] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Склад назначения можно поменять, пока товар ещё не принят. Если перемещение уже
+	// в пути, первая проводка не меняется: товар находится на транзитном складе.
+	app.post('/api/transfers/update-destination', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown; toStore?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		const toStore = String(b.toStore ?? '').trim();
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		if (!toStore) return reply.code(400).send({ ok: false, error: 'не выбран склад назначения' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
+		try {
+			const [doc, me, stores] = await Promise.all([
+				loadOne(client, id),
+				currentUser(client),
+				listActiveStoreTitles(erp),
+			]);
+			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
+			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'менять склад назначения может только снабжение' });
+			if (doc.status !== 'requested' && doc.status !== 'in_transit') {
+				return reply.code(409).send({ ok: false, error: 'склад назначения можно изменить только до приёмки перемещения' });
+			}
+			if (!stores.includes(toStore)) return reply.code(400).send({ ok: false, error: `склад «${toStore}» не найден или недоступен` });
+			if (doc.fromStore === toStore) return reply.code(400).send({ ok: false, error: 'склад назначения совпадает со складом отправки' });
+			if (doc.toStore === toStore) return { ok: true, transfer: doc };
+
+			const previousStore = doc.toStore;
+			const now = new Date().toISOString();
+			const data: TransferData = {
+				...doc,
+				toStore,
+				history: [...doc.history, {
+					at: now,
+					status: doc.status,
+					byId: me.id,
+					byName: me.name,
+					note: `склад назначения изменён: ${previousStore} → ${toStore}`,
+				}],
+			};
+			const itemName = doc.dealId
+				? `Перемещение #${doc.dealId}: ${doc.fromStore} → ${toStore}`
+				: `Перемещение: ${doc.fromStore} → ${toStore}`;
+			await saveData(client, id, itemName, data);
+			if (doc.taskId) {
+				const listText = doc.lines.map((line) => `• ${line.name || '#' + line.productId} × ${line.qty}`).join('\n');
+				await client.call('tasks.task.update', {
+					taskId: doc.taskId,
+					fields: {
+						TITLE: `Перемещение: ${doc.fromStore} → ${toStore}${doc.dealId ? ` (сделка #${doc.dealId})` : ''}`,
+						DESCRIPTION: `Запрос на перемещение со склада «${doc.fromStore}» на «${toStore}».${doc.dealId ? ` Основание — сделка #${doc.dealId}.` : ''}\n\n${listText}`,
+					},
+				}).catch((err) => app.log.warn({ id, taskId: doc.taskId }, `[api/transfers/update-destination] task update failed — ${errInfo(err)}`));
+			}
+			app.log.info({ id, previousStore, toStore, by: me.id }, '[api/transfers/update-destination] ok');
+			return { ok: true, transfer: { id, name: itemName, ...data } };
+		} catch (err) {
+			app.log.error({ id, toStore }, `[api/transfers/update-destination] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

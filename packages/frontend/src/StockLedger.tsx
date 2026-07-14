@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { InventoryHome } from './InventoryHome.js';
 import {
-	listTransfers, shipTransfer, receiveTransfer, resolveTransferShortage, fetchMovements, openDeal,
+	listTransfers, shipTransfer, receiveTransfer, resolveTransferShortage, updateTransferDestination, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	fetchDocDetail, fetchItemHistory,
@@ -261,7 +261,31 @@ function DocDetailModal({ doctype, name, onClose }: { doctype: string; name: str
 }
 
 /** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
-function TransferDetailModal({ t, onClose }: { t: TransferDoc; onClose: () => void }): JSX.Element {
+function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose }: {
+	t: TransferDoc;
+	stores: string[];
+	editable: boolean;
+	onDestinationChange: (toStore: string) => Promise<TransferDoc>;
+	onClose: () => void;
+}): JSX.Element {
+	const [toStore, setToStore] = useState(t.toStore);
+	const [saving, setSaving] = useState(false);
+	const [destinationError, setDestinationError] = useState<string | null>(null);
+	useEffect(() => setToStore(t.toStore), [t.toStore]);
+	const canEditDestination = editable && (t.status === 'requested' || t.status === 'in_transit');
+	const saveDestination = async (): Promise<void> => {
+		if (!canEditDestination || !toStore || toStore === t.toStore || saving) return;
+		setSaving(true);
+		setDestinationError(null);
+		try {
+			const updated = await onDestinationChange(toStore);
+			setToStore(updated.toStore);
+		} catch (error) {
+			setDestinationError(errText(error));
+		} finally {
+			setSaving(false);
+		}
+	};
 	return (
 		<div style={{ ...overlay, zIndex: 1100 }}>
 			<div style={modalCard}>
@@ -272,7 +296,16 @@ function TransferDetailModal({ t, onClose }: { t: TransferDoc; onClose: () => vo
 						<button style={btnGhost} onClick={onClose}>✕</button>
 					</div>
 				</div>
-				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{t.fromStore} → {t.toStore} · {TRANSFER_STATUS[t.status] ?? t.status}{t.note ? ` · 📝 ${t.note}` : ''}</div>
+				<div className="transfer-destination">
+					<div className="transfer-destination-field"><span>Откуда</span><strong>{t.fromStore}</strong></div>
+					<span className="transfer-destination-arrow" aria-hidden="true">→</span>
+					<div className="transfer-destination-field"><span>Куда</span>{canEditDestination
+						? <select value={toStore} disabled={saving} onChange={(event) => setToStore(event.target.value)}>{stores.filter((store) => store !== t.fromStore).map((store) => <option key={store} value={store}>{store}</option>)}</select>
+						: <strong>{t.toStore}</strong>}</div>
+					{canEditDestination && <button className="transfer-destination-save" type="button" disabled={saving || !toStore || toStore === t.toStore} onClick={() => void saveDestination()}>{saving ? 'Сохраняю...' : 'Изменить'}</button>}
+				</div>
+				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{TRANSFER_STATUS[t.status] ?? t.status}{t.note ? ` · 📝 ${t.note}` : ''}</div>
+				{destinationError && <p className="error">⛔ {destinationError}</p>}
 				<StockBlank doc={transferToPrint(t)} />
 				{t.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -473,6 +506,7 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openT, setOpenT] = useState<TransferDoc | null>(null);
 	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
+	const [destinationStores, setDestinationStores] = useState<string[]>([]);
 
 	const load = async (): Promise<void> => {
 		setLoading(true); setErr(null);
@@ -481,6 +515,17 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 		finally { setLoading(false); }
 	};
 	useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
+	useEffect(() => {
+		if (!isSupply) return;
+		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch(() => setDestinationStores([]));
+	}, [isSupply]);
+
+	const changeDestination = async (t: TransferDoc, toStore: string): Promise<TransferDoc> => {
+		const updated = await updateTransferDestination(t.id, toStore);
+		setList((current) => current?.map((row) => row.id === updated.id ? updated : row) ?? current);
+		setOpenT(updated);
+		return updated;
+	};
 
 	const act = async (t: TransferDoc, kind: 'ship' | 'receive'): Promise<void> => {
 		setBusy(t.id); setErr(null);
@@ -547,7 +592,7 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 					</tbody>
 				</table>
 			)}
-			{openT && <TransferDetailModal t={openT} onClose={() => setOpenT(null)} />}
+			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={isSupply} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onClose={() => setOpenT(null)} />}
 			{receiveT && <ReceiveTransferModal t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void receiveActual(receiveT, lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
 		</>

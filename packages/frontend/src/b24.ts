@@ -1085,6 +1085,17 @@ export async function listTransfers(dealId?: number, period?: { from?: string; t
 	return { transfers: json.transfers ?? [], isSupply: Boolean(json.isSupply) };
 }
 
+/** Изменить склад назначения до приёмки перемещения. */
+export async function updateTransferDestination(id: number, toStore: string): Promise<TransferDoc> {
+	const res = await fetch('/api/transfers/update-destination', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, toStore }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
+	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось изменить склад назначения');
+	return json.transfer;
+}
+
 /** Закупка: «В пути» (проводка А→транзит). */
 export async function shipTransfer(id: number): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/ship', {
