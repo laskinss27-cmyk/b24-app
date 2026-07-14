@@ -100,10 +100,12 @@ const MOCK_DATA: TableData = {
 
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
+const PRODUCT_PICKER_MIN_HEIGHT = 900;
 
-const dealContentHeight = (): number => {
+const dealContentHeight = (minHeight = 0): number => {
 	const root = document.getElementById('root');
 	return Math.ceil(Math.max(
+		minHeight,
 		root?.scrollHeight ?? 0,
 		document.body.scrollHeight,
 		document.documentElement.scrollHeight,
@@ -235,7 +237,7 @@ export function DealProductsTab(): JSX.Element {
 			if (timer != null) window.clearTimeout(timer);
 			timer = window.setTimeout(() => {
 				timer = null;
-				const height = dealContentHeight();
+				const height = dealContentHeight(adding ? PRODUCT_PICKER_MIN_HEIGHT : 0);
 				if (height <= 0 || Math.abs(height - lastHeight) < 2) return;
 				lastHeight = height;
 				try { window.BX24?.resizeWindow(document.documentElement.clientWidth, height); } catch { /* placement closed */ }
@@ -250,7 +252,7 @@ export function DealProductsTab(): JSX.Element {
 			window.removeEventListener('resize', syncHeight);
 			if (timer != null) window.clearTimeout(timer);
 		};
-	}, [ctx.__mock]);
+	}, [adding, ctx.__mock]);
 
 	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI

@@ -69,11 +69,27 @@ const UOM = 'шт';
 
 /** Завести товар в ЯДРЕ — зеркало нового продукта Б24 (code = productId). Идемпотентно: уже есть → ничего.
  *  Для «Создать товар» в форме прихода: продукт сперва создан в каталоге Б24 (получил productId), тут — Item ядра. */
-export async function ensureCoreItem(erp: ErpClient, args: { productId: number; name: string; isService?: boolean }): Promise<void> {
+export async function ensureCoreItem(erp: ErpClient, args: {
+	productId: number;
+	name: string;
+	isService?: boolean;
+	model?: string;
+	article?: string;
+	brand?: string;
+	section?: string;
+}): Promise<void> {
 	const code = String(args.productId);
 	const existing = await erp.get<Record<string, unknown>>('Item', code);
 	if (existing) {
-		if (args.isService && Number(existing['is_stock_item'] ?? 1) !== 0) await erp.update('Item', code, { is_stock_item: 0 });
+		const patch: Record<string, unknown> = {};
+		const hasStructuredMeta = args.model !== undefined || args.article !== undefined || args.brand !== undefined || args.section !== undefined;
+		if (args.isService && Number(existing['is_stock_item'] ?? 1) !== 0) patch['is_stock_item'] = 0;
+		if (hasStructuredMeta && args.name && String(existing['item_name'] ?? '') !== args.name) patch['item_name'] = args.name.slice(0, 140);
+		if (args.model !== undefined) patch['b24_model'] = args.model;
+		if (args.article !== undefined) patch['b24_article'] = args.article;
+		if (args.brand !== undefined) patch['b24_brand'] = args.brand;
+		if (args.section !== undefined) patch['b24_section'] = args.section;
+		if (Object.keys(patch).length) await erp.update('Item', code, patch);
 		return;
 	}
 	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
@@ -85,7 +101,11 @@ export async function ensureCoreItem(erp: ErpClient, args: { productId: number; 
 		item_group: ITEM_GROUP,
 		stock_uom: UOM,
 		is_stock_item: isService ? 0 : 1,
-		description: `Б24 productId=${args.productId} (создан из приёмки)`,
+		description: `Б24 productId=${args.productId}`,
+		b24_model: args.model ?? '',
+		b24_article: args.article ?? '',
+		b24_brand: args.brand ?? '',
+		b24_section: args.section ?? '',
 	});
 }
 
@@ -623,7 +643,7 @@ export interface PurchaseDraftLine { productId: number; itemName?: string; qty: 
 /** Черновик закупки по заявке снабжения. Не проводим: снабжение дальше выбирает поставщика/цены штатно. */
 export async function createPurchaseOrderDraft(
 	erp: ErpClient,
-	args: { dealId: number; supplyRequest: string; supplyRequestKey: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string },
+	args: { dealId?: number; supplyRequest?: string; supplyRequestKey?: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensurePurchaseFields(erp);
@@ -635,9 +655,9 @@ export async function createPurchaseOrderDraft(
 		company: ctx.company,
 		supplier,
 		schedule_date: args.scheduleDate,
-		[DEAL_FIELD]: String(args.dealId),
-		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
-		[SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey,
+		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
+		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		[SUPPLY_PURCHASE_STAGE_FIELD]: 'draft',
 		[SUPPLY_PURCHASE_EXPECTED_AT_FIELD]: args.scheduleDate,
 		items: args.lines.map((l) => ({
@@ -704,16 +724,17 @@ export async function updateSupplyPurchaseStage(
 
 export async function createSupplyPurchaseReceipt(
 	erp: ErpClient,
-	args: { dealId: number; supplyRequest: string; supplyRequestKey: string; purchaseOrder: string; toStore: string; lines: Array<{ productId: number; qty: number; rate: number }> },
+	args: { dealId?: number; supplyRequest: string; supplyRequestKey?: string; purchaseOrder: string; toStore: string; lines: Array<{ productId: number; qty: number; rate: number }> },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensurePurchaseFields(erp);
 	const order = await erp.get<Record<string, unknown>>('Purchase Order', args.purchaseOrder);
 	if (!order) throw new Error('заказ поставщику не найден');
-	if (String(order[DEAL_FIELD] ?? '') !== String(args.dealId)) throw new Error('заказ поставщику не относится к этой сделке');
+	if (args.dealId && String(order[DEAL_FIELD] ?? '') !== String(args.dealId)) throw new Error('заказ поставщику не относится к этой сделке');
+	if (!args.dealId && String(order[DEAL_FIELD] ?? '')) throw new Error('заказ поставщику относится к сделке');
 	if (String(order[SUPPLY_REQUEST_FIELD] ?? '') !== args.supplyRequest) throw new Error('заказ поставщику не относится к этой заявке');
 	const orderRequestKey = String(order[SUPPLY_REQUEST_KEY_FIELD] ?? '');
-	if (orderRequestKey && orderRequestKey !== args.supplyRequestKey) throw new Error('заказ поставщику относится к другой версии заявки');
+	if (orderRequestKey && orderRequestKey !== String(args.supplyRequestKey ?? '')) throw new Error('заказ поставщику относится к другой версии заявки');
 	if (String(order[SUPPLY_PURCHASE_STAGE_FIELD] ?? '') !== 'ordered') throw new Error('оприходовать можно только заказ со статусом «Заказано»');
 	const orderedByProduct = new Map<number, number>();
 	const rateByProduct = new Map<number, number>();
@@ -745,9 +766,9 @@ export async function createSupplyPurchaseReceipt(
 		supplier: String(order['supplier'] ?? '') || TECH_SUPPLIER,
 		set_posting_time: 1,
 		remarks: `Supply purchase order ${args.purchaseOrder}`,
-		[DEAL_FIELD]: String(args.dealId),
+		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
 		[SUPPLY_REQUEST_FIELD]: args.supplyRequest,
-		[SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey,
+		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		[SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder,
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),

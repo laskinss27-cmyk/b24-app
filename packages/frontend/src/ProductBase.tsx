@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
+	createCatalogProduct,
 	fetchStores,
 	fetchCurrentUserId,
 	openProductCard,
@@ -13,6 +14,7 @@ import {
 	BETA_USER_IDS,
 	QUICKSALE_USER_IDS,
 	type BaseRow,
+	type CatalogProductCandidate,
 	type StoreInfo,
 } from './b24.js';
 import { InventoryHome } from './InventoryHome.js';
@@ -56,11 +58,11 @@ const MOCK_STORES: StoreInfo[] = [
 	{ id: 22, title: 'Максидом ул. Фаворского 12', active: true },
 ];
 const MOCK_ROWS: BaseRow[] = [
-	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false, article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionName: 'Видеонаблюдение', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
-	{ id: 1810, iblockId: 24, name: 'Трубка аудиодомофона УКП-12', isService: false, article: 'УКП-12', model: 'УКП-12', manufacturer: '', sectionName: 'Домофоны', retail: 780, purchase: null, total: 8, stockByStore: { 8: 4, 22: 4 } },
-	{ id: 1811, iblockId: 24, name: 'Трубка аудиодомофона УКП-12м', isService: false, article: 'УКП-12м', model: 'УКП-12м', manufacturer: 'Vizit', sectionName: 'Домофоны', retail: 820, purchase: 782, total: 9, stockByStore: { 8: 5, 10: 4 } },
-	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', isService: false, article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
-	{ id: 3001, iblockId: 24, name: 'Монтаж видеокамеры (работа)', isService: true, article: '', model: '', manufacturer: '', sectionName: 'Услуги', retail: 1500, purchase: null, total: 0, stockByStore: {} },
+	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false, article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionId: 101, sectionName: 'Видеонаблюдение', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
+	{ id: 1810, iblockId: 24, name: 'Трубка аудиодомофона УКП-12', isService: false, article: 'УКП-12', model: 'УКП-12', manufacturer: '', sectionId: 102, sectionName: 'Домофоны', retail: 780, purchase: null, total: 8, stockByStore: { 8: 4, 22: 4 } },
+	{ id: 1811, iblockId: 24, name: 'Трубка аудиодомофона УКП-12м', isService: false, article: 'УКП-12м', model: 'УКП-12м', manufacturer: 'Vizit', sectionId: 102, sectionName: 'Домофоны', retail: 820, purchase: 782, total: 9, stockByStore: { 8: 5, 10: 4 } },
+	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', isService: false, article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionId: 103, sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
+	{ id: 3001, iblockId: 24, name: 'Монтаж видеокамеры (работа)', isService: true, article: '', model: '', manufacturer: '', sectionId: 104, sectionName: 'Услуги', retail: 1500, purchase: null, total: 0, stockByStore: {} },
 ];
 
 type SortKey = 'id' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
@@ -94,12 +96,164 @@ function QtyInput({ value, onChange }: { value: number; onChange: (n: number) =>
 	);
 }
 
+function productKey(value: string | undefined): string {
+	return String(value ?? '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, '');
+}
+
+function productNamePreview(productType: string, manufacturer: string, model: string): string {
+	return [productType, manufacturer, model].map((value) => value.trim().replace(/\s+/g, ' ')).filter(Boolean).join(' ');
+}
+
+function localProductCandidates(rows: BaseRow[], args: { name: string; manufacturer: string; model: string }): CatalogProductCandidate[] {
+	const wantedModel = productKey(args.model);
+	const wantedBrand = productKey(args.manufacturer);
+	const wantedName = productKey(args.name);
+	return rows
+		.filter((row) => !row.isService)
+		.map((row) => {
+			const rowModel = productKey(row.article || row.model);
+			const rowBrand = productKey(row.manufacturer);
+			const exact = Boolean(wantedName && productKey(row.name) === wantedName)
+				|| Boolean(wantedModel && rowModel === wantedModel);
+			let score = exact ? 100 : 0;
+			if (!exact && wantedModel && rowModel === wantedModel) score += 70;
+			else if (!exact && wantedModel && productKey(row.name).includes(wantedModel)) score += 45;
+			if (!exact && wantedBrand && rowBrand === wantedBrand) score += 20;
+			return { row, score, exact };
+		})
+		.filter((entry) => entry.score >= 45)
+		.sort((a, b) => b.score - a.score || a.row.name.localeCompare(b.row.name, 'ru'))
+		.slice(0, 6)
+		.map(({ row, exact }) => ({ ...row, exact }));
+}
+
+function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
+	rows: BaseRow[];
+	initialQuery: string;
+	onUse: (row: BaseRow) => void;
+	onClose: () => void;
+}): JSX.Element {
+	const [productType, setProductType] = useState('');
+	const [manufacturer, setManufacturer] = useState('');
+	const [model, setModel] = useState(initialQuery.trim());
+	const [sectionId, setSectionId] = useState('');
+	const [retailText, setRetailText] = useState('');
+	const [reviewed, setReviewed] = useState(false);
+	const [serverCandidates, setServerCandidates] = useState<CatalogProductCandidate[] | null>(null);
+	const [duplicateBlocked, setDuplicateBlocked] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const sections = useMemo(() => {
+		const byId = new Map<number, string>();
+		for (const row of rows) if (row.sectionId && row.sectionName && !row.isService) byId.set(row.sectionId, row.sectionName);
+		return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+	}, [rows]);
+	const preview = productNamePreview(productType, manufacturer, model);
+	const localCandidates = useMemo(
+		() => localProductCandidates(rows, { name: preview, manufacturer, model }),
+		[rows, preview, manufacturer, model],
+	);
+	const candidates = serverCandidates ?? localCandidates;
+	const exactCandidate = duplicateBlocked || candidates.some((candidate) => candidate.exact);
+	const retail = Number(retailText);
+	const section = sections.find((item) => item.id === Number(sectionId));
+	const valid = productType.trim().length >= 3
+		&& manufacturer.trim().length >= 2
+		&& model.trim().length >= 2
+		&& Boolean(section)
+		&& retail > 0;
+	const canCreate = valid && !busy && !exactCandidate && (!candidates.length || reviewed);
+
+	const resetReview = (): void => {
+		setReviewed(false);
+		setServerCandidates(null);
+		setDuplicateBlocked(false);
+		setErr(null);
+	};
+
+	const create = async (): Promise<void> => {
+		if (!section || !canCreate) return;
+		setBusy(true);
+		setErr(null);
+		try {
+			const result = await createCatalogProduct({
+				productType: productType.trim(),
+				manufacturer: manufacturer.trim(),
+				model: model.trim(),
+				sectionId: section.id,
+				sectionName: section.name,
+				retail,
+				...(candidates.length && reviewed ? { similarReviewed: true } : {}),
+			});
+			if (result.status === 'created') {
+				onUse(result.product);
+				return;
+			}
+			setServerCandidates(result.candidates);
+			setReviewed(false);
+			setDuplicateBlocked(result.status === 'duplicate');
+			if (result.status === 'duplicate') setErr('Такая модель уже есть в каталоге.');
+		} catch (error) {
+			setErr(String(error instanceof Error ? error.message : error));
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<div className="new-product-overlay" onClick={onClose}>
+			<div className="new-product-modal" onClick={(event) => event.stopPropagation()}>
+				<div className="new-product-head">
+					<div><span>Новая позиция каталога</span><h2>{preview || 'Новый товар'}</h2></div>
+					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
+				</div>
+				<div className="new-product-fields">
+					<label>Вид товара<input autoFocus value={productType} placeholder="IP-камера" onChange={(event) => { setProductType(event.target.value); resetReview(); }} /></label>
+					<label>Производитель<input value={manufacturer} placeholder="Hikvision" onChange={(event) => { setManufacturer(event.target.value); resetReview(); }} /></label>
+					<label>Модель / артикул<input value={model} placeholder="DS-2CD2043G2-I" onChange={(event) => { setModel(event.target.value); resetReview(); }} /></label>
+					<label>Раздел<select value={sectionId} onChange={(event) => { setSectionId(event.target.value); resetReview(); }}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+					<label>Цена продажи, ₽<input inputMode="decimal" value={retailText} placeholder="0" onChange={(event) => setRetailText(event.target.value.replace(',', '.'))} /></label>
+					<div className="new-product-name"><span>Название</span><b>{preview || '—'}</b></div>
+				</div>
+
+				{candidates.length > 0 && (
+					<div className={`new-product-matches${exactCandidate ? ' exact' : ''}`}>
+						<div className="new-product-match-title">Совпадения в каталоге</div>
+						{candidates.map((candidate) => (
+							<button type="button" key={candidate.id} onClick={() => onUse(candidate)}>
+								<span><b>{candidate.name}</b><small>{[candidate.manufacturer, candidate.article || candidate.model, candidate.sectionName].filter(Boolean).join(' · ')}</small></span>
+								<span>{candidate.retail ? `${fmt(candidate.retail)} ₽` : `ID ${candidate.id}`}</span>
+							</button>
+						))}
+						{!exactCandidate && <label className="new-product-confirm"><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} /> Это другая модель</label>}
+					</div>
+				)}
+				{err && <div className="new-product-error">{err}</div>}
+				<div className="new-product-actions">
+					<button type="button" className="btn-secondary" onClick={onClose}>Отмена</button>
+					<button type="button" className="btn-primary" disabled={!canCreate} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать и выбрать'}</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
-export interface ProductPickItem { productId: number; name: string; quantity: number; price: number; isService?: boolean }
+export interface ProductPickItem {
+	productId: number;
+	name: string;
+	quantity: number;
+	price: number;
+	purchasePrice?: number;
+	isService?: boolean;
+	stocks?: Record<string, number>;
+}
 export interface ProductPicker {
 	onDone: (items: ProductPickItem[]) => Promise<void>;
 	onCancel: () => void;
 	title?: string | undefined;
+	kindFilter?: 'goods' | 'services';
+	onlyStockDefault?: boolean;
 }
 
 export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.Element {
@@ -119,15 +273,16 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	const [showCart, setShowCart] = useState(false);
 	const [creatingSale, setCreatingSale] = useState(false);
 	const [saleErr, setSaleErr] = useState<string | null>(null);
+	const [showNewProduct, setShowNewProduct] = useState(false);
 	// Скидка % на КАЖДУЮ позицию: productId → процент.
 	const [discounts, setDiscounts] = useState<Map<number, number>>(() => new Map());
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
 	const [q, setQ] = useState('');
-	const [onlyStock, setOnlyStock] = useState(true);
+	const [onlyStock, setOnlyStock] = useState(picker?.onlyStockDefault ?? true);
 	/** Фильтр вида позиции для удобства подбора: все / только товары / только услуги (работы). */
-	const [kind, setKind] = useState<'all' | 'goods' | 'services'>('all');
+	const [kind, setKind] = useState<'all' | 'goods' | 'services'>(picker?.kindFilter ?? 'all');
 	const [sortKey, setSortKey] = useState<SortKey>('name');
 	const [sortDir, setSortDir] = useState<1 | -1>(1);
 
@@ -152,7 +307,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 				// BX24-вызовы на фронте флапают (особенно при возврате во вкладку из нативного окна —
 				// Сергей ловил «таймаут 15с» в пикере) → каждому по 2 попытки со своим таймаутом.
 				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
-				if (!BETA_USER_IDS.includes(uid)) {
+				if (!BETA_USER_IDS.includes(uid) && !pickMode) {
 					setGate('plain'); // не бета — отдаём текущий GA-модуль инвентаризации
 					return;
 				}
@@ -274,6 +429,13 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 		setCart(new Map());
 		setDiscounts(new Map());
 	}
+	function useCatalogProduct(row: BaseRow): void {
+		setRows((current) => current.some((item) => item.id === row.id) ? current : [...current, row]);
+		setCart((current) => new Map(current).set(row.id, current.get(row.id) ?? 1));
+		setOnlyStock(false);
+		setQ(row.name);
+		setShowNewProduct(false);
+	}
 
 	async function createSale(): Promise<void> {
 		setSaleErr(null);
@@ -301,7 +463,14 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	async function handleDone(): Promise<void> {
 		if (!picker) return;
 		setSaleErr(null);
-		const items: ProductPickItem[] = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0, isService: c.row.isService }));
+		const items: ProductPickItem[] = cartList.map((c) => {
+			const stocks = Object.fromEntries(
+				Object.entries(c.row.stockByStore)
+					.map(([storeId, qty]) => [stores.find((store) => store.id === Number(storeId))?.title ?? '', qty] as const)
+					.filter(([storeTitle]) => Boolean(storeTitle)),
+			);
+			return { productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0, purchasePrice: c.row.purchase ?? 0, isService: c.row.isService, stocks };
+		});
 		if (!items.length) { picker.onCancel(); return; }
 		setDone(true);
 		try {
@@ -369,7 +538,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 						)
 						: <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
 				</div>
-				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем «Готово» внизу — они добавятся в сделку.' : `Найти товар, посмотреть остатки/цены, запустить инвентаризацию.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
+				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем нажмите «Готово».' : `Найти товар, посмотреть остатки/цены, запустить инвентаризацию.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
 			</header>
 
 			<div className="base-toolbar">
@@ -383,15 +552,16 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 					<input type="search" value={q} placeholder="2050, камера, vizit, УКП…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
-				<div className="tb-seg" role="group" aria-label="Вид позиции">
+				{!picker?.kindFilter && <div className="tb-seg" role="group" aria-label="Вид позиции">
 					{([['all', 'Все'], ['goods', 'Товары'], ['services', 'Услуги']] as const).map(([k, lbl]) => (
 						<button key={k} type="button" className={`tb-seg-btn${kind === k ? ' active' : ''}`} onClick={() => setKind(k)}>{lbl}</button>
 					))}
-				</div>
+				</div>}
 				<div className="tb-spacer" />
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
+				{pickMode && kind !== 'services' && <button className="btn-secondary" disabled={q.trim().length < 2} onClick={() => setShowNewProduct(true)}>Новый товар</button>}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && <button className="btn-primary" onClick={() => setMode('inventory')}>📋 Инвентаризации</button>}
 				{!pickMode && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
@@ -471,6 +641,8 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 						<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
 					</div>
 				)}
+
+			{pickMode && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
 
 				{!pickMode && showCart && (
 				<div className="cart-overlay" onClick={() => setShowCart(false)}>

@@ -259,12 +259,22 @@ export async function fetchCurrentUserId(): Promise<string> {
 	return _uidInflight;
 }
 
-/** Текущий пользователь: id + читаемое имя (для «кто взял точку» в сводке). */
-export async function fetchCurrentUser(): Promise<{ id: string; name: string }> {
-	const u = await call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current');
+/** Текущий пользователь: id, читаемое имя и контактный телефон. */
+export async function fetchCurrentUser(): Promise<{ id: string; name: string; phone: string }> {
+	const u = await call<{
+		ID?: string | number;
+		NAME?: string;
+		LAST_NAME?: string;
+		WORK_PHONE?: string;
+		PERSONAL_MOBILE?: string;
+		PERSONAL_PHONE?: string;
+	}>('user.current');
 	const id = String(u?.ID ?? '');
 	const name = [u?.LAST_NAME, u?.NAME].filter(Boolean).join(' ').trim() || id;
-	return { id, name };
+	const phone = [u?.WORK_PHONE, u?.PERSONAL_MOBILE, u?.PERSONAL_PHONE]
+		.map((value) => String(value ?? '').trim())
+		.find(Boolean) ?? '';
+	return { id, name, phone };
 }
 
 /** Админ ли смотрящий — синхронно через BX24.isAdmin() (без REST, не виснет).
@@ -536,6 +546,7 @@ export interface BaseRow {
 	article?: string | undefined;
 	model?: string | undefined;
 	manufacturer?: string | undefined;
+	sectionId?: number | undefined;
 	sectionName?: string | undefined;
 	retail: number | null;
 	purchase: number | null;
@@ -566,6 +577,44 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; generatedAt?: string; cached?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached) };
+}
+
+export interface NewCatalogProductInput {
+	productType: string;
+	manufacturer: string;
+	model: string;
+	sectionId: number;
+	sectionName: string;
+	retail: number;
+	similarReviewed?: boolean;
+}
+
+export interface CatalogProductCandidate extends BaseRow { exact?: boolean }
+export type CreateCatalogProductResult =
+	| { status: 'created'; name: string; product: BaseRow }
+	| { status: 'duplicate' | 'review'; name: string; candidates: CatalogProductCandidate[] };
+
+/** Структурированное создание товара из сделки с повторной серверной проверкой дублей. */
+export async function createCatalogProduct(input: NewCatalogProductInput): Promise<CreateCatalogProductResult> {
+	const res = await fetch('/api/catalog/create-product', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as {
+		ok: boolean;
+		error?: string;
+		status?: 'created' | 'duplicate' | 'review';
+		name?: string;
+		product?: BaseRow;
+		candidates?: CatalogProductCandidate[];
+	};
+	if (!json.ok) throw new Error(json.error ?? 'не удалось создать товар');
+	if (json.status === 'created' && json.product) return { status: 'created', name: json.name ?? json.product.name, product: json.product };
+	if ((json.status === 'duplicate' || json.status === 'review') && json.candidates) {
+		return { status: json.status, name: json.name ?? '', candidates: json.candidates };
+	}
+	throw new Error('сервер вернул неполный результат создания товара');
 }
 
 /** Доступ к «Быстрой продаже» (ЗАПИСЬ): Сергей (1858) + Бекасов (986) + Дранишников (1, владелец). */
@@ -645,6 +694,7 @@ export interface SupplyOrderRow {
 	originalItems?: SupplyOrderItem[];
 	transfers?: SupplyTransferChild[];
 	purchases?: SupplyPurchaseChild[];
+	standalone?: boolean;
 }
 
 export type SupplyDecisionAction = 'transfer' | 'purchase';
@@ -659,6 +709,7 @@ export interface SupplyDecisionLine {
 export interface SupplyCreatedDocuments {
 	transfers: TransferDoc[];
 	purchases: string[];
+	updatedPurchases: string[];
 }
 
 /** Все заявки снабжения из ядра (Material Request по сделкам) + название сделки из Б24. Ядро не подключено → []. */
@@ -691,16 +742,17 @@ export async function createSupplyDocuments(args: { requestName: string; request
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...args }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; partial?: boolean; transfers?: TransferDoc[]; purchases?: string[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; partial?: boolean; transfers?: TransferDoc[]; purchases?: string[]; updatedPurchases?: string[] };
 	if (!json.ok) {
 		const created = [
 			...(json.transfers ?? []).map((transfer) => transfer.name || `перемещение #${transfer.id}`),
 			...(json.purchases ?? []),
+			...(json.updatedPurchases ?? []).map((name) => `${name} дополнен`),
 		];
 		const suffix = created.length ? ` Уже созданы: ${created.join(', ')}. Список заявки обновлён.` : '';
 		throw new Error(`${json.error ?? 'не удалось создать документы снабжения'}.${suffix}`);
 	}
-	return { transfers: json.transfers ?? [], purchases: json.purchases ?? [] };
+	return { transfers: json.transfers ?? [], purchases: json.purchases ?? [], updatedPurchases: json.updatedPurchases ?? [] };
 }
 
 export async function createSupplyPurchaseOrder(requestName: string, requestKey: string, dealId: number, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {
@@ -712,6 +764,17 @@ export async function createSupplyPurchaseOrder(requestName: string, requestKey:
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать черновик закупки');
 	return json.name ?? '';
+}
+
+export async function createStandaloneSupplyPurchase(supplier: string, expectedAt: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {
+	const res = await fetch('/api/supply/purchase-order/standalone', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), supplier, expectedAt, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
+	if (!json.ok || !json.name) throw new Error(json.error ?? 'не удалось создать самостоятельную закупку');
+	return json.name;
 }
 
 export async function updateSupplyPurchaseOrder(purchaseOrder: string, supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>): Promise<string> {

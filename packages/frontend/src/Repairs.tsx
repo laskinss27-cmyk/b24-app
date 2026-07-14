@@ -3,6 +3,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import { REPAIR_LOGO } from './repair-logo.js';
 import {
 	withTimeout,
+	fetchCurrentUser,
 	fetchRepairs,
 	createRepair,
 	updateRepair,
@@ -113,6 +114,11 @@ function repairPointLabel(r: Repair): string {
 	if (r.kind === 'presale') return r.sourceStore ?? r.issueStore ?? '';
 	return '';
 }
+function repairCompleteness(r: Repair): string {
+	const value = String(r.appearance ?? '').trim();
+	const match = value.match(/(?:комплект(?:ация)?|в комплекте)\s*[:—-]?\s*(.+)$/i);
+	return match?.[1]?.trim() || value || '—';
+}
 
 /** Фото → ужатый data-URL (хранится в нашем store; Диск Б24 недоступен — нет scope). */
 async function fileToPhoto(file: File, maxPx = 1280, quality = 0.7): Promise<RepairPhoto> {
@@ -141,7 +147,14 @@ async function fileToPhoto(file: File, maxPx = 1280, quality = 0.7): Promise<Rep
 }
 
 type Phase = { k: 'init' } | { k: 'ready' };
-type Screen = { k: 'list' } | { k: 'form'; initial?: Repair } | { k: 'presale' } | { k: 'card'; repair: Repair } | { k: 'print'; repair: Repair };
+type DispatchContact = { name: string; phone: string };
+type Screen =
+	| { k: 'list' }
+	| { k: 'form'; initial?: Repair }
+	| { k: 'presale' }
+	| { k: 'card'; repair: Repair }
+	| { k: 'print'; repair: Repair }
+	| { k: 'dispatch-print'; repairs: Repair[] };
 
 export function Repairs(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
@@ -149,6 +162,7 @@ export function Repairs(): JSX.Element {
 	const [screen, setScreen] = useState<Screen>({ k: 'list' });
 	const [repairs, setRepairs] = useState<Repair[]>([]);
 	const [canEditPrice, setCanEditPrice] = useState(false);
+	const [dispatchContact, setDispatchContact] = useState<DispatchContact>({ name: '', phone: '' });
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 
@@ -156,15 +170,35 @@ export function Repairs(): JSX.Element {
 		setErr(null);
 		setLoading(true);
 		try {
-			if (ctx.__mock) { setRepairs(MOCK); setCanEditPrice(true); return; }
+			if (ctx.__mock) {
+				setRepairs(MOCK);
+				setCanEditPrice(true);
+				setDispatchContact({ name: 'Андропов Даниил', phone: '+7 921 000-00-00' });
+				return;
+			}
 			const res = await withTimeout(fetchRepairs(), 30000, 'repairs/list');
 			setRepairs(res.repairs);
 			setCanEditPrice(res.canEditPrice);
+			void withTimeout(fetchCurrentUser(), 15000, 'user.current')
+				.then((user) => setDispatchContact({ name: user.name, phone: user.phone }))
+				.catch(() => undefined);
 		} catch (e: unknown) {
 			setErr(String(e instanceof Error ? e.message : e));
 		} finally {
 			setLoading(false);
 		}
+	}
+
+	async function openDispatchPrint(selected: Repair[]): Promise<void> {
+		let contact = dispatchContact;
+		if (!ctx.__mock && !contact.name) {
+			try {
+				const user = await withTimeout(fetchCurrentUser(), 15000, 'user.current');
+				contact = { name: user.name, phone: user.phone };
+				setDispatchContact(contact);
+			} catch { /* Печать остаётся доступной, даже если профиль Б24 временно не ответил. */ }
+		}
+		setScreen({ k: 'dispatch-print', repairs: selected });
 	}
 
 	useEffect(() => {
@@ -179,6 +213,7 @@ export function Repairs(): JSX.Element {
 	if (phase.k === 'init') return <Shell><p className="base-load">Загрузка…</p></Shell>;
 
 	if (screen.k === 'print') return <RepairBlank repair={screen.repair} onBack={() => setScreen({ k: 'card', repair: screen.repair })} />;
+	if (screen.k === 'dispatch-print') return <RepairDispatchBlank repairs={screen.repairs} contact={dispatchContact} onBack={() => setScreen({ k: 'list' })} />;
 
 	if (screen.k === 'form') {
 		const initial = screen.initial;
@@ -267,18 +302,20 @@ export function Repairs(): JSX.Element {
 				err={err}
 				onAdd={() => setScreen({ k: 'form' })}
 				onOpen={(r) => setScreen({ k: 'card', repair: r })}
+				onPrintSelected={(selected) => { void openDispatchPrint(selected); }}
 				onReload={() => void load()}
 			/>
 		</Shell>
 	);
 }
 
-function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
+function RepairList({ repairs, loading, err, onAdd, onOpen, onPrintSelected, onReload }: {
 	repairs: Repair[]; loading: boolean; err: string | null;
-	onAdd: () => void; onOpen: (r: Repair) => void; onReload: () => void;
+	onAdd: () => void; onOpen: (r: Repair) => void; onPrintSelected: (repairs: Repair[]) => void; onReload: () => void;
 }): JSX.Element {
 	const [q, setQ] = useState('');
 	const [st, setSt] = useState<RepairStatus | 'all'>('all');
+	const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
 	const view = useMemo(() => {
 		const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
 		return repairs.filter((r) => {
@@ -289,6 +326,33 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 		});
 	}, [repairs, q, st]);
 	const active = view.filter((r) => r.status !== 'issued').length;
+	const selectedRepairs = repairs.filter((repair) => selectedIds.has(repair.id));
+	const allVisibleSelected = view.length > 0 && view.every((repair) => selectedIds.has(repair.id));
+
+	useEffect(() => {
+		const existing = new Set(repairs.map((repair) => repair.id));
+		setSelectedIds((current) => new Set([...current].filter((id) => existing.has(id))));
+	}, [repairs]);
+
+	const toggleRepair = (id: number): void => {
+		setSelectedIds((current) => {
+			const next = new Set(current);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	};
+
+	const toggleVisible = (): void => {
+		setSelectedIds((current) => {
+			const next = new Set(current);
+			for (const repair of view) {
+				if (allVisibleSelected) next.delete(repair.id);
+				else next.add(repair.id);
+			}
+			return next;
+		});
+	};
 
 	return (
 		<>
@@ -299,6 +363,7 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 					disabled
 					title="Временно отключено: предпродажный ремонт двигает товар в ядре, а этот контур пока не используем."
 				>🛠 Предпродажный ремонт</button>
+				<button className="btn-secondary" disabled={selectedRepairs.length === 0} onClick={() => onPrintSelected(selectedRepairs)}>Сопроводительное письмо{selectedRepairs.length ? ` (${selectedRepairs.length})` : ''}</button>
 				<label className="tb-field">Статус
 					<select value={st} onChange={(e) => setSt(e.target.value as RepairStatus | 'all')}>
 						<option value="all">Все статусы</option>
@@ -321,11 +386,12 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onReload }: {
 				<div className="table-wrap">
 					<table className="products-table report-table">
 						<thead>
-							<tr><th>№</th><th>Клиент</th><th>ТТ приема</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Комментарий</th><th>Статус</th><th>Принят</th></tr>
+							<tr><th className="repair-select-cell"><input type="checkbox" checked={allVisibleSelected} aria-label="Выбрать все показанные ремонты" onChange={toggleVisible} /></th><th>№</th><th>Клиент</th><th>ТТ приема</th><th>Оборудование</th><th>Серийный №</th><th>Вид</th><th>Наша цена</th><th>Неисправность</th><th>Комментарий</th><th>Статус</th><th>Принят</th></tr>
 						</thead>
 						<tbody>
 							{view.map((r) => (
-								<tr key={r.id} className={`repair-row${r.status === 'issued' ? ' done' : ''}`} onClick={() => onOpen(r)}>
+								<tr key={r.id} className={`repair-row${r.status === 'issued' ? ' done' : ''}${selectedIds.has(r.id) ? ' selected' : ''}`} onClick={() => onOpen(r)}>
+									<td className="repair-select-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedIds.has(r.id)} aria-label={`Выбрать ремонт № ${repairNo(r)}`} onChange={() => toggleRepair(r.id)} /></td>
 									<td><b>#{repairNo(r)}</b></td>
 									<td>{r.kind === 'presale' ? <span className="pay-badge presale">🛠 предпродажа</span> : (<>{r.client.name || <span className="muted">—</span>}{r.client.phone && <div className="muted small">{r.client.phone}</div>}</>)}</td>
 									<td className="nowrap">{repairPointLabel(r) || <span className="muted">—</span>}</td>
@@ -836,6 +902,44 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onSta
 					</div>
 				</div>
 			)}
+		</div>
+	);
+}
+
+/** Сводное сопроводительное письмо для передачи выбранного оборудования в сервис. */
+function RepairDispatchBlank({ repairs, contact, onBack }: { repairs: Repair[]; contact: DispatchContact; onBack: () => void }): JSX.Element {
+	return (
+		<div className="repair-blank-wrap repair-dispatch-wrap">
+			<div className="blank-toolbar no-print">
+				<button className="btn-secondary" onClick={onBack}>← Назад</button>
+				<span className="muted small">Выбрано ремонтов: {repairs.length}</span>
+				<button className="btn-primary" onClick={() => window.print()}>Печать</button>
+			</div>
+			<div className="repair-blank repair-dispatch-letter">
+				<div className="blank-head">
+					<img className="blank-logo" src={REPAIR_LOGO} alt="Умный дом" />
+					<div className="repair-dispatch-meta">
+						<span>Дата: {ruDate(new Date().toISOString())}</span>
+						{contact.name && <span>Контактное лицо: {contact.name}</span>}
+						{contact.phone && <span>Телефон: {contact.phone}</span>}
+					</div>
+				</div>
+				<div className="blank-title">Сопроводительное письмо</div>
+				<table className="blank-table repair-dispatch-table">
+					<thead><tr><th>Номер ремонта</th><th>Модель</th><th>Серийный номер</th><th>Неисправность</th><th>Комплектация</th></tr></thead>
+					<tbody>
+						{repairs.map((repair) => (
+							<tr key={repair.id}>
+								<td>#{repairNo(repair)}</td>
+								<td>{repair.model || repair.device || '—'}</td>
+								<td>{repair.serial || '—'}</td>
+								<td>{repair.defect || '—'}</td>
+								<td>{repairCompleteness(repair)}</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
 		</div>
 	);
 }

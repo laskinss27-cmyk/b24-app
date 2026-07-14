@@ -14,6 +14,7 @@ import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
  */
 // «Обеспечено» — снабженец отработал заявку (статусы Material Request).
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
+const STANDALONE_SUPPLY_REQUEST = '__standalone__';
 interface AuthBody { domain?: string; accessToken?: string }
 
 function errInfo(err: unknown): string {
@@ -101,7 +102,6 @@ function parseTransferProgress(it: Record<string, unknown>): TransferProgress | 
 	try {
 		const data = it['DETAIL_TEXT'] ? JSON.parse(String(it['DETAIL_TEXT'])) as Record<string, unknown> : {};
 		const supplyRequest = String(data['supplyRequest'] ?? '');
-		if (!supplyRequest) return null;
 		const status = String(data['status'] ?? '');
 		const rawLines = Array.isArray(data['lines']) ? data['lines'] as Array<Record<string, unknown>> : [];
 		const rawReceived = Array.isArray(data['receivedLines']) ? data['receivedLines'] as Array<Record<string, unknown>> : [];
@@ -131,6 +131,7 @@ function parseTransferProgress(it: Record<string, unknown>): TransferProgress | 
 }
 
 function belongsToRequest(request: SupplyRequest, requestKey: string): boolean {
+	if (request.name === STANDALONE_SUPPLY_REQUEST) return !requestKey;
 	return Boolean(requestKey) && requestKey === request.requestKey;
 }
 
@@ -262,6 +263,8 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!erp) return { ok: true, orders: [] as unknown[] };
 		try {
 			const reqs = await listSupplyRequests(erp);
+			const standaloneToStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
+			const standaloneRequest: SupplyRequest = { name: STANDALONE_SUPPLY_REQUEST, requestKey: '', createdAt: '', dealId: '', date: '', status: '', toStore: standaloneToStore, items: [] };
 			// Название сделки — из Б24 (одним батч-вызовом по списку dealId). Статус «обеспечено» — из самой заявки.
 			const dealIds = [...new Set(reqs.map((o) => Number(o.dealId)).filter((n) => Number.isInteger(n) && n > 0))];
 			const titleMap = new Map<number, string>();
@@ -274,12 +277,16 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const planned = new Map<string, Map<number, number>>();
 			const fulfilled = new Map<string, Map<number, number>>();
 			const transfersByRequest = new Map<string, TransferProgress[]>();
+			const standaloneTransfers: TransferProgress[] = [];
 			try {
 				await ensureTransfersEntity(client);
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
 					const request = reqs.find((candidate) => transferBelongsToRequest(t, candidate));
-					if (!request) continue;
+					if (!request) {
+						if (!t.supplyRequest && !t.dealId) standaloneTransfers.push(t);
+						continue;
+					}
 					transfersByRequest.set(request.requestKey, [...(transfersByRequest.get(request.requestKey) ?? []), t]);
 					if (t.status !== 'canceled') addCovered(planned, request.requestKey, t.lines);
 					const lines = t.status === 'shortage' ? t.receivedLines : t.status === 'received' ? t.lines : [];
@@ -288,7 +295,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			} catch {
 				// Если старое хранилище перемещений недоступно, заявки всё равно покажем как есть.
 			}
-			const purchasesByRequest = await listPurchaseChildren(erp, reqs);
+			const purchasesByRequest = await listPurchaseChildren(erp, [...reqs, standaloneRequest]);
 			for (const [requestKey, purchases] of purchasesByRequest.entries()) {
 				for (const purchase of purchases) {
 					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestKey, purchaseRequestLines(purchase.lines));
@@ -314,8 +321,26 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 					closed: MR_DONE.has(o.status) || closedByProgress,
 				};
 			});
-			app.log.info({ reqs: enriched.length }, '[api/supply/orders] ok');
-			return { ok: true, orders: enriched };
+			const standalonePurchases = purchasesByRequest.get('') ?? [];
+			const orders = standalonePurchases.length || standaloneTransfers.length
+				? [...enriched, {
+					name: STANDALONE_SUPPLY_REQUEST,
+					requestKey: '',
+					createdAt: '',
+					dealId: '',
+					date: '',
+					status: '',
+					toStore: standaloneToStore,
+					items: [],
+					originalItems: [],
+					transfers: standaloneTransfers,
+					purchases: standalonePurchases,
+					dealTitle: 'Самостоятельные документы',
+					closed: true,
+					standalone: true,
+				}] : enriched;
+			app.log.info({ reqs: enriched.length, standalonePurchases: standalonePurchases.length, standaloneTransfers: standaloneTransfers.length }, '[api/supply/orders] ok');
+			return { ok: true, orders };
 		} catch (err) {
 			app.log.error({}, `[api/supply/orders] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -384,6 +409,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		supplyCreationLocks.add(lockKey);
 		const createdTransfers: unknown[] = [];
 		const createdPurchases: string[] = [];
+		const updatedPurchases: string[] = [];
 
 		try {
 			await ensureTransfersEntity(client);
@@ -442,6 +468,31 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			}
 			for (const [supplier, supplierLines] of purchasesBySupplier.entries()) {
 				await ensureB24SupplierCompany(client, supplier);
+				const existingDraft = existingPurchases.find((purchase) =>
+					purchase.supplyStage === 'draft'
+					&& supplierNorm(purchase.supplier) === supplierNorm(supplier),
+				);
+				if (existingDraft) {
+					const mergedLines = existingDraft.lines.map((line) => ({
+						productId: line.productId,
+						itemName: line.name,
+						qty: line.qty,
+						rate: Number(line.rate ?? 0),
+						requestQty: line.requestQty ?? line.qty,
+					}));
+					for (const incoming of supplierLines) {
+						const current = mergedLines.find((line) => line.productId === incoming.productId);
+						if (current) {
+							current.qty += incoming.qty;
+							current.requestQty = Number(current.requestQty ?? 0) + incoming.qty;
+						} else {
+							mergedLines.push({ productId: incoming.productId, itemName: incoming.itemName, qty: incoming.qty, rate: 0, requestQty: incoming.qty });
+						}
+					}
+					await updatePurchaseOrderDraft(erp, { purchaseOrder: existingDraft.name, lines: mergedLines });
+					updatedPurchases.push(existingDraft.name);
+					continue;
+				}
 				const { name } = await createPurchaseOrderDraft(erp, {
 					dealId,
 					supplyRequest: requestName,
@@ -505,16 +556,17 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				createdTransfers.push({ id, name: itemName, ...shippedData });
 			}
 
-			app.log.info({ requestName, dealId, transfers: createdTransfers.length, purchases: createdPurchases.length }, '[api/supply/create-documents] ok');
-			return { ok: true, transfers: createdTransfers, purchases: createdPurchases };
+			app.log.info({ requestName, dealId, transfers: createdTransfers.length, purchases: createdPurchases.length, updatedPurchases: updatedPurchases.length }, '[api/supply/create-documents] ok');
+			return { ok: true, transfers: createdTransfers, purchases: createdPurchases, updatedPurchases };
 		} catch (err) {
 			app.log.error({ requestName, dealId }, `[api/supply/create-documents] failed — ${errInfo(err)}`);
 			return reply.code(200).send({
 				ok: false,
 				error: errInfo(err),
-				partial: createdTransfers.length > 0 || createdPurchases.length > 0,
+				partial: createdTransfers.length > 0 || createdPurchases.length > 0 || updatedPurchases.length > 0,
 				transfers: createdTransfers,
 				purchases: createdPurchases,
+				updatedPurchases,
 			});
 		} finally {
 			supplyCreationLocks.delete(lockKey);
@@ -560,6 +612,32 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			return { ok: true, name };
 		} catch (err) {
 			app.log.error({ dealId, requestName }, `[api/supply/purchase-order] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/supply/purchase-order/standalone', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { supplier?: unknown; expectedAt?: unknown; lines?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const supplier = String(b.supplier ?? '').trim();
+		if (!supplier || supplier === 'Поставщик не выбран') return reply.code(400).send({ ok: false, error: 'нужен поставщик' });
+		const expectedAt = String(b.expectedAt ?? '').trim();
+		const scheduleDate = /^\d{4}-\d{2}-\d{2}$/.test(expectedAt) ? expectedAt : new Date().toISOString().slice(0, 10);
+		const lines = (Array.isArray(b.lines) ? b.lines : [])
+			.map((line) => line as { productId?: unknown; itemName?: unknown; qty?: unknown; rate?: unknown })
+			.map((line) => ({ productId: Number(line.productId), itemName: String(line.itemName ?? ''), qty: Number(line.qty), rate: Number(line.rate ?? 0), requestQty: 0 }))
+			.filter((line) => Number.isInteger(line.productId) && line.productId > 0 && Number.isFinite(line.qty) && line.qty > 0);
+		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций для закупки' });
+		try {
+			await ensureB24SupplierCompany(client, supplier);
+			const { name } = await createPurchaseOrderDraft(erp, { supplyRequest: STANDALONE_SUPPLY_REQUEST, scheduleDate, supplier, lines });
+			app.log.info({ supplier, lines: lines.length, name }, '[api/supply/purchase-order/standalone] created');
+			return { ok: true, name };
+		} catch (err) {
+			app.log.error({ supplier }, `[api/supply/purchase-order/standalone] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
@@ -655,10 +733,11 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
+		const standalone = requestName === STANDALONE_SUPPLY_REQUEST;
+		const dealId = Number(b.dealId);
+		if (!standalone && (!Number.isInteger(dealId) || dealId <= 0)) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const requestKey = String(b.requestKey ?? '').trim();
 		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
 		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
@@ -669,6 +748,11 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0);
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет фактически полученных позиций' });
 		try {
+			if (standalone) {
+				const { name } = await createSupplyPurchaseReceipt(erp, { supplyRequest: STANDALONE_SUPPLY_REQUEST, purchaseOrder, toStore, lines });
+				app.log.info({ purchaseOrder, lines: lines.length, name }, '[api/supply/purchase-receive] standalone received');
+				return { ok: true, name };
+			}
 			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			const { name } = await createSupplyPurchaseReceipt(erp, { dealId, supplyRequest: requestName, supplyRequestKey: request.requestKey, purchaseOrder, toStore, lines });

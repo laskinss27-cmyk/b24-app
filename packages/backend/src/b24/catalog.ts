@@ -50,6 +50,7 @@ export interface BaseRow {
 	article?: string | undefined;
 	model?: string | undefined;
 	manufacturer?: string | undefined;
+	sectionId?: number | undefined;
 	sectionName?: string | undefined;
 	retail: number | null;
 	purchase: number | null;
@@ -231,6 +232,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			article: undefined,
 			model: propVal(p['property330']),
 			manufacturer: propVal(p['property334']),
+			sectionId: sid,
 			sectionName: sectionName(sid),
 			retail: null,
 			purchase: numOrNull(p['purchasingPrice']),
@@ -256,6 +258,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			article: propVal(o['property360']),
 			model: propVal(o['property360']) ?? (par ? propVal(par['property330']) : undefined),
 			manufacturer: propVal(o['property334']) ?? (par ? propVal(par['property334']) : undefined),
+			sectionId: sid,
 			sectionName: sectionName(sid),
 			retail: null,
 			purchase: numOrNull(o['purchasingPrice']) ?? (par ? numOrNull(par['purchasingPrice']) : null),

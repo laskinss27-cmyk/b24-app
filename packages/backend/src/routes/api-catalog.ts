@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
-import { fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
+import { ensureCoreItem, fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -32,6 +32,128 @@ interface CacheEntry {
 	expires: number;
 }
 const baseCache = new Map<string, CacheEntry>();
+
+interface CatalogCandidate {
+	id: number;
+	iblockId: number;
+	name: string;
+	isService: boolean;
+	article?: string;
+	model?: string;
+	manufacturer?: string;
+	sectionId?: number;
+	sectionName?: string;
+	retail: number | null;
+	purchase: number | null;
+	total: number;
+	stockByStore: Record<number, number>;
+}
+
+function cleanText(value: unknown): string {
+	return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function normalized(value: unknown): string {
+	return cleanText(value).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, '');
+}
+
+function productTitle(productType: string, manufacturer: string, model: string): string {
+	return [productType, manufacturer, model].map(cleanText).filter(Boolean).join(' ');
+}
+
+function propValue(value: unknown): string | undefined {
+	if (value == null) return undefined;
+	if (typeof value === 'object') {
+		const obj = value as Record<string, unknown>;
+		const raw = obj['valueEnum'] ?? obj['value'];
+		return raw == null || raw === '' ? undefined : cleanText(raw);
+	}
+	const text = cleanText(value);
+	return text || undefined;
+}
+
+function candidateScore(row: CatalogCandidate, args: { name: string; model: string; manufacturer: string }): { score: number; exact: boolean } {
+	const wantedModel = normalized(args.model);
+	const wantedBrand = normalized(args.manufacturer);
+	const rowModel = normalized(row.article || row.model);
+	const rowBrand = normalized(row.manufacturer);
+	const exactName = normalized(row.name) === normalized(args.name);
+	const exactModel = Boolean(wantedModel && rowModel === wantedModel);
+	if (exactName || exactModel) return { score: 100, exact: true };
+	let score = 0;
+	if (wantedModel && rowModel === wantedModel) score += 70;
+	else if (wantedModel && (normalized(row.name).includes(wantedModel) || wantedModel.includes(rowModel))) score += 45;
+	if (wantedBrand && rowBrand === wantedBrand) score += 20;
+	else if (wantedBrand && normalized(row.name).includes(wantedBrand)) score += 10;
+	const wantedTokens = cleanText(args.name).toLocaleLowerCase('ru-RU').split(/[^a-zа-я0-9]+/i).filter((token) => token.length > 1);
+	const rowName = cleanText(row.name).toLocaleLowerCase('ru-RU');
+	const overlap = wantedTokens.filter((token) => rowName.includes(token)).length;
+	if (wantedTokens.length) score += Math.round(20 * overlap / wantedTokens.length);
+	return { score, exact: false };
+}
+
+function rankedCandidates(rows: CatalogCandidate[], args: { name: string; model: string; manufacturer: string }): Array<CatalogCandidate & { exact: boolean }> {
+	return rows
+		.filter((row) => !row.isService)
+		.map((row) => ({ row, ...candidateScore(row, args) }))
+		.filter((entry) => entry.score >= 45)
+		.sort((a, b) => b.score - a.score || a.row.name.localeCompare(b.row.name, 'ru'))
+		.slice(0, 8)
+		.map(({ row, exact }) => ({ ...row, exact }));
+}
+
+async function freshExactCandidates(client: B24Client, args: { name: string; model: string }): Promise<CatalogCandidate[]> {
+	const select = ['id', 'iblockId', 'name', 'type', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice'];
+	const attempts = await Promise.allSettled([
+		client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', { filter: { iblockId: 24, name: args.name }, select }),
+		client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', { filter: { iblockId: 24, property330: args.model }, select }),
+	]);
+	const byId = new Map<number, CatalogCandidate>();
+	for (const attempt of attempts) {
+		if (attempt.status !== 'fulfilled') continue;
+		for (const product of attempt.value?.products ?? []) {
+			const id = Number(product['id']);
+			if (!(id > 0)) continue;
+			const model = propValue(product['property330']);
+			const manufacturer = propValue(product['property334']);
+			const sectionId = Number(product['iblockSectionId'] ?? 0) || undefined;
+			byId.set(id, {
+				id,
+				iblockId: Number(product['iblockId'] ?? 24),
+				name: cleanText(product['name']) || `#${id}`,
+				isService: Number(product['type']) === 7,
+				...(model ? { model } : {}),
+				...(manufacturer ? { manufacturer } : {}),
+				...(sectionId ? { sectionId } : {}),
+				retail: null,
+				purchase: Number(product['purchasingPrice'] ?? 0) || null,
+				total: 0,
+				stockByStore: {},
+			});
+		}
+	}
+	const candidates = [...byId.values()];
+	if (candidates.length) {
+		try {
+			const prices = await client.call<{ prices?: Array<Record<string, unknown>> }>('catalog.price.list', {
+				filter: { productId: candidates.map((candidate) => candidate.id), catalogGroupId: 2 },
+				select: ['productId', 'price'],
+			});
+			const priceById = new Map((prices?.prices ?? []).map((price) => [Number(price['productId']), Number(price['price'])]));
+			for (const candidate of candidates) candidate.retail = priceById.get(candidate.id) ?? null;
+		} catch { /* Цена не нужна для самой блокировки дубля. */ }
+	}
+	return candidates;
+}
+
+let createProductQueue: Promise<void> = Promise.resolve();
+async function serializeProductCreate<T>(action: () => Promise<T>): Promise<T> {
+	const previous = createProductQueue;
+	let release!: () => void;
+	createProductQueue = new Promise<void>((resolve) => { release = resolve; });
+	await previous;
+	try { return await action(); } finally { release(); }
+}
 
 export function registerApiCatalogRoute(app: FastifyInstance): void {
 	const clientFrom = (body: AuthBody): B24Client | null => {
@@ -92,6 +214,87 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/catalog/create-product', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+
+		const productType = cleanText(body['productType']);
+		const manufacturer = cleanText(body['manufacturer']);
+		const model = cleanText(body['model']);
+		const sectionId = Number(body['sectionId']);
+		const sectionNameInput = cleanText(body['sectionName']);
+		const retail = Number(body['retail']);
+		const similarReviewed = body['similarReviewed'] === true;
+		if (productType.length < 3) return reply.code(400).send({ ok: false, error: 'укажи вид товара' });
+		if (manufacturer.length < 2) return reply.code(400).send({ ok: false, error: 'укажи производителя' });
+		if (model.length < 2) return reply.code(400).send({ ok: false, error: 'укажи полную модель или артикул' });
+		if (!Number.isInteger(sectionId) || sectionId <= 0) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
+		if (!(retail > 0)) return reply.code(400).send({ ok: false, error: 'цена продажи должна быть больше нуля' });
+
+		const name = productTitle(productType, manufacturer, model);
+		const cacheKey = normalizeDomain(body.domain ?? '');
+		try {
+			return await serializeProductCreate(async () => {
+				const cachedRows = (baseCache.get(cacheKey)?.data.rows ?? []) as CatalogCandidate[];
+				const sectionName = cachedRows.find((row) => row.sectionId === sectionId)?.sectionName || sectionNameInput;
+				const fresh = await freshExactCandidates(client, { name, model });
+				const merged = new Map<number, CatalogCandidate>();
+				for (const row of [...cachedRows, ...fresh]) merged.set(row.id, row);
+				const candidates = rankedCandidates([...merged.values()], { name, model, manufacturer });
+				const exact = candidates.filter((candidate) => candidate.exact);
+				if (exact.length) return { ok: true, status: 'duplicate', name, candidates: exact };
+				if (candidates.length && !similarReviewed) return { ok: true, status: 'review', name, candidates };
+
+				let productId = 0;
+				try {
+					const created = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', {
+						fields: {
+							iblockId: 24,
+							name,
+							type: 1,
+							measure: 9,
+							active: 'Y',
+							iblockSectionId: sectionId,
+							property334: manufacturer,
+							property330: model,
+						},
+					});
+					productId = Number(created?.element?.id ?? 0) || 0;
+					if (!productId) throw new Error('catalog.product.add не вернул id');
+					await client.call('catalog.price.add', { fields: { productId, catalogGroupId: 2, price: retail, currency: 'RUB' } });
+					await ensureCoreItem(erp, { productId, name, model, article: model, brand: manufacturer, section: sectionName });
+				} catch (error) {
+					if (productId) await client.call('catalog.product.delete', { id: productId }).catch(() => undefined);
+					throw error;
+				}
+
+				baseCache.delete(cacheKey);
+				const row: CatalogCandidate = {
+					id: productId,
+					iblockId: 24,
+					name,
+					isService: false,
+					model,
+					manufacturer,
+					sectionId,
+					sectionName,
+					retail,
+					purchase: null,
+					total: 0,
+					stockByStore: {},
+				};
+				app.log.info({ productId, name, sectionId }, '[api/catalog/create-product] ok');
+				return { ok: true, status: 'created', name, product: row };
+			});
+		} catch (error) {
+			app.log.error({}, `[api/catalog/create-product] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});
 

@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
+import { ProductBase } from './ProductBase.js';
 import {
 	BETA_USER_IDS,
+	createManualTransfer,
+	createStandaloneSupplyPurchase,
 	createSupplyDocuments,
 	createSupplyPurchaseTransfer,
 	deleteSupplyPurchaseOrder,
 	deleteTransfer,
 	fetchCurrentUserId,
+	fetchStockFormData,
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
 	isPortalAdmin,
@@ -59,7 +63,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 ];
 
 type Phase = 'init' | 'denied' | 'ready';
-type ViewKey = 'orders' | 'tree' | 'purchase' | 'logistics' | 'stock';
+type ViewKey = 'orders' | 'purchase' | 'logistics';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 
 interface DecisionState {
@@ -170,6 +174,47 @@ const transferDocumentLabel = (transfer: SupplyTransferChild): string => {
 
 const lineTitle = (line: { name?: string; itemName?: string; productId: number; qty: number }): string =>
 	`${line.name || line.itemName || `#${line.productId}`} ×${line.qty}`;
+const purchaseQuantities = (purchase: SupplyPurchaseChild): { ordered: number; received: number } => ({
+	ordered: purchase.lines.reduce((sum, line) => sum + Number(line.qty || 0), 0),
+	received: purchase.receipts.reduce((sum, receipt) => sum + receipt.lines.reduce((subtotal, line) => subtotal + Number(line.qty || 0), 0), 0),
+});
+const purchaseIsCancelled = (purchase: SupplyPurchaseChild): boolean => String(purchase.supplyStage ?? '').toLowerCase() === 'cancelled';
+const purchaseIsShortage = (purchase: SupplyPurchaseChild): boolean => {
+	const { ordered, received } = purchaseQuantities(purchase);
+	return !purchaseIsCancelled(purchase) && received > 0 && received < ordered;
+};
+const purchaseIsWaiting = (purchase: SupplyPurchaseChild): boolean => {
+	const { ordered, received } = purchaseQuantities(purchase);
+	return !purchaseIsCancelled(purchase) && ordered > 0 && received < ordered;
+};
+const purchaseAmount = (purchase: SupplyPurchaseChild): number =>
+	purchase.lines.reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.rate || 0), 0);
+
+const searchMatches = (query: string, values: Array<string | number | undefined>): boolean => {
+	const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+	if (!words.length) return true;
+	const haystack = values.map((value) => String(value ?? '')).join(' ').toLowerCase();
+	return words.every((word) => haystack.includes(word));
+};
+const orderSearchValues = (order: SupplyOrderRow): Array<string | number | undefined> => [
+	order.name,
+	order.dealId,
+	order.dealTitle,
+	order.toStore,
+	...requestItemsForOrder(order).flatMap((item) => [item.productId, item.itemName, ...Object.keys(item.stocks ?? {})]),
+	...(order.originalItems ?? []).flatMap((item) => [item.productId, item.itemName, ...Object.keys(item.stocks ?? {})]),
+	...(order.purchases ?? []).flatMap((purchase) => [purchase.name, purchase.supplier, ...purchase.lines.flatMap((line) => [line.productId, line.name])]),
+	...(order.transfers ?? []).flatMap((transfer) => [transfer.id, transfer.name, transfer.fromStore, transfer.toStore, ...transfer.lines.flatMap((line) => [line.productId, line.name])]),
+];
+const purchaseSearchValues = (order: SupplyOrderRow, purchase: SupplyPurchaseChild): Array<string | number | undefined> => [
+	order.name, order.dealId, order.dealTitle, order.toStore, purchase.name, purchase.supplier,
+	...purchase.lines.flatMap((line) => [line.productId, line.name, line.warehouse]),
+	...purchase.receipts.flatMap((receipt) => [receipt.name, ...receipt.lines.flatMap((line) => [line.productId, line.name, line.warehouse])]),
+];
+const transferSearchValues = (order: SupplyOrderRow, transfer: SupplyTransferChild): Array<string | number | undefined> => [
+	order.name, order.dealId, order.dealTitle, order.toStore, transfer.id, transfer.name, transfer.purchaseOrder, transfer.fromStore, transfer.toStore,
+	...transfer.lines.flatMap((line) => [line.productId, line.name, line.warehouse]),
+];
 const documentAmount = (lines: Array<{ qty: number }>): string => {
 	const qty = lines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
 	return `${lines.length} поз. · ${qty} шт`;
@@ -179,18 +224,39 @@ function Pill({ tone, children }: { tone: string; children: string }): JSX.Eleme
 	return <span className={`supply-proto-pill ${tone}`}>{children}</span>;
 }
 
-function Metrics({ orders }: { orders: SupplyOrderRow[] }): JSX.Element {
-	const openOrders = orders.filter((order) => !order.closed).length;
-	const purchaseCount = orders.reduce((sum, order) => sum + (order.purchases?.length ?? 0), 0);
-	const receiptCount = orders.reduce((sum, order) => sum + (order.purchases ?? []).reduce((a, purchase) => a + purchase.receipts.length, 0), 0);
-	const transferCount = orders.reduce((sum, order) => sum + (order.transfers?.length ?? 0), 0);
+function Metrics({ orders, view }: { orders: SupplyOrderRow[]; view: ViewKey }): JSX.Element {
+	const requests = orders.filter((order) => !order.standalone);
+	const purchases = orders.flatMap((order) => order.purchases ?? []);
+	const transfers = orders.flatMap((order) => order.transfers ?? []);
+	const entries = view === 'orders'
+		? [
+			{ label: 'Необработанные заявки', value: requests.filter((order) => requestItemsForOrder(order).length > 0).length },
+			{ label: 'Необработанные позиции', value: requests.reduce((sum, order) => sum + requestItemsForOrder(order).length, 0) },
+			{ label: 'Всего обработано', value: requests.filter((order) => requestItemsForOrder(order).length === 0).length },
+		]
+		: view === 'purchase'
+			? [
+				{ label: 'Заявки в ожидании', value: purchases.filter(purchaseIsWaiting).length },
+				{ label: 'Сумма заявок', value: `${money(purchases.filter((purchase) => !purchaseIsCancelled(purchase)).reduce((sum, purchase) => sum + purchaseAmount(purchase), 0))} ₽` },
+				{ label: 'Заявки с недовозом', value: purchases.filter(purchaseIsShortage).length },
+			]
+			: [
+				{ label: 'Перемещения в пути', value: transfers.filter((transfer) => transfer.status === 'in_transit').length },
+				{ label: 'Перемещения с недовозом', value: transfers.filter((transfer) => transfer.status === 'shortage').length },
+			];
 	return (
-		<div className="supply-proto-metrics">
-			<div><span>Заявки в работе</span><b>{openOrders}</b></div>
-			<div><span>Заявки поставщику</span><b>{purchaseCount}</b></div>
-			<div><span>Оприходования</span><b>{receiptCount}</b></div>
-			<div><span>Перемещения</span><b>{transferCount}</b></div>
+		<div className={`supply-proto-metrics columns-${entries.length}`}>
+			{entries.map((entry) => <div key={entry.label}><span>{entry.label}</span><b>{entry.value}</b></div>)}
 		</div>
+	);
+}
+
+function SupplySearch({ value, onChange }: { value: string; onChange: (value: string) => void }): JSX.Element {
+	return (
+		<label className="supply-proto-search">
+			<span>Поиск</span>
+			<input type="search" value={value} placeholder="Сделка, склад, товар или поставщик" onChange={(event) => onChange(event.target.value)} />
+		</label>
 	);
 }
 
@@ -283,7 +349,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 			<div className="supply-proto-overlay">
 				<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Заявка поставщику ${currentPurchase.name}`}>
 					<header>
-						<div><span className="supply-document-eyebrow">Заявка поставщику</span><h2>{currentPurchase.name}</h2><p>{order.name} · сделка #{order.dealId}</p></div>
+						<div><span className="supply-document-eyebrow">Заявка поставщику</span><h2>{currentPurchase.name}</h2><p>{order.standalone ? 'Самостоятельная закупка' : `${order.name} · сделка #${order.dealId}`}</p></div>
 						<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 					</header>
 					<dl className="supply-document-facts">
@@ -327,7 +393,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		<div className="supply-proto-overlay">
 			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferDocumentLabel(transfer)}`}>
 				<header>
-					<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transferDocumentLabel(transfer)}</h2><p>{transfer.fromStore} → {transfer.toStore} · сделка #{order.dealId}</p></div>
+						<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transferDocumentLabel(transfer)}</h2><p>{transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
 					<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 				</header>
 				<dl className="supply-document-facts">
@@ -459,6 +525,7 @@ function DecisionRows({
 function OrdersView({
 	orders,
 	sort,
+	search,
 	expanded,
 	decisions,
 	suppliers,
@@ -477,6 +544,7 @@ function OrdersView({
 }: {
 	orders: SupplyOrderRow[];
 	sort: SortKey;
+	search: string;
 	expanded: string;
 	decisions: DecisionMap;
 	suppliers: string[];
@@ -511,7 +579,7 @@ function OrdersView({
 				</label>
 			</div>
 			<div className="supply-order-list">
-				{orders.length === 0 && <div className="empty">Заявок пока нет.</div>}
+				{orders.length === 0 && <div className="empty">{search.trim() ? 'Ничего не найдено.' : 'Заявок пока нет.'}</div>}
 				{orders.map((order) => {
 					const isOpen = expanded === order.name;
 					const items = requestItemsForOrder(order);
@@ -709,40 +777,166 @@ type RegistryRow =
 	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
 	| { kind: 'logistics'; order: SupplyOrderRow; transfer: SupplyTransferChild };
 
-function RegistryView({ orders, kind, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; kind: ViewKey; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
-	const rows: RegistryRow[] = kind === 'purchase'
+function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; kind: ViewKey; search: string; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
+	const rows: RegistryRow[] = (kind === 'purchase'
 		? orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ kind: 'purchase' as const, order, purchase })))
-		: kind === 'logistics'
-			? orders.flatMap((order) => (order.transfers ?? []).map((transfer) => ({ kind: 'logistics' as const, order, transfer })))
-			: [];
+		: orders.flatMap((order) => (order.transfers ?? []).map((transfer) => ({ kind: 'logistics' as const, order, transfer }))))
+		.filter((row) => row.kind === 'purchase'
+			? searchMatches(search, purchaseSearchValues(row.order, row.purchase))
+			: searchMatches(search, transferSearchValues(row.order, row.transfer)));
 	return (
 		<section className="supply-proto-card">
 			<div className="supply-proto-card-head">
 				<div>
-					<h2>{kind === 'purchase' ? 'Закупки' : kind === 'logistics' ? 'Логистика' : 'Остатки'}</h2>
+					<h2>{kind === 'purchase' ? 'Закупки' : 'Логистика'}</h2>
 					<p>Отдельный реестр документов без дерева.</p>
 				</div>
 			</div>
-			{kind === 'stock' ? (
-				<div className="empty">Остатки оставляем отдельным быстрым реестром. Основной сценарий здесь начинается с заявки.</div>
-			) : (
-				<div className="supply-proto-table-wrap">
+			<div className="supply-proto-table-wrap">
 					<table className="supply-proto-table">
 						<thead><tr><th>Документ</th><th>Сделка</th><th>Маршрут / поставщик</th><th>Позиции</th><th>Статус</th></tr></thead>
 						<tbody>
-							{rows.length === 0 ? <tr><td colSpan={5} className="empty">Пока пусто.</td></tr> : rows.map((row) => {
+							{rows.length === 0 ? <tr><td colSpan={5} className="empty">{search.trim() ? 'Ничего не найдено.' : 'Пока пусто.'}</td></tr> : rows.map((row) => {
 								if (row.kind === 'purchase') {
 									const status = purchaseStatus(row.purchase);
-									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>#{row.order.dealId}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 								}
 								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>#{row.order.dealId}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 							})}
 						</tbody>
 					</table>
 				</div>
-			)}
 		</section>
+	);
+}
+
+type StandaloneDocumentKind = 'purchase' | 'transfer';
+interface StandaloneLine {
+	productId: number;
+	name: string;
+	stocks: Record<string, number>;
+	qty: NumericDraft;
+	rate: NumericDraft;
+}
+
+function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { kind: StandaloneDocumentKind; suppliers: string[]; mock: boolean; onClose: () => void; onDone: (message: string, view: ViewKey) => void }): JSX.Element {
+	const [stores, setStores] = useState<string[]>([]);
+	const [fromStore, setFromStore] = useState('');
+	const [toStore, setToStore] = useState('');
+	const [supplier, setSupplier] = useState('');
+	const [expectedAt, setExpectedAt] = useState(() => new Date().toISOString().slice(0, 10));
+	const [note, setNote] = useState('');
+	const [lines, setLines] = useState<StandaloneLine[]>([]);
+	const [pickingProducts, setPickingProducts] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+
+	useEffect(() => {
+		if (mock) {
+			setStores(['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12']);
+			return;
+		}
+		void fetchStockFormData().then((data) => setStores(data.stores.filter((name) => !name.toLowerCase().includes('транзит')))).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+	}, [mock]);
+
+	const addPickedLines = (items: Array<{ productId: number; name: string; quantity: number; purchasePrice?: number; stocks?: Record<string, number> }>): void => {
+		setLines((current) => {
+			const next = [...current];
+			for (const item of items) {
+				const index = next.findIndex((line) => line.productId === item.productId);
+				if (index >= 0) {
+					const existing = next[index];
+					if (existing) next[index] = { ...existing, stocks: item.stocks ?? existing.stocks, qty: Number(existing.qty || 0) + item.quantity };
+				} else {
+					next.push({ productId: item.productId, name: item.name, stocks: item.stocks ?? {}, qty: item.quantity, rate: kind === 'purchase' ? Number(item.purchasePrice ?? 0) : 0 });
+				}
+			}
+			return next;
+		});
+	};
+
+	const patchLine = (productId: number, patch: Partial<Pick<StandaloneLine, 'qty' | 'rate'>>): void => {
+		setLines((current) => current.map((line) => line.productId === productId ? { ...line, ...patch } : line));
+	};
+
+	const submit = async (): Promise<void> => {
+		setError('');
+		const validLines = lines.filter((line) => Number(line.qty || 0) > 0);
+		if (!validLines.length) { setError('Добавь хотя бы одну позицию.'); return; }
+		if (kind === 'purchase' && (!supplier.trim() || supplier.trim() === 'Поставщик не выбран')) { setError('Выбери поставщика.'); return; }
+		if (kind === 'transfer') {
+			if (!fromStore || !toStore) { setError('Выбери склад отправки и склад получения.'); return; }
+			if (fromStore === toStore) { setError('Склады отправки и получения должны отличаться.'); return; }
+			const unavailable = validLines.find((line) => Number(line.qty || 0) > Number(line.stocks[fromStore] ?? 0));
+			if (unavailable) { setError(`На складе «${fromStore}» доступно ${Number(unavailable.stocks[fromStore] ?? 0)}: ${unavailable.name}.`); return; }
+		}
+		setBusy(true);
+		try {
+			if (kind === 'purchase') {
+				const name = await createStandaloneSupplyPurchase(supplier.trim(), expectedAt, validLines.map((line) => ({ productId: line.productId, itemName: line.name, qty: Number(line.qty), rate: Number(line.rate || 0) })));
+				onDone(`${name}: создан самостоятельный черновик.`, 'purchase');
+				return;
+			}
+			const transfer = await createManualTransfer({ fromStore, toStore, ...(note.trim() ? { note: note.trim() } : {}), lines: validLines.map((line) => ({ productId: line.productId, name: line.name, qty: Number(line.qty) })) });
+			try {
+				await shipTransfer(transfer.id);
+				onDone(`Перемещение #${transfer.id}: товар отправлен в транзит.`, 'logistics');
+			} catch (err) {
+				onDone(`Перемещение #${transfer.id} создано, но не отправлено в транзит: ${err instanceof Error ? err.message : String(err)}`, 'logistics');
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	if (pickingProducts) {
+		return (
+			<div className="supply-product-picker-overlay">
+				<ProductBase picker={{
+					title: kind === 'purchase' ? 'Подобрать товары в заявку поставщику' : 'Подобрать товары для перемещения',
+					kindFilter: 'goods',
+					onlyStockDefault: false,
+					onCancel: () => setPickingProducts(false),
+					onDone: async (items) => {
+						addPickedLines(items);
+						setPickingProducts(false);
+					},
+				}} />
+			</div>
+		);
+	}
+
+	return (
+		<div className="supply-proto-overlay">
+			<section className="supply-proto-modal supply-standalone-modal" role="dialog" aria-modal="true" aria-label={kind === 'purchase' ? 'Новая заявка поставщику' : 'Новое перемещение'}>
+				<header><div><h2>{kind === 'purchase' ? 'Заявка поставщику' : 'Перемещение'}</h2><p>Самостоятельный документ без сделки и заявки.</p></div><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></header>
+				<div className="supply-standalone-fields">
+					{kind === 'purchase' ? <>
+						<label>Поставщик<input list="standalone-suppliers" value={supplier} onChange={(event) => setSupplier(event.target.value)} /></label>
+						<label>Ожидаемая дата<input type="date" value={expectedAt} onChange={(event) => setExpectedAt(event.target.value)} /></label>
+						<datalist id="standalone-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
+					</> : <>
+						<label>Склад отправки<select value={fromStore} onChange={(event) => setFromStore(event.target.value)}><option value="">Выбери склад</option>{stores.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+						<label>Склад получения<select value={toStore} onChange={(event) => setToStore(event.target.value)}><option value="">Выбери склад</option>{stores.filter((name) => name !== fromStore).map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+					</>}
+				</div>
+				<div className="supply-standalone-product-actions">
+					<button type="button" onClick={() => setPickingProducts(true)}>Подобрать товары</button>
+					<span>{lines.length ? `Выбрано позиций: ${lines.length}` : 'Позиции ещё не выбраны'}</span>
+				</div>
+				<div className="supply-document-lines supply-standalone-lines">
+					<table><thead><tr><th>Позиция</th><th>Количество</th>{kind === 'purchase' && <th>Цена</th>}<th aria-label="Удалить" /></tr></thead><tbody>
+						{lines.length === 0 ? <tr><td colSpan={kind === 'purchase' ? 4 : 3} className="empty">Позиции не добавлены.</td></tr> : lines.map((line) => <tr key={line.productId}><td><b>{line.name}</b><small>#{line.productId}{kind === 'transfer' && fromStore ? ` · доступно ${Number(line.stocks[fromStore] ?? 0)}` : ''}</small></td><td><input type="number" min="0" step="any" value={line.qty} onChange={(event) => patchLine(line.productId, { qty: numericDraft(event.target.value) })} /></td>{kind === 'purchase' && <td><input type="number" min="0" step="any" value={line.rate} onChange={(event) => patchLine(line.productId, { rate: numericDraft(event.target.value) })} /></td>}<td><button className="supply-document-remove-line" type="button" title="Удалить позицию" aria-label="Удалить позицию" onClick={() => setLines((current) => current.filter((row) => row.productId !== line.productId))}>×</button></td></tr>)}
+					</tbody></table>
+				</div>
+				{kind === 'transfer' && <label className="supply-standalone-search">Комментарий<input value={note} onChange={(event) => setNote(event.target.value)} /></label>}
+				{error && <div className="supply-standalone-error">{error}</div>}
+				<footer><button type="button" onClick={onClose}>Отмена</button><button className="primary" type="button" disabled={busy} onClick={() => void submit()}>{busy ? 'Создаю...' : 'Создать'}</button></footer>
+			</section>
+		</div>
 	);
 }
 
@@ -762,6 +956,8 @@ export function Supply(): JSX.Element {
 	const [documentBusy, setDocumentBusy] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState('');
 	const [notice, setNotice] = useState<string | null>(null);
+	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', purchase: '', logistics: '' });
 
 	const reload = async (): Promise<void> => {
 		const loaded = await fetchSupplyOrders();
@@ -888,12 +1084,17 @@ export function Supply(): JSX.Element {
 		});
 	}, [ctx.__mock]);
 
-	const sortedOrders = useMemo(() => [...orders].sort((a, b) => {
+	const requestOrders = useMemo(() => orders.filter((order) => !order.standalone), [orders]);
+	const sortedOrders = useMemo(() => [...requestOrders].sort((a, b) => {
 		if (sort === 'dateAsc') return String(a.date).localeCompare(String(b.date));
 		if (sort === 'store') return String(a.toStore).localeCompare(String(b.toStore), 'ru');
 		if (sort === 'deal') return String(a.dealTitle || a.dealId).localeCompare(String(b.dealTitle || b.dealId), 'ru');
 		return String(b.date).localeCompare(String(a.date));
-	}), [orders, sort]);
+	}), [requestOrders, sort]);
+	const filteredOrders = useMemo(
+		() => sortedOrders.filter((order) => searchMatches(searches.orders, orderSearchValues(order))),
+		[sortedOrders, searches.orders],
+	);
 
 	const patchDecision = (key: string, id: string, patch: Partial<DecisionState>): void => {
 		setReviewing('');
@@ -928,6 +1129,7 @@ export function Supply(): JSX.Element {
 			const purchasePlan = decisionGroups(lines, 'purchase');
 			let createdTransferCount = transferPlan.length;
 			let createdPurchaseCount = purchasePlan.length;
+			let updatedPurchaseCount = 0;
 			if (ctx.__mock) {
 				setOrders((current) => current.map((row) => row.name === order.name ? {
 					...row,
@@ -942,6 +1144,7 @@ export function Supply(): JSX.Element {
 				const created = await createSupplyDocuments({ requestName: order.name, requestKey: order.requestKey, dealId: Number(order.dealId), toStore: order.toStore, lines });
 				createdTransferCount = created.transfers.length;
 				createdPurchaseCount = created.purchases.length;
+				updatedPurchaseCount = created.updatedPurchases.length;
 				await reload();
 			}
 			setDecisions((current) => {
@@ -951,10 +1154,11 @@ export function Supply(): JSX.Element {
 			});
 			setReviewing('');
 			const parts = [
-				createdTransferCount ? `перемещений: ${createdTransferCount} (товар в транзите)` : '',
-				createdPurchaseCount ? `заявок поставщику: ${createdPurchaseCount} (черновики)` : '',
+				createdTransferCount ? `Создано перемещений: ${createdTransferCount} (товар в транзите)` : '',
+				createdPurchaseCount ? `Создано заявок поставщику: ${createdPurchaseCount} (черновики)` : '',
+				updatedPurchaseCount ? `Дополнено черновиков: ${updatedPurchaseCount}` : '',
 			].filter(Boolean);
-			setNotice(`Готово. Создано ${parts.join(', ')}.`);
+			setNotice(`Готово. ${parts.join('; ')}.`);
 		} catch (err) {
 			if (!ctx.__mock) await reload().catch(() => undefined);
 			setReviewing('');
@@ -972,10 +1176,8 @@ export function Supply(): JSX.Element {
 			<aside className="supply-proto-rail">
 				<div className="supply-proto-brand"><span>С</span><div><b>Снаб</b><small>рабочий сценарий</small></div></div>
 				<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
-				<button className={view === 'tree' ? 'active' : ''} type="button" onClick={() => setView('tree')}>Дерево сделок</button>
 				<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
 				<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
-				<button className={view === 'stock' ? 'active' : ''} type="button" onClick={() => setView('stock')}>Остатки</button>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>
 			<main className="supply-proto-main">
@@ -984,14 +1186,16 @@ export function Supply(): JSX.Element {
 						<h1>Снабжение</h1>
 						<p>Заявка раскрывается в строки, снабжение вручную выбирает закупку или перемещение.</p>
 					</div>
+					<div className="supply-proto-actions"><button type="button" onClick={() => setCreateKind('transfer')}>Перемещение</button><button className="primary" type="button" onClick={() => setCreateKind('purchase')}>Заявка поставщику</button></div>
 				</header>
-				<Metrics orders={orders} />
+				<Metrics orders={orders} view={view} />
+				<SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={sortedOrders} sort={sort} expanded={expanded} decisions={decisions} suppliers={suppliers} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
-				{view === 'tree' && <TreeView orders={orders} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
-				{(view === 'purchase' || view === 'logistics' || view === 'stock') && <RegistryView orders={orders} kind={view} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{(view === 'purchase' || view === 'logistics') && <RegistryView orders={orders} kind={view} search={searches[view]} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 			</main>
+			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); void reload(); }} />}
 			{openDocument && <DocumentDetail
 				key={openDocument.kind === 'purchase' ? `purchase-${openDocument.purchase.name}` : `transfer-${openDocument.transfer.id}`}
 				document={openDocument}
