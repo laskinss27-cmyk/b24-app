@@ -352,7 +352,7 @@ function ReceiveTransferModal({ t, busy, onClose, onConfirm }: {
 }
 
 /** Вкладка «Отчёт по движению товара» — выбираешь товар, видишь всю его историю (Stock Ledger ядра). */
-function LedgerTab(): JSX.Element {
+export function LedgerTab(): JSX.Element {
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [list, setList] = useState<ItemMovement[] | null>(null);
 	const [err, setErr] = useState<string | null>(null);
