@@ -1135,14 +1135,14 @@ export async function listTransfers(dealId?: number, period?: { from?: string; t
 	return { transfers: json.transfers ?? [], isSupply: Boolean(json.isSupply) };
 }
 
-/** Заявка менеджера на перемещение: информационный документ без резерва и движений. */
+/** Заказ менеджера на перемещение: информационный документ без резерва и движений. */
 export async function createTransferRequest(input: { fromStore: string; toStore: string; note?: string; lines: TransferLineDto[] }): Promise<TransferRequestDoc> {
 	const res = await fetch('/api/transfer-requests/create', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...input }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc };
-	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось создать заявку на перемещение');
+	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось создать заказ на перемещение');
 	return json.request;
 }
 
@@ -1152,7 +1152,7 @@ export async function listTransferRequests(): Promise<{ requests: TransferReques
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; requests?: TransferRequestDoc[]; isSupply?: boolean };
-	if (!json.ok) throw new Error(json.error ?? 'не удалось получить заявки на перемещение');
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить заказы на перемещение');
 	return { requests: json.requests ?? [], isSupply: Boolean(json.isSupply) };
 }
 
@@ -1162,7 +1162,7 @@ export async function cancelTransferRequest(id: number): Promise<TransferRequest
 		body: JSON.stringify({ ...bx24Auth(), id }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc };
-	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось отменить заявку');
+	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось отменить заказ');
 	return json.request;
 }
 
@@ -1172,7 +1172,7 @@ export async function convertTransferRequest(id: number, input: { fromStore: str
 		body: JSON.stringify({ ...bx24Auth(), id, ...input }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc; transfer?: TransferDoc };
-	if (!json.ok || !json.request || !json.transfer) throw new Error(json.error ?? 'не удалось создать перемещение по заявке');
+	if (!json.ok || !json.request || !json.transfer) throw new Error(json.error ?? 'не удалось создать перемещение по заказу');
 	return { request: json.request, transfer: json.transfer };
 }
 

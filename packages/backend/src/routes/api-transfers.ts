@@ -203,7 +203,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		return { id, name: itemName, ...data };
 	};
 
-	// ── Заявки на перемещение: просьба без резерва и складских движений ──────────
+	// ── Заказы на перемещение: просьба без резерва и складских движений ──────────
 	app.post('/api/transfer-requests/create', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(b);
@@ -218,11 +218,11 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const me = await currentUser(client);
 			const data = newTransferRequestData({ fromStore, toStore, lines, ...(note ? { note } : {}), createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name });
-			const draftName = `Заявка на перемещение: ${fromStore} → ${toStore}`;
+			const draftName = `Заказ на перемещение: ${fromStore} → ${toStore}`;
 			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: draftName, DETAIL_TEXT: JSON.stringify(data) });
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
-			const name = `Заявка на перемещение #${id}: ${fromStore} → ${toStore}`;
+			const name = `Заказ на перемещение #${id}: ${fromStore} → ${toStore}`;
 			const request = { id, name, ...data };
 			await saveTransferRequest(client, request);
 			app.log.info({ id, fromStore, toStore, lines: lines.length }, '[api/transfer-requests/create] ok');
@@ -299,9 +299,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const transfer = await createDraftTransfer({
 				client, erp, me, fromStore, toStore, lines: inputLines,
 				...(note ? { note } : {}),
-				supplyRequest: `Заявка на перемещение #${request.id}`,
+				supplyRequest: `Заказ на перемещение #${request.id}`,
 				supplyRequestKey: `transfer-request:${request.id}`,
-				historyNote: `создано по заявке на перемещение #${request.id}`,
+				historyNote: `создано по заказу на перемещение #${request.id}`,
 			});
 			createdTransferId = transfer.id;
 			const converted = {

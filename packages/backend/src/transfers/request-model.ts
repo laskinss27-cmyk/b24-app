@@ -36,7 +36,7 @@ export function parseTransferRequestItem(item: Record<string, unknown>): StoredT
 	const status = statuses.has(data.status as TransferRequestStatus) ? data.status as TransferRequestStatus : 'pending';
 	return {
 		id,
-		name: String(item['NAME'] ?? item['name'] ?? `Заявка на перемещение #${id}`),
+		name: String(item['NAME'] ?? item['name'] ?? `Заказ на перемещение #${id}`),
 		fromStore: String(data.fromStore ?? ''),
 		toStore: String(data.toStore ?? ''),
 		lines: normalizeTransferLines(data.lines).filter((line) => line.qty > 0),

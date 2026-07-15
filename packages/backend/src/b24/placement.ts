@@ -366,7 +366,7 @@ export async function ensureTransfersEntity(client: B24Client): Promise<{ status
 	}
 }
 
-/** Заявки менеджеров на перемещение. Это только просьбы: они не резервируют товар и не создают проводок. */
+/** Заказы менеджеров на перемещение. Это только просьбы: они не резервируют товар и не создают проводок. */
 // Bitrix24 limits entity codes to 16 characters.
 export const TRANSFER_REQUESTS_ENTITY = 'ctv_tr_requests';
 
@@ -375,7 +375,7 @@ let transferRequestsEntityEnsured = false;
 export async function ensureTransferRequestsEntity(client: B24Client): Promise<{ status: string }> {
 	if (transferRequestsEntityEnsured) return { status: 'cached' };
 	try {
-		await client.call('entity.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: 'CTV Заявки на перемещение', ACCESS: { AU: 'W' } });
+		await client.call('entity.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: 'CTV Заказы на перемещение', ACCESS: { AU: 'W' } });
 		transferRequestsEntityEnsured = true;
 		return { status: 'created' };
 	} catch (err) {

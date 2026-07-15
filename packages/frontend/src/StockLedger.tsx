@@ -32,7 +32,7 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
 export type StockMovementKind = 'issue' | 'receipt' | 'delivery' | 'return';
 type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
-	{ key: 'requests', label: 'Заявки на перемещение' },
+	{ key: 'requests', label: 'Заказы на перемещение' },
 	{ key: 'transfers', label: 'Перемещения' },
 	{ key: 'issue', label: 'Списания' },
 	{ key: 'receipt', label: 'Оприходования' },
@@ -441,7 +441,7 @@ export function LedgerTab(): JSX.Element {
 const TRANSFER_REQUEST_STATUS: Record<TransferRequestDoc['status'], string> = {
 	pending: 'Ожидает снабжение',
 	converted: 'Перемещение создано',
-	canceled: 'Отменена',
+	canceled: 'Отменён',
 };
 
 export function TransferRequestsTab({ form, mode, onChanged }: {
@@ -453,6 +453,7 @@ export function TransferRequestsTab({ form, mode, onChanged }: {
 	const [isSupply, setIsSupply] = useState(false);
 	const [status, setStatus] = useState<'all' | TransferRequestDoc['status']>(mode === 'supply' ? 'pending' : 'all');
 	const [showForm, setShowForm] = useState(false);
+	const [openRequest, setOpenRequest] = useState<TransferRequestDoc | null>(null);
 	const [convertRequest, setConvertRequest] = useState<TransferRequestDoc | null>(null);
 	const [busy, setBusy] = useState<number | null>(null);
 	const [err, setErr] = useState<string | null>(null);
@@ -471,9 +472,9 @@ export function TransferRequestsTab({ form, mode, onChanged }: {
 	useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
 	const cancel = async (request: TransferRequestDoc): Promise<void> => {
-		if (!window.confirm(`Отменить заявку на перемещение #${request.id}?`)) return;
+		if (!window.confirm(`Отменить заказ на перемещение #${request.id}?`)) return;
 		setBusy(request.id); setErr(null);
-		try { await cancelTransferRequest(request.id); await load(); onChanged?.(); }
+		try { await cancelTransferRequest(request.id); setOpenRequest(null); await load(); onChanged?.(); }
 		catch (error) { setErr(errText(error)); }
 		finally { setBusy(null); }
 	};
@@ -482,32 +483,59 @@ export function TransferRequestsTab({ form, mode, onChanged }: {
 	return (
 		<section>
 			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-				<div><h2 style={{ fontSize: 16, margin: 0 }}>Заявки на перемещение</h2><p style={{ color: '#7a8699', fontSize: 13, margin: '3px 0 0' }}>{mode === 'supply' ? 'Просьбы точек, по которым еще не созданы перемещения.' : 'Заявка ничего не резервирует и не меняет остатки.'}</p></div>
-				{mode === 'manager' && <button className="btn-primary" disabled={!form?.stores.length} onClick={() => setShowForm(true)}>Создать заявку</button>}
+				<div><h2 style={{ fontSize: 16, margin: 0 }}>Заказы на перемещение</h2><p style={{ color: '#7a8699', fontSize: 13, margin: '3px 0 0' }}>{mode === 'supply' ? 'Просьбы точек, по которым еще не созданы перемещения.' : 'Заказ ничего не резервирует и не меняет остатки.'}</p></div>
+				{mode === 'manager' && <button className="btn-primary" disabled={!form?.stores.length} onClick={() => setShowForm(true)}>Создать заказ</button>}
 			</div>
 			<div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
 				<select style={inp} value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
-					<option value="all">Все статусы</option><option value="pending">Ожидает снабжение</option><option value="converted">Перемещение создано</option><option value="canceled">Отменена</option>
+					<option value="all">Все статусы</option><option value="pending">Ожидает снабжение</option><option value="converted">Перемещение создано</option><option value="canceled">Отменён</option>
 				</select>
 				<span style={{ marginLeft: 'auto', color: '#7a8699', fontSize: 12 }}>{shown.length} из {(requests ?? []).length}</span>
 			</div>
 			{err && <p className="error">⛔ {err}</p>}
-			{requests === null ? <p>Загрузка…</p> : shown.length === 0 ? <p className="empty">{status === 'pending' ? 'Необработанных заявок нет.' : 'Заявок нет.'}</p> : (
+			{requests === null ? <p>Загрузка…</p> : shown.length === 0 ? <p className="empty">{status === 'pending' ? 'Необработанных заказов нет.' : 'Заказов нет.'}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата / автор</th><th style={TH}>Маршрут</th><th style={TH}>Позиции</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
-					<tbody>{shown.map((request) => <tr key={request.id}>
-						<td style={TD}><b>Заявка #{request.id}</b>{request.note && <div style={{ color: '#7a8699', fontSize: 12, marginTop: 3 }}>{request.note}</div>}</td>
+					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата / автор</th><th style={TH}>Маршрут</th><th style={TH}>Состав</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
+					<tbody>{shown.map((request) => {
+						const totalQty = request.lines.reduce((sum, line) => sum + line.qty, 0);
+						return <tr key={request.id} className="transfer-request-row" tabIndex={0} onClick={() => setOpenRequest(request)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpenRequest(request); } }}>
+						<td style={TD}><b>Заказ #{request.id}</b>{request.note && <div className="transfer-request-row-note">{request.note}</div>}</td>
 						<td style={TD}>{request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : '—'}<div style={{ color: '#7a8699', fontSize: 12 }}>{request.createdByName || '—'}</div></td>
 						<td style={TD}>{request.fromStore} → {request.toStore}</td>
-						<td style={TD}>{request.lines.map((line) => `${line.name || `#${line.productId}`} × ${line.qty}`).join(', ')}</td>
+						<td style={TD}>{request.lines.length} поз. · {totalQty} шт.</td>
 						<td style={TD}>{TRANSFER_REQUEST_STATUS[request.status]}{request.transferId ? <div style={{ color: '#185fa5', fontSize: 12 }}>Перемещение #{request.transferId}</div> : null}</td>
-						<td style={TD}><div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-							{request.status === 'pending' && mode === 'manager' && <button disabled={busy != null} onClick={() => void cancel(request)}>{busy === request.id ? '…' : 'Отменить'}</button>}
-							{request.status === 'pending' && mode === 'supply' && isSupply && <button className="btn-primary" disabled={busy != null} onClick={() => setConvertRequest(request)}>Создать перемещение</button>}
-						</div></td>
-					</tr>)}</tbody>
+						<td style={{ ...TD, textAlign: 'right', color: '#185fa5', whiteSpace: 'nowrap' }}>Открыть ›</td>
+					</tr>;
+					})}</tbody>
 				</table>
 			)}
+			{openRequest && <div style={overlay} onMouseDown={(event) => { if (event.target === event.currentTarget) setOpenRequest(null); }}>
+				<div style={{ ...modalCard, maxWidth: 900, maxHeight: 'calc(100vh - 72px)', overflow: 'auto' }}>
+					<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+						<div>
+							<div style={{ color: '#7a8699', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>Заказ на перемещение</div>
+							<h2 style={{ fontSize: 18, margin: '3px 0 0' }}>Заказ #{openRequest.id}</h2>
+						</div>
+						<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><b style={{ fontSize: 13 }}>{TRANSFER_REQUEST_STATUS[openRequest.status]}</b><button style={btnGhost} title="Закрыть" onClick={() => setOpenRequest(null)}>×</button></div>
+					</div>
+					<div className="transfer-request-detail-meta">
+						<div><span>Откуда</span><b>{openRequest.fromStore}</b></div>
+						<div><span>Куда</span><b>{openRequest.toStore}</b></div>
+						<div><span>Создал</span><b>{openRequest.createdByName || '—'}</b><small>{openRequest.createdAt ? new Date(openRequest.createdAt).toLocaleString('ru-RU') : '—'}</small></div>
+					</div>
+					{openRequest.note && <div className="transfer-request-detail-note"><span>Комментарий</span>{openRequest.note}</div>}
+					<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 14 }}>
+						<thead><tr><th style={TH}>Позиция</th><th style={{ ...TH, width: 110, textAlign: 'right' }}>Количество</th></tr></thead>
+						<tbody>{openRequest.lines.map((line) => <tr key={line.productId}><td style={TD}><b>{line.name || `Товар #${line.productId}`}</b><div style={{ color: '#7a8699', fontSize: 12 }}>#{line.productId}</div></td><td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{line.qty}</td></tr>)}</tbody>
+					</table>
+					{openRequest.transferId && <div style={{ marginTop: 12, color: '#185fa5', fontSize: 13 }}>Создано перемещение #{openRequest.transferId}</div>}
+					<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+						{openRequest.status === 'pending' && mode === 'manager' && <button disabled={busy != null} onClick={() => void cancel(openRequest)}>{busy === openRequest.id ? '…' : 'Отменить заказ'}</button>}
+						<button style={btnGhost} disabled={busy != null} onClick={() => setOpenRequest(null)}>Закрыть</button>
+						{openRequest.status === 'pending' && mode === 'supply' && isSupply && <button className="btn-primary" disabled={busy != null} onClick={() => { setConvertRequest(openRequest); setOpenRequest(null); }}>Создать перемещение</button>}
+					</div>
+				</div>
+			</div>}
 			{showForm && form && <TransferRequestForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); onChanged?.(); }} />}
 			{convertRequest && form && <ConvertTransferRequestForm form={form} request={convertRequest} onClose={() => setConvertRequest(null)} onDone={() => { setConvertRequest(null); void load(); onChanged?.(); }} />}
 		</section>
@@ -1143,11 +1171,11 @@ function TransferRequestForm({ form, onClose, onDone }: { form: StockForm; onClo
 		} catch (error) { setErr(errText(error)); }
 		finally { setBusy(false); }
 	};
-	if (pickingProducts) return <div className="supply-product-picker-overlay"><ProductBase picker={{ title: 'Подобрать товары в заявку на перемещение', kindFilter: 'goods', onlyStockDefault: false, onCancel: () => setPickingProducts(false), onDone: async (items) => { add(items); setPickingProducts(false); } }} /></div>;
+	if (pickingProducts) return <div className="supply-product-picker-overlay"><ProductBase picker={{ title: 'Подобрать товары в заказ на перемещение', kindFilter: 'goods', onlyStockDefault: false, onCancel: () => setPickingProducts(false), onDone: async (items) => { add(items); setPickingProducts(false); } }} /></div>;
 	return (
 		<div style={overlay}>
 			<div style={modalCard}>
-				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Заявка на перемещение</h2>
+				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Заказ на перемещение</h2>
 				<div style={{ display: 'flex', gap: 12 }}>
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Откуда</label>{storeSelect(fromStore, setFromStore, form.stores, '— склад-источник —')}</div>
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Куда</label>{storeSelect(toStore, setToStore, form.stores.filter((store) => store !== fromStore), '— склад-получатель —')}</div>
@@ -1160,7 +1188,7 @@ function TransferRequestForm({ form, onClose, onDone }: { form: StockForm; onClo
 				<label style={fieldLabel}>Комментарий</label>
 				<textarea style={{ ...inp, boxSizing: 'border-box', width: '100%', minHeight: 70, resize: 'vertical' }} value={note} onChange={(event) => setNote(event.target.value)} />
 				{err && <p className="error">⛔ {err}</p>}
-				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}><button style={btnGhost} onClick={onClose}>Отмена</button><button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать заявку'}</button></div>
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}><button style={btnGhost} onClick={onClose}>Отмена</button><button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать заказ'}</button></div>
 			</div>
 		</div>
 	);
@@ -1197,11 +1225,11 @@ function ConvertTransferRequestForm({ form, request, onClose, onDone }: { form: 
 		} catch (error) { setErr(errText(error)); }
 		finally { setBusy(false); }
 	};
-	if (pickingProducts) return <div className="supply-product-picker-overlay"><ProductBase picker={{ title: `Товары для перемещения по заявке #${request.id}`, kindFilter: 'goods', onlyStockDefault: false, onCancel: () => setPickingProducts(false), onDone: async (items) => { add(items); setPickingProducts(false); } }} /></div>;
+	if (pickingProducts) return <div className="supply-product-picker-overlay"><ProductBase picker={{ title: `Товары для перемещения по заказу #${request.id}`, kindFilter: 'goods', onlyStockDefault: false, onCancel: () => setPickingProducts(false), onDone: async (items) => { add(items); setPickingProducts(false); } }} /></div>;
 	return (
 		<div style={overlay}>
 			<div style={modalCard}>
-				<h2 style={{ fontSize: 17, margin: '0 0 3px' }}>Перемещение по заявке #{request.id}</h2>
+				<h2 style={{ fontSize: 17, margin: '0 0 3px' }}>Перемещение по заказу #{request.id}</h2>
 				<div style={{ color: '#7a8699', fontSize: 12, marginBottom: 8 }}>{request.createdByName} · {request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : ''}</div>
 				<div style={{ display: 'flex', gap: 12 }}>
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Откуда</label>{storeSelect(fromStore, setFromStore, form.stores, '— склад-источник —')}</div>
