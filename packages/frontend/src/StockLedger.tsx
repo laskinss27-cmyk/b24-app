@@ -560,9 +560,9 @@ export function StockLedger(): JSX.Element {
 			</div>
 			{tab === 'inventory' ? <InventoryHome />
 				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" />
-				: tab === 'transfers' ? <StockTransfersTab form={form} />
+				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} />
 				: tab === 'ledger' ? <LedgerTab />
-				: <StockMovementsTab kind={tab} form={form} />}
+				: <StockMovementsTab kind={tab} form={form} showCreate={false} />}
 		</div>
 	);
 }
