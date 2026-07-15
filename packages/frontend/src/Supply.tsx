@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
-import { LedgerTab, StockMovementsTab, StockTransfersTab, type StockMovementKind } from './StockLedger.js';
+import { LedgerTab, StockMovementsTab, StockTransfersTab, TransferRequestsTab, type StockMovementKind } from './StockLedger.js';
 import {
 	BETA_USER_IDS,
+	cancelTransfer,
+	createIssueDoc,
 	createManualTransfer,
+	createReceiptDoc,
 	createStandaloneSupplyPurchase,
+	createSupplySupplier,
 	createSupplyDocuments,
 	createSupplyPurchaseTransfer,
 	deleteSupplyPurchaseOrder,
@@ -17,9 +21,12 @@ import {
 	isPortalAdmin,
 	receiveSupplyPurchase,
 	receiveTransfer,
+	collectTransfer,
+	postTransfer,
 	resolveTransferShortage,
 	shipTransfer,
 	updateTransferDestination,
+	updateTransferLines,
 	updateSupplyPurchaseOrder,
 	updateSupplyPurchaseStage,
 	type SupplyDecisionAction,
@@ -39,15 +46,35 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 		dealId: '36766',
 		dealTitle: '37204_тест ERP',
 		date: '2026-07-10',
+		deadline: '2026-07-17',
 		status: 'Pending',
 		closed: false,
 		toStore: 'Максидом Дунайский 64',
+		note: 'Для монтажа по сделке, привезти одной партией.',
 		items: [
 			{ productId: 16758, itemName: 'IP-камера 4 Мп CTV-IPB2028', qty: 6, note: 'нужно новое, в упаковке', stocks: { Парнас: 2, Офис: 1 } },
 			{ productId: 202, itemName: 'Контроллер СКУД ZKTeco', qty: 4, note: '', stocks: {} },
 		],
 		purchases: [],
-		transfers: [],
+		transfers: [{
+			id: 9001,
+			name: 'Перемещение #36766: Максидом Тельмана 31 → Максидом Дунайский 64',
+			status: 'accepted',
+			fromStore: 'Максидом Тельмана 31',
+			toStore: 'Максидом Дунайский 64',
+			lines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2 }],
+			collectedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2 }],
+			shippedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2 }],
+			acceptedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 1 }],
+			receivedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 1 }],
+			shortageLines: [],
+			history: [
+				{ at: '2026-07-14T07:10:00.000Z', status: 'draft', byId: '1858', byName: 'Сергей Ласкин', action: 'created' },
+				{ at: '2026-07-14T07:30:00.000Z', status: 'collected', byId: '101', byName: 'Менеджер точки', action: 'collected', note: 'собрано полностью' },
+				{ at: '2026-07-14T08:00:00.000Z', status: 'in_transit', byId: '101', byName: 'Менеджер точки', action: 'shipped' },
+				{ at: '2026-07-14T09:15:00.000Z', status: 'accepted', byId: '102', byName: 'Менеджер приемки', action: 'accepted', note: 'принято с расхождениями', changes: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', field: 'accepted', from: 0, to: 1 }] },
+			],
+		}],
 	},
 	{
 		name: 'MAT-MR-2026-0002',
@@ -55,17 +82,51 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 		dealId: '36801',
 		dealTitle: 'СКУД офис',
 		date: '2026-07-11',
+		deadline: '2026-07-18',
 		status: 'Pending',
 		closed: false,
 		toStore: 'Измайловский 18Д',
-		items: [{ productId: 301, itemName: 'Домофон Tantos Prime SD', qty: 3, note: '', stocks: { Офис: 1 } }],
+		note: '',
+		items: [{ productId: 301, itemName: 'Домофон Tantos Prime SD', qty: 1, note: '', stocks: { Офис: 1 } }],
 		purchases: [],
-		transfers: [],
+		transfers: [{
+			id: 9010,
+			name: 'Перемещение #36801: Максидом Московский 131 → Измайловский 18Д',
+			status: 'posted',
+			fromStore: 'Максидом Московский 131',
+			toStore: 'Измайловский 18Д',
+			shipEntry: 'MAT-STE-DEMO-001',
+			receiveEntry: 'MAT-STE-DEMO-002',
+			correctionIds: [9011],
+			lines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 2 }],
+			collectedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 3 }],
+			shippedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 3 }],
+			acceptedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 2 }],
+			receivedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 2 }],
+			shortageLines: [],
+			history: [],
+		}, {
+			id: 9011,
+			name: 'Корректировка #9010: Транзит → Максидом Московский 131',
+			status: 'posted',
+			fromStore: 'Транзит',
+			toStore: 'Максидом Московский 131',
+			receiveEntry: 'MAT-STE-DEMO-003',
+			correctionOf: 9010,
+			correctionKind: 'shortage_return',
+			lines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
+			collectedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
+			shippedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
+			acceptedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
+			receivedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
+			shortageLines: [],
+			history: [],
+		}],
 	},
 ];
 
 type Phase = 'init' | 'denied' | 'ready';
-type ViewKey = 'orders' | 'purchase' | 'logistics' | StockMovementKind | 'ledger';
+type ViewKey = 'orders' | 'purchase' | 'logistics' | 'stocks' | StockMovementKind | 'ledger';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 
 interface DecisionState {
@@ -79,6 +140,7 @@ interface DecisionState {
 type DecisionMap = Record<string, DecisionState[]>;
 
 const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юнона', 'Сатро-Паладин', 'Амиком'];
+const supplierNorm = (name: string): string => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const money = (value: number): string => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(value);
 const requestItemsForOrder = (order: SupplyOrderRow): SupplyOrderItem[] => order.items ?? [];
 const rowKey = (orderName: string, productId: number, index: number): string => `${orderName}:${productId}:${index}`;
@@ -92,6 +154,39 @@ const makeDecision = (key: string, qty: number): DecisionState => ({
 });
 const decisionsForRow = (decisions: DecisionMap, key: string, qty: number): DecisionState[] => decisions[key] ?? [{ ...makeDecision(key, qty), id: `${key}:initial` }];
 const decisionReady = (decision: DecisionState): boolean => Boolean(decision.action && (decision.action === 'transfer' ? decision.fromStore : decision.supplier.trim()));
+
+function SupplierField({ id, label, value, suppliers, placeholder = 'поставщик', onChange, onCreate }: {
+	id: string;
+	label?: string;
+	value: string;
+	suppliers: string[];
+	placeholder?: string;
+	onChange: (value: string) => void;
+	onCreate: (name: string) => Promise<string>;
+}): JSX.Element {
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+	const clean = value.trim();
+	const exists = suppliers.some((supplier) => supplierNorm(supplier) === supplierNorm(clean));
+	const canCreate = clean.length >= 2 && clean !== 'Поставщик не выбран' && !exists;
+	const create = async (): Promise<void> => {
+		if (!canCreate || busy) return;
+		setBusy(true);
+		setError('');
+		try { onChange(await onCreate(clean)); }
+		catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+		finally { setBusy(false); }
+	};
+	return (
+		<div className="supply-supplier-field">
+			{label && <label htmlFor={id}>{label}</label>}
+			<input id={id} list={`${id}-list`} value={value} onChange={(event) => { setError(''); onChange(event.target.value); }} placeholder={placeholder} autoComplete="off" />
+			<datalist id={`${id}-list`}>{suppliers.map((supplier) => <option key={supplier} value={supplier} />)}</datalist>
+			{canCreate && <button className="supply-create-supplier" type="button" disabled={busy} onClick={() => void create()}>{busy ? 'Создаю...' : `+ Создать «${clean}»`}</button>}
+			{error && <small className="supply-create-supplier-error">{error}</small>}
+		</div>
+	);
+}
 
 function decisionLinesForOrder(order: SupplyOrderRow, decisions: DecisionMap): SupplyDecisionLine[] {
 	return requestItemsForOrder(order).flatMap((item, index) => {
@@ -144,7 +239,7 @@ function purchaseTransferAvailable(order: SupplyOrderRow, purchase: SupplyPurcha
 	const covered = new Map<number, number>();
 	const forwarded = new Map<number, number>();
 	for (const transfer of order.transfers ?? []) {
-		if (transfer.status === 'canceled') continue;
+		if (transfer.status === 'canceled' || transfer.correctionOf) continue;
 		for (const line of transfer.lines) {
 			covered.set(line.productId, (covered.get(line.productId) ?? 0) + Number(line.qty || 0));
 			if (transfer.purchaseOrder === purchase.name) forwarded.set(line.productId, (forwarded.get(line.productId) ?? 0) + Number(line.qty || 0));
@@ -162,12 +257,45 @@ function purchaseTransferAvailable(order: SupplyOrderRow, purchase: SupplyPurcha
 }
 
 const transferStatus = (transfer: SupplyTransferChild): { label: string; tone: string } => {
+	if (transfer.status === 'draft') return { label: 'Черновик', tone: 'muted' };
+	if (transfer.status === 'collected') return { label: 'Собрано', tone: 'info' };
 	if (transfer.status === 'received') return { label: 'Получено', tone: 'ok' };
+	if (transfer.status === 'accepted') return { label: 'На проверке', tone: 'info' };
+	if (transfer.status === 'posted') return { label: transfer.correctionOf ? 'Завершено' : 'Принято', tone: 'ok' };
 	if (transfer.status === 'shortage') return { label: 'Недовоз', tone: 'warn' };
 	if (transfer.status === 'in_transit') return { label: 'В пути', tone: 'info' };
 	if (transfer.status === 'canceled') return { label: 'Отменено', tone: 'muted' };
 	return { label: 'Создано', tone: 'muted' };
 };
+
+const transferHasDiscrepancy = (transfer: SupplyTransferChild): boolean => {
+	if (transfer.status === 'shortage') return true;
+	if (transfer.status === 'collected') {
+		const collected = new Map((transfer.collectedLines ?? []).map((line) => [line.productId, line.qty]));
+		return transfer.lines.some((line) => Math.abs(line.qty - (collected.get(line.productId) ?? 0)) > 0.000001);
+	}
+	if (transfer.status !== 'accepted') return false;
+	const shipped = new Map((transfer.shippedLines ?? transfer.lines).map((line) => [line.productId, line.qty]));
+	const accepted = new Map((transfer.acceptedLines ?? transfer.receivedLines ?? []).map((line) => [line.productId, line.qty]));
+	return [...new Set([...shipped.keys(), ...accepted.keys()])].some((id) => Math.abs((shipped.get(id) ?? 0) - (accepted.get(id) ?? 0)) > 0.000001);
+};
+
+const TRANSFER_HISTORY_LABELS: Record<string, string> = {
+	created: 'Создано',
+	lines_changed: 'Количество изменено',
+	destination_changed: 'Склад назначения изменен',
+	collected: 'Собрано',
+	shipped: 'Отправлено',
+	accepted: 'Принято',
+	posted: 'Проведено',
+	canceled: 'Отменено',
+	notification_sent: 'Сообщение отправлено',
+	notification_failed: 'Сообщение не отправлено',
+	legacy: 'Изменено',
+};
+
+const transferHistoryLabel = (event: { note?: string; action?: string; status: string }): string =>
+	event.note || (event.action ? TRANSFER_HISTORY_LABELS[event.action] : '') || event.status;
 
 const transferDocumentLabel = (transfer: SupplyTransferChild): string => {
 	const entries = [transfer.shipEntry, transfer.receiveEntry || transfer.shortageReturnEntry].filter((name): name is string => Boolean(name));
@@ -203,6 +331,8 @@ const orderSearchValues = (order: SupplyOrderRow): Array<string | number | undef
 	order.dealId,
 	order.dealTitle,
 	order.toStore,
+	order.deadline,
+	order.note,
 	...requestItemsForOrder(order).flatMap((item) => [item.productId, item.itemName, ...Object.keys(item.stocks ?? {})]),
 	...(order.originalItems ?? []).flatMap((item) => [item.productId, item.itemName, ...Object.keys(item.stocks ?? {})]),
 	...(order.purchases ?? []).flatMap((purchase) => [purchase.name, purchase.supplier, ...purchase.lines.flatMap((line) => [line.productId, line.name])]),
@@ -244,7 +374,7 @@ function Metrics({ orders, view }: { orders: SupplyOrderRow[]; view: ViewKey }):
 			]
 			: [
 				{ label: 'Перемещения в пути', value: transfers.filter((transfer) => transfer.status === 'in_transit').length },
-				{ label: 'Перемещения с недовозом', value: transfers.filter((transfer) => transfer.status === 'shortage').length },
+				{ label: 'Перемещения с расхождениями', value: transfers.filter(transferHasDiscrepancy).length },
 			];
 	return (
 		<div className={`supply-proto-metrics columns-${entries.length}`}>
@@ -340,9 +470,11 @@ function SupplyApprovalPrint({ order }: { order: SupplyOrderRow }): JSX.Element 
 			<dl className="supply-print-facts">
 				<div><dt>Сделка</dt><dd>#{order.dealId} · {order.dealTitle || '—'}</dd></div>
 				<div><dt>Точка</dt><dd>{order.toStore || '—'}</dd></div>
+				<div><dt>Нужно до</dt><dd>{order.deadline ? printDate(order.deadline) : '—'}</dd></div>
 				<div><dt>Поставщиков</dt><dd>{purchases.length}</dd></div>
 				<div><dt>Общая сумма</dt><dd>{grandTotal > 0 ? `${printMoney(grandTotal)} ₽` : '—'}</dd></div>
 			</dl>
+			{order.note && <p className="supply-print-note"><b>Комментарий:</b> {order.note}</p>}
 			<table className="supply-print-table supply-print-approval-table">
 				<thead><tr><th>Поставщик / заявка</th><th>Код</th><th>Наименование</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th></tr></thead>
 				{purchases.map((purchase) => {
@@ -364,19 +496,24 @@ function SupplyApprovalPrint({ order }: { order: SupplyOrderRow }): JSX.Element 
 	);
 }
 
-function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onSavePurchase, onReceivePurchase, onCreatePurchaseTransfer, onChangeTransferDestination, onShipTransfer, onReceiveTransfer, onResolveShortage }: {
+function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelete, onCreateSupplier, onSavePurchase, onReceivePurchase, onCreatePurchaseTransfer, onChangeTransferDestination, onUpdateTransfer, onCollectTransfer, onShipTransfer, onReceiveTransfer, onPostTransfer, onCancelTransfer, onResolveShortage }: {
 	document: OpenSupplyDocument;
 	suppliers: string[];
 	busy: boolean;
 	canDelete: boolean;
 	onClose: () => void;
 	onDelete: () => void;
+	onCreateSupplier: (name: string) => Promise<string>;
 	onSavePurchase: (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>, stage: SupplyPurchaseStage, expectedAt: string) => void;
 	onReceivePurchase: (lines: Array<{ productId: number; qty: number; rate: number }>) => void;
 	onCreatePurchaseTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
 	onChangeTransferDestination: (toStore: string) => Promise<SupplyTransferChild>;
+	onUpdateTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
+	onCollectTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
 	onShipTransfer: () => void;
 	onReceiveTransfer: (lines: Array<{ productId: number; qty: number }>) => void;
+	onPostTransfer: () => void;
+	onCancelTransfer: () => void;
 	onResolveShortage: () => void;
 }): JSX.Element {
 	const purchase = document.kind === 'purchase' ? document.purchase : null;
@@ -392,6 +529,12 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		rate: Number(line.rate || 0) > 0.01 ? Number(line.rate) : 0,
 	})));
 	const [receiveLines, setReceiveLines] = useState<Record<string, NumericDraft>>(() => Object.fromEntries((initialTransfer?.lines ?? []).map((line) => [String(line.productId), line.qty])));
+	const [plannedLines, setPlannedLines] = useState<Record<string, NumericDraft>>(() => Object.fromEntries((initialTransfer?.lines ?? []).map((line) => [String(line.productId), line.qty])));
+	const [collectLines, setCollectLines] = useState<Record<string, NumericDraft>>(() => {
+		const collected = new Map((initialTransfer?.collectedLines ?? []).map((line) => [line.productId, line.qty]));
+		return Object.fromEntries((initialTransfer?.lines ?? []).map((line) => [String(line.productId), collected.get(line.productId) ?? line.qty]));
+	});
+	const [historyOpen, setHistoryOpen] = useState(false);
 	const [destinationStores, setDestinationStores] = useState<string[]>([]);
 	const [toStore, setToStore] = useState(initialTransfer?.toStore ?? '');
 	const [savingDestination, setSavingDestination] = useState(false);
@@ -414,10 +557,18 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		if (document.kind === 'purchase') setPurchaseTransferLines(Object.fromEntries(purchaseTransferAvailable(document.order, purchase)));
 	}, [document, purchase]);
 	useEffect(() => {
-		if (!initialTransfer || (initialTransfer.status !== 'requested' && initialTransfer.status !== 'in_transit')) return;
+		if (!initialTransfer || !['draft', 'collected', 'requested', 'in_transit'].includes(initialTransfer.status)) return;
 		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch((error) => setDestinationError(error instanceof Error ? error.message : String(error)));
 	}, [initialTransfer]);
 	useEffect(() => setToStore(initialTransfer?.toStore ?? ''), [initialTransfer?.toStore]);
+	useEffect(() => {
+		if (!initialTransfer) return;
+		setPlannedLines(Object.fromEntries(initialTransfer.lines.map((line) => [String(line.productId), line.qty])));
+		const collected = new Map((initialTransfer.collectedLines ?? []).map((line) => [line.productId, line.qty]));
+		setCollectLines(Object.fromEntries(initialTransfer.lines.map((line) => [String(line.productId), collected.get(line.productId) ?? line.qty])));
+		const accepted = new Map((initialTransfer.acceptedLines ?? initialTransfer.receivedLines ?? []).map((line) => [line.productId, line.qty]));
+		setReceiveLines(Object.fromEntries(initialTransfer.lines.map((line) => [String(line.productId), accepted.get(line.productId) ?? line.qty])));
+	}, [initialTransfer]);
 	const saveDestination = async (): Promise<void> => {
 		if (!initialTransfer || !toStore || toStore === initialTransfer.toStore || savingDestination) return;
 		setSavingDestination(true);
@@ -458,7 +609,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 						<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 					</header>
 					<dl className="supply-document-facts">
-						<div><dt>Поставщик</dt><dd><input list="supply-document-suppliers" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></dd></div>
+						<div><dt>Поставщик</dt><dd><SupplierField id="supply-document-supplier" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} /></dd></div>
 						<div><dt>Склад заявки</dt><dd>{order.toStore || 'Не указан'}</dd></div>
 						<div><dt>Ожидаем</dt><dd><input type="date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} /></dd></div>
 						<div><dt>Сумма</dt><dd>{total > 0.01 ? `${money(total)} ₽` : '—'}</dd></div>
@@ -480,7 +631,6 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 						</tbody></table>
 					</div>
 					{currentPurchase.receipts.length > 0 && <section className="supply-document-receipts"><h3>Оприходования</h3>{currentPurchase.receipts.map((receipt) => <div key={receipt.name}><b>{receipt.name}</b><span>{documentAmount(receipt.lines)}</span><small>{receipt.lines.map(lineTitle).join(' · ')}</small></div>)}</section>}
-					<datalist id="supply-document-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
 					<footer className="supply-document-modal-footer">
 						<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}<select value={purchaseStage} onChange={(e) => setPurchaseStage(e.target.value as SupplyPurchaseStage)}>{PURCHASE_STAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
 						<div><button type="button" disabled={!purchaseLines.some((line) => Number(line.qty || 0) > 0)} onClick={() => window.print()}>Печать заявки</button>{canCreatePurchaseTransfer && <button type="button" disabled={busy || !purchaseTransferPayload.length} title={`Создать перемещение на ${order.toStore}`} onClick={() => onCreatePurchaseTransfer(purchaseTransferPayload)}>{busy ? 'Провожу...' : 'Создать перемещение'}</button>}{canReceivePurchase && <button type="button" disabled={busy || !receivePurchasePayload.length} title="Оприходовать фактически полученное на Склад Прихода" onClick={() => onReceivePurchase(receivePurchasePayload)}>{busy ? 'Провожу...' : 'Оприходовать'}</button>}<button type="button" onClick={onClose}>Закрыть</button><button className="primary" type="button" disabled={busy || !supplier.trim() || !purchaseLines.some((line) => Number(line.qty || 0) > 0)} onClick={() => onSavePurchase(supplier.trim(), purchaseLines.filter((line) => Number(line.qty || 0) > 0).map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty: Number(qty || 0), rate: Number(rate || 0) })), purchaseStage, expectedAt)}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></div>
@@ -493,16 +643,23 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 
 	const { order, transfer } = document;
 	const status = transferStatus(transfer);
-	const receivedByProduct = new Map(transfer.receivedLines.map((line) => [line.productId, line.qty]));
-	const shortageByProduct = new Map(transfer.shortageLines.map((line) => [line.productId, line.qty]));
-	const canEditDestination = transfer.status === 'requested' || transfer.status === 'in_transit';
+	const collectedByProduct = new Map((transfer.collectedLines ?? []).map((line) => [line.productId, line.qty]));
+	const acceptedByProduct = new Map((transfer.acceptedLines ?? transfer.receivedLines ?? []).map((line) => [line.productId, line.qty]));
+	const canEditDestination = ['draft', 'collected', 'requested'].includes(transfer.status);
+	const canEditPlan = ['draft', 'collected', 'accepted', 'requested'].includes(transfer.status);
+	const quantitiesMatch = transfer.lines.every((line) => Math.abs(line.qty - (collectedByProduct.get(line.productId) ?? 0)) < 0.000001);
+	const acceptedMatchesPlan = transfer.lines.every((line) => Math.abs(line.qty - (acceptedByProduct.get(line.productId) ?? 0)) < 0.000001);
+	const planPayload = transfer.lines.map((line) => ({ productId: line.productId, qty: Number(plannedLines[String(line.productId)] || 0) }));
+	const planDirty = planPayload.some((line) => Math.abs(line.qty - (transfer.lines.find((current) => current.productId === line.productId)?.qty ?? 0)) >= 0.000001);
+	const collectPayload = transfer.lines.map((line) => ({ productId: line.productId, qty: Number(collectLines[String(line.productId)] || 0) }));
+	const receivePayload = transfer.lines.map((line) => ({ productId: line.productId, qty: Number(receiveLines[String(line.productId)] || 0) }));
 	const selectableStores = destinationStores.includes(transfer.toStore) ? destinationStores : [transfer.toStore, ...destinationStores];
 	return (
 		<div className="supply-proto-overlay">
 			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferDocumentLabel(transfer)}`}>
 				<header>
 						<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transferDocumentLabel(transfer)}</h2><p>{transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
-					<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
+					<div className="supply-document-modal-head"><span>{status.label}</span>{transferHasDiscrepancy(transfer) && <span className="supply-discrepancy">Расхождение</span>}<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 				</header>
 				<div className="transfer-destination">
 					<div className="transfer-destination-field"><span>Откуда</span><strong>{transfer.fromStore}</strong></div>
@@ -520,16 +677,25 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 					<div><dt>Основание</dt><dd>{transfer.purchaseOrder || order.name}</dd></div>
 				</dl>
 				<div className="supply-document-lines">
-					<table><thead><tr><th>Позиция</th><th>Отправлено</th><th>Получено</th><th>Недовоз</th></tr></thead><tbody>
-						{transfer.lines.map((line, index) => <tr key={`${line.productId}-${index}`}><td><b>{line.name || `#${line.productId}`}</b><small>#{line.productId}</small></td><td>{line.qty}</td><td>{transfer.status === 'in_transit' ? <input type="number" min="0" max={line.qty} step="any" value={receiveLines[String(line.productId)] ?? ''} onChange={(e) => setReceiveLines((current) => ({ ...current, [String(line.productId)]: e.target.value === '' ? '' : Math.max(0, Math.min(line.qty, Number(e.target.value))) }))} /> : (receivedByProduct.get(line.productId) ?? '—')}</td><td>{shortageByProduct.get(line.productId) ?? '—'}</td></tr>)}
+					<table><thead><tr><th>Наименование</th><th>Количество</th><th>Собрано</th><th>Принято</th></tr></thead><tbody>
+						{transfer.lines.map((line, index) => <tr key={`${line.productId}-${index}`}>
+							<td><b>{line.name || `#${line.productId}`}</b><small>#{line.productId}</small></td>
+							<td>{canEditPlan ? <input type="number" min="0" step="any" value={plannedLines[String(line.productId)] ?? ''} onChange={(e) => setPlannedLines((current) => ({ ...current, [String(line.productId)]: numericDraft(e.target.value) }))} /> : line.qty}</td>
+							<td>{transfer.status === 'draft' || transfer.status === 'requested' ? <input type="number" min="0" max={line.qty} step="any" value={collectLines[String(line.productId)] ?? ''} onChange={(e) => setCollectLines((current) => ({ ...current, [String(line.productId)]: e.target.value === '' ? '' : Math.max(0, Math.min(line.qty, Number(e.target.value))) }))} /> : (collectedByProduct.get(line.productId) ?? '—')}</td>
+							<td>{transfer.status === 'in_transit' ? <input type="number" min="0" step="any" value={receiveLines[String(line.productId)] ?? ''} onChange={(e) => setReceiveLines((current) => ({ ...current, [String(line.productId)]: e.target.value === '' ? '' : Math.max(0, Number(e.target.value)) }))} /> : (acceptedByProduct.get(line.productId) ?? '—')}</td>
+						</tr>)}
 					</tbody></table>
 				</div>
+				{historyOpen && <section className="supply-document-receipts"><h3>История</h3>{[...(transfer.history ?? [])].reverse().map((event, index) => <div key={`${event.at}-${index}`}><b>{new Date(event.at).toLocaleString('ru-RU')} · {event.byName || 'Система'}</b><span>{transferHistoryLabel(event)}</span>{event.changes?.length ? <small>{event.changes.map((change) => `${change.name}: ${change.from} → ${change.to}`).join(' · ')}</small> : null}</div>)}</section>}
 				<footer className="supply-document-modal-footer">
-					<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}</div>
+					<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}{['draft', 'collected', 'requested'].includes(transfer.status) && <button className="danger" type="button" disabled={busy} onClick={onCancelTransfer}>Отменить</button>}<button type="button" onClick={() => setHistoryOpen((open) => !open)}>История</button></div>
 					<div>
 						<button type="button" onClick={onClose}>Закрыть</button>
-						{transfer.status === 'requested' && <button className="primary" type="button" disabled={busy} onClick={onShipTransfer}>{busy ? 'Провожу...' : 'В путь'}</button>}
-						{transfer.status === 'in_transit' && <button className="primary" type="button" disabled={busy} onClick={() => onReceiveTransfer(transfer.lines.map((line) => ({ productId: line.productId, qty: Number(receiveLines[String(line.productId)] || 0) })))}>{busy ? 'Провожу...' : 'Подтвердить приём'}</button>}
+						{canEditPlan && <button type="button" disabled={busy || !planDirty} onClick={() => onUpdateTransfer(planPayload)}>{busy ? 'Сохраняю...' : 'Сохранить количество'}</button>}
+						{(transfer.status === 'draft' || transfer.status === 'requested') && <button className="primary" type="button" disabled={busy || planDirty} title={planDirty ? 'Сначала сохрани количество' : ''} onClick={() => onCollectTransfer(collectPayload)}>{busy ? 'Сохраняю...' : 'Собрано'}</button>}
+						{transfer.status === 'collected' && <button className="primary" type="button" disabled={busy || planDirty || !quantitiesMatch} title={planDirty ? 'Сначала сохрани количество' : quantitiesMatch ? '' : 'Снабжению нужно скорректировать количество по факту сборки'} onClick={onShipTransfer}>{busy ? 'Провожу...' : 'Отправлено'}</button>}
+						{transfer.status === 'in_transit' && <button className="primary" type="button" disabled={busy} onClick={() => onReceiveTransfer(receivePayload)}>{busy ? 'Сохраняю...' : 'Принять'}</button>}
+						{transfer.status === 'accepted' && <button className="primary" type="button" disabled={busy || planDirty || !acceptedMatchesPlan} title={planDirty ? 'Сначала сохрани количество' : acceptedMatchesPlan ? '' : 'Скорректируй количество по факту приемки'} onClick={onPostTransfer}>{busy ? 'Провожу...' : transferHasDiscrepancy(transfer) ? 'Провести и скорректировать' : 'Провести'}</button>}
 						{transfer.status === 'shortage' && <button className="primary" type="button" disabled={busy} onClick={onResolveShortage}>{busy ? 'Провожу...' : 'Завершить недовоз'}</button>}
 					</div>
 				</footer>
@@ -544,6 +710,7 @@ function DecisionRows({
 	index,
 	decisions,
 	suppliers,
+	onCreateSupplier,
 	onPatch,
 	onAdd,
 	onRemove,
@@ -553,6 +720,7 @@ function DecisionRows({
 	index: number;
 	decisions: DecisionState[];
 	suppliers: string[];
+	onCreateSupplier: (name: string) => Promise<string>;
 	onPatch: (id: string, patch: Partial<DecisionState>) => void;
 	onAdd: () => void;
 	onRemove: (id: string) => void;
@@ -616,12 +784,7 @@ function DecisionRows({
 								</select>
 							)}
 							{decision.action === 'purchase' && (
-								<>
-									<input list={`suppliers-${order.name}-${index}-${allocationIndex}`} value={decision.supplier} onChange={(e) => onPatch(decision.id, { supplier: e.target.value })} placeholder="поставщик" />
-									<datalist id={`suppliers-${order.name}-${index}-${allocationIndex}`}>
-										{suppliers.map((supplier) => <option key={supplier} value={supplier} />)}
-									</datalist>
-								</>
+								<SupplierField id={`suppliers-${order.name}-${index}-${allocationIndex}`} value={decision.supplier} suppliers={suppliers} onChange={(supplier) => onPatch(decision.id, { supplier })} onCreate={onCreateSupplier} />
 							)}
 							{!decision.action && <span className="muted">выбери действие</span>}
 						</td>
@@ -646,6 +809,7 @@ function OrdersView({
 	expanded,
 	decisions,
 	suppliers,
+	onCreateSupplier,
 	busy,
 	reviewing,
 	onSort,
@@ -666,6 +830,7 @@ function OrdersView({
 	expanded: string;
 	decisions: DecisionMap;
 	suppliers: string[];
+	onCreateSupplier: (name: string) => Promise<string>;
 	busy: string | null;
 	reviewing: string;
 	onSort: (sort: SortKey) => void;
@@ -736,7 +901,7 @@ function OrdersView({
 							<button className="supply-order-head" type="button" onClick={() => onToggle(order.name)}>
 								<div>
 									<b>{order.name} · {order.dealTitle || `сделка #${order.dealId}`}</b>
-									<small>#{order.dealId} · {order.toStore || 'склад не указан'} · {order.date || 'без даты'}</small>
+									<small>#{order.dealId} · {order.toStore || 'склад не указан'} · нужно до {order.deadline || 'дата не указана'}</small>
 								</div>
 								<div className="supply-order-head-meta">
 									<Pill tone={requestState.tone}>{requestState.label}</Pill>
@@ -745,6 +910,7 @@ function OrdersView({
 							</button>
 							{isOpen && (
 								<div className="supply-order-body">
+									{order.note && <div className="supply-order-common-note"><b>Комментарий:</b> {order.note}</div>}
 									<div className="supply-proto-table-wrap">
 										<table className="supply-proto-table supply-decision-table">
 											<thead><tr><th>Позиция</th><th>Нужно</th><th>Остатки</th><th>Действие</th><th>Откуда / поставщик</th><th>Кол-во</th></tr></thead>
@@ -753,7 +919,7 @@ function OrdersView({
 													const key = rowKey(order.name, item.productId, index);
 													const rowDecisions = decisionsForRow(decisions, key, item.qty);
 													const assigned = rowDecisions.filter(decisionReady).reduce((sum, decision) => sum + decision.qty, 0);
-													return <DecisionRows key={key} order={order} item={item} index={index} decisions={rowDecisions} suppliers={suppliers} onPatch={(id, patch) => onPatch(key, id, patch)} onAdd={() => onAdd(key, Math.max(item.qty - assigned, 1))} onRemove={(id) => onRemove(key, id)} />;
+													return <DecisionRows key={key} order={order} item={item} index={index} decisions={rowDecisions} suppliers={suppliers} onCreateSupplier={onCreateSupplier} onPatch={(id, patch) => onPatch(key, id, patch)} onAdd={() => onAdd(key, Math.max(item.qty - assigned, 1))} onRemove={(id) => onRemove(key, id)} />;
 												})}
 											</tbody>
 										</table>
@@ -763,14 +929,22 @@ function OrdersView({
 									{(order.transfers?.length ?? 0) === 0 && (order.purchases?.length ?? 0) === 0
 										? <p className="muted">Документов нет.</p>
 										: <div className="supply-document-tree">
-											{(order.transfers ?? []).map((transfer) => {
+											{(order.transfers ?? []).filter((transfer) => !transfer.correctionOf).map((transfer) => {
 												const status = transferStatus(transfer);
+												const corrections = (order.transfers ?? []).filter((candidate) => candidate.correctionOf === transfer.id);
 												return (
 													<div key={`t-${transfer.id}`} className="supply-document-branch">
 														<button className="supply-document-row" type="button" onClick={() => onOpenTransfer(order, transfer)}>
 													<div><span className="kind">Перемещение</span><b>{transferDocumentLabel(transfer)}</b><small>{transfer.fromStore} → {transfer.toStore}{transfer.purchaseOrder ? ` · ${transfer.purchaseOrder}` : ''}</small></div>
-															<div className="supply-document-meta"><span>{documentAmount(transfer.lines)}</span><span className="status">{status.label}</span></div>
+													<div className="supply-document-meta"><span>{documentAmount(transfer.lines)}</span>{transferHasDiscrepancy(transfer) && <span className="supply-discrepancy">Расхождение</span>}<span className="status">{status.label}</span></div>
 														</button>
+														{corrections.length > 0 && <div className="supply-correction-list">{corrections.map((correction) => {
+															const correctionStatus = transferStatus(correction);
+															return <button key={correction.id} className="supply-document-row supply-correction-row" type="button" onClick={() => onOpenTransfer(order, correction)}>
+																<div><span className="kind">{correction.correctionKind === 'shortage_return' ? 'Возврат недовоза' : 'Перенос излишка'}</span><b>{transferDocumentLabel(correction)}</b><small>{correction.fromStore} → {correction.toStore}</small></div>
+																<div className="supply-document-meta"><span>{documentAmount(correction.lines)}</span><span className="status">{correctionStatus.label}</span></div>
+															</button>;
+														})}</div>}
 													</div>
 												);
 											})}
@@ -813,7 +987,7 @@ function OrdersView({
 												<div key={`transfer-${group.key}`} className="supply-order-review-row">
 													<span className="kind">Перемещение</span>
 													<div><b>{group.key} → транзит → {order.toStore}</b><small>{group.lines.map(lineTitle).join(' · ')}</small></div>
-													<span className="supply-review-status">В пути</span>
+											<span className="supply-review-status">Черновик</span>
 												</div>
 											))}
 											{purchaseGroups.map((group) => (
@@ -865,7 +1039,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 									<div key={`${order.name}-${purchase.name}`} className="supply-proto-node">
 									<div className="node-top">
 										<div><span className="kind">заявка поставщику</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenPurchase(order, purchase)}>{purchase.name}</button> · {purchase.supplier || 'поставщик не выбран'}</div>
-											<Pill tone={status.tone}>{status.label}</Pill>
+										<Pill tone={status.tone}>{status.label}</Pill>
 										</div>
 										<p>{purchase.lines.map(lineTitle).join(' · ')}</p>
 										{purchase.receipts.map((receipt) => <p key={receipt.name} className="subline">Приход {receipt.name}: {receipt.lines.map(lineTitle).join(' · ')}</p>)}
@@ -875,10 +1049,10 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 							{(order.transfers ?? []).map((transfer) => {
 								const status = transferStatus(transfer);
 								return (
-									<div key={`${order.name}-${transfer.id}`} className="supply-proto-node">
+									<div key={`${order.name}-${transfer.id}`} className={`supply-proto-node${transfer.correctionOf ? ' correction' : ''}`}>
 									<div className="node-top">
-										<div><span className="kind">перемещение</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transferDocumentLabel(transfer)}</button> · {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
-											<Pill tone={status.tone}>{status.label}</Pill>
+										<div><span className="kind">{transfer.correctionOf ? 'корректировка' : 'перемещение'}</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transferDocumentLabel(transfer)}</button> · {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
+											<div className="supply-status-pair">{transferHasDiscrepancy(transfer) && <Pill tone="warn">Расхождение</Pill>}<Pill tone={status.tone}>{status.label}</Pill></div>
 										</div>
 										<p>{transfer.lines.map(lineTitle).join(' · ')}</p>
 									</div>
@@ -922,7 +1096,7 @@ function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: 
 									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
 								}
 								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><div className="supply-status-pair">{transferHasDiscrepancy(row.transfer) && <Pill tone="warn">Расхождение</Pill>}<Pill tone={status.tone}>{status.label}</Pill></div></td></tr>;
 							})}
 						</tbody>
 					</table>
@@ -931,21 +1105,23 @@ function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: 
 	);
 }
 
-type StandaloneDocumentKind = 'purchase' | 'transfer';
+type StandaloneDocumentKind = 'purchase' | 'transfer' | 'issue' | 'receipt';
 interface StandaloneLine {
 	productId: number;
 	name: string;
 	stocks: Record<string, number>;
 	qty: NumericDraft;
 	rate: NumericDraft;
+	retail: NumericDraft;
 }
 
-function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { kind: StandaloneDocumentKind; suppliers: string[]; mock: boolean; onClose: () => void; onDone: (message: string, view: ViewKey) => void }): JSX.Element {
+function StandaloneDocumentModal({ kind, suppliers, mock, onCreateSupplier, onClose, onDone }: { kind: StandaloneDocumentKind; suppliers: string[]; mock: boolean; onCreateSupplier: (name: string) => Promise<string>; onClose: () => void; onDone: (message: string, view: ViewKey) => void }): JSX.Element {
 	const [stores, setStores] = useState<string[]>([]);
 	const [fromStore, setFromStore] = useState('');
 	const [toStore, setToStore] = useState('');
 	const [supplier, setSupplier] = useState('');
 	const [expectedAt, setExpectedAt] = useState(() => new Date().toISOString().slice(0, 10));
+	const [reason, setReason] = useState('');
 	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<StandaloneLine[]>([]);
 	const [pickingProducts, setPickingProducts] = useState(false);
@@ -960,7 +1136,7 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 		void fetchStockFormData().then((data) => setStores(data.stores.filter((name) => !name.toLowerCase().includes('транзит')))).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 	}, [mock]);
 
-	const addPickedLines = (items: Array<{ productId: number; name: string; quantity: number; purchasePrice?: number; stocks?: Record<string, number> }>): void => {
+	const addPickedLines = (items: Array<{ productId: number; name: string; quantity: number; price: number; purchasePrice?: number; stocks?: Record<string, number> }>): void => {
 		setLines((current) => {
 			const next = [...current];
 			for (const item of items) {
@@ -969,14 +1145,21 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 					const existing = next[index];
 					if (existing) next[index] = { ...existing, stocks: item.stocks ?? existing.stocks, qty: Number(existing.qty || 0) + item.quantity };
 				} else {
-					next.push({ productId: item.productId, name: item.name, stocks: item.stocks ?? {}, qty: item.quantity, rate: kind === 'purchase' ? Number(item.purchasePrice ?? 0) : 0 });
+					next.push({
+						productId: item.productId,
+						name: item.name,
+						stocks: item.stocks ?? {},
+						qty: item.quantity,
+						rate: kind === 'purchase' || kind === 'receipt' ? Number(item.purchasePrice ?? 0) : 0,
+						retail: kind === 'receipt' ? Number(item.price ?? 0) : 0,
+					});
 				}
 			}
 			return next;
 		});
 	};
 
-	const patchLine = (productId: number, patch: Partial<Pick<StandaloneLine, 'qty' | 'rate'>>): void => {
+	const patchLine = (productId: number, patch: Partial<Pick<StandaloneLine, 'qty' | 'rate' | 'retail'>>): void => {
 		setLines((current) => current.map((line) => line.productId === productId ? { ...line, ...patch } : line));
 	};
 
@@ -985,9 +1168,13 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 		const validLines = lines.filter((line) => Number(line.qty || 0) > 0);
 		if (!validLines.length) { setError('Добавь хотя бы одну позицию.'); return; }
 		if (kind === 'purchase' && (!supplier.trim() || supplier.trim() === 'Поставщик не выбран')) { setError('Выбери поставщика.'); return; }
+		if (kind === 'receipt' && !toStore) { setError('Выбери склад оприходования.'); return; }
+		if (kind === 'issue' && !fromStore) { setError('Выбери склад списания.'); return; }
 		if (kind === 'transfer') {
 			if (!fromStore || !toStore) { setError('Выбери склад отправки и склад получения.'); return; }
 			if (fromStore === toStore) { setError('Склады отправки и получения должны отличаться.'); return; }
+		}
+		if (kind === 'transfer' || kind === 'issue') {
 			const unavailable = validLines.find((line) => Number(line.qty || 0) > Number(line.stocks[fromStore] ?? 0));
 			if (unavailable) { setError(`На складе «${fromStore}» доступно ${Number(unavailable.stocks[fromStore] ?? 0)}: ${unavailable.name}.`); return; }
 		}
@@ -998,13 +1185,28 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 				onDone(`${name}: создан самостоятельный черновик.`, 'purchase');
 				return;
 			}
-			const transfer = await createManualTransfer({ fromStore, toStore, ...(note.trim() ? { note: note.trim() } : {}), lines: validLines.map((line) => ({ productId: line.productId, name: line.name, qty: Number(line.qty) })) });
-			try {
-				await shipTransfer(transfer.id);
-				onDone(`Перемещение #${transfer.id}: товар отправлен в транзит.`, 'logistics');
-			} catch (err) {
-				onDone(`Перемещение #${transfer.id} создано, но не отправлено в транзит: ${err instanceof Error ? err.message : String(err)}`, 'logistics');
+			if (kind === 'receipt') {
+				const name = await createReceiptDoc({
+					toStore,
+					...(supplier.trim() && supplier.trim() !== 'Поставщик не выбран' ? { supplier: supplier.trim() } : {}),
+					...(note.trim() ? { note: note.trim() } : {}),
+					lines: validLines.map((line) => ({ productId: line.productId, qty: Number(line.qty), purchase: Number(line.rate || 0), retail: Number(line.retail || 0) })),
+				});
+				onDone(`${name}: создан черновик оприходования.`, 'receipt');
+				return;
 			}
+			if (kind === 'issue') {
+				const name = await createIssueDoc({
+					fromStore,
+					...(reason.trim() ? { reason: reason.trim() } : {}),
+					...(note.trim() ? { note: note.trim() } : {}),
+					lines: validLines.map((line) => ({ productId: line.productId, qty: Number(line.qty) })),
+				});
+				onDone(`${name}: создан черновик списания.`, 'issue');
+				return;
+			}
+			const transfer = await createManualTransfer({ fromStore, toStore, ...(note.trim() ? { note: note.trim() } : {}), lines: validLines.map((line) => ({ productId: line.productId, name: line.name, qty: Number(line.qty) })) });
+			onDone(`Перемещение #${transfer.id}: создан черновик.`, 'logistics');
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -1012,11 +1214,20 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 		}
 	};
 
+	const documentTitle = kind === 'purchase' ? 'Заявка поставщику'
+		: kind === 'transfer' ? 'Перемещение'
+			: kind === 'issue' ? 'Списание'
+				: 'Оприходование';
+	const pickerTitle = kind === 'purchase' ? 'Подобрать товары в заявку поставщику'
+		: kind === 'transfer' ? 'Подобрать товары для перемещения'
+			: kind === 'issue' ? 'Подобрать товары для списания'
+				: 'Подобрать товары для оприходования';
+
 	if (pickingProducts) {
 		return (
 			<div className="supply-product-picker-overlay">
 				<ProductBase picker={{
-					title: kind === 'purchase' ? 'Подобрать товары в заявку поставщику' : 'Подобрать товары для перемещения',
+					title: pickerTitle,
 					kindFilter: 'goods',
 					onlyStockDefault: false,
 					onCancel: () => setPickingProducts(false),
@@ -1031,16 +1242,21 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 
 	return (
 		<div className="supply-proto-overlay">
-			<section className="supply-proto-modal supply-standalone-modal" role="dialog" aria-modal="true" aria-label={kind === 'purchase' ? 'Новая заявка поставщику' : 'Новое перемещение'}>
-				<header><div><h2>{kind === 'purchase' ? 'Заявка поставщику' : 'Перемещение'}</h2><p>Самостоятельный документ без сделки и заявки.</p></div><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></header>
+			<section className="supply-proto-modal supply-standalone-modal" role="dialog" aria-modal="true" aria-label={`Новое ${documentTitle.toLowerCase()}`}>
+				<header><div><h2>{documentTitle}</h2><p>Самостоятельный документ без сделки и заявки.</p></div><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></header>
 				<div className="supply-standalone-fields">
 					{kind === 'purchase' ? <>
-						<label>Поставщик<input list="standalone-suppliers" value={supplier} onChange={(event) => setSupplier(event.target.value)} /></label>
+						<SupplierField id="standalone-purchase-supplier" label="Поставщик" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} />
 						<label>Ожидаемая дата<input type="date" value={expectedAt} onChange={(event) => setExpectedAt(event.target.value)} /></label>
-						<datalist id="standalone-suppliers">{suppliers.map((name) => <option key={name} value={name} />)}</datalist>
-					</> : <>
+					</> : kind === 'transfer' ? <>
 						<label>Склад отправки<select value={fromStore} onChange={(event) => setFromStore(event.target.value)}><option value="">Выбери склад</option>{stores.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
 						<label>Склад получения<select value={toStore} onChange={(event) => setToStore(event.target.value)}><option value="">Выбери склад</option>{stores.filter((name) => name !== fromStore).map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+					</> : kind === 'issue' ? <>
+						<label>Склад списания<select value={fromStore} onChange={(event) => setFromStore(event.target.value)}><option value="">Выбери склад</option>{stores.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+						<label>Причина<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Брак, недостача, внутренние нужды" /></label>
+					</> : <>
+						<label>Склад оприходования<select value={toStore} onChange={(event) => setToStore(event.target.value)}><option value="">Выбери склад</option>{stores.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+						<SupplierField id="standalone-receipt-supplier" label="Поставщик (необязательно)" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} />
 					</>}
 				</div>
 				<div className="supply-standalone-product-actions">
@@ -1048,11 +1264,11 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onClose, onDone }: { k
 					<span>{lines.length ? `Выбрано позиций: ${lines.length}` : 'Позиции ещё не выбраны'}</span>
 				</div>
 				<div className="supply-document-lines supply-standalone-lines">
-					<table><thead><tr><th>Позиция</th><th>Количество</th>{kind === 'purchase' && <th>Цена</th>}<th aria-label="Удалить" /></tr></thead><tbody>
-						{lines.length === 0 ? <tr><td colSpan={kind === 'purchase' ? 4 : 3} className="empty">Позиции не добавлены.</td></tr> : lines.map((line) => <tr key={line.productId}><td><b>{line.name}</b><small>#{line.productId}{kind === 'transfer' && fromStore ? ` · доступно ${Number(line.stocks[fromStore] ?? 0)}` : ''}</small></td><td><input type="number" min="0" step="any" value={line.qty} onChange={(event) => patchLine(line.productId, { qty: numericDraft(event.target.value) })} /></td>{kind === 'purchase' && <td><input type="number" min="0" step="any" value={line.rate} onChange={(event) => patchLine(line.productId, { rate: numericDraft(event.target.value) })} /></td>}<td><button className="supply-document-remove-line" type="button" title="Удалить позицию" aria-label="Удалить позицию" onClick={() => setLines((current) => current.filter((row) => row.productId !== line.productId))}>×</button></td></tr>)}
+					<table><thead><tr><th>Позиция</th><th>Количество</th>{kind === 'purchase' && <th>Цена</th>}{kind === 'receipt' && <><th>Закупочная цена</th><th>Розничная цена</th></>}<th aria-label="Удалить" /></tr></thead><tbody>
+						{lines.length === 0 ? <tr><td colSpan={kind === 'receipt' ? 5 : kind === 'purchase' ? 4 : 3} className="empty">Позиции не добавлены.</td></tr> : lines.map((line) => <tr key={line.productId}><td><b>{line.name}</b><small>#{line.productId}{(kind === 'transfer' || kind === 'issue') && fromStore ? ` · доступно ${Number(line.stocks[fromStore] ?? 0)}` : ''}</small></td><td><input type="number" min="0" step="any" value={line.qty} onChange={(event) => patchLine(line.productId, { qty: numericDraft(event.target.value) })} /></td>{(kind === 'purchase' || kind === 'receipt') && <td><input type="number" min="0" step="any" value={line.rate} onChange={(event) => patchLine(line.productId, { rate: numericDraft(event.target.value) })} /></td>}{kind === 'receipt' && <td><input type="number" min="0" step="any" value={line.retail} onChange={(event) => patchLine(line.productId, { retail: numericDraft(event.target.value) })} /></td>}<td><button className="supply-document-remove-line" type="button" title="Удалить позицию" aria-label="Удалить позицию" onClick={() => setLines((current) => current.filter((row) => row.productId !== line.productId))}>×</button></td></tr>)}
 					</tbody></table>
 				</div>
-				{kind === 'transfer' && <label className="supply-standalone-search">Комментарий<input value={note} onChange={(event) => setNote(event.target.value)} /></label>}
+				{(kind === 'transfer' || kind === 'issue' || kind === 'receipt') && <label className="supply-standalone-search">Комментарий<input value={note} onChange={(event) => setNote(event.target.value)} /></label>}
 				{error && <div className="supply-standalone-error">{error}</div>}
 				<footer><button type="button" onClick={onClose}>Отмена</button><button className="primary" type="button" disabled={busy} onClick={() => void submit()}>{busy ? 'Создаю...' : 'Создать'}</button></footer>
 			</section>
@@ -1078,8 +1294,12 @@ export function Supply(): JSX.Element {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', purchase: '', logistics: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', purchase: '', logistics: '', stocks: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
+	const [stockForm, setStockForm] = useState<Awaited<ReturnType<typeof fetchStockFormData>> | null>(ctx.__mock
+		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: DEFAULT_SUPPLIERS, canCreate: true }
+		: null);
+	const [deepLinkHandled, setDeepLinkHandled] = useState(false);
 
 	useEffect(() => {
 		if (!printApprovalOrder) return;
@@ -1100,6 +1320,20 @@ export function Supply(): JSX.Element {
 	const reload = async (): Promise<void> => {
 		const loaded = await fetchSupplyOrders();
 		setOrders(loaded);
+	};
+
+	const addSupplier = async (name: string): Promise<string> => {
+		const clean = name.trim();
+		if (ctx.__mock) {
+			setSuppliers((current) => [...new Set([...current, clean])].sort((a, b) => a.localeCompare(b, 'ru')));
+			return clean;
+		}
+		const result = await createSupplySupplier(clean);
+		const next = [...new Set([...result.suppliers, ...DEFAULT_SUPPLIERS])].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru'));
+		setSuppliers(next);
+		setStockForm((current) => current ? { ...current, suppliers: next } : current);
+		setNotice(result.created ? `Поставщик «${result.name}» создан.` : `Поставщик «${result.name}» уже есть в справочнике.`);
+		return result.name;
 	};
 
 	const refreshOpenDocument = async (target: OpenSupplyDocument): Promise<void> => {
@@ -1152,7 +1386,7 @@ export function Supply(): JSX.Element {
 		try {
 			const transfer = await createSupplyPurchaseTransfer(target.order.name, target.order.requestKey, Number(target.order.dealId), target.purchase.name, lines);
 			await refreshOpenDocument(target);
-			setNotice(`${transferDocumentLabel(transfer)}: товар отправлен в транзит на ${target.order.toStore}.`);
+			setNotice(`${transferDocumentLabel(transfer)}: создан черновик перемещения на ${target.order.toStore}.`);
 		} catch (err) {
 			await refreshOpenDocument(target).catch(() => undefined);
 			setNotice(err instanceof Error ? err.message : 'Не удалось создать перемещение на точку.');
@@ -1177,16 +1411,20 @@ export function Supply(): JSX.Element {
 		return nextTransfer;
 	};
 
-	const moveOpenTransfer = async (action: 'ship' | 'receive' | 'resolve', lines: Array<{ productId: number; qty: number }> = []): Promise<void> => {
+	const moveOpenTransfer = async (action: 'update' | 'collect' | 'ship' | 'receive' | 'post' | 'cancel' | 'resolve', lines: Array<{ productId: number; qty: number }> = []): Promise<void> => {
 		const target = openDocument;
 		if (!target || target.kind !== 'transfer' || documentBusy) return;
 		setDocumentBusy(true);
 		try {
-			if (action === 'ship') await shipTransfer(target.transfer.id);
-			else if (action === 'receive') await receiveTransfer(target.transfer.id, lines);
-			else await resolveTransferShortage(target.transfer.id);
+			const updated = action === 'update' ? await updateTransferLines(target.transfer.id, lines)
+				: action === 'collect' ? await collectTransfer(target.transfer.id, lines)
+					: action === 'ship' ? await shipTransfer(target.transfer.id)
+						: action === 'receive' ? await receiveTransfer(target.transfer.id, lines)
+							: action === 'post' ? await postTransfer(target.transfer.id)
+								: action === 'cancel' ? await cancelTransfer(target.transfer.id)
+								: await resolveTransferShortage(target.transfer.id);
 			await refreshOpenDocument(target);
-			setNotice(`${transferDocumentLabel(target.transfer)}: статус обновлён.`);
+			setNotice(updated.actionWarning || `${transferDocumentLabel(target.transfer)}: статус обновлён.`);
 		} catch (err) {
 			setNotice(err instanceof Error ? err.message : 'Не удалось изменить статус перемещения.');
 		} finally { setDocumentBusy(false); }
@@ -1198,7 +1436,7 @@ export function Supply(): JSX.Element {
 		const title = target.kind === 'purchase' ? target.purchase.name : `Перемещение ${transferDocumentLabel(target.transfer)}`;
 		const detail = target.kind === 'purchase'
 			? 'Связанные оприходования будут отменены.'
-			: 'Все проведённые складские движения этого перемещения будут отменены.';
+			: 'Все проведённые складские движения и связанные корректировки этого перемещения будут отменены и удалены.';
 		if (!window.confirm(`Удалить ${title}?\n\n${detail}`)) return;
 		setDocumentBusy(true);
 		try {
@@ -1227,6 +1465,7 @@ export function Supply(): JSX.Element {
 				setCurrentUserId(uid);
 				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) { setPhase('denied'); return; }
 				setPhase('ready');
+				void fetchStockFormData().then(setStockForm).catch(() => setStockForm({ stores: [], suppliers: [], canCreate: false }));
 				try {
 					const [loaded, supplierList] = await Promise.all([fetchSupplyOrders(), fetchSupplySuppliers()]);
 					setOrders(loaded);
@@ -1239,6 +1478,22 @@ export function Supply(): JSX.Element {
 			})().catch(() => setPhase('denied'));
 		});
 	}, [ctx.__mock]);
+
+	useEffect(() => {
+		if (loading || deepLinkHandled) return;
+		const queryId = Number(new URLSearchParams(window.location.search).get('transfer') ?? 0);
+		const transferId = Number(ctx.transferId ?? queryId);
+		if (Number.isInteger(transferId) && transferId > 0) {
+			for (const order of orders) {
+				const transfer = (order.transfers ?? []).find((row) => row.id === transferId);
+				if (!transfer) continue;
+				setView('logistics');
+				setOpenDocument({ kind: 'transfer', order, transfer });
+				break;
+			}
+		}
+		setDeepLinkHandled(true);
+	}, [ctx.transferId, deepLinkHandled, loading, orders]);
 
 	const requestOrders = useMemo(() => orders.filter((order) => !order.standalone), [orders]);
 	const sortedOrders = useMemo(() => [...requestOrders].sort((a, b) => {
@@ -1334,6 +1589,7 @@ export function Supply(): JSX.Element {
 				<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
 				<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
 				<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
+				<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
 				<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
 				<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
 				<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
@@ -1345,7 +1601,9 @@ export function Supply(): JSX.Element {
 				<header className="supply-proto-top">
 					<div>
 						<h1>Снабжение</h1>
-						<p>{view === 'ledger'
+						<p>{view === 'stocks'
+							? 'Каталог товаров и актуальные остатки по складам.'
+							: view === 'ledger'
 							? 'История прихода, перемещения, реализации и инвентаризации по выбранному товару.'
 							: view === 'logistics'
 								? 'Все перемещения: самостоятельные и созданные по заявкам или закупкам.'
@@ -1359,19 +1617,28 @@ export function Supply(): JSX.Element {
 												? 'Возвраты клиентов с исходной сделкой и составом документа.'
 												: 'Заявка раскрывается в строки, снабжение вручную выбирает закупку или перемещение.'}</p>
 					</div>
-					<div className="supply-proto-actions"><button type="button" onClick={() => setCreateKind('transfer')}>Перемещение</button><button className="primary" type="button" onClick={() => setCreateKind('purchase')}>Заявка поставщику</button></div>
+					<div className="supply-proto-actions">
+						{view === 'purchase' && <button className="primary" type="button" onClick={() => setCreateKind('purchase')}>Создать заявку поставщику</button>}
+						{view === 'logistics' && <button className="primary" type="button" onClick={() => setCreateKind('transfer')}>Создать перемещение</button>}
+						{view === 'issue' && <button className="primary" type="button" onClick={() => setCreateKind('issue')}>Создать списание</button>}
+						{view === 'receipt' && <button className="primary" type="button" onClick={() => setCreateKind('receipt')}>Создать оприходование</button>}
+					</div>
 				</header>
 				{(view === 'orders' || view === 'purchase' || view === 'logistics') && <Metrics orders={orders} view={view} />}
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
+				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
-				{view === 'logistics' && <div className="supply-proto-card"><StockTransfersTab key={stockRefresh} form={null} /></div>}
-				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card"><StockMovementsTab kind={view} form={null} /></div>}
+				{view === 'logistics' && <>
+					<div className="supply-proto-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" onChanged={() => setStockRefresh((value) => value + 1)} /></div>
+					<div className="supply-proto-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} /></div>
+				</>}
+				{view === 'stocks' && <div className="supply-products-view"><ProductBase readOnly /></div>}
+				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
 				{view === 'ledger' && <div className="supply-proto-card"><LedgerTab /></div>}
 			</main>
-			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}
+			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onCreateSupplier={addSupplier} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}
 			{openDocument && <DocumentDetail
 				key={openDocument.kind === 'purchase' ? `purchase-${openDocument.purchase.name}` : `transfer-${openDocument.transfer.id}`}
 				document={openDocument}
@@ -1380,13 +1647,18 @@ export function Supply(): JSX.Element {
 				canDelete={currentUserId === '1858'}
 				onClose={() => setOpenDocument(null)}
 				onDelete={() => void deleteOpenDocument()}
+				onCreateSupplier={addSupplier}
 				onSavePurchase={(supplier, lines, stage, expectedAt) => void saveOpenPurchase(supplier, lines, stage, expectedAt)}
 				onReceivePurchase={(lines) => void receiveOpenPurchase(lines)}
 				onCreatePurchaseTransfer={(lines) => void createOpenPurchaseTransfer(lines)}
 				onChangeTransferDestination={changeOpenTransferDestination}
+				onUpdateTransfer={(lines) => void moveOpenTransfer('update', lines)}
+				onCollectTransfer={(lines) => void moveOpenTransfer('collect', lines)}
 				onShipTransfer={() => void moveOpenTransfer('ship')}
 				onReceiveTransfer={(lines) => void moveOpenTransfer('receive', lines)}
-				 onResolveShortage={() => void moveOpenTransfer('resolve')}
+				onPostTransfer={() => void moveOpenTransfer('post')}
+				onCancelTransfer={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void moveOpenTransfer('cancel'); }}
+				onResolveShortage={() => void moveOpenTransfer('resolve')}
 			/>}
 			{printApprovalOrder && <SupplyApprovalPrint order={printApprovalOrder} />}
 		</div>

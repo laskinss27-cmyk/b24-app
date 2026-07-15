@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
-import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
+import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { createRealizationDraft, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listSupplyRequestsForDeal } from '../erp/operations.js';
+import { createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listSupplyRequestsForDeal } from '../erp/operations.js';
+import { parseTransferItem } from '../transfers/model.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -302,14 +303,32 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 				const groups = Array.isArray(b.groups) ? b.groups : [];
-				const drafts: Array<{ name: string; storeTitle: string }> = [];
-				for (const g of groups) {
+				const parsedGroups = groups.map((g) => {
 					const gg = g as { storeTitle?: unknown; lines?: unknown };
 					const storeTitle = String(gg.storeTitle ?? '').trim();
 					const lines = (Array.isArray(gg.lines) ? gg.lines : [])
 						.map((l) => l as { productId?: unknown; qty?: unknown; rate?: unknown })
 						.map((l) => ({ productId: Number(l.productId), qty: Number(l.qty), rate: Number(l.rate) || 0, storeTitle }))
 						.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
+					return { storeTitle, lines };
+				}).filter((group) => group.storeTitle && group.lines.length);
+				await ensureTransfersEntity(client);
+				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+				const reserved = new Map<string, number>();
+				for (const transfer of (transferItems ?? []).map(parseTransferItem).filter((item) => item && (item.status === 'draft' || item.status === 'collected' || item.status === 'requested'))) {
+					for (const line of transfer!.lines) {
+						const key = `${line.productId}:${transfer!.fromStore}`;
+						reserved.set(key, (reserved.get(key) ?? 0) + line.qty);
+					}
+				}
+				const productIds = parsedGroups.flatMap((group) => group.lines.map((line) => line.productId));
+				const stocks = await fetchErpStocksFor(erp, productIds);
+				for (const group of parsedGroups) for (const line of group.lines) {
+					const available = Math.max(Number(stocks.get(line.productId)?.[group.storeTitle] ?? 0) - (reserved.get(`${line.productId}:${group.storeTitle}`) ?? 0), 0);
+					if (line.qty > available + 0.000001) throw new Error(`на складе «${group.storeTitle}» для товара #${line.productId} свободно ${available}, к реализации выбрано ${line.qty}`);
+				}
+				const drafts: Array<{ name: string; storeTitle: string }> = [];
+				for (const { storeTitle, lines } of parsedGroups) {
 					if (!storeTitle || !lines.length) continue;
 					const { name } = await createRealizationDraft(erp, { dealId, lines });
 					drafts.push({ name, storeTitle });
@@ -335,7 +354,26 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0 && l.storeTitle);
 				if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций возврата' });
 				const { names } = await createClientReturns(erp, { dealId, ...(note ? { note } : {}), lines });
-				app.log.info({ dealId, returns: names.length }, '[api/deal/realize-core] returns created');
+				// Возвращённый товар больше не должен снова появляться в сделке как неотгруженный.
+				// Уменьшаем план на фактически возвращённое количество; полный возврат удаляет строку.
+				const returnedByProduct = new Map<number, number>();
+				for (const line of lines) returnedByProduct.set(line.productId, (returnedByProduct.get(line.productId) ?? 0) + line.qty);
+				const currentPlan = await listDealPlan(erp, dealId);
+				const nextPlan = currentPlan
+					.map((item) => ({ ...item, qty: Math.max(0, item.qty - (returnedByProduct.get(item.productId) ?? 0)) }))
+					.filter((item) => item.qty > 0.000001);
+				const today = new Date().toISOString().slice(0, 10);
+				await upsertDealPlan(erp, dealId, nextPlan.map((item) => ({
+					productId: item.productId,
+					itemName: item.itemName,
+					qty: item.qty,
+					priceListRate: item.priceListRate,
+					discountPercent: item.discountPercent,
+					isService: item.isService,
+				})), today);
+				const total = Math.round(nextPlan.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
+				await setDealB24Service(client, dealId, total);
+				app.log.info({ dealId, returns: names.length, planLines: nextPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
 				return { ok: true, returns: names };
 			}
 			if (action === 'submit') {

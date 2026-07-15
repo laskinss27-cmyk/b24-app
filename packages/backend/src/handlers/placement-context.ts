@@ -29,6 +29,7 @@ export const PlacementQuerySchema = z.object({
 	APP_SID: z.string().optional(),
 	LANG: z.string().optional(),
 	PROTOCOL: z.string().optional(),
+	transfer: z.coerce.number().int().positive().optional(),
 });
 
 export type PlacementQuery = z.infer<typeof PlacementQuerySchema>;
@@ -69,6 +70,7 @@ export function extractInstallAuth(body: PlacementBody, query: PlacementQuery): 
 export interface PlacementContext {
 	dealId: number | null;
 	taskId: number | null;
+	transferId?: number | null;
 	/** 'inventory' — инвентаризация; 'salesReport' — отчёт по продажам; 'repairs' — ремонты; 'stock' — складской учёт; 'supply' — рабочее место снабженца («Снаб»). */
 	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply';
 	domain: string | null;
@@ -172,6 +174,7 @@ export function buildSupplyContext(body: PlacementBody): PlacementContext {
 	return {
 		dealId: null,
 		taskId: null,
+		transferId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['transfer', 'TRANSFER']),
 		view: 'supply',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,

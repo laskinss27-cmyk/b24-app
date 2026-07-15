@@ -255,7 +255,7 @@ export interface ProductPicker {
 	onlyStockDefault?: boolean;
 }
 
-export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.Element {
+export function ProductBase({ picker, readOnly = false }: { picker?: ProductPicker; readOnly?: boolean } = {}): JSX.Element {
 	const pickMode = !!picker;
 	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
@@ -391,7 +391,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 	}
 
 	// ── корзина быстрой продажи ───────────────────────────────────────────────
-	const canQuickSale = QUICKSALE_USER_IDS.includes(uid);
+	const canQuickSale = !readOnly && QUICKSALE_USER_IDS.includes(uid);
 	const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 	const cartList = useMemo(
 		() => [...cart.entries()].map(([id, qty]) => ({ row: rowById.get(id), qty })).filter((c): c is { row: BaseRow; qty: number } => Boolean(c.row)),
@@ -523,7 +523,7 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 								<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
 							</div>
 						)
-						: <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
+						: !readOnly && <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
 				</div>
 				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем нажмите «Готово».' : `Найти товар, посмотреть остатки и цены.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
 			</header>
@@ -548,9 +548,9 @@ export function ProductBase({ picker }: { picker?: ProductPicker } = {}): JSX.El
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
-				{pickMode && kind !== 'services' && <button className="btn-secondary" disabled={q.trim().length < 2} onClick={() => setShowNewProduct(true)}>Новый товар</button>}
+				{pickMode && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
-				{!pickMode && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
+				{!pickMode && !readOnly && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
 
 			<div className="base-tablewrap">

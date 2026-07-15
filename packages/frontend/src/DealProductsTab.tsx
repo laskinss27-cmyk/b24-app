@@ -180,6 +180,10 @@ async function loadAll(dealId: number): Promise<TableData> {
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
+const todayYmd = (): string => {
+	const now = new Date();
+	return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+};
 
 /** Человеческая подпись стадии заявки снабжения (DT1110_114:NEW → «новая»). */
 const stageLabel = (stageId: string): string => {
@@ -199,6 +203,18 @@ const stageLabel = (stageId: string): string => {
 	if (tail === 'FAIL') return 'провалена';
 	return 'в работе';
 };
+
+const transferDocStatusLabel = (status: TransferDoc['status']): string => ({
+	draft: 'черновик',
+	collected: 'собрано',
+	requested: 'запрошено',
+	in_transit: 'в пути',
+	accepted: 'на проверке',
+	posted: 'проведено',
+	received: 'получено',
+	shortage: 'расхождение',
+	canceled: 'отменено',
+})[status];
 
 /** Русская плюрализация: plural(2,'строка','строки','строк') → 'строки'. */
 const plural = (n: number, one: string, few: string, many: string): string => {
@@ -506,10 +522,16 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	/** Подтверждение заказа снабжению и комментарии по выбранным позициям. */
 	const [showSupplyOrder, setShowSupplyOrder] = useState(false);
 	const [supplyNotes, setSupplyNotes] = useState<Record<string, string>>({});
+	const [supplyToStore, setSupplyToStore] = useState('');
+	const [supplyDeadline, setSupplyDeadline] = useState('');
+	const [supplyOrderNote, setSupplyOrderNote] = useState('');
+	const [supplyFormError, setSupplyFormError] = useState<string | null>(null);
 	/** id строки, по которой создаётся перемещение. */
 	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
 	/** Открыто модальное окно возврата от клиента. */
 	const [showReturn, setShowReturn] = useState(false);
+	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
+	const [showDealDocuments, setShowDealDocuments] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
@@ -532,6 +554,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	// документ ядра хранит item_code=productId без rowId, а в типичной сделке товар уникален по строкам.
 	const realizedOf = (productId: number): number =>
 		data.coreReals.reduce((a, rz) => a + rz.items.filter((it) => it.productId === productId).reduce((s, it) => s + it.qty, 0), 0);
+	/** Фактически проведено: черновики сюда не входят, возвраты уменьшают итог. */
+	const shippedOf = (productId: number): number =>
+		Math.max(0, data.coreReals.filter((document) => document.submitted).reduce((sum, document) => sum + document.items.filter((item) => item.productId === productId).reduce((itemSum, item) => itemSum + item.qty, 0), 0));
 	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - realizedOf(r.productId));
 	const qtyOf = (r: EnrichedRow): number => {
 		const v = Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.')) || 0;
@@ -551,10 +576,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const storeName = (id: number): string => data.stores.find((s) => s.id === id)?.title ?? `Склад #${id}`;
 	/** Незакрытое перемещение по этому товару (запрошено/в пути) — чтобы показать статус вместо кнопки. */
 	const activeTransferOf = (r: EnrichedRow): TransferDoc | null =>
-		dealTransfers.find((t) => (t.status === 'requested' || t.status === 'in_transit' || t.status === 'shortage') && t.lines.some((l) => l.productId === r.productId)) ?? null;
+		dealTransfers.find((t) => !t.correctionOf && ['draft', 'collected', 'requested', 'in_transit', 'accepted', 'shortage'].includes(t.status) && t.lines.some((l) => l.productId === r.productId)) ?? null;
 	/** Полученное перемещение по товару: товар уже на складе Б, но остаток открытой вкладки мог не обновиться. */
 	const receivedTransferOf = (r: EnrichedRow): TransferDoc | null =>
-		dealTransfers.find((t) => t.status === 'received' && t.lines.some((l) => l.productId === r.productId)) ?? null;
+		dealTransfers.find((t) => !t.correctionOf && (t.status === 'received' || t.status === 'posted') && t.lines.some((l) => l.productId === r.productId)) ?? null;
+	const activeTransferLabel = (transfer: TransferDoc): string => {
+		if (transfer.status === 'draft' || transfer.status === 'requested') return 'перемещение создано';
+		if (transfer.status === 'collected') return 'собрано';
+		if (transfer.status === 'in_transit') return 'в пути';
+		if (transfer.status === 'accepted') return 'на проверке';
+		return 'недовоз';
+	};
 	const activeSupplyOf = (r: EnrichedRow): SupplyCard | null =>
 		data.supply.find((s) => s.source === 'core' && !/stopped|closed|completed|success|fail/i.test(s.stageId) && (s.productIds ?? []).includes(r.productId)) ?? null;
 
@@ -606,12 +638,15 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
 	const partsOf = (r: EnrichedRow): Part[] =>
 		data.coreReals
+			.filter((rz) => !rz.isReturn)
 			.map((rz): Part | null => {
 				const its = rz.items.filter((it) => it.productId === r.productId);
 				if (!its.length) return null;
 				return { name: rz.name, submitted: rz.submitted, isReturn: Boolean(rz.isReturn), qty: its.reduce((s, it) => s + it.qty, 0), storeName: its[0]!.storeTitle };
 			})
 			.filter((p): p is Part => p != null);
+	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
+	const hiddenDocumentCount = returnDocuments.length + data.supply.length + dealTransfers.length;
 
 		// ВКЛАДКА НЕ СМОТРИТ на товарный состав Б24 (он врёт — Б24 подменяет товар на услугу).
 		// Товары показываем ТОЛЬКО из ядра. Поэтому в матч против строк Б24 берём лишь работы:
@@ -657,6 +692,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
 			</td>
 			<td className="num"><span className="none">—</span></td>
+			<td className="num"><span className="none">—</span></td>
 			<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 			<td><span className="none">—</span></td>
 			<td><span className="none">—</span></td>
@@ -676,7 +712,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				<td className="num">{rub(r.price)}</td>
 				<td className="num"><span className="none">—</span></td>
 				<td className="num"><span className="none">—</span></td>
-				<td className="num">{p.qty} {r.measure}</td>
+				<td className="num">{p.submitted ? `${p.qty} ${r.measure}` : <span className="none">—</span>}</td>
+				<td className="num">{p.submitted ? <span className="none">—</span> : `${p.qty} ${r.measure}`}</td>
 				<td className="num">{rub(r.price * p.qty)}</td>
 				<td className="row-store part-store">
 					<span className="part-reserve" title="Склад списания в ядре">{p.storeName}</span>
@@ -691,6 +728,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		if (left > 0) {
 			const status = rowStatus(r);
 			const activeSupply = activeSupplyOf(r);
+			const activeTransfer = activeTransferOf(r);
+			const receivedTransfer = receivedTransferOf(r);
 			const sortedStocks = [...r.stocks].sort((a, b) => b.amount - a.amount);
 			const isStockExpanded = Boolean(expandedStocks[r.id]);
 			out.push(
@@ -730,6 +769,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					<td className="num">
 						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
 					</td>
+					<td className="num"><b className="realized-qty">{shippedOf(r.productId)}</b></td>
 					<td className="num">
 						<input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} onBlur={(e) => onRowBlur(r, e)} title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} />
 					</td>
@@ -760,27 +800,19 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 								<option key={s.id} value={s.id}>{s.title} ({amountAt(r, s.id)})</option>
 							))}
 						</select>
-						{status === 'ready' && <span className="st-badge ready">✓ хватит</span>}
-						{status === 'transfer' && (() => {
-							const active = activeTransferOf(r);
-							if (active) return (
-								<span className={`st-badge ${active.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${active.fromStore} → ${active.toStore}`}>
-									{active.status === 'shortage' ? '⚠ недовоз' : active.status === 'in_transit' ? '🚚 в пути' : '⏳ запрошено'}
-								</span>
-							);
-							if (receivedTransferOf(r)) return (
+						{activeTransfer ? (
+							<span className={`st-badge ${activeTransfer.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${activeTransfer.fromStore} → ${activeTransfer.toStore}`}>
+								{activeTransferLabel(activeTransfer)}
+							</span>
+						) : status === 'ready' ? <span className="st-badge ready">✓ хватит</span> : receivedTransfer ? (
 								<button
 									className="st-badge ready"
 									disabled={refreshing || busy}
 									onClick={() => void doRefresh()}
 									title="Перемещение получено — обновить остаток из ядра, чтобы реализовать"
-								>{refreshing ? '…' : '✓ получено — обновить'}</button>
-							);
-							// Менеджер перемещение не инициирует и видеть ничего не должен — пусто.
-							// (Активное/полученное перемещение от снабжения показано выше.)
-							return null;
-						})()}
-						{status === 'order' && (
+								>{refreshing ? '…' : '✓ принято — обновить'}</button>
+							) : null}
+						{!activeTransfer && !receivedTransfer && status === 'order' && (
 							activeSupply
 								? <span className="st-badge order" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>
 								: <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
@@ -792,7 +824,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				out.push(
 					<tr key={`${r.id}-stocks`} className="stock-detail-row">
 						<td className="check-col"></td>
-						<td colSpan={9}>
+						<td colSpan={10}>
 							<div className="stock-detail-list">
 								{sortedStocks.map((s) => (
 									<span key={s.storeId} className={`stock-chip${s.storeId === storeOf(r) ? ' sel' : ''}`}>{s.storeName}: <b>{s.amount}</b></span>
@@ -809,7 +841,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	// наглядно было видно, где что (раньше шли вперемешку одним списком).
 	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
 		<tr className="group-band">
-			<td colSpan={7}>{label} <span className="group-band-count">· {list.length}</span></td>
+			<td colSpan={8}>{label} <span className="group-band-count">· {list.length}</span></td>
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
@@ -835,24 +867,23 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const supplyGoods = goods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
 	const doCreateSupply = async (): Promise<void> => {
 		if (dealId == null || !supplyGoods.length || supplyBusy || busy || realizePhase !== 'idle') return;
+		setSupplyFormError(null);
+		if (!supplyToStore) { setSupplyFormError('Выберите конечный склад.'); return; }
+		if (!supplyDeadline) { setSupplyFormError('Укажите крайнюю дату поставки.'); return; }
+		if (supplyDeadline < todayYmd()) { setSupplyFormError('Крайняя дата не может быть в прошлом.'); return; }
 		setSupplyBusy(true);
 		setNotice(null);
 		try {
-			const byDest = new Map<number, typeof supplyGoods>();
-			for (const row of supplyGoods) {
-				const sid = storeOf(row);
-				byDest.set(sid, [...(byDest.get(sid) ?? []), row]);
-			}
-			let totalLines = 0;
-			for (const [sid, rows] of byDest.entries()) {
-				const lines = rows.map((r) => ({ productId: r.productId, itemName: r.name, qty: remaining(r), note: String(supplyNotes[r.id] ?? '').trim() }));
-				totalLines += lines.length;
-				await createDealSupplyRequest(dealId, lines, sid > 0 ? storeName(sid) : undefined);
-			}
+			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: remaining(row), note: String(supplyNotes[row.id] ?? '').trim() }));
+			await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, ...(supplyOrderNote.trim() ? { note: supplyOrderNote.trim() } : {}) });
 			setSelected({});
 			setSupplyNotes({});
+			setSupplyToStore('');
+			setSupplyDeadline('');
+			setSupplyOrderNote('');
+			setSupplyFormError(null);
 			setShowSupplyOrder(false);
-			setNotice({ kind: 'ok', text: `Заказ сформирован: ${totalLines} ${plural(totalLines, 'позиция', 'позиции', 'позиций')}. Он появился в дисплее снабжения.` });
+			setNotice({ kind: 'ok', text: `Заказ сформирован: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')} · ${supplyToStore} · до ${supplyDeadline}.` });
 			await onReload();
 		} catch (err) {
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
@@ -952,9 +983,56 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 					onClick={() => setShowReturn(true)}
 					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Возврат оформляет снабжение'}
 				>Возврат</button>
+				<button
+					className={`btn-secondary${showDealDocuments ? ' active' : ''}`}
+					onClick={() => {
+						setShowDealDocuments((shown) => !shown);
+						requestB24FitWindow(160);
+					}}
+				>Документы по сделке{hiddenDocumentCount ? ` (${hiddenDocumentCount})` : ''}</button>
 				</div>
 				<span className="hint">Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.</span>
 			</div>
+
+			{showDealDocuments && (
+				<section className="deal-documents-panel" aria-label="Документы по сделке">
+					<header><h2>Документы по сделке</h2><span>{hiddenDocumentCount || 'нет документов'}</span></header>
+					{returnDocuments.length > 0 && (
+						<div className="deal-documents-group">
+							<h3>Возвраты</h3>
+							{returnDocuments.map((document) => (
+								<div className="deal-document-row" key={document.name}>
+									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
+									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
+								</div>
+							))}
+						</div>
+					)}
+					{data.supply.length > 0 && (
+						<div className="deal-documents-group">
+							<h3>Снабжение</h3>
+							{data.supply.map((document) => (
+								<button type="button" key={`${document.source ?? 'b24'}-${document.id}-${document.title}`} className="deal-document-row clickable" onClick={() => document.id > 0 && openSupplyCard(document.id)}>
+									<span><b>{document.title}</b><small>{document.source === 'core' ? 'ядро' : 'Битрикс24'}</small></span>
+									<span className="deal-document-status">{stageLabel(document.stageId)}</span>
+								</button>
+							))}
+						</div>
+					)}
+					{dealTransfers.length > 0 && (
+						<div className="deal-documents-group">
+							<h3>Перемещения</h3>
+							{dealTransfers.map((document) => (
+								<div className="deal-document-row" key={document.id}>
+									<span><b>{document.name || `Перемещение #${document.id}`}</b><small>{document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
+									<span className="deal-document-status">{transferDocStatusLabel(document.status)}</span>
+								</div>
+							))}
+						</div>
+					)}
+					{hiddenDocumentCount === 0 && <p className="deal-documents-empty">Других документов по сделке пока нет.</p>}
+				</section>
+			)}
 
 			<div className="table-wrap">
 			<table className="products-table">
@@ -966,6 +1044,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						<th className="num">Цена</th>
 						<th className="num">Скидка</th>
 						<th className="num">Кол-во</th>
+						<th className="num">Реализовано</th>
 						<th className="num">К отгрузке</th>
 						<th className="num">Сумма</th>
 						<th>Остатки по складам</th>
@@ -996,17 +1075,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				<div className="trow grand"><span>Итого</span><span>{rub(sumGoods + sumRealWorks)}</span></div>
 			</div>
 
-			{data.supply.length > 0 && (
-				<div className="supply-line">
-					<span>📦 Снабжение:</span>
-					{data.supply.map((s) => (
-						<button key={`${s.source ?? 'b24'}-${s.id}-${s.title}`} className="supply-chip" onClick={() => s.id > 0 && openSupplyCard(s.id)} title={`${s.source === 'core' ? 'ядро' : 'стадия'}: ${stageLabel(s.stageId)}`}>
-							{s.title.slice(0, 48)} · {stageLabel(s.stageId)}
-						</button>
-					))}
-				</div>
-			)}
-
 			<div className="realize-bar">
 				{realizePhase === 'drafted' ? (
 					<div className="realize-plan">
@@ -1036,7 +1104,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
 					)}
 					{realizePhase === 'idle' && supplyGoods.length > 0 && (
-						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => setShowSupplyOrder(true)}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
+						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => {
+							const first = supplyGoods[0];
+							setSupplyToStore(first ? storeName(storeOf(first)) : '');
+							setSupplyDeadline('');
+							setSupplyOrderNote('');
+							setSupplyFormError(null);
+							setShowSupplyOrder(true);
+						}}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
 					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
@@ -1049,10 +1124,16 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							<div><h2>Заказ снабжению</h2><span>{supplyGoods.length} {plural(supplyGoods.length, 'позиция', 'позиции', 'позиций')}</span></div>
 							<button type="button" aria-label="Закрыть" title="Закрыть" disabled={supplyBusy} onClick={() => setShowSupplyOrder(false)}>×</button>
 						</header>
+						<div className="deal-supply-order-fields">
+							<label><span>Конечный склад</span><select value={supplyToStore} disabled={supplyBusy} onChange={(e) => { setSupplyToStore(e.target.value); setSupplyFormError(null); }}><option value="">Выберите склад</option>{data.stores.map((store) => <option key={store.id} value={store.title}>{store.title}</option>)}</select></label>
+							<label><span>Привезти не позднее</span><input type="date" min={todayYmd()} value={supplyDeadline} disabled={supplyBusy} onChange={(e) => { setSupplyDeadline(e.target.value); setSupplyFormError(null); }} /></label>
+							<label className="wide"><span>Общий комментарий</span><textarea rows={2} maxLength={500} value={supplyOrderNote} disabled={supplyBusy} placeholder="Комментарий ко всему заказу" onChange={(e) => setSupplyOrderNote(e.target.value)} /></label>
+						</div>
+						{supplyFormError && <div className="deal-supply-order-error">{supplyFormError}</div>}
 						<div className="deal-supply-order-lines">
 							{supplyGoods.map((row) => (
 								<label key={row.id} className="deal-supply-order-line">
-									<span className="deal-supply-order-line-head"><b>{row.name}</b><small>{remaining(row)} {row.measure} · {storeName(storeOf(row))}</small></span>
+									<span className="deal-supply-order-line-head"><b>{row.name}</b><small>{remaining(row)} {row.measure}</small></span>
 									<textarea
 										value={supplyNotes[row.id] ?? ''}
 										maxLength={500}

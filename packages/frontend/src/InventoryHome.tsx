@@ -119,6 +119,8 @@ export function InventoryHome(): JSX.Element {
 	const [notify, setNotify] = useState<string[]>([]);
 	const [pickedSections, setPickedSections] = useState<number[]>([]);
 	const [saving, setSaving] = useState(false);
+	const [deadlineError, setDeadlineError] = useState(false);
+	const [createError, setCreateError] = useState<string | null>(null);
 	const [storageWarn, setStorageWarn] = useState<string | null>(null);
 
 	const [counting, setCounting] = useState<Counting | null>(null);
@@ -329,6 +331,12 @@ export function InventoryHome(): JSX.Element {
 	}
 
 	async function submitCreate(): Promise<void> {
+		setCreateError(null);
+		if (!deadline) {
+			setDeadlineError(true);
+			return;
+		}
+		setDeadlineError(false);
 		const points: InvPoint[] = Object.entries(picked).map(([sid, rid]) => {
 			const store = stores.find((s) => s.id === Number(sid));
 			const user = rid ? users.find((u) => u.id === rid) : undefined;
@@ -340,7 +348,10 @@ export function InventoryHome(): JSX.Element {
 				status: 'idle',
 			};
 		});
-		if (!points.length || !deadline) return;
+		if (!points.length) {
+			setCreateError('Выберите хотя бы одну точку.');
+			return;
+		}
 		setSaving(true);
 		const now = new Date().toISOString();
 		try {
@@ -356,6 +367,8 @@ export function InventoryHome(): JSX.Element {
 			setCreating(false);
 			setPicked({});
 			setDeadline('');
+			setDeadlineError(false);
+			setCreateError(null);
 			setNotify([]);
 			setPickedSections([]);
 		} catch (e) {
@@ -521,7 +534,6 @@ export function InventoryHome(): JSX.Element {
 	}
 
 	// Инициатор: создание + сводка статусов (и сам может пройти точку)
-	const canSave = Object.keys(picked).length > 0 && Boolean(deadline);
 	return (
 		<div className="inv">
 			<header>
@@ -535,7 +547,8 @@ export function InventoryHome(): JSX.Element {
 
 			{creating && (
 				<div className="inv-card create">
-					<label className="inv-field">Крайний срок сдачи: <input type="date" className="inv-date" value={deadline} onChange={(e) => setDeadline(e.target.value)} autoFocus /></label>
+					<label className="inv-field">Крайний срок сдачи: <input type="date" className={`inv-date${deadlineError ? ' invalid' : ''}`} value={deadline} aria-invalid={deadlineError} onChange={(e) => { setDeadline(e.target.value); setDeadlineError(false); setCreateError(null); }} autoFocus /></label>
+					{deadlineError && <p className="inv-validation-error">Укажите дату ревизии.</p>}
 					<p className="muted">Точки (ответственного можно не ставить — менеджер сам возьмёт точку):</p>
 					<div className="point-pick">
 						{stores.map((s) => {
@@ -581,9 +594,10 @@ export function InventoryHome(): JSX.Element {
 						empty="Сотрудники не загрузились."
 					/>
 					<div className="inv-actions">
-						<button className="btn-primary" disabled={saving || !canSave} onClick={() => void submitCreate()}>{saving ? 'Сохраняю…' : 'Создать'}</button>
-						<button className="btn-secondary" onClick={() => { setCreating(false); setPicked({}); setNotify([]); setPickedSections([]); }}>Отмена</button>
+						<button className="btn-primary" disabled={saving} onClick={() => void submitCreate()}>{saving ? 'Сохраняю…' : 'Создать'}</button>
+						<button className="btn-secondary" onClick={() => { setCreating(false); setPicked({}); setDeadline(''); setDeadlineError(false); setCreateError(null); setNotify([]); setPickedSections([]); }}>Отмена</button>
 					</div>
+					{createError && <p className="inv-validation-error">{createError}</p>}
 				</div>
 			)}
 

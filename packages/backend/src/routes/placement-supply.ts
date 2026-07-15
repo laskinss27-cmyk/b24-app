@@ -20,7 +20,8 @@ export function registerPlacementSupplyRoute(app: FastifyInstance): void {
 			app.log.warn({ reason: verdict.reason }, '[placement/supply] rejected — failed verification');
 			return reply.code(403).send('forbidden');
 		}
-		const ctx = buildSupplyContext(parsed.data);
+		const baseContext = buildSupplyContext(parsed.data);
+		const ctx = { ...baseContext, transferId: query.success ? (query.data.transfer ?? baseContext.transferId) : baseContext.transferId };
 		app.log.info({ view: ctx.view }, '[placement/supply] opened');
 		const indexHtml = await app.readFrontendIndex();
 		if (!indexHtml) {

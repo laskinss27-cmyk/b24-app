@@ -7,6 +7,8 @@ export interface B24Context {
 	dealId: number | null;
 	/** id задачи — устаревший путь (task placement не принимается новой карточкой). */
 	taskId?: number | null;
+	/** Перемещение, которое нужно открыть сразу (переход из сообщения складского чата). */
+	transferId?: number | null;
 	/** какой экран рендерить. 'inventory' — модуль (левое меню); 'mobileCount' — мобильный подсчёт (/m); 'salesReport' — отчёт по продажам (меню сделок); 'repairs' — ремонты (левое меню). */
 	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | null;
 	domain: string | null;

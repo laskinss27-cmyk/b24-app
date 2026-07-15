@@ -20,6 +20,8 @@ export const SUPPLY_PURCHASE_STAGE_FIELD = 'b24_supply_stage';
 export const SUPPLY_PURCHASE_ORDERED_AT_FIELD = 'b24_ordered_at';
 export const SUPPLY_PURCHASE_EXPECTED_AT_FIELD = 'b24_expected_at';
 export const SUPPLY_PURCHASE_REQUEST_QTY_FIELD = 'b24_request_qty';
+const TRANSFER_DOCUMENT_FIELD = 'b24_transfer_document';
+const TRANSFER_PHASE_FIELD = 'b24_transfer_phase';
 const TECH_CUSTOMER = 'Б24 Розница';
 const TECH_SUPPLIER = 'Б24 Снабжение';
 const ITEM_GROUP = 'Каталог Б24';
@@ -451,10 +453,11 @@ async function ensureMrField(erp: ErpClient): Promise<void> {
 export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string }
 
 /** Создать заявку в снабжение (Material Request, тип Purchase) по выбранным товарам сделки. */
-export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string }): Promise<{ name: string }> {
+export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string }): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMrField(erp);
+	if (args.note) await ensureNoteField(erp, 'Material Request');
 	if (!args.lines.length) throw new Error('пустая заявка');
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
 	const doc = await erp.create('Material Request', {
@@ -463,6 +466,7 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 		schedule_date: args.scheduleDate,
 		[DEAL_FIELD]: String(args.dealId),
 		...(args.toStore ? { [MR_TO_STORE_FIELD]: args.toStore } : {}),
+		...(args.note ? { [NOTE_FIELD]: args.note.slice(0, 500) } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -474,8 +478,8 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 }
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
-export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; status: string; toStore: string; items: SupplyReqItem[] }
-export interface SupplyRequestSummary { name: string; requestKey: string; createdAt: string; dealId: string; date: string; status: string; toStore: string; productIds: number[] }
+export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; items: SupplyReqItem[] }
+export interface SupplyRequestSummary { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; productIds: number[] }
 
 function materialRequestKey(name: string, creation: unknown): string {
 	return `${name}@${String(creation ?? '')}`;
@@ -483,6 +487,7 @@ function materialRequestKey(name: string, creation: unknown): string {
 
 export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number): Promise<SupplyRequestSummary[]> {
 	await ensureMrField(erp);
+	await ensureNoteField(erp, 'Material Request');
 	const heads = await erp.list('Material Request',
 		['name', DEAL_FIELD, 'transaction_date', 'status'],
 		[['docstatus', '!=', 2], [DEAL_FIELD, '=', String(dealId)]], 0, 'creation desc');
@@ -495,8 +500,10 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 			createdAt: String(mr?.['creation'] ?? ''),
 			dealId: String(h[DEAL_FIELD] ?? ''),
 			date: String(h['transaction_date'] ?? ''),
+			deadline: String(mr?.['schedule_date'] ?? ''),
 			status: String(h['status'] ?? ''),
 			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
+			note: String(mr?.[NOTE_FIELD] ?? ''),
 			productIds: ((mr?.['items'] as Array<Record<string, unknown>>) ?? []).map((it) => Number(it['item_code'] ?? 0)).filter((id) => Number.isInteger(id) && id > 0),
 		});
 	}
@@ -506,6 +513,7 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 /** Все заявки снабжения из ядра (Material Request, кроме отменённых) с позициями, комментариями и остатками. */
 export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[]> {
 	await ensureMrField(erp);
+	await ensureNoteField(erp, 'Material Request');
 	const stocks = await fetchErpStocks(erp);
 	const heads = await erp.list('Material Request',
 		['name', DEAL_FIELD, 'transaction_date', 'status'],
@@ -529,8 +537,10 @@ export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[
 			createdAt: String(mr?.['creation'] ?? ''),
 			dealId: String(h[DEAL_FIELD] ?? ''),
 			date: String(h['transaction_date'] ?? ''),
+			deadline: String(mr?.['schedule_date'] ?? ''),
 			status: String(h['status'] ?? ''),
 			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
+			note: String(mr?.[NOTE_FIELD] ?? ''),
 			items,
 		});
 	}
@@ -627,6 +637,8 @@ async function ensureSupplyTransferFields(erp: ErpClient): Promise<void> {
 		[SUPPLY_REQUEST_FIELD, 'B24 Supply Request', DEAL_FIELD],
 		[SUPPLY_REQUEST_KEY_FIELD, 'B24 Supply Request Key', SUPPLY_REQUEST_FIELD],
 		[SUPPLY_PURCHASE_ORDER_FIELD, 'B24 Purchase Order', SUPPLY_REQUEST_KEY_FIELD],
+		[TRANSFER_DOCUMENT_FIELD, 'B24 Transfer Document', SUPPLY_PURCHASE_ORDER_FIELD],
+		[TRANSFER_PHASE_FIELD, 'B24 Transfer Phase', TRANSFER_DOCUMENT_FIELD],
 	] as const) {
 		const name = `Stock Entry-${fieldname}`;
 		if (!(await erp.get('Custom Field', name))) {
@@ -636,6 +648,25 @@ async function ensureSupplyTransferFields(erp: ErpClient): Promise<void> {
 		}
 	}
 	supplyTransferFieldDone = true;
+}
+
+async function existingTransferOperation(erp: ErpClient, transferId: number | undefined, phase: string): Promise<{ name: string; docstatus: number } | null> {
+	if (!transferId) return null;
+	const rows = await erp.list<Record<string, unknown>>(
+		'Stock Entry',
+		['name', 'docstatus'],
+		[[TRANSFER_DOCUMENT_FIELD, '=', String(transferId)], [TRANSFER_PHASE_FIELD, '=', phase], ['docstatus', '!=', 2]],
+		1,
+		'creation desc',
+	);
+	const row = rows[0];
+	return row ? { name: String(row['name']), docstatus: Number(row['docstatus'] ?? 0) } : null;
+}
+
+async function finishExistingTransferOperation(erp: ErpClient, existing: { name: string; docstatus: number } | null): Promise<{ name: string } | null> {
+	if (!existing) return null;
+	if (existing.docstatus === 0) await erp.submit('Stock Entry', existing.name);
+	return { name: existing.name };
 }
 
 export interface PurchaseDraftLine { productId: number; itemName?: string; qty: number; rate?: number; requestQty?: number }
@@ -817,11 +848,13 @@ const TRANSIT_STORE = 'Goods In Transit';
  */
 export async function shipTransferToTransit(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; dealId?: number; supplyRequest?: string; supplyRequestKey?: string; purchaseOrder?: string },
+	args: { lines: Array<{ productId: number; qty: number; fromStore: string }>; transferId?: number; dealId?: number; supplyRequest?: string; supplyRequestKey?: string; purchaseOrder?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureSupplyTransferFields(erp);
 	if (!args.lines.length) throw new Error('пустая отгрузка');
+	const recovered = await finishExistingTransferOperation(erp, await existingTransferOperation(erp, args.transferId, 'ship'));
+	if (recovered) return recovered;
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
@@ -829,6 +862,7 @@ export async function shipTransferToTransit(
 		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
 		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
+		...(args.transferId ? { [TRANSFER_DOCUMENT_FIELD]: String(args.transferId), [TRANSFER_PHASE_FIELD]: 'ship' } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -852,11 +886,13 @@ export async function shipTransferToTransit(
  */
 export async function receiveTransferFromTransit(
 	erp: ErpClient,
-	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; dealId?: number; supplyRequest?: string; supplyRequestKey?: string; purchaseOrder?: string },
+	args: { lines: Array<{ productId: number; qty: number; toStore: string }>; transferId?: number; dealId?: number; supplyRequest?: string; supplyRequestKey?: string; purchaseOrder?: string },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureSupplyTransferFields(erp);
 	if (!args.lines.length) throw new Error('пустая приёмка');
+	const recovered = await finishExistingTransferOperation(erp, await existingTransferOperation(erp, args.transferId, 'legacy_receive'));
+	if (recovered) return recovered;
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
@@ -864,6 +900,7 @@ export async function receiveTransferFromTransit(
 		...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
 		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
+		...(args.transferId ? { [TRANSFER_DOCUMENT_FIELD]: String(args.transferId), [TRANSFER_PHASE_FIELD]: 'legacy_receive' } : {}),
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
@@ -879,6 +916,107 @@ export async function receiveTransferFromTransit(
 		throw err;
 	}
 	return { name };
+}
+
+/** План финальной приемки и отдельных корректировочных движений. */
+export function planTransferCompletion(
+	shippedLines: Array<{ productId: number; qty: number }>,
+	finalLines: Array<{ productId: number; qty: number }>,
+): Array<{ productId: number; qty: number; route: 'deliver' | 'return' | 'extra' }> {
+	const shipped = new Map<number, number>();
+	const final = new Map<number, number>();
+	for (const line of shippedLines) shipped.set(line.productId, (shipped.get(line.productId) ?? 0) + Math.max(Number(line.qty) || 0, 0));
+	for (const line of finalLines) final.set(line.productId, (final.get(line.productId) ?? 0) + Math.max(Number(line.qty) || 0, 0));
+	const result: Array<{ productId: number; qty: number; route: 'deliver' | 'return' | 'extra' }> = [];
+	for (const productId of new Set([...shipped.keys(), ...final.keys()])) {
+		const sent = shipped.get(productId) ?? 0;
+		const done = final.get(productId) ?? 0;
+		const delivered = Math.min(sent, done);
+		const returned = Math.max(sent - done, 0);
+		const extra = Math.max(done - sent, 0);
+		if (delivered > 0) result.push({ productId, qty: delivered, route: 'deliver' });
+		if (returned > 0) result.push({ productId, qty: returned, route: 'return' });
+		if (extra > 0) result.push({ productId, qty: extra, route: 'extra' });
+	}
+	return result;
+}
+
+export async function completeTransferFromTransit(
+	erp: ErpClient,
+	args: {
+		shippedLines: Array<{ productId: number; qty: number }>;
+		finalLines: Array<{ productId: number; qty: number }>;
+		fromStore: string;
+		toStore: string;
+		dealId?: number;
+		supplyRequest?: string;
+		supplyRequestKey?: string;
+		purchaseOrder?: string;
+		transferId?: number;
+	},
+): Promise<{
+	receiveEntry: string | null;
+	corrections: Array<{
+		kind: 'shortage_return' | 'overage_transfer';
+		name: string;
+		lines: Array<{ productId: number; qty: number }>;
+	}>;
+}> {
+	const ctx = await erpContext(erp);
+	await ensureSupplyTransferFields(erp);
+	const legs = planTransferCompletion(args.shippedLines, args.finalLines);
+	if (!legs.length) throw new Error('в перемещении нет количества для проведения');
+
+	const runPhase = async (
+		phase: 'receive' | 'correction_return' | 'correction_extra',
+		items: Array<{ item_code: string; qty: number; s_warehouse: string; t_warehouse: string }>,
+	): Promise<string | null> => {
+		if (!items.length) return null;
+		const recovered = await finishExistingTransferOperation(erp, await existingTransferOperation(erp, args.transferId, phase));
+		if (recovered) return recovered.name;
+		const doc = await erp.create('Stock Entry', {
+			company: ctx.company,
+			stock_entry_type: 'Material Transfer',
+			...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
+			...(args.supplyRequest ? { [SUPPLY_REQUEST_FIELD]: args.supplyRequest } : {}),
+			...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
+			...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
+			...(args.transferId ? { [TRANSFER_DOCUMENT_FIELD]: String(args.transferId), [TRANSFER_PHASE_FIELD]: phase } : {}),
+			items,
+		});
+		const name = String(doc['name']);
+		try {
+			await erp.submit('Stock Entry', name);
+		} catch (err) {
+			await erp.delete('Stock Entry', name).catch(() => undefined);
+			throw err;
+		}
+		return name;
+	};
+
+	const itemsFor = (route: 'deliver' | 'return' | 'extra') => legs
+		.filter((leg) => leg.route === route)
+		.map((leg) => ({
+			item_code: String(leg.productId),
+			qty: leg.qty,
+			s_warehouse: erpWarehouse(ctx, route === 'extra' ? args.fromStore : TRANSIT_STORE),
+			t_warehouse: erpWarehouse(ctx, route === 'return' ? args.fromStore : args.toStore),
+		}));
+	const receiveEntry = await runPhase('receive', itemsFor('deliver'));
+	const corrections: Array<{ kind: 'shortage_return' | 'overage_transfer'; name: string; lines: Array<{ productId: number; qty: number }> }> = [];
+	const returnEntry = await runPhase('correction_return', itemsFor('return'));
+	if (returnEntry) corrections.push({
+		kind: 'shortage_return',
+		name: returnEntry,
+		lines: legs.filter((leg) => leg.route === 'return').map(({ productId, qty }) => ({ productId, qty })),
+	});
+	const extraEntry = await runPhase('correction_extra', itemsFor('extra'));
+	if (extraEntry) corrections.push({
+		kind: 'overage_transfer',
+		name: extraEntry,
+		lines: legs.filter((leg) => leg.route === 'extra').map(({ productId, qty }) => ({ productId, qty })),
+	});
+	return { receiveEntry, corrections };
 }
 
 /** Причина списания — custom-поле на Stock Entry (показываем в журнале). */
@@ -905,7 +1043,7 @@ async function ensureNoteField(erp: ErpClient, doctype: string): Promise<void> {
 	if (!(await erp.get('Custom Field', cfName))) {
 		await erp.create('Custom Field', {
 			dt: doctype, fieldname: NOTE_FIELD, label: 'B24 Note',
-			fieldtype: 'Data', insert_after: 'company', in_list_view: 1,
+			fieldtype: doctype === 'Material Request' ? 'Small Text' : 'Data', insert_after: 'company', in_list_view: 1,
 		});
 	}
 	noteFieldDone.add(doctype);

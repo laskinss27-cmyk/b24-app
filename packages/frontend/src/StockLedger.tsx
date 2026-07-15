@@ -1,12 +1,14 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { InventoryHome } from './InventoryHome.js';
+import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import {
-	listTransfers, shipTransfer, receiveTransfer, resolveTransferShortage, updateTransferDestination, fetchMovements, openDeal,
+	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
+	createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
 	fetchDocDetail, fetchItemHistory,
-	type TransferDoc, type CoreMovement, type StockItem, type CoreDocDetail, type ItemMovement,
+	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type CoreDocDetail, type ItemMovement,
 } from './b24.js';
 
 /** Кликабельная ссылка на сделку + ФИО ответственного (общий вид для всех складских документов). */
@@ -28,8 +30,9 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
  *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
  */
 export type StockMovementKind = 'issue' | 'receipt' | 'delivery' | 'return';
-type Tab = 'transfers' | StockMovementKind | 'ledger' | 'inventory';
+type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
+	{ key: 'requests', label: 'Заявки на перемещение' },
 	{ key: 'transfers', label: 'Перемещения' },
 	{ key: 'issue', label: 'Списания' },
 	{ key: 'receipt', label: 'Оприходования' },
@@ -270,9 +273,12 @@ function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose
 }): JSX.Element {
 	const [toStore, setToStore] = useState(t.toStore);
 	const [saving, setSaving] = useState(false);
+	const [historyOpen, setHistoryOpen] = useState(false);
 	const [destinationError, setDestinationError] = useState<string | null>(null);
 	useEffect(() => setToStore(t.toStore), [t.toStore]);
-	const canEditDestination = editable && (t.status === 'requested' || t.status === 'in_transit');
+	const canEditDestination = editable && ['draft', 'collected', 'requested'].includes(t.status);
+	const collected = new Map(t.collectedLines.map((line) => [line.productId, line.qty]));
+	const accepted = new Map(t.acceptedLines.map((line) => [line.productId, line.qty]));
 	const saveDestination = async (): Promise<void> => {
 		if (!canEditDestination || !toStore || toStore === t.toStore || saving) return;
 		setSaving(true);
@@ -292,8 +298,9 @@ function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose
 				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
 					<h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2>
 					<div style={{ display: 'flex', gap: 8 }}>
-						<button style={btnGhost} onClick={() => window.print()}>🖨 Печать</button>
-						<button style={btnGhost} onClick={onClose}>✕</button>
+						<button style={btnGhost} onClick={() => setHistoryOpen((open) => !open)}>История</button>
+						<button style={btnGhost} onClick={() => window.print()}>Печать</button>
+						<button style={btnGhost} onClick={onClose}>Закрыть</button>
 					</div>
 				</div>
 				<div className="transfer-destination">
@@ -304,13 +311,13 @@ function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose
 						: <strong>{t.toStore}</strong>}</div>
 					{canEditDestination && <button className="transfer-destination-save" type="button" disabled={saving || !toStore || toStore === t.toStore} onClick={() => void saveDestination()}>{saving ? 'Сохраняю...' : 'Изменить'}</button>}
 				</div>
-				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{TRANSFER_STATUS[t.status] ?? t.status}{t.note ? ` · 📝 ${t.note}` : ''}</div>
+				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{transferStatusText(t)}{t.note ? ` · 📝 ${t.note}` : ''}</div>
 				{destinationError && <p className="error">⛔ {destinationError}</p>}
 				<StockBlank doc={transferToPrint(t)} />
 				{t.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-					<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th></tr></thead>
-					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{l.qty}</td></tr>)}</tbody>
+					<thead><tr><th style={TH}>Наименование</th><th style={TH}>Количество</th><th style={TH}>Собрано</th><th style={TH}>Принято</th></tr></thead>
+					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
 				</table>
 				{t.receivedLines?.length ? (
 					<div style={{ marginTop: 10 }}>
@@ -325,10 +332,10 @@ function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose
 					</div>
 				) : null}
 				{t.shortageReturnEntry ? <div style={{ marginTop: 10, fontSize: 13, color: '#1a7f37' }}>Хвост возвращен на склад отправки: {t.shortageReturnEntry}</div> : null}
-				{t.history && t.history.length > 0 ? (
+				{historyOpen && t.history && t.history.length > 0 ? (
 					<div style={{ marginTop: 10 }}>
 						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>История:</div>
-						{t.history.map((h, i) => <div key={i} style={{ fontSize: 13 }}>{(h.at || '').slice(0, 16).replace('T', ' ')} — {TRANSFER_STATUS[h.status] ?? h.status}{h.byName ? ` · ${h.byName}` : ''}{h.note ? ` (${h.note})` : ''}</div>)}
+						{[...t.history].reverse().map((h, i) => <div key={i} style={{ fontSize: 13, marginBottom: 6 }}><b>{new Date(h.at).toLocaleString('ru-RU')} · {h.byName || 'Система'}</b><div>{h.note || TRANSFER_STATUS[h.status] || h.status}</div>{h.changes?.length ? <div style={{ color: '#7a8699' }}>{h.changes.map((change) => `${change.name}: ${change.from} → ${change.to}`).join(' · ')}</div> : null}</div>)}
 					</div>
 				) : null}
 			</div>
@@ -336,7 +343,8 @@ function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose
 	);
 }
 
-function ReceiveTransferModal({ t, busy, onClose, onConfirm }: {
+function ReceiveTransferModal({ mode, t, busy, onClose, onConfirm }: {
+	mode: 'collect' | 'receive';
 	t: TransferDoc;
 	busy: boolean;
 	onClose: () => void;
@@ -346,39 +354,40 @@ function ReceiveTransferModal({ t, busy, onClose, onConfirm }: {
 	const [err, setErr] = useState<string | null>(null);
 	const setLine = (productId: number, value: number): void => {
 		const max = t.lines.find((l) => l.productId === productId)?.qty ?? 0;
-		setQty((current) => ({ ...current, [productId]: Math.min(Math.max(Number(value) || 0, 0), max) }));
+		const normalized = Math.max(Number(value) || 0, 0);
+		setQty((current) => ({ ...current, [productId]: mode === 'collect' ? Math.min(normalized, max) : normalized }));
 	};
 	const confirm = (): void => {
 		const lines = t.lines.map((l) => ({ productId: l.productId, qty: qty[l.productId] ?? 0 }));
-		if (!lines.some((l) => l.qty > 0) && !window.confirm('Ничего не принято. Перемещение уйдет в недовоз, весь товар останется в транзите. Продолжить?')) return;
+		if (!lines.some((l) => l.qty > 0) && !window.confirm(mode === 'collect' ? 'Ничего не собрано. Сохранить такой результат?' : 'Ничего не принято. Сохранить такой результат?')) return;
 		setErr(null);
 		onConfirm(lines);
 	};
-	const shortage = t.lines.some((l) => (qty[l.productId] ?? 0) < l.qty);
+	const mismatch = t.lines.some((l) => Math.abs((qty[l.productId] ?? 0) - l.qty) > 0.000001);
 	return (
 		<div style={{ ...overlay, zIndex: 1200 }}>
 			<div style={modalCard}>
-				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Приемка перемещения</h2>
+				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>{mode === 'collect' ? 'Сборка перемещения' : 'Приемка перемещения'}</h2>
 				<div style={{ color: '#7a8699', fontSize: 13, marginBottom: 8 }}>{t.fromStore} → {t.toStore}</div>
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-					<thead><tr><th style={TH}>Товар</th><th style={TH}>Отправлено</th><th style={TH}>Принято</th></tr></thead>
+					<thead><tr><th style={TH}>Товар</th><th style={TH}>Количество</th><th style={TH}>{mode === 'collect' ? 'Собрано' : 'Принято'}</th></tr></thead>
 					<tbody>
 						{t.lines.map((l) => (
 							<tr key={l.productId}>
 								<td style={TD}>{l.name || ('#' + l.productId)}</td>
 								<td style={TD}>{l.qty}</td>
-								<td style={TD}><input type="number" min="0" max={l.qty} step="any" style={{ ...inp, width: 90 }} value={qty[l.productId] ?? 0} onChange={(e) => setLine(l.productId, Number(e.target.value))} /></td>
+								<td style={TD}><input type="number" min="0" {...(mode === 'collect' ? { max: l.qty } : {})} step="any" style={{ ...inp, width: 90 }} value={qty[l.productId] ?? 0} onChange={(e) => setLine(l.productId, Number(e.target.value))} /></td>
 							</tr>
 						))}
 					</tbody>
 				</table>
-				<p style={{ color: shortage ? '#9a3412' : '#1a7f37', fontSize: 13, margin: '8px 0 0' }}>
-					{shortage ? 'Есть недовоз: на склад попадет только принятое количество, остаток останется в транзите.' : 'Количество совпадает: перемещение закроется как полученное.'}
+				<p style={{ color: mismatch ? '#9a3412' : '#1a7f37', fontSize: 13, margin: '8px 0 0' }}>
+					{mismatch ? 'Есть расхождения. Снабжение увидит их в документе.' : 'Количество совпадает.'}
 				</p>
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} disabled={busy} onClick={onClose}>Отмена</button>
-					<button className="btn-primary" disabled={busy} onClick={confirm}>{busy ? '…' : 'Подтвердить приемку'}</button>
+					<button className="btn-primary" disabled={busy} onClick={confirm}>{busy ? '…' : mode === 'collect' ? 'Собрано' : 'Принять'}</button>
 				</div>
 			</div>
 		</div>
@@ -429,6 +438,82 @@ export function LedgerTab(): JSX.Element {
 	);
 }
 
+const TRANSFER_REQUEST_STATUS: Record<TransferRequestDoc['status'], string> = {
+	pending: 'Ожидает снабжение',
+	converted: 'Перемещение создано',
+	canceled: 'Отменена',
+};
+
+export function TransferRequestsTab({ form, mode, onChanged }: {
+	form: StockForm | null;
+	mode: 'manager' | 'supply';
+	onChanged?: () => void;
+}): JSX.Element {
+	const [requests, setRequests] = useState<TransferRequestDoc[] | null>(null);
+	const [isSupply, setIsSupply] = useState(false);
+	const [status, setStatus] = useState<'all' | TransferRequestDoc['status']>(mode === 'supply' ? 'pending' : 'all');
+	const [showForm, setShowForm] = useState(false);
+	const [convertRequest, setConvertRequest] = useState<TransferRequestDoc | null>(null);
+	const [busy, setBusy] = useState<number | null>(null);
+	const [err, setErr] = useState<string | null>(null);
+
+	const load = async (): Promise<void> => {
+		setErr(null);
+		try {
+			const result = await listTransferRequests();
+			setRequests(result.requests);
+			setIsSupply(result.isSupply);
+		} catch (error) {
+			setErr(errText(error));
+			setRequests([]);
+		}
+	};
+	useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+	const cancel = async (request: TransferRequestDoc): Promise<void> => {
+		if (!window.confirm(`Отменить заявку на перемещение #${request.id}?`)) return;
+		setBusy(request.id); setErr(null);
+		try { await cancelTransferRequest(request.id); await load(); onChanged?.(); }
+		catch (error) { setErr(errText(error)); }
+		finally { setBusy(null); }
+	};
+
+	const shown = (requests ?? []).filter((request) => status === 'all' || request.status === status);
+	return (
+		<section>
+			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+				<div><h2 style={{ fontSize: 16, margin: 0 }}>Заявки на перемещение</h2><p style={{ color: '#7a8699', fontSize: 13, margin: '3px 0 0' }}>{mode === 'supply' ? 'Просьбы точек, по которым еще не созданы перемещения.' : 'Заявка ничего не резервирует и не меняет остатки.'}</p></div>
+				{mode === 'manager' && <button className="btn-primary" disabled={!form?.stores.length} onClick={() => setShowForm(true)}>Создать заявку</button>}
+			</div>
+			<div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+				<select style={inp} value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
+					<option value="all">Все статусы</option><option value="pending">Ожидает снабжение</option><option value="converted">Перемещение создано</option><option value="canceled">Отменена</option>
+				</select>
+				<span style={{ marginLeft: 'auto', color: '#7a8699', fontSize: 12 }}>{shown.length} из {(requests ?? []).length}</span>
+			</div>
+			{err && <p className="error">⛔ {err}</p>}
+			{requests === null ? <p>Загрузка…</p> : shown.length === 0 ? <p className="empty">{status === 'pending' ? 'Необработанных заявок нет.' : 'Заявок нет.'}</p> : (
+				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата / автор</th><th style={TH}>Маршрут</th><th style={TH}>Позиции</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
+					<tbody>{shown.map((request) => <tr key={request.id}>
+						<td style={TD}><b>Заявка #{request.id}</b>{request.note && <div style={{ color: '#7a8699', fontSize: 12, marginTop: 3 }}>{request.note}</div>}</td>
+						<td style={TD}>{request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : '—'}<div style={{ color: '#7a8699', fontSize: 12 }}>{request.createdByName || '—'}</div></td>
+						<td style={TD}>{request.fromStore} → {request.toStore}</td>
+						<td style={TD}>{request.lines.map((line) => `${line.name || `#${line.productId}`} × ${line.qty}`).join(', ')}</td>
+						<td style={TD}>{TRANSFER_REQUEST_STATUS[request.status]}{request.transferId ? <div style={{ color: '#185fa5', fontSize: 12 }}>Перемещение #{request.transferId}</div> : null}</td>
+						<td style={TD}><div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+							{request.status === 'pending' && mode === 'manager' && <button disabled={busy != null} onClick={() => void cancel(request)}>{busy === request.id ? '…' : 'Отменить'}</button>}
+							{request.status === 'pending' && mode === 'supply' && isSupply && <button className="btn-primary" disabled={busy != null} onClick={() => setConvertRequest(request)}>Создать перемещение</button>}
+						</div></td>
+					</tr>)}</tbody>
+				</table>
+			)}
+			{showForm && form && <TransferRequestForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); onChanged?.(); }} />}
+			{convertRequest && form && <ConvertTransferRequestForm form={form} request={convertRequest} onClose={() => setConvertRequest(null)} onDone={() => { setConvertRequest(null); void load(); onChanged?.(); }} />}
+		</section>
+	);
+}
+
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
 
 export function StockLedger(): JSX.Element {
@@ -455,7 +540,6 @@ export function StockLedger(): JSX.Element {
 				setFullAccess(canUseStockDocuments);
 				if (!canUseStockDocuments) setTab('inventory');
 				setPhase({ k: 'ready' });
-				if (!canUseStockDocuments) return;
 				// Справочники форм — best-effort (ядро может быть недоступно: формы просто не покажут селекторы).
 				fetchStockFormData().then(setForm).catch(() => setForm({ stores: [], suppliers: [], canCreate: false }));
 			})().catch(() => setPhase({ k: 'denied' }));
@@ -465,7 +549,7 @@ export function StockLedger(): JSX.Element {
 
 	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>🔒 Раздел в обкатке — доступен ограниченному кругу.</div>;
-	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'inventory');
+	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'requests' || item.key === 'inventory');
 	return (
 		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
@@ -475,6 +559,7 @@ export function StockLedger(): JSX.Element {
 				))}
 			</div>
 			{tab === 'inventory' ? <InventoryHome />
+				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" />
 				: tab === 'transfers' ? <StockTransfersTab form={form} />
 				: tab === 'ledger' ? <LedgerTab />
 				: <StockMovementsTab kind={tab} form={form} />}
@@ -482,20 +567,31 @@ export function StockLedger(): JSX.Element {
 	);
 }
 
-const TRANSFER_STATUS: Record<string, string> = { requested: '⏳ запрошено', in_transit: '🚚 в пути', received: '✅ получено', shortage: '⚠️ недовоз', canceled: 'отменено' };
+const TRANSFER_STATUS: Record<string, string> = { draft: 'Черновик', collected: 'Собрано', requested: 'Запрошено', in_transit: 'В пути', accepted: 'На проверке', posted: 'Принято', received: 'Получено', shortage: 'Недовоз', canceled: 'Отменено' };
+const transferStatusText = (transfer: TransferDoc): string => transfer.status === 'posted' && transfer.correctionOf
+	? 'Завершено'
+	: TRANSFER_STATUS[transfer.status] ?? transfer.status;
+const transferHasFinalDiscrepancy = (transfer: TransferDoc): boolean => {
+	const shipped = new Map((transfer.shippedLines.length ? transfer.shippedLines : transfer.lines).map((line) => [line.productId, line.qty]));
+	const accepted = new Map(transfer.acceptedLines.map((line) => [line.productId, line.qty]));
+	return [...new Set([...shipped.keys(), ...accepted.keys()])]
+		.some((productId) => Math.abs((shipped.get(productId) ?? 0) - (accepted.get(productId) ?? 0)) > 0.000001);
+};
 const TRANSFER_STATUS_OPTS = [
 	{ value: 'all', label: 'Все статусы' },
-	{ value: 'requested', label: '⏳ Запрошено' },
-	{ value: 'in_transit', label: '🚚 В пути' },
-	{ value: 'received', label: '✅ Получено' },
-	{ value: 'shortage', label: '⚠️ Недовоз' },
+	{ value: 'draft', label: 'Черновик' },
+	{ value: 'collected', label: 'Собрано' },
+	{ value: 'in_transit', label: 'В пути' },
+	{ value: 'accepted', label: 'На проверке' },
+	{ value: 'posted', label: 'Принято / завершено' },
 ];
 
-export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Element {
+export function StockTransfersTab({ form, showCreate = true }: { form: StockForm | null; showCreate?: boolean }): JSX.Element {
 	const [list, setList] = useState<TransferDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
 	const [busy, setBusy] = useState<number | null>(null);
 	const [err, setErr] = useState<string | null>(null);
+	const [notice, setNotice] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [search, setSearch] = useState('');
 	const [status, setStatus] = useState('all');
@@ -505,6 +601,7 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 	const [showForm, setShowForm] = useState(false);
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openT, setOpenT] = useState<TransferDoc | null>(null);
+	const [collectT, setCollectT] = useState<TransferDoc | null>(null);
 	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
 	const [destinationStores, setDestinationStores] = useState<string[]>([]);
 
@@ -527,15 +624,19 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 		return updated;
 	};
 
-	const act = async (t: TransferDoc, kind: 'ship' | 'receive'): Promise<void> => {
+	const act = async (t: TransferDoc, kind: 'ship' | 'post' | 'cancel'): Promise<void> => {
 		setBusy(t.id); setErr(null);
-		try { await (kind === 'ship' ? shipTransfer(t.id) : receiveTransfer(t.id)); await load(); }
+		try { const updated = await (kind === 'ship' ? shipTransfer(t.id) : kind === 'post' ? postTransfer(t.id) : cancelTransfer(t.id)); setNotice(updated.actionWarning ?? null); await load(); }
 		catch (e) { setErr(errText(e)); }
 		finally { setBusy(null); }
 	};
-	const receiveActual = async (t: TransferDoc, lines: Array<{ productId: number; qty: number }>): Promise<void> => {
+	const saveActual = async (t: TransferDoc, kind: 'collect' | 'receive', lines: Array<{ productId: number; qty: number }>): Promise<void> => {
 		setBusy(t.id); setErr(null);
-		try { await receiveTransfer(t.id, lines); setReceiveT(null); await load(); }
+		try {
+			const updated = kind === 'collect' ? await collectTransfer(t.id, lines) : await receiveTransfer(t.id, lines);
+			setNotice(updated.actionWarning ?? null);
+			setCollectT(null); setReceiveT(null); await load();
+		}
 		catch (e) { setErr(errText(e)); }
 		finally { setBusy(null); }
 	};
@@ -553,13 +654,13 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 		if (prod && !t.lines.some((l) => l.productId === prod.productId)) return false;
 		const q = search.trim().toLowerCase();
 		if (!q) return true;
-		const hay = `${t.dealId} ${t.ownerName ?? ''} ${t.fromStore} ${t.toStore} ${TRANSFER_STATUS[t.status] ?? t.status} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
+		const hay = `${t.dealId} ${t.ownerName ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
 		return q.split(/\s+/).every((w) => hay.includes(w));
 	});
 
 	return (
 		<>
-			{form?.canCreate && (
+			{showCreate && form?.canCreate && (
 				<div style={{ marginBottom: 10 }}>
 					<button className="btn-primary" onClick={() => setShowForm(true)}>➕ Создать перемещение</button>
 				</div>
@@ -571,7 +672,7 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={TRANSFER_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
-			{!isSupply && <p style={{ color: '#7a8699', fontSize: 13 }}>Кнопки «В пути»/«Получено» доступны снабжению. У тебя — просмотр.</p>}
+			{notice && <p style={{ color: '#9a6700', fontSize: 13 }}>{notice}</p>}
 			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{(list.length ? 'Ничего не найдено по фильтру.' : 'Перемещений пока нет. Создаются из карточки сделки или кнопкой выше.')}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Сделка</th><th style={TH}>Маршрут</th><th style={TH}>Позиции</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
@@ -581,10 +682,13 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 								<td style={TD}><DealCell dealId={t.dealId} ownerName={t.ownerName} /><div style={{ color: '#7a8699', fontSize: 12 }}>{(t.createdAt || '').slice(0, 10)}</div></td>
 								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenT(t); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{t.fromStore} → {t.toStore}</a>{t.note ? <div style={{ color: '#7a8699', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
-								<td style={TD}>{TRANSFER_STATUS[t.status] ?? t.status}</td>
+								<td style={TD}>{transferStatusText(t)}</td>
 								<td style={TD}>
-									{isSupply && t.status === 'requested' && <button className="btn-primary" disabled={busy != null} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'В пути'}</button>}
-									{isSupply && t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Получено'}</button>}
+									{isSupply && ['draft', 'collected', 'requested'].includes(t.status) && <button disabled={busy != null} onClick={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void act(t, 'cancel'); }}>Отменить</button>}
+									{(t.status === 'draft' || t.status === 'requested') && <button className="btn-primary" disabled={busy != null} onClick={() => setCollectT(t)}>{busy === t.id ? '…' : 'Собрано'}</button>}
+									{t.status === 'collected' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.collectedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'Отправлено'}</button>}
+									{t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
+									{isSupply && t.status === 'accepted' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} title={t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001) ? '' : 'Сначала скорректируй количество в Снабе'} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>}
 									{isSupply && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
 								</td>
 							</tr>
@@ -593,7 +697,8 @@ export function StockTransfersTab({ form }: { form: StockForm | null }): JSX.Ele
 				</table>
 			)}
 			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={isSupply} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onClose={() => setOpenT(null)} />}
-			{receiveT && <ReceiveTransferModal t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void receiveActual(receiveT, lines)} />}
+			{collectT && <ReceiveTransferModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
+			{receiveT && <ReceiveTransferModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
 		</>
 	);
@@ -605,7 +710,7 @@ const MOVE_STATUS_OPTS = [
 	{ value: 'draft', label: 'Черновик' },
 ];
 
-export function StockMovementsTab({ kind, form }: { kind: StockMovementKind; form: StockForm | null }): JSX.Element {
+export function StockMovementsTab({ kind, form, showCreate = true }: { kind: StockMovementKind; form: StockForm | null; showCreate?: boolean }): JSX.Element {
 	const [list, setList] = useState<CoreMovement[] | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -655,7 +760,7 @@ export function StockMovementsTab({ kind, form }: { kind: StockMovementKind; for
 
 	return (
 		<>
-			{canPost && (
+			{showCreate && canPost && (
 				<div style={{ marginBottom: 10 }}>
 					<button className="btn-primary" onClick={() => setShowForm(true)}>{createLabel}</button>
 				</div>
@@ -1001,6 +1106,116 @@ function TransferForm({ form, onClose, onDone }: { form: StockForm; onClose: () 
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
 					<button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать'}</button>
 				</div>
+			</div>
+		</div>
+	);
+}
+
+function TransferRequestForm({ form, onClose, onDone }: { form: StockForm; onClose: () => void; onDone: () => void }): JSX.Element {
+	const [fromStore, setFromStore] = useState('');
+	const [toStore, setToStore] = useState('');
+	const [note, setNote] = useState('');
+	const [lines, setLines] = useState<SimpleLine[]>([]);
+	const [pickingProducts, setPickingProducts] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const add = (items: ProductPickItem[]): void => setLines((current) => {
+		const next = [...current];
+		for (const item of items) {
+			const index = next.findIndex((line) => line.productId === item.productId);
+			if (index >= 0) {
+				const existing = next[index];
+				if (existing) next[index] = { ...existing, qty: existing.qty + item.quantity };
+			} else next.push({ productId: item.productId, name: item.name, qty: item.quantity });
+		}
+		return next;
+	});
+	const save = async (): Promise<void> => {
+		setErr(null);
+		const validLines = lines.filter((line) => line.qty > 0);
+		if (!fromStore || !toStore) { setErr('выберите склад отправки и склад получения'); return; }
+		if (fromStore === toStore) { setErr('склады должны отличаться'); return; }
+		if (!validLines.length) { setErr('добавьте хотя бы одну позицию'); return; }
+		setBusy(true);
+		try {
+			await createTransferRequest({ fromStore, toStore, ...(note.trim() ? { note: note.trim() } : {}), lines: validLines });
+			onDone();
+		} catch (error) { setErr(errText(error)); }
+		finally { setBusy(false); }
+	};
+	if (pickingProducts) return <div className="supply-product-picker-overlay"><ProductBase picker={{ title: 'Подобрать товары в заявку на перемещение', kindFilter: 'goods', onlyStockDefault: false, onCancel: () => setPickingProducts(false), onDone: async (items) => { add(items); setPickingProducts(false); } }} /></div>;
+	return (
+		<div style={overlay}>
+			<div style={modalCard}>
+				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>Заявка на перемещение</h2>
+				<div style={{ display: 'flex', gap: 12 }}>
+					<div style={{ flex: 1 }}><label style={fieldLabel}>Откуда</label>{storeSelect(fromStore, setFromStore, form.stores, '— склад-источник —')}</div>
+					<div style={{ flex: 1 }}><label style={fieldLabel}>Куда</label>{storeSelect(toStore, setToStore, form.stores.filter((store) => store !== fromStore), '— склад-получатель —')}</div>
+				</div>
+				<label style={fieldLabel}>Позиции</label>
+				<button style={btnGhost} onClick={() => setPickingProducts(true)}>Подобрать товары</button>
+				{lines.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}><thead><tr><th style={TH}>Товар</th><th style={TH}>Количество</th><th style={TH}></th></tr></thead><tbody>{lines.map((line) => <tr key={line.productId}>
+					<td style={TD}>{line.name}</td><td style={TD}><input type="number" min="0" step="any" style={{ ...inp, width: 80 }} value={line.qty} onChange={(event) => setLines((current) => current.map((row) => row.productId === line.productId ? { ...row, qty: Number(event.target.value) } : row))} /></td><td style={TD}><button style={btnGhost} title="Удалить" onClick={() => setLines((current) => current.filter((row) => row.productId !== line.productId))}>×</button></td>
+				</tr>)}</tbody></table>}
+				<label style={fieldLabel}>Комментарий</label>
+				<textarea style={{ ...inp, boxSizing: 'border-box', width: '100%', minHeight: 70, resize: 'vertical' }} value={note} onChange={(event) => setNote(event.target.value)} />
+				{err && <p className="error">⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}><button style={btnGhost} onClick={onClose}>Отмена</button><button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать заявку'}</button></div>
+			</div>
+		</div>
+	);
+}
+
+function ConvertTransferRequestForm({ form, request, onClose, onDone }: { form: StockForm; request: TransferRequestDoc; onClose: () => void; onDone: () => void }): JSX.Element {
+	const [fromStore, setFromStore] = useState(request.fromStore);
+	const [toStore, setToStore] = useState(request.toStore);
+	const [note, setNote] = useState(request.note);
+	const [lines, setLines] = useState<SimpleLine[]>(request.lines.map((line) => ({ productId: line.productId, name: line.name, qty: line.qty })));
+	const [pickingProducts, setPickingProducts] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const add = (items: ProductPickItem[]): void => setLines((current) => {
+		const next = [...current];
+		for (const item of items) {
+			const index = next.findIndex((line) => line.productId === item.productId);
+			if (index >= 0) {
+				const existing = next[index];
+				if (existing) next[index] = { ...existing, qty: existing.qty + item.quantity };
+			} else next.push({ productId: item.productId, name: item.name, qty: item.quantity });
+		}
+		return next;
+	});
+	const save = async (): Promise<void> => {
+		setErr(null);
+		const validLines = lines.filter((line) => line.qty > 0);
+		if (!fromStore || !toStore || fromStore === toStore) { setErr('выберите разные склады'); return; }
+		if (!validLines.length) { setErr('в перемещении должна остаться хотя бы одна позиция'); return; }
+		setBusy(true);
+		try {
+			await convertTransferRequest(request.id, { fromStore, toStore, ...(note.trim() ? { note: note.trim() } : {}), lines: validLines });
+			onDone();
+		} catch (error) { setErr(errText(error)); }
+		finally { setBusy(false); }
+	};
+	if (pickingProducts) return <div className="supply-product-picker-overlay"><ProductBase picker={{ title: `Товары для перемещения по заявке #${request.id}`, kindFilter: 'goods', onlyStockDefault: false, onCancel: () => setPickingProducts(false), onDone: async (items) => { add(items); setPickingProducts(false); } }} /></div>;
+	return (
+		<div style={overlay}>
+			<div style={modalCard}>
+				<h2 style={{ fontSize: 17, margin: '0 0 3px' }}>Перемещение по заявке #{request.id}</h2>
+				<div style={{ color: '#7a8699', fontSize: 12, marginBottom: 8 }}>{request.createdByName} · {request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : ''}</div>
+				<div style={{ display: 'flex', gap: 12 }}>
+					<div style={{ flex: 1 }}><label style={fieldLabel}>Откуда</label>{storeSelect(fromStore, setFromStore, form.stores, '— склад-источник —')}</div>
+					<div style={{ flex: 1 }}><label style={fieldLabel}>Куда</label>{storeSelect(toStore, setToStore, form.stores.filter((store) => store !== fromStore), '— склад-получатель —')}</div>
+				</div>
+				<label style={fieldLabel}>Позиции</label>
+				<button style={btnGhost} onClick={() => setPickingProducts(true)}>Подобрать товары</button>
+				<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}><thead><tr><th style={TH}>Товар</th><th style={TH}>Количество</th><th style={TH}></th></tr></thead><tbody>{lines.map((line) => <tr key={line.productId}>
+					<td style={TD}>{line.name}</td><td style={TD}><input type="number" min="0" step="any" style={{ ...inp, width: 80 }} value={line.qty} onChange={(event) => setLines((current) => current.map((row) => row.productId === line.productId ? { ...row, qty: Number(event.target.value) } : row))} /></td><td style={TD}><button style={btnGhost} title="Удалить" onClick={() => setLines((current) => current.filter((row) => row.productId !== line.productId))}>×</button></td>
+				</tr>)}</tbody></table>
+				<label style={fieldLabel}>Комментарий</label>
+				<textarea style={{ ...inp, boxSizing: 'border-box', width: '100%', minHeight: 70, resize: 'vertical' }} value={note} onChange={(event) => setNote(event.target.value)} />
+				{err && <p className="error">⛔ {err}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}><button style={btnGhost} disabled={busy} onClick={onClose}>Отмена</button><button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать перемещение'}</button></div>
 			</div>
 		</div>
 	);

@@ -2,8 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, shipTransferToTransit, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
+import { newTransferData, parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
+import { sendStoreChatMessage } from '../transfers/chats.js';
 
 /**
  * API рабочего места «Снаб». Источник спроса — ЗАЯВКИ (Material Request) ядра по сделкам:
@@ -22,24 +24,7 @@ function errInfo(err: unknown): string {
 }
 
 interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string; requestQty?: number }
-interface TransferProgress {
-	id: number;
-	name: string;
-	supplyRequest: string;
-	supplyRequestKey: string;
-	dealId: string;
-	createdAt: string;
-	purchaseOrder: string;
-	status: string;
-	fromStore: string;
-	toStore: string;
-	shipEntry: string;
-	receiveEntry: string;
-	shortageReturnEntry: string;
-	lines: TransferLine[];
-	receivedLines: TransferLine[];
-	shortageLines: TransferLine[];
-}
+type TransferProgress = StoredTransfer;
 interface PurchaseReceiptChild { name: string; status: string; purchaseOrder: string; lines: TransferLine[] }
 interface PurchaseChild {
 	name: string;
@@ -99,35 +84,7 @@ async function ensureB24SupplierCompany(client: B24Client, name: string): Promis
 }
 
 function parseTransferProgress(it: Record<string, unknown>): TransferProgress | null {
-	try {
-		const data = it['DETAIL_TEXT'] ? JSON.parse(String(it['DETAIL_TEXT'])) as Record<string, unknown> : {};
-		const supplyRequest = String(data['supplyRequest'] ?? '');
-		const status = String(data['status'] ?? '');
-		const rawLines = Array.isArray(data['lines']) ? data['lines'] as Array<Record<string, unknown>> : [];
-		const rawReceived = Array.isArray(data['receivedLines']) ? data['receivedLines'] as Array<Record<string, unknown>> : [];
-		const rawShortage = Array.isArray(data['shortageLines']) ? data['shortageLines'] as Array<Record<string, unknown>> : [];
-		const mapLine = (l: Record<string, unknown>): TransferLine => ({ productId: Number(l['productId']), name: String(l['name'] ?? ''), qty: Number(l['qty']) });
-		return {
-			id: Number(it['ID'] ?? it['id'] ?? 0),
-			name: String(it['NAME'] ?? it['name'] ?? ''),
-			supplyRequest,
-			supplyRequestKey: String(data['supplyRequestKey'] ?? ''),
-			dealId: String(data['dealId'] ?? ''),
-			createdAt: String(data['createdAt'] ?? ''),
-			purchaseOrder: String(data['purchaseOrder'] ?? ''),
-			status,
-			fromStore: String(data['fromStore'] ?? ''),
-			toStore: String(data['toStore'] ?? ''),
-			shipEntry: String(data['shipEntry'] ?? ''),
-			receiveEntry: String(data['receiveEntry'] ?? ''),
-			shortageReturnEntry: String(data['shortageReturnEntry'] ?? ''),
-			lines: rawLines.map(mapLine).filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
-			receivedLines: rawReceived.map(mapLine).filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
-			shortageLines: rawShortage.map(mapLine).filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
-		};
-	} catch {
-		return null;
-	}
+	return parseTransferItem(it);
 }
 
 function belongsToRequest(request: SupplyRequest, requestKey: string): boolean {
@@ -254,6 +211,39 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (normalizeDomain(b.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: b.domain, accessToken: b.accessToken } });
 	};
+	const transferLink = (id: number): string => {
+		const base = String(process.env['SUPPLY_SECTION_URL'] ?? '').trim()
+			|| `https://${app.config.portalDomain}/devops/placement/574/`;
+		const url = new URL(base);
+		url.searchParams.set('transfer', String(id));
+		return `[URL=${url.toString()}]Открыть перемещение #${id}[/URL]`;
+	};
+	const notifyTransferCreated = async (
+		client: B24Client,
+		id: number,
+		name: string,
+		data: TransferData,
+		me: CurrentUser,
+	): Promise<TransferData> => {
+		const message = `[B]Нужно собрать перемещение #${id}[/B]\n${data.fromStore} → ${data.toStore}\n\n${data.lines.map((line) => `• ${line.name || `#${line.productId}`} × ${line.qty}`).join('\n')}\n\n${transferLink(id)}`;
+		const at = new Date().toISOString();
+		let next = data;
+		try {
+			const notificationClient = app.config.devWebhook
+				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+				: client;
+			const sent = await sendStoreChatMessage(notificationClient, data.fromStore, message);
+			if (sent) next = { ...data, history: [...data.history, { at, status: 'draft', byId: me.id, byName: me.name, action: 'notification_sent', note: `сообщение отправлено в чат склада «${data.fromStore}»` }] };
+		} catch (error) {
+			next = { ...data, history: [...data.history, { at, status: 'draft', byId: me.id, byName: me.name, action: 'notification_failed', note: `сообщение в чат склада «${data.fromStore}» не отправлено: ${errInfo(error)}` }] };
+			app.log.warn({ id, store: data.fromStore }, `[supply] transfer chat notification failed — ${errInfo(error)}`);
+		}
+		if (next !== data) {
+			await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(next) })
+				.catch((error) => app.log.warn({ id }, `[supply] transfer notification history failed — ${errInfo(error)}`));
+		}
+		return next;
+	};
 
 	app.post('/api/supply/orders', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody;
@@ -264,7 +254,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		try {
 			const reqs = await listSupplyRequests(erp);
 			const standaloneToStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
-			const standaloneRequest: SupplyRequest = { name: STANDALONE_SUPPLY_REQUEST, requestKey: '', createdAt: '', dealId: '', date: '', status: '', toStore: standaloneToStore, items: [] };
+			const standaloneRequest: SupplyRequest = { name: STANDALONE_SUPPLY_REQUEST, requestKey: '', createdAt: '', dealId: '', date: '', deadline: '', status: '', toStore: standaloneToStore, note: '', items: [] };
 			// Название сделки — из Б24 (одним батч-вызовом по списку dealId). Статус «обеспечено» — из самой заявки.
 			const dealIds = [...new Set(reqs.map((o) => Number(o.dealId)).filter((n) => Number.isInteger(n) && n > 0))];
 			const titleMap = new Map<number, string>();
@@ -278,18 +268,26 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const fulfilled = new Map<string, Map<number, number>>();
 			const transfersByRequest = new Map<string, TransferProgress[]>();
 			const standaloneTransfers: TransferProgress[] = [];
+			const reservations = new Map<string, number>();
 			try {
 				await ensureTransfersEntity(client);
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
+					if (t.status === 'draft' || t.status === 'collected' || t.status === 'requested') {
+						for (const line of t.lines) {
+							const key = `${line.productId}:${t.fromStore}`;
+							reservations.set(key, (reservations.get(key) ?? 0) + line.qty);
+						}
+					}
 					const request = reqs.find((candidate) => transferBelongsToRequest(t, candidate));
 					if (!request) {
 						if (!t.supplyRequest && !t.dealId) standaloneTransfers.push(t);
 						continue;
 					}
 					transfersByRequest.set(request.requestKey, [...(transfersByRequest.get(request.requestKey) ?? []), t]);
+					if (t.correctionOf) continue;
 					if (t.status !== 'canceled') addCovered(planned, request.requestKey, t.lines);
-					const lines = t.status === 'shortage' ? t.receivedLines : t.status === 'received' ? t.lines : [];
+					const lines = t.status === 'shortage' ? t.receivedLines : (t.status === 'received' || t.status === 'posted') ? t.lines : [];
 					addCovered(fulfilled, request.requestKey, lines);
 				}
 			} catch {
@@ -304,7 +302,12 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const enriched = reqs.map((o) => {
 				const byProduct = planned.get(o.requestKey) ?? new Map<number, number>();
 				const fulfilledByProduct = fulfilled.get(o.requestKey) ?? new Map<number, number>();
+				const withFreeStocks = (item: SupplyRequest['items'][number]): SupplyRequest['items'][number] => ({
+					...item,
+					stocks: Object.fromEntries(Object.entries(item.stocks).map(([store, qty]) => [store, Math.max(qty - (reservations.get(`${item.productId}:${store}`) ?? 0), 0)])),
+				});
 				const remaining = o.items
+					.map(withFreeStocks)
 					.map((item) => ({ ...item, qty: Math.max(item.qty - (byProduct.get(item.productId) ?? 0), 0) }))
 					.filter((item) => item.qty > 0);
 				const unfulfilled = o.items
@@ -314,7 +317,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				return {
 					...o,
 					items: remaining,
-					originalItems: o.items,
+					originalItems: o.items.map(withFreeStocks),
 					transfers: transfersByRequest.get(o.requestKey) ?? [],
 					purchases: purchasesByRequest.get(o.requestKey) ?? [],
 					dealTitle: titleMap.get(Number(o.dealId)) ?? '',
@@ -329,8 +332,10 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 					createdAt: '',
 					dealId: '',
 					date: '',
+					deadline: '',
 					status: '',
 					toStore: standaloneToStore,
+					note: '',
 					items: [],
 					originalItems: [],
 					transfers: standaloneTransfers,
@@ -349,7 +354,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 
 	// Создать заявку в снабжение по выбранным товарам сделки (из вкладки «Товары»).
 	app.post('/api/supply/request', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; lines?: unknown; toStore?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; lines?: unknown; toStore?: unknown; deadline?: unknown; note?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -362,10 +367,13 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0);
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций для заявки' });
 		try {
-			const scheduleDate = new Date().toISOString().slice(0, 10);
 			const toStore = String(b.toStore ?? '').trim();
-			const { name } = await createSupplyRequest(erp, { dealId, scheduleDate, ...(toStore ? { toStore } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.note ? { note: l.note } : {}) })) });
-			app.log.info({ dealId, lines: lines.length, name }, '[api/supply/request] created');
+			const scheduleDate = String(b.deadline ?? '').trim();
+			const note = String(b.note ?? '').trim();
+			if (!toStore) return reply.code(400).send({ ok: false, error: 'не указан конечный склад' });
+			if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate) || Number.isNaN(new Date(`${scheduleDate}T00:00:00`).getTime())) return reply.code(400).send({ ok: false, error: 'не указана крайняя дата поставки' });
+			const { name } = await createSupplyRequest(erp, { dealId, scheduleDate, toStore, ...(note ? { note } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.note ? { note: l.note } : {}) })) });
+			app.log.info({ dealId, lines: lines.length, name, toStore, scheduleDate }, '[api/supply/request] created');
 			return { ok: true, name };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/supply/request] failed — ${errInfo(err)}`);
@@ -421,8 +429,16 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			for (const item of request.items) requested.set(item.productId, (requested.get(item.productId) ?? 0) + item.qty);
 			const planned = new Map<number, number>();
 			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
-			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
-				if (!transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
+			const existingTransfers = (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null);
+			const reservedByProductStore = new Map<string, number>();
+			for (const transfer of existingTransfers) {
+				if (transfer.status === 'draft' || transfer.status === 'collected' || transfer.status === 'requested') {
+					for (const line of transfer.lines) {
+						const key = `${line.productId}:${transfer.fromStore}`;
+						reservedByProductStore.set(key, (reservedByProductStore.get(key) ?? 0) + line.qty);
+					}
+				}
+				if (transfer.correctionOf || !transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
 				for (const line of transfer.lines) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
 			}
 			const existingPurchases = (await listPurchaseChildren(erp, [request])).get(request.requestKey) ?? [];
@@ -452,7 +468,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				const productId = Number(key.slice(0, separator));
 				const fromStore = key.slice(separator + 1);
 				const requestItem = request.items.find((item) => item.productId === productId);
-				const available = Number(requestItem?.stocks?.[fromStore] ?? 0);
+				const available = Math.max(Number(requestItem?.stocks?.[fromStore] ?? 0) - (reservedByProductStore.get(key) ?? 0), 0);
 				if (qty > available + 0.0001) {
 					throw new Error(`остаток изменился: на складе «${fromStore}» доступно ${available}, выбрано ${qty}`);
 				}
@@ -510,27 +526,18 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			}
 			for (const [fromStore, storeLines] of transfersByStore.entries()) {
 				const transferLines = storeLines.map((l) => ({ productId: l.productId, name: l.itemName || `#${l.productId}`, qty: l.qty }));
-				const baseData = {
+				let baseData = newTransferData({
 					supplyRequest: requestName,
 					supplyRequestKey: request.requestKey,
-					purchaseOrder: '',
 					dealId: String(dealId),
 					toStore,
 					fromStore,
-					status: 'requested',
 					lines: transferLines,
-					note: '',
-					taskId: null,
-					shipEntry: null,
-					receiveEntry: null,
-					receivedLines: [],
-					shortageLines: [],
-					shortageReturnEntry: null,
 					createdAt: now,
 					createdById: me.id,
 					createdByName: me.name,
-					history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: 'создано из дисплея снабжения' }],
-				};
+					historyNote: 'создано из дисплея снабжения',
+				});
 				const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
 				const added = await client.call<number | { id?: number }>('entity.item.add', {
 					ENTITY: TRANSFERS_ENTITY,
@@ -539,21 +546,8 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				});
 				const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 				if (!id) throw new Error('entity.item.add не вернул id');
-				const { name: shipEntry } = await shipTransferToTransit(erp, {
-					dealId,
-					supplyRequest: requestName,
-					supplyRequestKey: request.requestKey,
-					lines: transferLines.map((l) => ({ productId: l.productId, qty: l.qty, fromStore })),
-				});
-				const shippedAt = new Date().toISOString();
-				const shippedData = {
-					...baseData,
-					status: 'in_transit',
-					shipEntry,
-					history: [...baseData.history, { at: shippedAt, status: 'in_transit', byId: me.id, byName: me.name, note: `Stock Entry ${shipEntry}` }],
-				};
-				await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: itemName, DETAIL_TEXT: JSON.stringify(shippedData) });
-				createdTransfers.push({ id, name: itemName, ...shippedData });
+				baseData = await notifyTransferCreated(client, id, itemName, baseData, me);
+				createdTransfers.push({ id, name: itemName, ...baseData });
 			}
 
 			app.log.info({ requestName, dealId, transfers: createdTransfers.length, purchases: createdPurchases.length, updatedPurchases: updatedPurchases.length }, '[api/supply/create-documents] ok');
@@ -582,6 +576,25 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.error({}, `[api/supply/suppliers] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err), suppliers: [] });
+		}
+	});
+
+	app.post('/api/supply/supplier/create', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { name?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const name = String(b.name ?? '').trim();
+		if (name.length < 2 || name === 'Поставщик не выбран') return reply.code(400).send({ ok: false, error: 'укажи название поставщика' });
+		try {
+			const before = await fetchSupplierCompanies(client);
+			const existing = before.find((supplier) => supplierNorm(supplier) === supplierNorm(name));
+			if (existing) return { ok: true, name: existing, suppliers: before, created: false };
+			await ensureB24SupplierCompany(client, name);
+			const suppliers = [...before, name].sort((a, b) => a.localeCompare(b, 'ru'));
+			return { ok: true, name, suppliers, created: true };
+		} catch (err) {
+			app.log.error({ name }, `[api/supply/supplier/create] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
 
@@ -837,7 +850,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const forwarded = new Map<number, number>();
 			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
-				if (!transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
+				if (transfer.correctionOf || !transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
 				for (const line of transfer.lines) {
 					covered.set(line.productId, (covered.get(line.productId) ?? 0) + line.qty);
 					if (transfer.purchaseOrder === purchaseOrder) forwarded.set(line.productId, (forwarded.get(line.productId) ?? 0) + line.qty);
@@ -856,27 +869,19 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const me = await currentUser(client);
 			const now = new Date().toISOString();
 			const transferLines = [...incoming.entries()].map(([productId, qty]) => ({ productId, name: itemNames.get(productId) || `#${productId}`, qty }));
-			const baseData = {
+			let baseData = newTransferData({
 				supplyRequest: requestName,
 				supplyRequestKey: request.requestKey,
 				purchaseOrder,
 				dealId: String(dealId),
 				toStore,
 				fromStore,
-				status: 'requested',
 				lines: transferLines,
-				note: '',
-				taskId: null,
-				shipEntry: null,
-				receiveEntry: null,
-				receivedLines: [],
-				shortageLines: [],
-				shortageReturnEntry: null,
 				createdAt: now,
 				createdById: me.id,
 				createdByName: me.name,
-				history: [{ at: now, status: 'requested', byId: me.id, byName: me.name, note: `создано после оприходования ${purchaseOrder}` }],
-			};
+				historyNote: `создано после оприходования ${purchaseOrder}`,
+			});
 			const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
 			const added = await client.call<number | { id?: number }>('entity.item.add', {
 				ENTITY: TRANSFERS_ENTITY,
@@ -885,23 +890,9 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			});
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
-			const { name: shipEntry } = await shipTransferToTransit(erp, {
-				dealId,
-				supplyRequest: requestName,
-				supplyRequestKey: request.requestKey,
-				purchaseOrder,
-				lines: transferLines.map((line) => ({ productId: line.productId, qty: line.qty, fromStore })),
-			});
-			const shippedAt = new Date().toISOString();
-			const shippedData = {
-				...baseData,
-				status: 'in_transit',
-				shipEntry,
-				history: [...baseData.history, { at: shippedAt, status: 'in_transit', byId: me.id, byName: me.name, note: `Stock Entry ${shipEntry}` }],
-			};
-			await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: itemName, DETAIL_TEXT: JSON.stringify(shippedData) });
-			app.log.info({ requestName, purchaseOrder, id, shipEntry }, '[api/supply/purchase-transfer] created');
-			return { ok: true, transfer: { id, name: itemName, ...shippedData } };
+			baseData = await notifyTransferCreated(client, id, itemName, baseData, me);
+			app.log.info({ requestName, purchaseOrder, id }, '[api/supply/purchase-transfer] created');
+			return { ok: true, transfer: { id, name: itemName, ...baseData } };
 		} catch (err) {
 			app.log.error({ requestName, purchaseOrder }, `[api/supply/purchase-transfer] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });

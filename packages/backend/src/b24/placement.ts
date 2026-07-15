@@ -366,6 +366,29 @@ export async function ensureTransfersEntity(client: B24Client): Promise<{ status
 	}
 }
 
+/** Заявки менеджеров на перемещение. Это только просьбы: они не резервируют товар и не создают проводок. */
+export const TRANSFER_REQUESTS_ENTITY = 'ctv_transfer_requests';
+
+let transferRequestsEntityEnsured = false;
+
+export async function ensureTransferRequestsEntity(client: B24Client): Promise<{ status: string }> {
+	if (transferRequestsEntityEnsured) return { status: 'cached' };
+	try {
+		await client.call('entity.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: 'CTV Заявки на перемещение', ACCESS: { AU: 'W' } });
+		transferRequestsEntityEnsured = true;
+		return { status: 'created' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) {
+				transferRequestsEntityEnsured = true;
+				return { status: 'exists' };
+			}
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
 /**
  * Пункт ЛЕВОГО МЕНЮ «Ремонты» — вход в наш модуль приёма оборудования (view='repairs').
  * Обработчик /placement/repairs. LEFT_MENU допускает несколько привязок с разными HANDLER —
