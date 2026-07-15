@@ -281,12 +281,12 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [destinationError, setDestinationError] = useState<string | null>(null);
 	const [lineError, setLineError] = useState<string | null>(null);
-	const [lineQty, setLineQty] = useState<Record<number, number>>(() => Object.fromEntries(t.lines.map((line) => [line.productId, line.qty])));
+	const [lineQty, setLineQty] = useState<Record<number, number | ''>>(() => Object.fromEntries(t.lines.map((line) => [line.productId, line.qty])));
 	useEffect(() => setToStore(t.toStore), [t.toStore]);
 	useEffect(() => setLineQty(Object.fromEntries(t.lines.map((line) => [line.productId, line.qty]))), [t.lines]);
 	const canEditDestination = editable && ['draft', 'collected', 'requested'].includes(t.status);
 	const canEditLines = editable && ['draft', 'collected', 'accepted', 'requested'].includes(t.status);
-	const linesDirty = t.lines.some((line) => Math.abs((lineQty[line.productId] ?? 0) - line.qty) > 0.000001);
+	const linesDirty = t.lines.some((line) => Math.abs(Number(lineQty[line.productId] || 0) - line.qty) > 0.000001);
 	const collected = new Map(t.collectedLines.map((line) => [line.productId, line.qty]));
 	const accepted = new Map(t.acceptedLines.map((line) => [line.productId, line.qty]));
 	const saveDestination = async (): Promise<void> => {
@@ -307,7 +307,7 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 		setSavingLines(true);
 		setLineError(null);
 		try {
-			const updated = await onLinesChange(t.lines.map((line) => ({ productId: line.productId, qty: Math.max(lineQty[line.productId] ?? 0, 0) })));
+			const updated = await onLinesChange(t.lines.map((line) => ({ productId: line.productId, qty: Math.max(Number(lineQty[line.productId] || 0), 0) })));
 			setLineQty(Object.fromEntries(updated.lines.map((line) => [line.productId, line.qty])));
 		} catch (error) {
 			setLineError(errText(error));
@@ -342,7 +342,7 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 				{t.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Наименование</th><th style={TH}>Количество</th><th style={TH}>Собрано</th><th style={TH}>Принято</th></tr></thead>
-					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{canEditLines ? <input type="number" min="0" step="any" style={{ ...inp, width: 90 }} value={lineQty[l.productId] ?? 0} onChange={(event) => setLineQty((current) => ({ ...current, [l.productId]: Math.max(Number(event.target.value) || 0, 0) }))} /> : l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
+					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{canEditLines ? <input type="number" min="0" step="any" style={{ ...inp, width: 90 }} value={lineQty[l.productId] ?? ''} onChange={(event) => setLineQty((current) => ({ ...current, [l.productId]: event.target.value === '' ? '' : Math.max(Number(event.target.value), 0) }))} /> : l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
 				</table>
 				{canEditLines && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}><button className="btn-primary" disabled={busy || savingLines || !linesDirty} onClick={() => void saveLines()}>{savingLines ? 'Сохраняю...' : 'Сохранить количество'}</button></div>}
 				{t.receivedLines?.length ? (
@@ -376,20 +376,21 @@ function ReceiveTransferModal({ mode, t, busy, onClose, onConfirm }: {
 	onClose: () => void;
 	onConfirm: (lines: Array<{ productId: number; qty: number }>) => void;
 }): JSX.Element {
-	const [qty, setQty] = useState<Record<number, number>>(() => Object.fromEntries(t.lines.map((l) => [l.productId, l.qty])));
+	const [qty, setQty] = useState<Record<number, number | ''>>(() => Object.fromEntries(t.lines.map((l) => [l.productId, l.qty])));
 	const [err, setErr] = useState<string | null>(null);
-	const setLine = (productId: number, value: number): void => {
+	const setLine = (productId: number, value: string): void => {
+		if (value === '') { setQty((current) => ({ ...current, [productId]: '' })); return; }
 		const max = t.lines.find((l) => l.productId === productId)?.qty ?? 0;
 		const normalized = Math.max(Number(value) || 0, 0);
 		setQty((current) => ({ ...current, [productId]: mode === 'collect' ? Math.min(normalized, max) : normalized }));
 	};
 	const confirm = (): void => {
-		const lines = t.lines.map((l) => ({ productId: l.productId, qty: qty[l.productId] ?? 0 }));
+		const lines = t.lines.map((l) => ({ productId: l.productId, qty: Number(qty[l.productId] || 0) }));
 		if (!lines.some((l) => l.qty > 0) && !window.confirm(mode === 'collect' ? 'Ничего не собрано. Сохранить такой результат?' : 'Ничего не принято. Сохранить такой результат?')) return;
 		setErr(null);
 		onConfirm(lines);
 	};
-	const mismatch = t.lines.some((l) => Math.abs((qty[l.productId] ?? 0) - l.qty) > 0.000001);
+	const mismatch = t.lines.some((l) => Math.abs(Number(qty[l.productId] || 0) - l.qty) > 0.000001);
 	return (
 		<div style={{ ...overlay, zIndex: 1200 }}>
 			<div style={modalCard}>
@@ -402,7 +403,7 @@ function ReceiveTransferModal({ mode, t, busy, onClose, onConfirm }: {
 							<tr key={l.productId}>
 								<td style={TD}>{l.name || ('#' + l.productId)}</td>
 								<td style={TD}>{l.qty}</td>
-								<td style={TD}><input type="number" min="0" {...(mode === 'collect' ? { max: l.qty } : {})} step="any" style={{ ...inp, width: 90 }} value={qty[l.productId] ?? 0} onChange={(e) => setLine(l.productId, Number(e.target.value))} /></td>
+								<td style={TD}><input type="number" min="0" {...(mode === 'collect' ? { max: l.qty } : {})} step="any" style={{ ...inp, width: 90 }} value={qty[l.productId] ?? ''} onChange={(e) => setLine(l.productId, e.target.value)} /></td>
 							</tr>
 						))}
 					</tbody>
