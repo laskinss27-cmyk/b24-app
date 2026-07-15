@@ -3939,6 +3939,12 @@ body.deal-placement-body #root {
 	overflow: hidden;
 }
 
+.supply-stock-card {
+	box-sizing: border-box;
+	padding: 16px;
+	overflow-x: auto;
+}
+
 .supply-proto-card-head {
 	display: flex;
 	justify-content: space-between;

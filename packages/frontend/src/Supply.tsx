@@ -1631,12 +1631,12 @@ export function Supply(): JSX.Element {
 				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'logistics' && <>
-					<div className="supply-proto-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" onChanged={() => setStockRefresh((value) => value + 1)} /></div>
-					<div className="supply-proto-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} /></div>
+					<div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" onChanged={() => setStockRefresh((value) => value + 1)} /></div>
+					<div className="supply-proto-card supply-stock-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} /></div>
 				</>}
 				{view === 'stocks' && <div className="supply-products-view"><ProductBase readOnly /></div>}
-				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
-				{view === 'ledger' && <div className="supply-proto-card"><LedgerTab /></div>}
+				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card supply-stock-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
+				{view === 'ledger' && <div className="supply-proto-card supply-stock-card"><LedgerTab /></div>}
 			</main>
 			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onCreateSupplier={addSupplier} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}
 			{openDocument && <DocumentDetail
