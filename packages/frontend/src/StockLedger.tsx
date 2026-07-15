@@ -3,7 +3,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import {
-	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, deleteTransfer, fetchMovements, openDeal,
+	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
@@ -264,22 +264,29 @@ function DocDetailModal({ doctype, name, onClose }: { doctype: string; name: str
 }
 
 /** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
-function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onDelete, onClose }: {
+function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onLinesChange, onDelete, onClose }: {
 	t: TransferDoc;
 	stores: string[];
 	editable: boolean;
 	canDelete: boolean;
 	busy: boolean;
 	onDestinationChange: (toStore: string) => Promise<TransferDoc>;
+	onLinesChange: (lines: Array<{ productId: number; qty: number }>) => Promise<TransferDoc>;
 	onDelete: () => void;
 	onClose: () => void;
 }): JSX.Element {
 	const [toStore, setToStore] = useState(t.toStore);
 	const [saving, setSaving] = useState(false);
+	const [savingLines, setSavingLines] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [destinationError, setDestinationError] = useState<string | null>(null);
+	const [lineError, setLineError] = useState<string | null>(null);
+	const [lineQty, setLineQty] = useState<Record<number, number>>(() => Object.fromEntries(t.lines.map((line) => [line.productId, line.qty])));
 	useEffect(() => setToStore(t.toStore), [t.toStore]);
+	useEffect(() => setLineQty(Object.fromEntries(t.lines.map((line) => [line.productId, line.qty]))), [t.lines]);
 	const canEditDestination = editable && ['draft', 'collected', 'requested'].includes(t.status);
+	const canEditLines = editable && ['draft', 'collected', 'accepted', 'requested'].includes(t.status);
+	const linesDirty = t.lines.some((line) => Math.abs((lineQty[line.productId] ?? 0) - line.qty) > 0.000001);
 	const collected = new Map(t.collectedLines.map((line) => [line.productId, line.qty]));
 	const accepted = new Map(t.acceptedLines.map((line) => [line.productId, line.qty]));
 	const saveDestination = async (): Promise<void> => {
@@ -293,6 +300,19 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 			setDestinationError(errText(error));
 		} finally {
 			setSaving(false);
+		}
+	};
+	const saveLines = async (): Promise<void> => {
+		if (!canEditLines || !linesDirty || savingLines) return;
+		setSavingLines(true);
+		setLineError(null);
+		try {
+			const updated = await onLinesChange(t.lines.map((line) => ({ productId: line.productId, qty: Math.max(lineQty[line.productId] ?? 0, 0) })));
+			setLineQty(Object.fromEntries(updated.lines.map((line) => [line.productId, line.qty])));
+		} catch (error) {
+			setLineError(errText(error));
+		} finally {
+			setSavingLines(false);
 		}
 	};
 	return (
@@ -317,12 +337,14 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 				</div>
 				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{transferStatusText(t)}{t.note ? ` · 📝 ${t.note}` : ''}</div>
 				{destinationError && <p className="error">⛔ {destinationError}</p>}
+				{lineError && <p className="error">⛔ {lineError}</p>}
 				<StockBlank doc={transferToPrint(t)} />
 				{t.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Наименование</th><th style={TH}>Количество</th><th style={TH}>Собрано</th><th style={TH}>Принято</th></tr></thead>
-					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
+					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{canEditLines ? <input type="number" min="0" step="any" style={{ ...inp, width: 90 }} value={lineQty[l.productId] ?? 0} onChange={(event) => setLineQty((current) => ({ ...current, [l.productId]: Math.max(Number(event.target.value) || 0, 0) }))} /> : l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
 				</table>
+				{canEditLines && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}><button className="btn-primary" disabled={busy || savingLines || !linesDirty} onClick={() => void saveLines()}>{savingLines ? 'Сохраняю...' : 'Сохранить количество'}</button></div>}
 				{t.receivedLines?.length ? (
 					<div style={{ marginTop: 10 }}>
 						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>Принято на склад:</div>
@@ -662,6 +684,12 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 		setOpenT(updated);
 		return updated;
 	};
+	const changeLines = async (t: TransferDoc, lines: Array<{ productId: number; qty: number }>): Promise<TransferDoc> => {
+		const updated = await updateTransferLines(t.id, lines);
+		setList((current) => current?.map((row) => row.id === updated.id ? updated : row) ?? current);
+		setOpenT(updated);
+		return updated;
+	};
 
 	const act = async (t: TransferDoc, kind: 'ship' | 'post' | 'cancel'): Promise<void> => {
 		setBusy(t.id); setErr(null);
@@ -748,7 +776,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 					</tbody>
 				</table>
 			)}
-			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
+			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
 			{collectT && <ReceiveTransferModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
 			{receiveT && <ReceiveTransferModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
