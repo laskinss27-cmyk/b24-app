@@ -369,6 +369,25 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 	);
 }
 
+function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc; onOpenTransfer: (id: number) => void }): JSX.Element {
+	const requestMatch = /^transfer-request:(\d+)$/.exec(transfer.supplyRequestKey ?? '');
+	let basis: JSX.Element;
+	if (transfer.correctionOf) {
+		basis = <a href="#" onClick={(event) => { event.preventDefault(); onOpenTransfer(transfer.correctionOf as number); }} style={{ color: '#185fa5', textDecoration: 'none' }}>Перемещение #{transfer.correctionOf}</a>;
+	} else if (requestMatch?.[1]) {
+		basis = <span>Заказ на перемещение #{requestMatch[1]}</span>;
+	} else if (transfer.dealId) {
+		basis = <DealCell dealId={transfer.dealId} ownerName={transfer.ownerName} />;
+	} else if (transfer.purchaseOrder) {
+		basis = <span>Заявка поставщику {transfer.purchaseOrder}</span>;
+	} else if (transfer.supplyRequest) {
+		basis = <span>{transfer.supplyRequest}</span>;
+	} else {
+		basis = <span>Самостоятельное перемещение</span>;
+	}
+	return <div>{basis}<div style={{ color: '#7a8699', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
+}
+
 function ReceiveTransferModal({ mode, t, busy, onClose, onConfirm }: {
 	mode: 'collect' | 'receive';
 	t: TransferDoc;
@@ -739,7 +758,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 		if (prod && !t.lines.some((l) => l.productId === prod.productId)) return false;
 		const q = search.trim().toLowerCase();
 		if (!q) return true;
-		const hay = `${t.dealId} ${t.ownerName ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
+		const hay = `${t.dealId} ${t.ownerName ?? ''} ${t.supplyRequest ?? ''} ${t.supplyRequestKey ?? ''} ${t.purchaseOrder ?? ''} ${t.correctionOf ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
 		return q.split(/\s+/).every((w) => hay.includes(w));
 	});
 
@@ -760,11 +779,11 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 			{notice && <p style={{ color: '#9a6700', fontSize: 13 }}>{notice}</p>}
 			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{(list.length ? 'Ничего не найдено по фильтру.' : 'Перемещений пока нет. Создаются из карточки сделки или кнопкой выше.')}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-					<thead><tr><th style={TH}>Сделка</th><th style={TH}>Маршрут</th><th style={TH}>Позиции</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
+					<thead><tr><th style={TH}>Основание</th><th style={TH}>Маршрут</th><th style={TH}>Позиции</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
 					<tbody>
 						{shown.map((t) => (
 							<tr key={t.id}>
-								<td style={TD}><DealCell dealId={t.dealId} ownerName={t.ownerName} /><div style={{ color: '#7a8699', fontSize: 12 }}>{(t.createdAt || '').slice(0, 10)}</div></td>
+								<td style={TD}><TransferBasisCell transfer={t} onOpenTransfer={(id) => { const source = list?.find((row) => row.id === id); if (source) setOpenT(source); }} /></td>
 								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenT(t); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{t.fromStore} → {t.toStore}</a>{t.note ? <div style={{ color: '#7a8699', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{transferStatusText(t)}</td>

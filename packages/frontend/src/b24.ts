@@ -1065,6 +1065,7 @@ export interface TransferDoc {
 	name: string;
 	supplyRequest: string;
 	supplyRequestKey?: string;
+	purchaseOrder?: string;
 	dealId: string;
 	toStore: string;
 	fromStore: string;
