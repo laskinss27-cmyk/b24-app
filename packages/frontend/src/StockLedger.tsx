@@ -631,6 +631,10 @@ const transferHasFinalDiscrepancy = (transfer: TransferDoc): boolean => {
 	return [...new Set([...shipped.keys(), ...accepted.keys()])]
 		.some((productId) => Math.abs((shipped.get(productId) ?? 0) - (accepted.get(productId) ?? 0)) > 0.000001);
 };
+const transferPlanMatchesAccepted = (transfer: TransferDoc): boolean => {
+	const accepted = new Map(transfer.acceptedLines.map((line) => [line.productId, line.qty]));
+	return transfer.lines.every((line) => Math.abs(line.qty - (accepted.get(line.productId) ?? 0)) < 0.000001);
+};
 const TRANSFER_STATUS_OPTS = [
 	{ value: 'all', label: 'Все статусы' },
 	{ value: 'draft', label: 'Черновик' },
@@ -768,7 +772,9 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 									{(t.status === 'draft' || t.status === 'requested') && <button className="btn-primary" disabled={busy != null} onClick={() => setCollectT(t)}>{busy === t.id ? '…' : 'Собрано'}</button>}
 									{t.status === 'collected' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.collectedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'Отправлено'}</button>}
 									{t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
-									{canManage && t.status === 'accepted' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} title={t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001) ? '' : 'Сначала скорректируй количество в Снабе'} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>}
+									{canManage && t.status === 'accepted' && (transferPlanMatchesAccepted(t)
+										? <button className="btn-primary" disabled={busy != null} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>
+										: <button className="btn-primary" disabled={busy != null} onClick={() => setOpenT(t)}>Скорректировать</button>)}
 									{canManage && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
 								</td>
 							</tr>
