@@ -618,7 +618,7 @@ const TRANSFER_STATUS_OPTS = [
 	{ value: 'posted', label: 'Принято / завершено' },
 ];
 
-export function StockTransfersTab({ form, showCreate = true }: { form: StockForm | null; showCreate?: boolean }): JSX.Element {
+export function StockTransfersTab({ form, showCreate = true, supplyMode = false }: { form: StockForm | null; showCreate?: boolean; supplyMode?: boolean }): JSX.Element {
 	const [list, setList] = useState<TransferDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
 	const [busy, setBusy] = useState<number | null>(null);
@@ -637,6 +637,7 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
 	const [destinationStores, setDestinationStores] = useState<string[]>([]);
 	const [canDelete, setCanDelete] = useState(false);
+	const canManage = supplyMode && isSupply;
 
 	const load = async (): Promise<void> => {
 		setLoading(true); setErr(null);
@@ -646,13 +647,14 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 	};
 	useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
 	useEffect(() => {
-		if (!isSupply) return;
+		if (!canManage) return;
 		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch(() => setDestinationStores([]));
-	}, [isSupply]);
+	}, [canManage]);
 	useEffect(() => {
+		if (!supplyMode) { setCanDelete(false); return; }
 		if (getContext().__mock) { setCanDelete(true); return; }
 		void fetchCurrentUserId().then((id) => setCanDelete(id === '1858')).catch(() => setCanDelete(false));
-	}, []);
+	}, [supplyMode]);
 
 	const changeDestination = async (t: TransferDoc, toStore: string): Promise<TransferDoc> => {
 		const updated = await updateTransferDestination(t.id, toStore);
@@ -734,19 +736,19 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{transferStatusText(t)}</td>
 								<td style={TD}>
-									{isSupply && ['draft', 'collected', 'requested'].includes(t.status) && <button disabled={busy != null} onClick={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void act(t, 'cancel'); }}>Отменить</button>}
+									{canManage && ['draft', 'collected', 'requested'].includes(t.status) && <button disabled={busy != null} onClick={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void act(t, 'cancel'); }}>Отменить</button>}
 									{(t.status === 'draft' || t.status === 'requested') && <button className="btn-primary" disabled={busy != null} onClick={() => setCollectT(t)}>{busy === t.id ? '…' : 'Собрано'}</button>}
 									{t.status === 'collected' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.collectedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'Отправлено'}</button>}
 									{t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
-									{isSupply && t.status === 'accepted' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} title={t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001) ? '' : 'Сначала скорректируй количество в Снабе'} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>}
-									{isSupply && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
+									{canManage && t.status === 'accepted' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} title={t.lines.every((line) => Math.abs(line.qty - (t.acceptedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001) ? '' : 'Сначала скорректируй количество в Снабе'} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>}
+									{canManage && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
 								</td>
 							</tr>
 						))}
 					</tbody>
 				</table>
 			)}
-			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={isSupply} canDelete={canDelete} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
+			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
 			{collectT && <ReceiveTransferModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
 			{receiveT && <ReceiveTransferModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
