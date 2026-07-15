@@ -1415,6 +1415,8 @@ export interface CoreRealization {
 	submitted: boolean;
 	/** true — это возврат от клиента (Delivery Note is_return), а не отгрузка. */
 	isReturn?: boolean;
+	/** Имя исходной реализации, которую сторнирует возврат. */
+	returnAgainst?: string;
 	grandTotal: number;
 	items: CoreRealizationItem[];
 }

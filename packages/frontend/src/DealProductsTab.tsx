@@ -636,15 +636,32 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 
 	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
 	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
-	const partsOf = (r: EnrichedRow): Part[] =>
-		data.coreReals
+	const partsOf = (r: EnrichedRow): Part[] => {
+		const linkedReturns = new Map<string, number>();
+		let unlinkedReturns = 0;
+		for (const document of data.coreReals.filter((item) => item.isReturn && item.submitted)) {
+			const qty = Math.abs(document.items
+				.filter((item) => item.productId === r.productId)
+				.reduce((sum, item) => sum + item.qty, 0));
+			if (qty <= 0.000001) continue;
+			if (document.returnAgainst) linkedReturns.set(document.returnAgainst, (linkedReturns.get(document.returnAgainst) ?? 0) + qty);
+			else unlinkedReturns += qty;
+		}
+		return data.coreReals
 			.filter((rz) => !rz.isReturn)
 			.map((rz): Part | null => {
 				const its = rz.items.filter((it) => it.productId === r.productId);
 				if (!its.length) return null;
-				return { name: rz.name, submitted: rz.submitted, isReturn: Boolean(rz.isReturn), qty: its.reduce((s, it) => s + it.qty, 0), storeName: its[0]!.storeTitle };
+				const gross = its.reduce((sum, item) => sum + item.qty, 0);
+				const linked = linkedReturns.get(rz.name) ?? 0;
+				const fallback = rz.submitted ? Math.min(Math.max(gross - linked, 0), unlinkedReturns) : 0;
+				unlinkedReturns -= fallback;
+				const qty = Math.max(0, gross - linked - fallback);
+				if (qty <= 0.000001) return null;
+				return { name: rz.name, submitted: rz.submitted, isReturn: false, qty, storeName: its[0]!.storeTitle };
 			})
 			.filter((p): p is Part => p != null);
+	};
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const hiddenDocumentCount = returnDocuments.length + data.supply.length + dealTransfers.length;
 
