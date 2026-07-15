@@ -962,6 +962,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const allTransfers = await loadAll(client);
 			const doc = allTransfers.find((transfer) => transfer.id === id) ?? null;
 			if (!doc) return { ok: true };
+			if (doc.correctionOf) {
+				return reply.code(409).send({ ok: false, error: `корректировка удаляется вместе с основным перемещением #${doc.correctionOf}; открой основной документ` });
+			}
 			const rootId = doc.correctionOf ?? doc.id;
 			if (operationLocks.has(`ship:${rootId}`) || operationLocks.has(`post:${rootId}`)) {
 				return reply.code(409).send({ ok: false, error: 'с этим перемещением сейчас выполняется складская операция' });

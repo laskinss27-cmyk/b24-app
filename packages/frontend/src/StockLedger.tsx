@@ -741,7 +741,8 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 	const remove = async (t: TransferDoc): Promise<void> => {
 		const linkedOrder = t.supplyRequestKey?.startsWith('transfer-request:');
 		const detail = linkedOrder ? '\nСвязанный заказ на перемещение также будет удалён.' : '';
-		if (!window.confirm(`Удалить перемещение #${t.id}?\n${t.fromStore} → ${t.toStore}\n\nСвязанные складские проводки будут отменены.${detail}`)) return;
+		const corrections = t.correctionIds?.length ? `\nКорректировки: ${t.correctionIds.map((id) => `#${id}`).join(', ')}.` : '';
+		if (!window.confirm(`Удалить всю цепочку перемещения #${t.id}?\n${t.fromStore} → ${t.toStore}\n\nСвязанные складские проводки будут отменены.${corrections}${detail}`)) return;
 		setBusy(t.id); setErr(null);
 		try {
 			await deleteTransfer(t.id);
@@ -802,7 +803,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 					</tbody>
 				</table>
 			)}
-			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
+			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete && !openT.correctionOf} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
 			{collectT && <ReceiveTransferModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
 			{receiveT && <ReceiveTransferModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
