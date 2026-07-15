@@ -3,7 +3,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import {
-	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, fetchMovements, openDeal,
+	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, deleteTransfer, fetchMovements, openDeal,
 	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
@@ -264,11 +264,14 @@ function DocDetailModal({ doctype, name, onClose }: { doctype: string; name: str
 }
 
 /** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
-function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose }: {
+function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onDelete, onClose }: {
 	t: TransferDoc;
 	stores: string[];
 	editable: boolean;
+	canDelete: boolean;
+	busy: boolean;
 	onDestinationChange: (toStore: string) => Promise<TransferDoc>;
+	onDelete: () => void;
 	onClose: () => void;
 }): JSX.Element {
 	const [toStore, setToStore] = useState(t.toStore);
@@ -298,6 +301,7 @@ function TransferDetailModal({ t, stores, editable, onDestinationChange, onClose
 				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
 					<h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2>
 					<div style={{ display: 'flex', gap: 8 }}>
+						{canDelete && <button className="btn-danger" disabled={busy} onClick={onDelete}>Удалить</button>}
 						<button style={btnGhost} onClick={() => setHistoryOpen((open) => !open)}>История</button>
 						<button style={btnGhost} onClick={() => window.print()}>Печать</button>
 						<button style={btnGhost} onClick={onClose}>Закрыть</button>
@@ -632,6 +636,7 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 	const [collectT, setCollectT] = useState<TransferDoc | null>(null);
 	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
 	const [destinationStores, setDestinationStores] = useState<string[]>([]);
+	const [canDelete, setCanDelete] = useState(false);
 
 	const load = async (): Promise<void> => {
 		setLoading(true); setErr(null);
@@ -644,6 +649,10 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 		if (!isSupply) return;
 		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch(() => setDestinationStores([]));
 	}, [isSupply]);
+	useEffect(() => {
+		if (getContext().__mock) { setCanDelete(true); return; }
+		void fetchCurrentUserId().then((id) => setCanDelete(id === '1858')).catch(() => setCanDelete(false));
+	}, []);
 
 	const changeDestination = async (t: TransferDoc, toStore: string): Promise<TransferDoc> => {
 		const updated = await updateTransferDestination(t.id, toStore);
@@ -673,6 +682,19 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 		setBusy(t.id); setErr(null);
 		try { await resolveTransferShortage(t.id); await load(); }
 		catch (e) { setErr(errText(e)); }
+		finally { setBusy(null); }
+	};
+	const remove = async (t: TransferDoc): Promise<void> => {
+		const linkedOrder = t.supplyRequestKey?.startsWith('transfer-request:');
+		const detail = linkedOrder ? '\nСвязанный заказ на перемещение также будет удалён.' : '';
+		if (!window.confirm(`Удалить перемещение #${t.id}?\n${t.fromStore} → ${t.toStore}\n\nСвязанные складские проводки будут отменены.${detail}`)) return;
+		setBusy(t.id); setErr(null);
+		try {
+			await deleteTransfer(t.id);
+			setOpenT(null);
+			setNotice(`Перемещение #${t.id} удалено.`);
+			await load();
+		} catch (error) { setErr(errText(error)); }
 		finally { setBusy(null); }
 	};
 	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); };
@@ -724,7 +746,7 @@ export function StockTransfersTab({ form, showCreate = true }: { form: StockForm
 					</tbody>
 				</table>
 			)}
-			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={isSupply} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onClose={() => setOpenT(null)} />}
+			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={isSupply} canDelete={canDelete} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
 			{collectT && <ReceiveTransferModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
 			{receiveT && <ReceiveTransferModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}

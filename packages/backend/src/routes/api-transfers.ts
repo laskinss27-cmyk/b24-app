@@ -986,9 +986,20 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			for (const transfer of family) {
 				await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: transfer.id });
 			}
+			let deletedRequestId: number | null = null;
+			if (root.supplyRequestKey.startsWith('transfer-request:')) {
+				const requestId = Number(root.supplyRequestKey.slice('transfer-request:'.length));
+				if (Number.isInteger(requestId) && requestId > 0) {
+					const request = await loadTransferRequest(client, requestId);
+					if (request && (request.transferId === rootId || request.transferId === doc.id)) {
+						await client.call('entity.item.delete', { ENTITY: TRANSFER_REQUESTS_ENTITY, ID: requestId });
+						deletedRequestId = requestId;
+					}
+				}
+			}
 			const deletedIds = family.map((transfer) => transfer.id);
-			app.log.info({ id, rootId, deletedIds, by: me.id, entries }, '[api/transfers/delete] removed family');
-			return { ok: true, deletedIds };
+			app.log.info({ id, rootId, deletedIds, deletedRequestId, by: me.id, entries }, '[api/transfers/delete] removed family');
+			return { ok: true, deletedIds, deletedRequestId };
 		} catch (err) {
 			app.log.error({ id, by: me.id }, `[api/transfers/delete] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
