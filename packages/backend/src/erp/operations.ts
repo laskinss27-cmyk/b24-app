@@ -202,8 +202,10 @@ export interface ErpRealization {
 	submitted: boolean;
 	/** true — это возврат от клиента (Delivery Note is_return), а не отгрузка. */
 	isReturn: boolean;
+	/** Исходная реализация для возвратного Delivery Note. */
+	returnAgainst: string;
 	grandTotal: number;
-	items: Array<{ productId: number; itemName: string; qty: number; storeTitle: string }>;
+	items: Array<{ productId: number; itemName: string; qty: number; storeTitle: string; rate: number; rowName: string; sourceRow: string }>;
 }
 
 /** Черновик реализации (Delivery Note) с привязкой к сделке. Проведение — submitRealization. */
@@ -248,27 +250,71 @@ export async function createClientReturns(
 	await ensureErpSetup(erp);
 	if (!args.lines.length) throw new Error('нет позиций возврата');
 	await ensureNoteField(erp, 'Delivery Note');
-	// Оригинал по productId: проведённая реализация сделки, где этот товар отгружался.
+	// Возврат привязываем не только к Delivery Note, но и к конкретной строке исходной
+	// реализации. Иначе ERPNext подставляет текущую цену товара вместо цены продажи.
 	const reals = (await listDealRealizations(erp, args.dealId)).filter((r) => r.submitted);
-	const origOf = (productId: number): string | null =>
-		reals.find((rz) => rz.items.some((it) => it.productId === productId && it.qty > 0))?.name ?? null;
-	// Группируем по оригиналу (return_against — один на документ).
-	const byOrig = new Map<string, Array<{ productId: number; qty: number; storeTitle: string }>>();
-	for (const l of args.lines) {
-		const key = origOf(l.productId) ?? '';
-		if (!byOrig.has(key)) byOrig.set(key, []);
-		byOrig.get(key)!.push(l);
+	type Source = {
+		original: string;
+		productId: number;
+		remaining: number;
+		rate: number;
+		rowName: string;
+	};
+	const sources: Source[] = reals
+		.filter((document) => !document.isReturn)
+		.sort((a, b) => `${a.postingDate}:${a.name}`.localeCompare(`${b.postingDate}:${b.name}`))
+		.flatMap((document) => document.items
+			.filter((item) => item.qty > 0)
+			.map((item) => ({
+				original: document.name,
+				productId: item.productId,
+				remaining: item.qty,
+				rate: item.rate,
+				rowName: item.rowName,
+			})));
+	// Уже оформленные возвраты уменьшают доступный остаток каждой исходной строки.
+	for (const returned of reals.filter((document) => document.isReturn)) {
+		for (const item of returned.items.filter((entry) => entry.qty < 0)) {
+			let qty = Math.abs(item.qty);
+			const candidates = sources.filter((source) =>
+				source.productId === item.productId
+				&& (!returned.returnAgainst || source.original === returned.returnAgainst)
+				&& (!item.sourceRow || source.rowName === item.sourceRow));
+			for (const source of candidates) {
+				const used = Math.min(source.remaining, qty);
+				source.remaining -= used;
+				qty -= used;
+				if (qty <= 0.000001) break;
+			}
+		}
 	}
-	// Для строк без найденного оригинала ставим себестоимость из valuation ядра (иначе нулевая оценка).
-	const orphanIds = (byOrig.get('') ?? []).map((l) => l.productId);
-	const valuation = orphanIds.length ? await fetchErpPurchasing(erp, orphanIds) : new Map<number, number>();
+	type ReturnLine = { productId: number; qty: number; storeTitle: string; rate: number; sourceRow: string };
+	const byOrig = new Map<string, ReturnLine[]>();
+	for (const line of args.lines) {
+		let qty = line.qty;
+		for (const source of sources.filter((candidate) => candidate.productId === line.productId && candidate.remaining > 0.000001)) {
+			const part = Math.min(source.remaining, qty);
+			if (!byOrig.has(source.original)) byOrig.set(source.original, []);
+			byOrig.get(source.original)!.push({
+				productId: line.productId,
+				qty: part,
+				storeTitle: line.storeTitle,
+				rate: source.rate,
+				sourceRow: source.rowName,
+			});
+			source.remaining -= part;
+			qty -= part;
+			if (qty <= 0.000001) break;
+		}
+		if (qty > 0.000001) throw new Error(`товар #${line.productId}: возврат превышает фактически реализованное количество`);
+	}
 	const names: string[] = [];
 	for (const [orig, lines] of byOrig.entries()) {
 		const doc = await erp.create('Delivery Note', {
 			company: ctx.company,
 			customer: TECH_CUSTOMER,
 			is_return: 1,
-			...(orig ? { return_against: orig } : {}),
+			return_against: orig,
 			set_posting_time: 1,
 			[DEAL_FIELD]: String(args.dealId),
 			...(args.note ? { [NOTE_FIELD]: args.note.slice(0, 200) } : {}),
@@ -276,7 +322,9 @@ export async function createClientReturns(
 				item_code: String(l.productId),
 				qty: -Math.abs(l.qty),
 				warehouse: erpWarehouse(ctx, l.storeTitle),
-				...(orig ? {} : { rate: Math.max(valuation.get(l.productId) ?? 0, 0.01) }),
+				dn_detail: l.sourceRow,
+				rate: l.rate,
+				price_list_rate: l.rate,
 			})),
 		});
 		const name = String(doc['name']);
@@ -290,7 +338,7 @@ export async function createClientReturns(
 export async function listDealRealizations(erp: ErpClient, dealId: number): Promise<ErpRealization[]> {
 	const ctx = await erpContext(erp);
 	const heads = await erp.list('Delivery Note',
-		['name', DEAL_FIELD, 'posting_date', 'docstatus', 'grand_total', 'is_return'],
+		['name', DEAL_FIELD, 'posting_date', 'docstatus', 'grand_total', 'is_return', 'return_against'],
 		[[DEAL_FIELD, '=', String(dealId)], ['docstatus', '!=', 2]]);
 	const out: ErpRealization[] = [];
 	for (const h of heads) {
@@ -300,6 +348,9 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 			itemName: String(it['item_name'] ?? ''),
 			qty: Number(it['qty'] ?? 0),
 			storeTitle: b24StoreTitle(ctx, String(it['warehouse'] ?? '')),
+			rate: Number(it['rate'] ?? 0),
+			rowName: String(it['name'] ?? ''),
+			sourceRow: String(it['dn_detail'] ?? ''),
 		}));
 		out.push({
 			name: String(h['name']),
@@ -307,6 +358,7 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 			postingDate: String(h['posting_date'] ?? ''),
 			submitted: Number(h['docstatus']) === 1,
 			isReturn: Number(h['is_return'] ?? 0) === 1,
+			returnAgainst: String(h['return_against'] ?? ''),
 			grandTotal: Number(h['grand_total'] ?? 0),
 			items,
 		});
