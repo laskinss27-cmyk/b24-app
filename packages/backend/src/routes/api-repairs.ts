@@ -239,25 +239,8 @@ async function ensureRepairNotifyTask(
  * у платного сумма = «наша цена», у гарантийного сумма = 0; dealId пишется в карточку → дубля нет.
  * Если вид/цена потом меняются — обновляем сумму и позицию у уже созданной сделки (best-effort). Без контакта не создаём.
  * Возвращает результат для подсказки на фронте. Мутирует data.dealId при создании. */
-/** Воронка сделок «Ремонты» (entityTypeId=2). Резолвим по имени (кэш на процесс), создаём если нет.
- * Туда льём сделки ремонтов — отдельно от продаж и без робота-переименователя «Объектов».
- * undefined — ещё не выясняли; number — id; на ошибке не кэшируем (повторим позже). */
-let repairsCategoryId: number | undefined;
-async function ensureRepairsDealCategory(client: B24Client, log: FastifyInstance['log']): Promise<number | null> {
-	if (repairsCategoryId !== undefined) return repairsCategoryId;
-	try {
-		const res = await client.call<{ categories?: Array<{ id: number | string; name: string }> }>('crm.category.list', { entityTypeId: 2 });
-		const found = (res?.categories ?? []).find((c) => String(c.name).trim().toLowerCase() === 'ремонты');
-		if (found) { repairsCategoryId = Number(found.id); return repairsCategoryId; }
-		const added = await client.call<{ category?: { id?: number | string } } | number>('crm.category.add', { entityTypeId: 2, fields: { name: 'Ремонты' } });
-		const id = typeof added === 'number' ? added : Number((added as { category?: { id?: number | string } })?.category?.id ?? 0);
-		if (id > 0) { repairsCategoryId = id; log.info({ id }, '[repairs] воронка сделок «Ремонты» создана'); return id; }
-		return null; // не вышло — не кэшируем, сделка уйдёт в общую воронку
-	} catch (err) {
-		log.warn({}, `[repairs] воронку «Ремонты» получить/создать не вышло — ${errInfo(err)}; сделка уйдёт в общую`);
-		return null;
-	}
-}
+const QUICKSALE_REPAIR_CATEGORY_ID = 6;
+const QUICKSALE_REPAIR_STAGE_ID = 'C6:NEW';
 
 interface DealSyncResult { dealId: number | null; created: boolean; noContact: boolean }
 async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyInstance['log']): Promise<DealSyncResult> {
@@ -271,7 +254,16 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	if (data.dealId) {
 		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
 		try {
-			await client.call('crm.deal.update', { id: data.dealId, fields: { TITLE: objectName, OPPORTUNITY: price, [DEAL_OBJECT_NAME_FIELD]: objectName } });
+			await client.call('crm.deal.update', {
+				id: data.dealId,
+				fields: {
+					TITLE: objectName,
+					CATEGORY_ID: QUICKSALE_REPAIR_CATEGORY_ID,
+					STAGE_ID: QUICKSALE_REPAIR_STAGE_ID,
+					OPPORTUNITY: price,
+					[DEAL_OBJECT_NAME_FIELD]: objectName,
+				},
+			});
 			await client.call('crm.deal.productrows.set', { id: data.dealId, rows });
 		} catch (err) { log.warn({}, `[repairs] обновление сделки ${data.dealId} не удалось — ${errInfo(err)}`); }
 		return { dealId: data.dealId, created: false, noContact: false };
@@ -279,9 +271,15 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	if (!contactId) return { dealId: null, created: false, noContact: true }; // не на кого вешать
 	try {
 		// Имя сделки Б24 собирает как {{ID}}_{{Название объекта}} → кладём осмысленное в поле «Название объекта».
-		const categoryId = await ensureRepairsDealCategory(client, log);
-		const fields: Record<string, unknown> = { TITLE: objectName, CONTACT_ID: contactId, OPPORTUNITY: price, CURRENCY_ID: 'RUB', [DEAL_OBJECT_NAME_FIELD]: objectName };
-		if (categoryId) fields['CATEGORY_ID'] = categoryId; // отдельная воронка «Ремонты»
+		const fields: Record<string, unknown> = {
+			TITLE: objectName,
+			CONTACT_ID: contactId,
+			CATEGORY_ID: QUICKSALE_REPAIR_CATEGORY_ID,
+			STAGE_ID: QUICKSALE_REPAIR_STAGE_ID,
+			OPPORTUNITY: price,
+			CURRENCY_ID: 'RUB',
+			[DEAL_OBJECT_NAME_FIELD]: objectName,
+		};
 		const added = await client.call<number | { id?: number }>('crm.deal.add', { fields });
 		const did = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 		if (!did) throw new Error('crm.deal.add не вернул id');

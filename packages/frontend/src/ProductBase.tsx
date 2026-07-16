@@ -230,7 +230,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 				{err && <div className="new-product-error">{err}</div>}
 				<div className="new-product-actions">
 					<button type="button" className="btn-secondary" onClick={onClose}>Отмена</button>
-					<button type="button" className="btn-primary" disabled={!canCreate} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать и выбрать'}</button>
+					<button type="button" className="btn-primary" disabled={!canCreate} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать товар'}</button>
 				</div>
 			</div>
 		</div>
@@ -255,7 +255,7 @@ export interface ProductPicker {
 	onlyStockDefault?: boolean;
 }
 
-export function ProductBase({ picker, readOnly = false }: { picker?: ProductPicker; readOnly?: boolean } = {}): JSX.Element {
+export function ProductBase({ picker, readOnly = false, allowCreateProduct = false }: { picker?: ProductPicker; readOnly?: boolean; allowCreateProduct?: boolean } = {}): JSX.Element {
 	const pickMode = !!picker;
 	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
@@ -430,7 +430,7 @@ export function ProductBase({ picker, readOnly = false }: { picker?: ProductPick
 	}
 	function useCatalogProduct(row: BaseRow): void {
 		setRows((current) => current.some((item) => item.id === row.id) ? current : [...current, row]);
-		setCart((current) => new Map(current).set(row.id, current.get(row.id) ?? 1));
+		if (pickMode || canQuickSale) setCart((current) => new Map(current).set(row.id, current.get(row.id) ?? 1));
 		setOnlyStock(false);
 		setQ(row.name);
 		setShowNewProduct(false);
@@ -548,7 +548,7 @@ export function ProductBase({ picker, readOnly = false }: { picker?: ProductPick
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
-				{pickMode && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
+				{(pickMode || allowCreateProduct) && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && !readOnly && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
@@ -628,7 +628,7 @@ export function ProductBase({ picker, readOnly = false }: { picker?: ProductPick
 					</div>
 				)}
 
-			{pickMode && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
+			{(pickMode || allowCreateProduct) && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
 
 				{!pickMode && showCart && (
 				<div className="cart-overlay" onClick={() => setShowCart(false)}>
