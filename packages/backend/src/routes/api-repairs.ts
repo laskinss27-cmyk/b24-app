@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
+import { bindRepairsUriPlacement, ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { receiveRepairUnit, renameRepairItem, moveRepairUnit, deliverRepairUnit, fetchErpStoreStockFull } from '../erp/operations.js';
@@ -586,10 +586,14 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
 	const repairLink = (id: number, repairNo: number): string => {
-		const base = String(process.env['REPAIRS_SECTION_URL'] ?? '').trim()
-			|| `https://${app.config.portalDomain}/devops/placement/574/`;
+		const configuredBase = String(process.env['REPAIRS_SECTION_URL'] ?? '').trim();
+		const appCode = String(app.config.appClientId ?? '').trim();
+		const base = configuredBase
+			|| (appCode
+				? `https://${app.config.portalDomain}/marketplace/view/${encodeURIComponent(appCode)}/`
+				: `https://${app.config.portalDomain}/devops/placement/568/`);
 		const url = new URL(base);
-		url.searchParams.set('repairId', String(id));
+		url.searchParams.set(base.includes('/marketplace/view/') ? 'params[repairId]' : 'repairId', String(id));
 		return `[URL=${url.toString()}]Открыть ремонт #${repairNo || id}[/URL]`;
 	};
 	const rub = (value: number | null): string => value == null ? '—' : `${value.toLocaleString('ru-RU')} ₽`;
@@ -932,6 +936,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.history = Array.isArray(data.history) ? data.history : [];
 			const title = [data.device, data.model].filter(Boolean).join(' ') || 'оборудование';
 			const customerPrice = data.ourPrice ?? data.cost;
+			const uriPlacement = await bindRepairsUriPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+			if (!['bound', 'already-bound'].includes(uriPlacement.status)) {
+				return reply.code(400).send({ ok: false, error: `не удалось подготовить ссылку на ремонт: ${uriPlacement.status}` });
+			}
 			const message = [
 				`[B]Согласуйте стоимость ремонта с клиентом[/B]`,
 				`Ремонт #${data.repairNo || id}: ${title}`,

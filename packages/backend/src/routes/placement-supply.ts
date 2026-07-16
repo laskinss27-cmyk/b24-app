@@ -21,7 +21,11 @@ export function registerPlacementSupplyRoute(app: FastifyInstance): void {
 			return reply.code(403).send('forbidden');
 		}
 		const baseContext = buildSupplyContext(parsed.data);
-		const ctx = { ...baseContext, transferId: query.success ? (query.data.transfer ?? baseContext.transferId) : baseContext.transferId };
+		const ctx = {
+			...baseContext,
+			transferId: query.success ? (query.data.transfer ?? baseContext.transferId) : baseContext.transferId,
+			repairId: query.success ? (query.data.repairId ?? baseContext.repairId) : baseContext.repairId,
+		};
 		app.log.info({ view: ctx.view }, '[placement/supply] opened');
 		const indexHtml = await app.readFrontendIndex();
 		if (!indexHtml) {

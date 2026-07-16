@@ -97,8 +97,11 @@ function parseIdFromOptions(raw: string | undefined, keys: string[]): number | n
 	}
 }
 
-export function parsePlacementOptions(raw: string | undefined): { dealId: number | null } {
-	return { dealId: parseIdFromOptions(raw, ['ID']) };
+export function parsePlacementOptions(raw: string | undefined): { dealId: number | null; repairId: number | null } {
+	return {
+		dealId: parseIdFromOptions(raw, ['ID']),
+		repairId: parseIdFromOptions(raw, ['repairId', 'REPAIR_ID']),
+	};
 }
 
 /** Контекст для placement сделки (CRM_DEAL_DETAIL_TAB): dealId из {ID}. */
@@ -152,6 +155,7 @@ export function buildRepairsContext(body: PlacementBody): PlacementContext {
 	return {
 		dealId: null,
 		taskId: null,
+		repairId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['repairId', 'REPAIR_ID']),
 		view: 'repairs',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,
@@ -177,6 +181,7 @@ export function buildSupplyContext(body: PlacementBody): PlacementContext {
 		dealId: null,
 		taskId: null,
 		transferId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['transfer', 'TRANSFER']),
+		repairId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['repairId', 'REPAIR_ID']),
 		view: 'supply',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,

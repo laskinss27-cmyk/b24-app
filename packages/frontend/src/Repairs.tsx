@@ -324,6 +324,12 @@ export function Repairs(): JSX.Element {
 						setRepairs((prev) => prev.map((x) => (x.id === res.repair.id ? res.repair : x)));
 						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact };
 					}}
+					onSetIssueStore={async (store) => {
+						const issueStore = ctx.__mock ? (store || null) : await setRepairIssueStore(screen.repair.id, store);
+						const next = { ...screen.repair, issueStore };
+						setScreen({ k: 'card', repair: next });
+						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
+					}}
 					onDelete={async () => {
 						const id = screen.repair.id;
 						if (!ctx.__mock) await deleteRepair(id);
@@ -765,8 +771,8 @@ function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () =
 	);
 }
 
-function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onDelete: () => Promise<void>;
+function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSetIssueStore, onDelete }: {
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
@@ -803,10 +809,17 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 		try { await onStatus(s); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
 	}
 	async function changeIssue(store: string): Promise<void> {
+		const previous = issueVal;
 		setIssueVal(store);
-		if (mock) return;
 		setIssueBusy(true); setStErr(null);
-		try { await setRepairIssueStore(repair.id, store); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setIssueBusy(false); }
+		try {
+			await onSetIssueStore(store);
+		} catch (e: unknown) {
+			setIssueVal(previous);
+			setStErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setIssueBusy(false);
+		}
 	}
 	async function changePay(p: 'warranty' | 'paid'): Promise<void> {
 		if (p === repair.payType) return;

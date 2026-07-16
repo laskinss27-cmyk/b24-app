@@ -3,9 +3,10 @@ import {
 	PlacementBodySchema,
 	PlacementQuerySchema,
 	extractInstallAuth,
+	parsePlacementOptions,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, bindRepairsUriPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -102,6 +103,32 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			return reply.code(403).type('text/html; charset=utf-8').send(renderHtml('no-auth'));
 		}
 
+		const placementOptions = parsePlacementOptions(body.PLACEMENT_OPTIONS);
+		if (placementOptions.repairId) {
+			const indexHtml = await app.readFrontendIndex();
+			if (!indexHtml) {
+				return reply.code(503).type('text/html; charset=utf-8').send('<!doctype html><html lang="ru"><body><h1>Фронт ещё не собран</h1></body></html>');
+			}
+			const ctxJson = JSON.stringify({
+				dealId: null,
+				taskId: null,
+				repairId: placementOptions.repairId,
+				view: 'repairs',
+				domain: body.DOMAIN ?? null,
+				memberId: body.member_id ?? null,
+				placement: body.PLACEMENT ?? null,
+			})
+				.replace(/</g, '\\u003c')
+				.replace(/>/g, '\\u003e')
+				.replace(/&/g, '\\u0026');
+			const inject = `
+	<script src="//api.bitrix24.com/api/v1/"></script>
+	<script>window.__B24_CONTEXT__ = ${ctxJson};</script>
+`;
+			app.log.info({ repairId: placementOptions.repairId }, '[app/handler] repair deep link opened');
+			return reply.code(200).type('text/html; charset=utf-8').send(indexHtml.replace('</head>', `${inject}</head>`));
+		}
+
 		const auth = extractInstallAuth(body, query);
 		let status: Status = 'idle';
 		let taskInfo = '';
@@ -157,8 +184,9 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			// 3.5) Пункт «Ремонты» (левое меню) + хранилище ctv_repairs — независимо, не ломает остальное.
 			try {
 				const rep = await bindRepairsMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				const repUri = await bindRepairsUriPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				const repEnt = await ensureRepairsEntity(client);
-				app.log.info({ menu: rep.status, entity: repEnt.status }, '[app/handler] repairs menu + entity');
+				app.log.info({ menu: rep.status, uri: repUri.status, entity: repEnt.status }, '[app/handler] repairs menu + uri + entity');
 			} catch (err) {
 				app.log.error({}, `[app/handler] repairs bind failed — ${err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err)}`);
 			}

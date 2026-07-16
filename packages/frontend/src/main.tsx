@@ -21,9 +21,11 @@ if (!root) {
 //  - dealId (placement сделки) → вкладка товаров сделки.
 // ProductBase сам решает по канарейке: бета (Сергей) → База товаров, остальные → GA-инвентаризация.
 const ctx = getContext();
+const repairId = Number(new URLSearchParams(window.location.search).get('repairId') ?? 0);
+const opensRepair = (Number.isInteger(repairId) && repairId > 0) || (Number.isInteger(ctx.repairId) && Number(ctx.repairId) > 0);
 
 createRoot(root).render(
 	<StrictMode>
-		{ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
+		{opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
 	</StrictMode>,
 );

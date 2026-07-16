@@ -396,6 +396,29 @@ export async function ensureTransferRequestsEntity(client: B24Client): Promise<{
  * этот пункт живёт рядом с «Товары». Только идемпотентный bind (без unbind — см. инцидент гонки 2026-06-03).
  */
 export const REPAIRS_MENU_TITLE = 'Ремонты';
+export const REPAIRS_URI_PLACEMENT = 'REST_APP_URI';
+
+export async function bindRepairsUriPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/repairs`;
+	try {
+		await opts.client.call('placement.bind', {
+			PLACEMENT: REPAIRS_URI_PLACEMENT,
+			HANDLER: handlerUrl,
+			TITLE: REPAIRS_MENU_TITLE,
+			LANG_ALL: {
+				ru: { TITLE: REPAIRS_MENU_TITLE },
+				en: { TITLE: 'Repairs' },
+			},
+		});
+		return { status: 'bound' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
 
 /** Пункт ЛЕВОГО МЕНЮ «Складской учёт» — окно перемещений/списаний/оприходований/реализаций (view='stock').
  *  LEFT_MENU допускает несколько привязок; живёт рядом с «Продажа» и «Ремонты». Только идемпотентный bind. */
