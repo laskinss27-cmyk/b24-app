@@ -1788,6 +1788,16 @@ export async function uploadRepairFile(file: File): Promise<RepairFile | null> {
 	return { ...json.photo, type: file.type || '' };
 }
 
+export async function getRepairFileUrl(id: number): Promise<string> {
+	const res = await fetch('/api/repairs/file-link', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; url?: string };
+	if (!json.ok || !json.url) throw new Error(json.error ?? 'не удалось получить ссылку на файл');
+	return json.url;
+}
+
 /** Быстрая смена вида ремонта платный↔гарантийный (+ цена СЦ и наша цена при платном).
  * При простановке «нашей цены» сервер сам заводит/обновляет сделку → возвращает dealId/флаги. */
 /** Задать склад выдачи (на странице просмотра). При «Готово к выдаче» сервер перемещает аппарат на него. */

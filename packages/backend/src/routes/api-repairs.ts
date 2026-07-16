@@ -1116,8 +1116,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 	app.get('/api/repairs/file/:id', async (req, reply) => {
 		const id = Number((req.params as { id?: string }).id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad file id' });
-		const client = systemClient();
-		if (!client) return reply.code(503).send({ ok: false, error: 'нет системного доступа к Б24 Диску' });
+		const client = systemClient() ?? clientFrom(req.query as AuthBody);
+		if (!client) return reply.code(403).send({ ok: false, error: 'нет доступа к Б24 Диску' });
 		try {
 			const file = await client.call<Record<string, unknown>>('disk.file.get', { id });
 			const url = String(file?.['DOWNLOAD_URL'] ?? file?.['downloadUrl'] ?? file?.['DETAIL_URL'] ?? '');
@@ -1126,6 +1126,23 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.warn({ fileId: id }, `[api/repairs/file] failed — ${errInfo(err)}`);
 			return reply.code(404).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/repairs/file-link', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
+		const id = Number(b.id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad file id' });
+		const client = systemClient() ?? clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'нет доступа к Б24 Диску' });
+		try {
+			const file = await client.call<Record<string, unknown>>('disk.file.get', { id });
+			const url = String(file?.['DOWNLOAD_URL'] ?? file?.['downloadUrl'] ?? file?.['DETAIL_URL'] ?? '');
+			if (!url) return reply.code(404).send({ ok: false, error: 'ссылка на файл не получена' });
+			return { ok: true, url };
+		} catch (err) {
+			app.log.warn({ fileId: id }, `[api/repairs/file-link] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
 

@@ -12,6 +12,7 @@ import {
 	requestRepairPriceApproval,
 	setRepairIssueStore,
 	deleteRepair,
+	getRepairFileUrl,
 	searchRepairContacts,
 	findRepairContactByPhone,
 	createPresaleRepair,
@@ -122,6 +123,19 @@ function repairCompleteness(r: Repair): string {
 }
 function repairFileHref(file: RepairFile | RepairPhoto): string {
 	return file.id > 0 ? `/api/repairs/file/${file.id}` : file.url;
+}
+
+async function openRepairFile(file: RepairFile): Promise<void> {
+	const win = window.open('', '_blank');
+	try {
+		const url = file.id > 0 ? await getRepairFileUrl(file.id) : file.url;
+		if (!url) throw new Error('ссылка на файл пустая');
+		if (win) win.location.href = url;
+		else window.open(url, '_blank', 'noopener,noreferrer');
+	} catch (error) {
+		if (win) win.close();
+		window.alert(String(error instanceof Error ? error.message : error));
+	}
 }
 
 /** Фото → ужатый data-URL (хранится в нашем store; Диск Б24 недоступен — нет scope). */
@@ -920,7 +934,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 					<span className="rc-label">Документы</span>
 					<div className="rc-files-list">
 						{repair.files.map((f, i) => (
-							<a key={`${f.id}-${i}`} className="rc-file" href={repairFileHref(f)} target="_blank" rel="noreferrer">📄 {f.name}</a>
+							<a key={`${f.id}-${i}`} className="rc-file" href={f.url || '#'} onClick={(event) => { event.preventDefault(); void openRepairFile(f); }}>📄 {f.name}</a>
 						))}
 					</div>
 				</div>
