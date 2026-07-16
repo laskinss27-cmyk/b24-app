@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
@@ -65,6 +65,7 @@ const MOCK_ROWS: BaseRow[] = [
 ];
 
 type SortKey = 'id' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
+type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number; qty: number }> };
 
 /**
  * Поле ввода количества с локальным состоянием: можно очистить и вписать своё, не теряя
@@ -279,6 +280,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
 	const [q, setQ] = useState('');
+	const deferredQ = useDeferredValue(q);
 	const [onlyStock, setOnlyStock] = useState(picker?.onlyStockDefault ?? true);
 	/** Фильтр вида позиции для удобства подбора: все / только товары / только услуги (работы). */
 	const [kind, setKind] = useState<'all' | 'goods' | 'services'>(picker?.kindFilter ?? 'all');
@@ -327,29 +329,30 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 
 	const isAll = store === ALL;
 	const sid = isAll ? null : Number(store);
-
-	const view = useMemo(() => {
-		const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-		let list = rows.filter((d) => d.id !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID).map((d) => {
-			const qty = isAll ? d.total : (d.stockByStore[sid as number] ?? 0);
-			// Показываем ВСЕ склады с остатком, включая выбранный (его подсветим) — чтобы не было
-			// «остаток 1, а по складам прочерк», когда товар лежит только на выбранном складе.
-			const others = Object.entries(d.stockByStore)
+	const indexedRows = useMemo<IndexedRow[]>(() => rows
+		.filter((d) => d.id !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)
+		.map((d) => ({
+			d,
+			search: `${d.id} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''}`.toLowerCase(),
+			stockEntries: Object.entries(d.stockByStore)
 				.map(([s, n]) => ({ id: Number(s), qty: n }))
 				.filter((o) => o.qty > 0)
-				.sort((a, b) => b.qty - a.qty);
-			return { d, qty, others };
-		});
+				.sort((a, b) => b.qty - a.qty),
+		})), [rows]);
+
+	const view = useMemo(() => {
+		const words = deferredQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+		let list = indexedRows;
 		// Фильтр остатка к услугам не применяем — у работ остатка нет (иначе «Услуги» давали бы пусто).
-		if (onlyStock && kind !== 'services') list = list.filter((r) => r.qty > 0 || r.d.isService);
 		if (kind === 'goods') list = list.filter((r) => !r.d.isService);
 		else if (kind === 'services') list = list.filter((r) => r.d.isService);
 		if (words.length) {
-			list = list.filter((r) => {
-				const hay = `${r.d.id} ${r.d.name} ${r.d.article ?? ''} ${r.d.manufacturer ?? ''} ${r.d.model ?? ''} ${r.d.sectionName ?? ''}`.toLowerCase();
-				return words.every((w) => hay.includes(w));
-			});
+			list = list.filter((r) => words.every((w) => r.search.includes(w)));
 		}
+		if (onlyStock && kind !== 'services') {
+			list = list.filter((r) => (isAll ? r.d.total : (r.d.stockByStore[sid as number] ?? 0)) > 0 || r.d.isService);
+		}
+		const withQty = list.map((r) => ({ d: r.d, qty: isAll ? r.d.total : (r.d.stockByStore[sid as number] ?? 0), others: r.stockEntries }));
 		const val = (r: { d: BaseRow; qty: number }): string | number => {
 			switch (sortKey) {
 				case 'id': return r.d.id;
@@ -363,14 +366,14 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				case 'total': return r.d.total;
 			}
 		};
-		list.sort((a, b) => {
+		withQty.sort((a, b) => {
 			const x = val(a);
 			const y = val(b);
 			if (typeof x === 'number' && typeof y === 'number') return (x - y) * sortDir;
 			return String(x).localeCompare(String(y), 'ru') * sortDir;
 		});
-		return list;
-	}, [rows, q, onlyStock, kind, isAll, sid, sortKey, sortDir]);
+		return withQty;
+	}, [indexedRows, deferredQ, onlyStock, kind, isAll, sid, sortKey, sortDir]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
