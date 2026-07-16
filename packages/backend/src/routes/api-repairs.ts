@@ -577,6 +577,9 @@ async function assignRepairNo(client: B24Client, log: FastifyInstance['log']): P
 }
 
 export function registerApiRepairsRoute(app: FastifyInstance): void {
+	const systemClient = (): B24Client | null => app.config.devWebhook
+		? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+		: null;
 	const clientFrom = (body: AuthBody): B24Client | null => {
 		if (!body.domain || !body.accessToken) return null;
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
@@ -1110,6 +1113,22 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 
 	// Загрузка фото на Б24 Диск (хранилище приложения). Возвращает ссылку для карточки.
 	// Best-effort: если Диск недоступен — фронт сохранит ремонт без фото.
+	app.get('/api/repairs/file/:id', async (req, reply) => {
+		const id = Number((req.params as { id?: string }).id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad file id' });
+		const client = systemClient();
+		if (!client) return reply.code(503).send({ ok: false, error: 'нет системного доступа к Б24 Диску' });
+		try {
+			const file = await client.call<Record<string, unknown>>('disk.file.get', { id });
+			const url = String(file?.['DOWNLOAD_URL'] ?? file?.['downloadUrl'] ?? file?.['DETAIL_URL'] ?? '');
+			if (!url) return reply.code(404).send({ ok: false, error: 'ссылка на файл не получена' });
+			return reply.redirect(url);
+		} catch (err) {
+			app.log.warn({ fileId: id }, `[api/repairs/file] failed — ${errInfo(err)}`);
+			return reply.code(404).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
 	app.post('/api/repairs/upload-photo', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { fileName?: unknown; content?: unknown };
 		const client = clientFrom(b);
@@ -1130,7 +1149,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const photo: RepairPhoto = {
 				id: Number(file?.['ID']) || 0,
 				name: String(file?.['NAME'] ?? fileName),
-				url: String(file?.['DOWNLOAD_URL'] ?? file?.['DETAIL_URL'] ?? ''),
+				url: Number(file?.['ID']) > 0 ? `/api/repairs/file/${Number(file?.['ID'])}` : String(file?.['DOWNLOAD_URL'] ?? file?.['DETAIL_URL'] ?? ''),
 			};
 			app.log.info({ id: photo.id }, '[api/repairs/upload-photo] ok');
 			return { ok: true, photo };

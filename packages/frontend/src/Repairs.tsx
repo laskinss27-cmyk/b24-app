@@ -120,6 +120,9 @@ function repairCompleteness(r: Repair): string {
 	const match = value.match(/(?:комплект(?:ация)?|в комплекте)\s*[:—-]?\s*(.+)$/i);
 	return match?.[1]?.trim() || value || '—';
 }
+function repairFileHref(file: RepairFile | RepairPhoto): string {
+	return file.id > 0 ? `/api/repairs/file/${file.id}` : file.url;
+}
 
 /** Фото → ужатый data-URL (хранится в нашем store; Диск Б24 недоступен — нет scope). */
 async function fileToPhoto(file: File, maxPx = 1280, quality = 0.7): Promise<RepairPhoto> {
@@ -917,7 +920,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 					<span className="rc-label">Документы</span>
 					<div className="rc-files-list">
 						{repair.files.map((f, i) => (
-							<a key={`${f.id}-${i}`} className="rc-file" href={f.url} target="_blank" rel="noreferrer">📄 {f.name}</a>
+							<a key={`${f.id}-${i}`} className="rc-file" href={repairFileHref(f)} target="_blank" rel="noreferrer">📄 {f.name}</a>
 						))}
 					</div>
 				</div>
@@ -925,7 +928,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 
 			{repair.photos.length > 0 && (
 				<div className="rf-photos">
-					{repair.photos.map((p, i) => <div key={`${p.id}-${i}`} className="rf-photo"><img src={p.url} alt={p.name} /></div>)}
+					{repair.photos.map((p, i) => <div key={`${p.id}-${i}`} className="rf-photo"><img src={repairFileHref(p)} alt={p.name} /></div>)}
 				</div>
 			)}
 
