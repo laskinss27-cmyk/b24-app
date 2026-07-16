@@ -4,6 +4,7 @@ import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { receiveRepairUnit, renameRepairItem, moveRepairUnit, deliverRepairUnit, fetchErpStoreStockFull } from '../erp/operations.js';
+import { sendStoreChatMessage } from '../transfers/chats.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -583,6 +584,14 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
+	const repairLink = (id: number, repairNo: number): string => {
+		const base = String(process.env['REPAIRS_SECTION_URL'] ?? '').trim()
+			|| `https://${app.config.portalDomain}/devops/placement/574/`;
+		const url = new URL(base);
+		url.searchParams.set('repairId', String(id));
+		return `[URL=${url.toString()}]Открыть ремонт #${repairNo || id}[/URL]`;
+	};
+	const rub = (value: number | null): string => value == null ? '—' : `${value.toLocaleString('ru-RU')} ₽`;
 
 	// Список ремонтов (+ идемпотентно создаёт хранилище, если его ещё нет).
 	app.post('/api/repairs/list', async (req, reply) => {
@@ -890,6 +899,66 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			return { ok: true, payType: data.payType, cost: data.cost, ourPrice: data.ourPrice, dealId: data.dealId, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/set-pay] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/repairs/request-price-approval', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown; cost?: unknown; ourPrice?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		try {
+			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
+			const raw = (items ?? [])[0];
+			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
+			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+			const me = await currentUser(client);
+			if (!me.canEditPrice) {
+				return reply.code(403).send({ ok: false, error: 'отправить цену на согласование может только снабжение / руководитель' });
+			}
+			const point = String(data.point ?? '').trim();
+			if (!point) return reply.code(400).send({ ok: false, error: 'у ремонта не указана точка приёма' });
+			const reqCost = b.cost != null && b.cost !== '' && Number.isFinite(Number(b.cost)) ? Number(b.cost) : null;
+			const reqOur = b.ourPrice != null && b.ourPrice !== '' && Number.isFinite(Number(b.ourPrice)) ? Number(b.ourPrice) : null;
+			if (reqCost == null && reqOur == null) {
+				return reply.code(400).send({ ok: false, error: 'сначала укажи цену ремонта' });
+			}
+			data.payType = 'paid';
+			data.cost = reqCost;
+			data.ourPrice = reqOur;
+			data.history = Array.isArray(data.history) ? data.history : [];
+			const title = [data.device, data.model].filter(Boolean).join(' ') || 'оборудование';
+			const customerPrice = data.ourPrice ?? data.cost;
+			const message = [
+				`[B]Согласуйте стоимость ремонта с клиентом[/B]`,
+				`Ремонт #${data.repairNo || id}: ${title}`,
+				data.serial ? `Серийный номер: ${data.serial}` : '',
+				data.client?.name ? `Клиент: ${data.client.name}${data.client.phone ? `, ${data.client.phone}` : ''}` : '',
+				`Цена для согласования: ${rub(customerPrice)}`,
+				data.cost != null && data.ourPrice != null && data.cost !== data.ourPrice ? `Цена СЦ: ${rub(data.cost)}` : '',
+				'',
+				repairLink(id, data.repairNo),
+			].filter(Boolean).join('\n');
+			const notificationClient = app.config.devWebhook
+				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+				: client;
+			const sent = await sendStoreChatMessage(notificationClient, point, message);
+			if (!sent) return reply.code(400).send({ ok: false, error: `для точки «${point}» не найден чат` });
+			data.history.push({
+				at: new Date().toISOString(),
+				status: data.status,
+				byId: me.id,
+				byName: me.name,
+				note: `цена отправлена на согласование: ${rub(customerPrice)}`,
+			});
+			const dealSync = await syncRepairDeal(client, data, app.log);
+			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
+			app.log.info({ id, point }, '[api/repairs/request-price-approval] ok');
+			return { ok: true, repair: { id, name: String(raw['NAME'] ?? ''), ...data }, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
+		} catch (err) {
+			app.log.error({}, `[api/repairs/request-price-approval] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

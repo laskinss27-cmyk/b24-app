@@ -30,6 +30,7 @@ export const PlacementQuerySchema = z.object({
 	LANG: z.string().optional(),
 	PROTOCOL: z.string().optional(),
 	transfer: z.coerce.number().int().positive().optional(),
+	repairId: z.coerce.number().int().positive().optional(),
 });
 
 export type PlacementQuery = z.infer<typeof PlacementQuerySchema>;
@@ -71,6 +72,7 @@ export interface PlacementContext {
 	dealId: number | null;
 	taskId: number | null;
 	transferId?: number | null;
+	repairId?: number | null;
 	/** 'inventory' — инвентаризация; 'salesReport' — отчёт по продажам; 'repairs' — ремонты; 'stock' — складской учёт; 'supply' — рабочее место снабженца («Снаб»). */
 	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply';
 	domain: string | null;

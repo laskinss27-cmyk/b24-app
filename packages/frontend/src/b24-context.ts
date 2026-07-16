@@ -9,6 +9,8 @@ export interface B24Context {
 	taskId?: number | null;
 	/** Перемещение, которое нужно открыть сразу (переход из сообщения складского чата). */
 	transferId?: number | null;
+	/** Ремонт, который нужно открыть сразу (переход из сообщения в чате точки). */
+	repairId?: number | null;
 	/** какой экран рендерить. 'inventory' — модуль (левое меню); 'mobileCount' — мобильный подсчёт (/m); 'salesReport' — отчёт по продажам (меню сделок); 'repairs' — ремонты (левое меню). */
 	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | null;
 	domain: string | null;

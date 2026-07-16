@@ -24,7 +24,8 @@ export function registerPlacementRepairsRoute(app: FastifyInstance): void {
 			return reply.code(403).send('forbidden');
 		}
 
-		const ctx = buildRepairsContext(parsed.data);
+		const baseContext = buildRepairsContext(parsed.data);
+		const ctx = { ...baseContext, repairId: query.success ? (query.data.repairId ?? baseContext.repairId) : baseContext.repairId };
 		app.log.info({ view: ctx.view }, '[placement/repairs] opened');
 
 		const indexHtml = await app.readFrontendIndex();

@@ -1797,6 +1797,16 @@ export async function setRepairPayType(id: number, payType: 'warranty' | 'paid',
 	return { payType: json.payType ?? payType, cost: json.cost ?? null, ourPrice: json.ourPrice ?? null, dealId: json.dealId ?? null, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact) };
 }
 
+export async function requestRepairPriceApproval(id: number, cost: number | null, ourPrice: number | null): Promise<{ repair: Repair; dealCreated: boolean; dealNoContact: boolean }> {
+	const res = await fetch('/api/repairs/request-price-approval', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, cost, ourPrice }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; dealCreated?: boolean; dealNoContact?: boolean };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось отправить цену на согласование');
+	return { repair: json.repair, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact) };
+}
+
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */
 const DEFAULT_INITIATORS = ['1', '986'];
 

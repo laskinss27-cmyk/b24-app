@@ -9,6 +9,7 @@ import {
 	updateRepair,
 	updateRepairStatus,
 	setRepairPayType,
+	requestRepairPriceApproval,
 	setRepairIssueStore,
 	deleteRepair,
 	searchRepairContacts,
@@ -166,6 +167,8 @@ export function Repairs(): JSX.Element {
 	const [dispatchContact, setDispatchContact] = useState<DispatchContact>({ name: '', phone: '' });
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
+	const [deepLinkHandled, setDeepLinkHandled] = useState(false);
+	const queryRepairId = Number(new URLSearchParams(window.location.search).get('repairId') ?? 0);
 
 	async function load(): Promise<void> {
 		setErr(null);
@@ -210,6 +213,15 @@ export function Repairs(): JSX.Element {
 		bx.init(() => { setPhase({ k: 'ready' }); void load(); });
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ctx]);
+
+	useEffect(() => {
+		const repairId = Number(ctx.repairId ?? queryRepairId);
+		if (deepLinkHandled || !Number.isInteger(repairId) || repairId <= 0 || repairs.length === 0) return;
+		const repair = repairs.find((row) => row.id === repairId || repairNo(row) === repairId);
+		if (!repair) return;
+		setDeepLinkHandled(true);
+		setScreen({ k: 'card', repair });
+	}, [ctx.repairId, deepLinkHandled, queryRepairId, repairs]);
 
 	if (phase.k === 'init') return <Shell><p className="base-load">Загрузка…</p></Shell>;
 
@@ -287,6 +299,14 @@ export function Repairs(): JSX.Element {
 						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
 						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact };
 					}}
+					onRequestPriceApproval={async (cost, ourPrice) => {
+						const res = ctx.__mock
+							? { repair: { ...screen.repair, payType: 'paid' as const, cost, ourPrice }, dealCreated: false, dealNoContact: false }
+							: await requestRepairPriceApproval(screen.repair.id, cost, ourPrice);
+						setScreen({ k: 'card', repair: res.repair });
+						setRepairs((prev) => prev.map((x) => (x.id === res.repair.id ? res.repair : x)));
+						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact };
+					}}
 					onDelete={async () => {
 						const id = screen.repair.id;
 						if (!ctx.__mock) await deleteRepair(id);
@@ -325,7 +345,10 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onPrintSelected, onR
 		return repairs.filter((r) => {
 			if (st !== 'all' && r.status !== st) return false;
 			if (!words.length) return true;
-			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment} ${r.internalComment ?? ''}`.toLowerCase();
+			const status = STATUS_LABEL[r.status] ?? r.status;
+			const history = (r.history ?? []).map((h) => `${h.byName ?? h.byId ?? ''} ${h.note ?? ''} ${STATUS_LABEL[h.status] ?? h.status}`).join(' ');
+			const files = (r.files ?? []).map((file) => file.name).join(' ');
+			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment} ${r.internalComment ?? ''} ${r.createdByName} ${r.createdById} ${r.dealId ?? ''} ${r.taskId ?? ''} ${status} ${files} ${history}`.toLowerCase();
 			return words.every((w) => hay.includes(w));
 		});
 	}, [repairs, q, st]);
@@ -725,8 +748,8 @@ function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () =
 	);
 }
 
-function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIssuePrint, onStatus, onSetPay, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onDelete: () => Promise<void>;
+function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onDelete }: {
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
@@ -776,6 +799,17 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 	async function savePrices(): Promise<void> {
 		setPayBusy(true); setStErr(null);
 		try { reactDeal(await onSetPay('paid', costNum(), ourNum())); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setPayBusy(false); }
+	}
+	async function sendPriceApproval(): Promise<void> {
+		setPayBusy(true); setStErr(null);
+		try {
+			reactDeal(await onRequestPriceApproval(costNum(), ourNum()));
+			setDealMsg('Цена отправлена на согласование в чат точки.');
+		} catch (e: unknown) {
+			setStErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setPayBusy(false);
+		}
 	}
 	async function remove(): Promise<void> {
 		if (busy) return;
@@ -833,6 +867,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 							<input type="number" min="0" step="1" value={costVal} placeholder="цена СЦ, ₽" disabled={payBusy} onChange={(e) => setCostVal(e.target.value)} title="Цена ремонта СЦ" />
 							<input type="number" min="0" step="1" value={ourVal} placeholder="наша цена, ₽" disabled={payBusy} onChange={(e) => setOurVal(e.target.value)} title="Наша цена (→ сделка)" />
 							<button className="btn-secondary" disabled={payBusy} onClick={() => void savePrices()}>Сохранить ₽</button>
+							<button className="btn-primary" disabled={payBusy || (costNum() == null && ourNum() == null)} onClick={() => void sendPriceApproval()}>Согласовать цену</button>
 						</span>
 					)}
 					{repair.payType === 'paid' && !canEditPrice && (
