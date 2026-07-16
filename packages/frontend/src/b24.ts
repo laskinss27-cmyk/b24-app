@@ -1094,12 +1094,16 @@ export interface TransferDoc {
 }
 
 export type TransferRequestStatus = 'pending' | 'converted' | 'canceled';
+export type TransferRequestKind = 'transfer' | 'supply';
+export interface SupplyRequestLineDto { productId: number | null; name: string; qty: number; link?: string; note?: string }
 export interface TransferRequestDoc {
 	id: number;
 	name: string;
+	kind: TransferRequestKind;
 	fromStore: string;
 	toStore: string;
 	lines: TransferLineDto[];
+	supplyLines: SupplyRequestLineDto[];
 	note: string;
 	status: TransferRequestStatus;
 	createdAt: string;
@@ -1144,6 +1148,16 @@ export async function createTransferRequest(input: { fromStore: string; toStore:
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc };
 	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось создать заказ на перемещение');
+	return json.request;
+}
+
+export async function createSupplyTtRequest(input: { toStore: string; note?: string; lines: SupplyRequestLineDto[] }): Promise<TransferRequestDoc> {
+	const res = await fetch('/api/transfer-requests/create-supply', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc };
+	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось создать заявку снабжению');
 	return json.request;
 }
 

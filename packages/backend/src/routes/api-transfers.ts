@@ -19,7 +19,7 @@ import {
 	type TransferLine,
 	type TransferStatus,
 } from '../transfers/model.js';
-import { newTransferRequestData, parseTransferRequestItem, type StoredTransferRequest, type TransferRequestData } from '../transfers/request-model.js';
+import { newSupplyRequestData, newTransferRequestData, parseTransferRequestItem, type StoredTransferRequest, type SupplyRequestLine, type TransferRequestData } from '../transfers/request-model.js';
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
 
 /**
@@ -233,6 +233,44 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		}
 	});
 
+	app.post('/api/transfer-requests/create-supply', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const toStore = String(b['toStore'] ?? '').trim();
+		const note = String(b['note'] ?? '').trim().slice(0, 500);
+		const rawLines = Array.isArray(b['lines']) ? b['lines'] as Array<Record<string, unknown>> : [];
+		const lines: SupplyRequestLine[] = rawLines.map((line) => {
+			const productId = Number(line['productId']);
+			const qty = Number(line['qty']);
+			return {
+				productId: Number.isInteger(productId) && productId > 0 ? productId : null,
+				name: String(line['name'] ?? '').trim(),
+				qty: Number.isFinite(qty) && qty > 0 ? qty : 0,
+				link: String(line['link'] ?? '').trim(),
+				note: String(line['note'] ?? '').trim(),
+			};
+		}).filter((line) => line.qty > 0 && (line.productId || line.name));
+		if (!toStore) return reply.code(400).send({ ok: false, error: 'нужно выбрать склад' });
+		if (!lines.length) return reply.code(400).send({ ok: false, error: 'добавь хотя бы одну позицию' });
+		await ensureTransferRequestsEntity(client);
+		try {
+			const me = await currentUser(client);
+			const data = newSupplyRequestData({ toStore, lines, ...(note ? { note } : {}), createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name });
+			const draftName = `Заявка снабжению: ${toStore}`;
+			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: draftName, DETAIL_TEXT: JSON.stringify(data) });
+			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+			if (!id) throw new Error('entity.item.add не вернул id');
+			const request = { id, name: `Заявка снабжению #${id}: ${toStore}`, ...data };
+			await saveTransferRequest(client, request);
+			app.log.info({ id, toStore, lines: lines.length }, '[api/transfer-requests/create-supply] ok');
+			return { ok: true, request };
+		} catch (err) {
+			app.log.error({ toStore }, `[api/transfer-requests/create-supply] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
 	app.post('/api/transfer-requests/list', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody;
 		const client = clientFrom(b);
@@ -285,6 +323,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
 			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'создать перемещение по заявке может только снабжение' });
+			if (request.kind !== 'transfer') return reply.code(409).send({ ok: false, error: 'по этой заявке нельзя создать перемещение' });
 			if (request.status !== 'pending') return reply.code(409).send({ ok: false, error: 'заявка уже обработана' });
 			const fromStore = String(b['fromStore'] ?? request.fromStore).trim();
 			const toStore = String(b['toStore'] ?? request.toStore).trim();
