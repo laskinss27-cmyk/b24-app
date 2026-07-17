@@ -725,7 +725,7 @@ function DecisionRows({
 	onAdd: () => void;
 	onRemove: (id: string) => void;
 }): JSX.Element {
-	const entries = stockEntries(item);
+	const entries = stockEntries(item).filter(([store]) => store !== order.toStore);
 	const assigned = decisions.filter(decisionReady).reduce((sum, decision) => sum + decision.qty, 0);
 	const covered = Math.min(assigned, item.qty);
 	const surplus = Math.max(assigned - item.qty, 0);
@@ -812,6 +812,7 @@ function OrdersView({
 	onCreateSupplier,
 	busy,
 	reviewing,
+	creationErrors,
 	onSort,
 	onToggle,
 	onPatch,
@@ -833,6 +834,7 @@ function OrdersView({
 	onCreateSupplier: (name: string) => Promise<string>;
 	busy: string | null;
 	reviewing: string;
+	creationErrors: Record<string, string>;
 	onSort: (sort: SortKey) => void;
 	onToggle: (name: string) => void;
 	onPatch: (key: string, id: string, patch: Partial<DecisionState>) => void;
@@ -884,10 +886,11 @@ function OrdersView({
 						const key = rowKey(order.name, item.productId, index);
 						const transfers = decisionsForRow(decisions, key, item.qty).filter((decision) => decision.action === 'transfer' && decision.fromStore);
 						const transferTotal = transfers.reduce((sum, decision) => sum + decision.qty, 0);
-						const stores = new Map<string, number>();
-						for (const decision of transfers) stores.set(decision.fromStore, (stores.get(decision.fromStore) ?? 0) + decision.qty);
-						const storeErrors = [...stores.entries()].filter(([store, qty]) => qty > Number(item.stocks?.[store] ?? 0)).length;
-						return count + (transferTotal > item.qty ? 1 : 0) + storeErrors;
+							const stores = new Map<string, number>();
+							for (const decision of transfers) stores.set(decision.fromStore, (stores.get(decision.fromStore) ?? 0) + decision.qty);
+							const storeErrors = [...stores.entries()].filter(([store, qty]) => qty > Number(item.stocks?.[store] ?? 0)).length;
+							const destinationErrors = transfers.filter((decision) => decision.fromStore === order.toStore).length;
+							return count + (transferTotal > item.qty ? 1 : 0) + storeErrors + destinationErrors;
 					}, 0);
 					const canCreate = items.length > 0 && readyLines.length > 0 && incompleteCount === 0 && allocationErrorCount === 0 && Boolean(order.toStore) && !busy;
 					const requestState = order.closed
@@ -998,8 +1001,9 @@ function OrdersView({
 												</div>
 											))}
 										</div>
-										{unresolvedCount > 0 && <p className="supply-order-review-note">{unresolvedCount} строк(и) останутся в заявке и не попадут в документы.</p>}
-										<div className="supply-order-review-actions">
+											{unresolvedCount > 0 && <p className="supply-order-review-note">{unresolvedCount} строк(и) останутся в заявке и не попадут в документы.</p>}
+											{creationErrors[order.name] && <p className="supply-order-review-error">{creationErrors[order.name]}</p>}
+											<div className="supply-order-review-actions">
 											<button type="button" disabled={Boolean(busy)} onClick={onCancelReview}>Вернуться к строкам</button>
 											<button className="primary" type="button" disabled={!canCreate} onClick={() => onCreate(order)}>{busy === order.name ? 'Создаю...' : `Подтвердить и создать ${documentCount}`}</button>
 										</div>
@@ -1292,6 +1296,7 @@ export function Supply(): JSX.Element {
 	const [documentBusy, setDocumentBusy] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState('');
 	const [notice, setNotice] = useState<string | null>(null);
+	const [creationErrors, setCreationErrors] = useState<Record<string, string>>({});
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
 	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
@@ -1535,6 +1540,7 @@ export function Supply(): JSX.Element {
 			return;
 		}
 		setBusy(order.name);
+		setCreationErrors((current) => ({ ...current, [order.name]: '' }));
 		try {
 			const transferPlan = decisionGroups(lines, 'transfer');
 			const purchasePlan = decisionGroups(lines, 'purchase');
@@ -1564,6 +1570,7 @@ export function Supply(): JSX.Element {
 				return next;
 			});
 			setReviewing('');
+			setCreationErrors((current) => ({ ...current, [order.name]: '' }));
 			const parts = [
 				createdTransferCount ? `Создано перемещений: ${createdTransferCount} (товар в транзите)` : '',
 				createdPurchaseCount ? `Создано заявок поставщику: ${createdPurchaseCount} (черновики)` : '',
@@ -1572,8 +1579,9 @@ export function Supply(): JSX.Element {
 			setNotice(`Готово. ${parts.join('; ')}.`);
 		} catch (err) {
 			if (!ctx.__mock) await reload().catch(() => undefined);
-			setReviewing('');
-			setNotice(err instanceof Error ? err.message : String(err));
+			const message = err instanceof Error ? err.message : String(err);
+			setCreationErrors((current) => ({ ...current, [order.name]: message }));
+			setNotice(message);
 		} finally {
 			setBusy(null);
 		}
@@ -1631,7 +1639,7 @@ export function Supply(): JSX.Element {
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={setReviewing} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
+				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>

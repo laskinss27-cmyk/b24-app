@@ -5242,6 +5242,15 @@ body.deal-placement-body #root {
 	color: #9a6700;
 }
 
+.supply-order-review-error {
+	margin: 10px 0 0;
+	padding: 9px 11px;
+	border: 1px solid #efb4b4;
+	background: #fff4f4;
+	color: #a62323;
+	font-size: 12px;
+}
+
 .supply-order-review-actions {
 	display: flex;
 	justify-content: flex-end;
