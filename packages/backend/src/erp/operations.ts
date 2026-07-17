@@ -1472,8 +1472,26 @@ export async function itemStockLedger(erp: ErpClient, productId: number, limit =
 	const rows = await erp.list('Stock Ledger Entry',
 		['posting_date', 'actual_qty', 'warehouse', 'voucher_type', 'voucher_no'],
 		[['item_code', '=', String(productId)], ['is_cancelled', '=', 0]], limit, 'posting_date desc, creation desc');
+	// Аварийные ручные коррекции нужны только для тихого выравнивания остатков.
+	// Технический документ остаётся в ERPNext, но в пользовательский журнал не попадает.
+	const recoNos = [...new Set(rows
+		.filter((r) => String(r['voucher_type']) === 'Stock Reconciliation')
+		.map((r) => String(r['voucher_no']))
+		.filter(Boolean))];
+	const hiddenCorrections = new Set<string>();
+	for (let i = 0; i < recoNos.length; i += 100) {
+		const chunk = recoNos.slice(i, i + 100);
+		const recos = await erp.list('Stock Reconciliation', ['name', INV_FIELD], [['name', 'in', chunk]]);
+		for (const reco of recos) {
+			if (String(reco[INV_FIELD] ?? '').startsWith('correction')) hiddenCorrections.add(String(reco['name']));
+		}
+	}
+	const visibleRows = rows.filter((r) => !(
+		String(r['voucher_type']) === 'Stock Reconciliation'
+		&& hiddenCorrections.has(String(r['voucher_no']))
+	));
 	// Для Stock Entry уточняем тип (перемещение/списание/оприходование) пачкой по voucher_no.
-	const steNos = [...new Set(rows.filter((r) => String(r['voucher_type']) === 'Stock Entry').map((r) => String(r['voucher_no'])))];
+	const steNos = [...new Set(visibleRows.filter((r) => String(r['voucher_type']) === 'Stock Entry').map((r) => String(r['voucher_no'])))];
 	const steType = new Map<string, string>();
 	for (let i = 0; i < steNos.length; i += 100) {
 		const chunk = steNos.slice(i, i + 100);
@@ -1490,7 +1508,7 @@ export async function itemStockLedger(erp: ErpClient, productId: number, limit =
 		}
 		return vt;
 	};
-	return rows.map((r) => {
+	return visibleRows.map((r) => {
 		const vt = String(r['voucher_type'] ?? '');
 		const no = String(r['voucher_no'] ?? '');
 		return { date: String(r['posting_date'] ?? ''), doctype: vt, voucherNo: no, kind: label(vt, no), qty: Number(r['actual_qty'] ?? 0), store: b24StoreTitle(ctx, String(r['warehouse'] ?? '')) };
