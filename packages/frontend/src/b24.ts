@@ -664,11 +664,11 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 }
 
 /** Добавить НЕСКОЛЬКО товаров в сделку за раз (корзина пикера → «Готово»). Возвращает кол-во добавленных. */
-export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[]): Promise<number> {
+export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean } = {}): Promise<number> {
 	const res = await fetch('/api/deal/add-products', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, items }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
@@ -877,6 +877,9 @@ export interface DealPlanItem {
 	isService?: boolean;
 }
 
+export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; isService: boolean }
+export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
+
 /** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24.
  *  Ядро не подключено / read-only фолбэк → []. */
 export async function fetchDealPlan(dealId: number): Promise<DealPlanItem[]> {
@@ -977,6 +980,17 @@ export interface SupplyCard {
 	stageId: string;
 	source?: 'b24' | 'core';
 	productIds?: number[];
+}
+
+export async function fetchDealStages(dealId: number): Promise<DealStage[]> {
+	const res = await fetch('/api/deal/stages', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok: boolean; stages?: DealStage[] };
+	if (!json.ok) return [];
+	return json.stages ?? [];
 }
 
 export interface DealShippedInfo {

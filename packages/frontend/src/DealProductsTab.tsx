@@ -15,6 +15,7 @@ import {
 	fetchDealShipped,
 	fetchDealRealizationsCore,
 	fetchDealPlan,
+	fetchDealStages,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	createDealReturn,
@@ -30,6 +31,7 @@ import {
 	type ProductEnrichment,
 	type CoreRealization,
 	type DealPlanItem,
+	type DealStage,
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type SupplyCard,
@@ -57,6 +59,8 @@ interface TableData {
 	supply: SupplyCard[];
 	/** Активные склады каталога. */
 	stores: StoreInfo[];
+	/** История дополнительных этапов комплектации сделки. */
+	stages: DealStage[];
 }
 
 type State =
@@ -87,6 +91,7 @@ const MOCK_DATA: TableData = {
 		// Склад без остатков по товарам сделки — чтобы в dev видеть статус «↪ Переместить».
 		{ id: 12, title: 'Максидом Богатырский 15', active: true },
 	],
+	stages: [],
 	rows: [
 		// всего хватает на ОБОИХ складах — все строки «✓ хватит», крути склады/кол-ва как хочешь
 		{ id: '1', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 2400, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: 1500, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
@@ -126,7 +131,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [bxRows, stores, coef, shippedInfo, coreReals, plan] = await Promise.all([
+	const [bxRows, stores, coef, shippedInfo, coreReals, plan, stages] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
@@ -136,6 +141,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchDealRealizationsCore(dealId), 25000, 'deal/realize-core list').catch(() => [] as CoreRealization[]),
 		// Состав сделки (план = Sales Order ядра) — реальные товары, мимо подмены Б24. Ядро не подключено → [].
 		withTimeout(fetchDealPlan(dealId), 25000, 'deal/plan').catch(() => [] as DealPlanItem[]),
+		withTimeout(fetchDealStages(dealId), 25000, 'deal/stages').catch(() => [] as DealStage[]),
 	]);
 	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
 	// если бэкенд их не отдал — берём BX24-результат.
@@ -176,7 +182,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
 	const b24OnlyGoods = enriched.filter((r) => !isWorkRow(r.type) && r.productId > 0 && !planIdsSet.has(r.productId));
 	const planRows = [...planRowsFromCore, ...b24OnlyGoods];
-	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active) };
+	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active), stages };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -228,7 +234,7 @@ const plural = (n: number, one: string, few: string, many: string): string => {
 export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [state, setState] = useState<State>({ phase: 'init' });
-	const [adding, setAdding] = useState(false);
+	const [adding, setAdding] = useState<'product' | 'stage' | null>(null);
 	const [showKp, setShowKp] = useState(false);
 
 	useEffect(() => {
@@ -358,14 +364,15 @@ export function DealProductsTab(): JSX.Element {
 	// «Добавить товар» → открываем «Базу» как страницу-каталог (пикер). «Готово» → пачкой в сделку.
 	if (adding && ctx.dealId != null) {
 		const dealId = ctx.dealId;
+		const isStage = adding === 'stage';
 		return (
 			<ProductBase
 				picker={{
-					title: `Добавить товар в сделку #${dealId}`,
-					onCancel: () => setAdding(false),
+					title: isStage ? `Новый этап сделки #${dealId}` : `Добавить товар в сделку #${dealId}`,
+					onCancel: () => setAdding(null),
 					onDone: async (items) => {
-						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })));
-						setAdding(false);
+						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })), { stage: isStage });
+						setAdding(null);
 						await reload();
 					},
 				}}
@@ -377,7 +384,7 @@ export function DealProductsTab(): JSX.Element {
 		return <KpDocument dealId={ctx.dealId} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} onAdd={() => setAdding(true)} onKp={() => setShowKp(true)} onReload={reload} />;
+	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} onAdd={() => setAdding('product')} onStage={() => setAdding('stage')} onKp={() => setShowKp(true)} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -447,7 +454,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; onAdd: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; onAdd: () => void; onStage: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
@@ -522,6 +529,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	/** Подтверждение заказа снабжению и комментарии по выбранным позициям. */
 	const [showSupplyOrder, setShowSupplyOrder] = useState(false);
 	const [supplyNotes, setSupplyNotes] = useState<Record<string, string>>({});
+	const [supplyQty, setSupplyQty] = useState<Record<string, string>>({});
 	const [supplyToStore, setSupplyToStore] = useState('');
 	const [supplyDeadline, setSupplyDeadline] = useState('');
 	const [supplyOrderNote, setSupplyOrderNote] = useState('');
@@ -532,6 +540,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 	const [showReturn, setShowReturn] = useState(false);
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const [showDealDocuments, setShowDealDocuments] = useState(false);
+	const [showStages, setShowStages] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
@@ -888,13 +897,23 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 		if (!supplyToStore) { setSupplyFormError('Выберите конечный склад.'); return; }
 		if (!supplyDeadline) { setSupplyFormError('Укажите крайнюю дату поставки.'); return; }
 		if (supplyDeadline < todayYmd()) { setSupplyFormError('Крайняя дата не может быть в прошлом.'); return; }
+		const quantities = new Map<string, number>();
+		for (const row of supplyGoods) {
+			const qty = Number(String(supplyQty[row.id] ?? '').replace(',', '.'));
+			if (!Number.isFinite(qty) || qty <= 0) {
+				setSupplyFormError(`Укажите количество для позиции «${row.name}».`);
+				return;
+			}
+			quantities.set(row.id, qty);
+		}
 		setSupplyBusy(true);
 		setNotice(null);
 		try {
-			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: remaining(row), note: String(supplyNotes[row.id] ?? '').trim() }));
+			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)!, note: String(supplyNotes[row.id] ?? '').trim() }));
 			await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, ...(supplyOrderNote.trim() ? { note: supplyOrderNote.trim() } : {}) });
 			setSelected({});
 			setSupplyNotes({});
+			setSupplyQty({});
 			setSupplyToStore('');
 			setSupplyDeadline('');
 			setSupplyOrderNote('');
@@ -993,6 +1012,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 			<div className="deal-addbar">
 				<div className="deal-actions">
 				<button className="btn-primary" onClick={onAdd}>Добавить товар</button>
+				<button className="btn-secondary" onClick={onStage}>Этап</button>
+				{data.stages.length > 0 && (
+					<button className={`btn-secondary${showStages ? ' active' : ''}`} onClick={() => {
+						setShowStages((shown) => !shown);
+						requestB24FitWindow(160);
+					}}>История этапов ({data.stages.length})</button>
+				)}
 				<button className="btn-secondary" onClick={onKp}>КП</button>
 				<button
 					className="btn-secondary"
@@ -1010,6 +1036,22 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 				</div>
 				<span className="hint">Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.</span>
 			</div>
+
+			{showStages && data.stages.length > 0 && (
+				<section className="deal-stages-panel" aria-label="История этапов сделки">
+					{[...data.stages].reverse().map((stage, reverseIndex) => {
+						const number = data.stages.length - reverseIndex;
+						const at = new Date(stage.at);
+						const when = Number.isNaN(at.getTime()) ? stage.at : at.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+						return (
+							<div className="deal-stage-row" key={stage.id}>
+								<span className="deal-stage-meta"><b>Этап {number}</b><small>{when}{stage.byName ? ` · ${stage.byName}` : ''}</small></span>
+								<span className="deal-stage-items">{stage.items.map((item) => `${item.itemName} ×${item.qty}`).join(' · ')}</span>
+							</div>
+						);
+					})}
+				</section>
+			)}
 
 			{showDealDocuments && (
 				<section className="deal-documents-panel" aria-label="Документы по сделке">
@@ -1126,6 +1168,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 							setSupplyToStore(first ? storeName(storeOf(first)) : '');
 							setSupplyDeadline('');
 							setSupplyOrderNote('');
+							setSupplyQty(Object.fromEntries(supplyGoods.map((row) => [row.id, String(remaining(row))])));
 							setSupplyFormError(null);
 							setShowSupplyOrder(true);
 						}}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
@@ -1150,7 +1193,15 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onKp, onReload
 						<div className="deal-supply-order-lines">
 							{supplyGoods.map((row) => (
 								<label key={row.id} className="deal-supply-order-line">
-									<span className="deal-supply-order-line-head"><b>{row.name}</b><small>{remaining(row)} {row.measure}</small></span>
+									<span className="deal-supply-order-line-head"><b>{row.name}</b><small>Нужно по сделке: {remaining(row)} {row.measure}</small></span>
+									<span className="deal-supply-order-qty"><small>Заказать</small><input
+										type="number"
+										min="0.001"
+										step="any"
+										value={supplyQty[row.id] ?? ''}
+										disabled={supplyBusy}
+										onChange={(e) => { setSupplyQty((qty) => ({ ...qty, [row.id]: e.target.value })); setSupplyFormError(null); }}
+									/></span>
 									<textarea
 										value={supplyNotes[row.id] ?? ''}
 										maxLength={500}

@@ -371,6 +371,7 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 // услугу «Выезд инженера»). Реализация (Delivery Note) идёт против заказа; остаток к отгрузке
 // ERPNext считает сам (delivered_qty/per_delivered). Источник правды о составе сделки.
 let planFieldDone = false;
+const DEAL_STAGES_FIELD = 'b24_deal_stages';
 async function ensurePlanField(erp: ErpClient): Promise<void> {
 	if (planFieldDone) return;
 	const cfName = `Sales Order-${DEAL_FIELD}`;
@@ -380,12 +381,21 @@ async function ensurePlanField(erp: ErpClient): Promise<void> {
 			insert_after: 'customer', in_standard_filter: 1, in_list_view: 1,
 		});
 	}
+	const stagesName = `Sales Order-${DEAL_STAGES_FIELD}`;
+	if (!(await erp.get('Custom Field', stagesName))) {
+		await erp.create('Custom Field', {
+			dt: 'Sales Order', fieldname: DEAL_STAGES_FIELD, label: 'B24 Deal Stages', fieldtype: 'Long Text',
+			insert_after: DEAL_FIELD,
+		});
+	}
 	planFieldDone = true;
 }
 
 // priceListRate = базовая цена (до скидки), discountPercent = скидка %. rate (итог) ERPNext считает сам.
 export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
 export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean }
+export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; isService: boolean }
+export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
 
 /** Черновик плана сделки (Sales Order docstatus 0 по b24_deal_id) — имя или null. */
 async function findDealPlan(erp: ErpClient, dealId: number): Promise<string | null> {
@@ -440,6 +450,35 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 		delivered: Number(it['delivered_qty'] ?? 0),
 		isService: Number(it['item_code']) === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
 	}));
+}
+
+function parseDealStages(raw: unknown): DealStage[] {
+	if (typeof raw !== 'string' || !raw.trim()) return [];
+	try {
+		const value = JSON.parse(raw) as unknown;
+		if (!Array.isArray(value)) return [];
+		return value.filter((stage): stage is DealStage => Boolean(stage && typeof stage === 'object' && Array.isArray((stage as DealStage).items)));
+	} catch {
+		return [];
+	}
+}
+
+export async function listDealStages(erp: ErpClient, dealId: number): Promise<DealStage[]> {
+	await ensurePlanField(erp);
+	const name = await findDealPlan(erp, dealId);
+	if (!name) return [];
+	const plan = await erp.get<Record<string, unknown>>('Sales Order', name);
+	return parseDealStages(plan?.[DEAL_STAGES_FIELD]);
+}
+
+export async function appendDealStage(erp: ErpClient, dealId: number, stage: DealStage): Promise<void> {
+	await ensurePlanField(erp);
+	const name = await findDealPlan(erp, dealId);
+	if (!name) throw new Error('план сделки не найден');
+	const plan = await erp.get<Record<string, unknown>>('Sales Order', name);
+	const stages = parseDealStages(plan?.[DEAL_STAGES_FIELD]);
+	stages.push(stage);
+	await erp.update('Sales Order', name, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
 }
 
 /** Заказ для дисплея снабжения: один Sales Order = спрос одной сделки. */

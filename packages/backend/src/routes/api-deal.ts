@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listSupplyRequestsForDeal } from '../erp/operations.js';
+import { appendDealStage, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 
 /**
@@ -430,7 +431,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	// Добавить НЕСКОЛЬКО товарных строк в сделку за раз (корзина из пикера «Готово»).
 	app.post('/api/deal/add-products', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; stage?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(b.dealId);
@@ -466,6 +467,17 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
 				await upsertDealPlan(erp, dealId, lines, today);
+				if (b.stage === true) {
+					const me = await client.call<{ ID?: unknown; NAME?: unknown; LAST_NAME?: unknown }>('user.current', {}).catch(() => null);
+					const byName = [String(me?.['NAME'] ?? '').trim(), String(me?.['LAST_NAME'] ?? '').trim()].filter(Boolean).join(' ');
+					await appendDealStage(erp, dealId, {
+						id: randomUUID(),
+						at: new Date().toISOString(),
+						byId: String(me?.['ID'] ?? ''),
+						byName,
+						items: priced.map((item) => ({ productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, price: item.price, isService: item.isService })),
+					});
+				}
 				const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
 				app.log.info({ dealId, planLines: lines.length, total }, '[api/deal/add-products] core plan + B24 service');
@@ -625,6 +637,22 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return { ok: true, items };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/plan] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/deal/stages', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return { ok: true, stages: [] as unknown[] };
+		try {
+			return { ok: true, stages: await listDealStages(erp, dealId) };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/stages] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

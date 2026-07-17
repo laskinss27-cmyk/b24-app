@@ -1598,7 +1598,7 @@ export function Supply(): JSX.Element {
 				<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>
-			<main className="supply-proto-main">
+			<main className={`supply-proto-main${view === 'stocks' ? ' supply-proto-main-wide' : ''}`}>
 				<header className="supply-proto-top">
 					<div>
 						<h1>Снабжение</h1>

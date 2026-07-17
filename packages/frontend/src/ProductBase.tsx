@@ -279,6 +279,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
+	const [section, setSection] = useState<string>(ALL);
 	const [q, setQ] = useState('');
 	const deferredQ = useDeferredValue(q);
 	const [onlyStock, setOnlyStock] = useState(picker?.onlyStockDefault ?? true);
@@ -339,6 +340,13 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				.filter((o) => o.qty > 0)
 				.sort((a, b) => b.qty - a.qty),
 		})), [rows]);
+	const sections = useMemo(() => {
+		const byId = new Map<number, string>();
+		for (const row of rows) {
+			if (row.sectionId && row.sectionName) byId.set(row.sectionId, row.sectionName);
+		}
+		return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+	}, [rows]);
 
 	const view = useMemo(() => {
 		const words = deferredQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -346,6 +354,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		// Фильтр остатка к услугам не применяем — у работ остатка нет (иначе «Услуги» давали бы пусто).
 		if (kind === 'goods') list = list.filter((r) => !r.d.isService);
 		else if (kind === 'services') list = list.filter((r) => r.d.isService);
+		if (section !== ALL) list = list.filter((r) => r.d.sectionId === Number(section));
 		if (words.length) {
 			list = list.filter((r) => words.every((w) => r.search.includes(w)));
 		}
@@ -373,7 +382,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			return String(x).localeCompare(String(y), 'ru') * sortDir;
 		});
 		return withQty;
-	}, [indexedRows, deferredQ, onlyStock, kind, isAll, sid, sortKey, sortDir]);
+	}, [indexedRows, deferredQ, onlyStock, kind, section, isAll, sid, sortKey, sortDir]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
@@ -536,6 +545,12 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					<select value={store} onChange={(e) => setStore(e.target.value)}>
 						<option value={ALL}>Все склады</option>
 						{stores.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+					</select>
+				</label>
+				<label className="tb-field">Раздел
+					<select value={section} onChange={(e) => setSection(e.target.value)}>
+						<option value={ALL}>Все разделы</option>
+						{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
 					</select>
 				</label>
 				<label className="tb-field tb-search">Поиск (ID · название · артикул · бренд · модель)
