@@ -481,6 +481,28 @@ export async function appendDealStage(erp: ErpClient, dealId: number, stage: Dea
 	await erp.update('Sales Order', name, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
 }
 
+export async function appendDealStageItems(erp: ErpClient, dealId: number, stageId: string, items: DealStageItem[]): Promise<void> {
+	await ensurePlanField(erp);
+	const name = await findDealPlan(erp, dealId);
+	if (!name) throw new Error('план сделки не найден');
+	const plan = await erp.get<Record<string, unknown>>('Sales Order', name);
+	const stages = parseDealStages(plan?.[DEAL_STAGES_FIELD]);
+	const stage = stages.find((row) => row.id === stageId);
+	if (!stage) throw new Error('этап сделки не найден');
+	for (const item of items) {
+		const current = stage.items.find((row) => row.productId === item.productId);
+		if (current) {
+			current.qty += item.qty;
+			current.price = item.price;
+			current.itemName = item.itemName || current.itemName;
+			current.isService = current.isService || item.isService;
+		} else {
+			stage.items.push(item);
+		}
+	}
+	await erp.update('Sales Order', name, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
+}
+
 /** Заказ для дисплея снабжения: один Sales Order = спрос одной сделки. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; rate: number; stocks: Record<string, number> }
 export interface SupplyOrder { name: string; dealId: string; date: string; total: number; items: SupplyOrderItem[] }

@@ -2717,6 +2717,30 @@ body.deal-placement-body #root {
 	color: #6c7b90;
 	font-size: 12px;
 }
+.deal-stage-band-title {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+.deal-stage-inline-add {
+	flex: 0 0 auto;
+	border: 0;
+	padding: 3px 0;
+	background: transparent;
+	color: #1769aa;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.deal-stage-inline-add::before {
+	content: '+ ';
+}
+.deal-stage-inline-add:hover {
+	color: #0b4f86;
+	text-decoration: underline;
+}
 .deal-stage-addbar {
 	display: flex;
 	justify-content: flex-start;

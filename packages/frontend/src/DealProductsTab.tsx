@@ -239,7 +239,12 @@ const plural = (n: number, one: string, few: string, many: string): string => {
 export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [state, setState] = useState<State>({ phase: 'init' });
-	const [adding, setAdding] = useState<'product' | 'stage' | null>(null);
+	const [adding, setAdding] = useState<
+		| { kind: 'deal' }
+		| { kind: 'new-stage' }
+		| { kind: 'stage'; stageId: string; stageNumber: number }
+		| null
+	>(null);
 	const [showKp, setShowKp] = useState(false);
 
 	useEffect(() => {
@@ -349,14 +354,23 @@ export function DealProductsTab(): JSX.Element {
 	// «Добавить товар» → открываем «Базу» как страницу-каталог (пикер). «Готово» → пачкой в сделку.
 	if (adding && ctx.dealId != null) {
 		const dealId = ctx.dealId;
-		const isStage = adding === 'stage';
+		const isNewStage = adding.kind === 'new-stage';
+		const isExistingStage = adding.kind === 'stage';
 		return (
 			<ProductBase
 				picker={{
-					title: isStage ? `Новый этап сделки #${dealId}` : `Добавить товар в сделку #${dealId}`,
+					title: isNewStage
+						? `Новый этап сделки #${dealId}`
+						: isExistingStage
+							? `Добавить в этап ${adding.stageNumber}`
+							: `Добавить товар в сделку #${dealId}`,
 					onCancel: () => setAdding(null),
 					onDone: async (items) => {
-						await addProductsToDeal(dealId, items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })), { stage: isStage });
+						await addProductsToDeal(
+							dealId,
+							items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })),
+							{ stage: isNewStage, ...(isExistingStage ? { stageId: adding.stageId } : {}) },
+						);
 						setAdding(null);
 						await reload();
 					},
@@ -369,7 +383,7 @@ export function DealProductsTab(): JSX.Element {
 		return <KpDocument dealId={ctx.dealId} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} onAdd={() => setAdding('product')} onStage={() => setAdding('stage')} onKp={() => setShowKp(true)} onReload={reload} />;
+	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} onAdd={() => setAdding({ kind: 'deal' })} onStage={() => setAdding({ kind: 'new-stage' })} onAddToStage={(stageId, stageNumber) => setAdding({ kind: 'stage', stageId, stageNumber })} onKp={() => setShowKp(true)} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -439,7 +453,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; onAdd: () => void; onStage: () => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; onAdd: () => void; onStage: () => void; onAddToStage: (stageId: string, stageNumber: number) => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
@@ -906,9 +920,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
-	const sectionBand = (title: string, subtitle: string, list: EnrichedRow[]): JSX.Element => (
+	const sectionBand = (title: string, subtitle: string, list: EnrichedRow[], onAddItems?: () => void): JSX.Element => (
 		<tr className="deal-stage-band">
-			<td colSpan={8}><b>{title}</b>{subtitle && <small>{subtitle}</small>}</td>
+			<td colSpan={8}>
+				<div className="deal-stage-band-title">
+					<span><b>{title}</b>{subtitle && <small>{subtitle}</small>}</span>
+					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить позиции</button>}
+				</div>
+			</td>
 			<td className="num" colSpan={3}>{rub(list.reduce((sum, row) => sum + line(row), 0))}</td>
 		</tr>
 	);
@@ -1136,7 +1155,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 				<tbody>
 					{summaryView ? (
 						<>
-							{goods.length > 0 && groupBand('Товары', goods, sumGoods)}
+							{goods.length > 0 && groupBand('Оборудование', goods, sumGoods)}
 							{goods.flatMap(renderGoodsRows)}
 							{realWorks.length > 0 && groupBand('Работы и услуги', realWorks, sumRealWorks)}
 							{realWorks.map(renderWorkRow)}
@@ -1150,7 +1169,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 								return (
 									<Fragment key="base-deal">
 										{sectionBand('Основная сделка', '', all)}
+										{baseGoods.length > 0 && groupBand('Оборудование', baseGoods, baseGoods.reduce((sum, row) => sum + line(row), 0))}
 										{baseGoods.flatMap(renderGoodsRows)}
+										{baseWorks.length > 0 && groupBand('Работы и услуги', baseWorks, baseWorks.reduce((sum, row) => sum + line(row), 0))}
 										{baseWorks.map(renderWorkRow)}
 									</Fragment>
 								);
@@ -1162,8 +1183,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 								const stageWorks = stageRows.filter((row) => isWorkRow(row.type));
 								return (
 									<Fragment key={stage.id}>
-										{sectionBand(`Этап ${number}`, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows)}
+										{sectionBand(`Этап ${number}`, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows, () => onAddToStage(stage.id, number))}
+										{stageGoods.length > 0 && groupBand('Оборудование', stageGoods, stageGoods.reduce((sum, row) => sum + line(row), 0))}
 										{stageGoods.flatMap(renderGoodsRows)}
+										{stageWorks.length > 0 && groupBand('Работы и услуги', stageWorks, stageWorks.reduce((sum, row) => sum + line(row), 0))}
 										{stageWorks.map(renderWorkRow)}
 									</Fragment>
 								);

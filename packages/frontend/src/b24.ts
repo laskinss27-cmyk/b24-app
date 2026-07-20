@@ -661,11 +661,11 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 }
 
 /** Добавить НЕСКОЛЬКО товаров в сделку за раз (корзина пикера → «Готово»). Возвращает кол-во добавленных. */
-export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean } = {}): Promise<number> {
+export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean; stageId?: string } = {}): Promise<number> {
 	const res = await fetch('/api/deal/add-products', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true, ...(options.stageId ? { stageId: options.stageId } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
