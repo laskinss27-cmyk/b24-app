@@ -2720,15 +2720,22 @@ body.deal-placement-body #root {
 .deal-stage-band-title {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
 	gap: 12px;
+	flex-wrap: wrap;
+}
+.deal-stage-band-heading {
+	display: inline-flex;
+	align-items: baseline;
+	flex-wrap: wrap;
 }
 .deal-stage-inline-add {
 	flex: 0 0 auto;
-	border: 0;
-	padding: 3px 0;
-	background: transparent;
-	color: #1769aa;
+	min-height: 30px;
+	border: 1px solid #9eb4d0;
+	border-radius: 4px;
+	padding: 5px 10px;
+	background: #fff;
+	color: #145f9b;
 	font: inherit;
 	font-size: 12px;
 	font-weight: 600;
@@ -2738,8 +2745,9 @@ body.deal-placement-body #root {
 	content: '+ ';
 }
 .deal-stage-inline-add:hover {
+	border-color: #6f91bb;
+	background: #f5f9ff;
 	color: #0b4f86;
-	text-decoration: underline;
 }
 .deal-stage-addbar {
 	display: flex;

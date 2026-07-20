@@ -924,8 +924,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 		<tr className="deal-stage-band">
 			<td colSpan={8}>
 				<div className="deal-stage-band-title">
-					<span><b>{title}</b>{subtitle && <small>{subtitle}</small>}</span>
-					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить позиции</button>}
+					<span className="deal-stage-band-heading"><b>{title}</b>{subtitle && <small>{subtitle}</small>}</span>
+					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить оборудование или работу</button>}
 				</div>
 			</td>
 			<td className="num" colSpan={3}>{rub(list.reduce((sum, row) => sum + line(row), 0))}</td>
