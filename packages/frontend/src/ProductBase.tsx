@@ -453,6 +453,10 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			return next;
 		});
 	}
+	function cancelPriceTagSelection(): void {
+		setPriceTagMode(false);
+		setPriceTagQty(new Map());
+	}
 	const priceTagItems = useMemo<PriceTagSelection[]>(() => {
 		const result: PriceTagSelection[] = [];
 		for (const [id, copies] of priceTagQty) {
@@ -584,12 +588,12 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					))}
 				</div>}
 				<div className="tb-spacer" />
-				{!pickMode && (
-					<>
-						<button className={priceTagMode ? 'btn-primary' : 'btn-secondary'} type="button" onClick={() => setPriceTagMode((value) => !value)}>{priceTagMode ? '✓ Выбор ценников' : 'Ценники'}</button>
-						{priceTagMode && priceTagItems.length > 0 && <button className="btn-primary" type="button" onClick={() => setShowPriceTags(true)}>Подготовить ({priceTagItems.length})</button>}
+				{!pickMode && (priceTagMode
+					? <>
+						<button className="btn-secondary" type="button" onClick={cancelPriceTagSelection}>Отмена</button>
+						<button className="btn-primary" type="button" disabled={priceTagItems.length === 0} onClick={() => setShowPriceTags(true)}>Подготовить ({priceTagItems.length})</button>
 					</>
-				)}
+					: <button className="btn-secondary" type="button" onClick={() => setPriceTagMode(true)}>Ценники</button>)}
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
