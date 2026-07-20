@@ -2049,6 +2049,164 @@ html, body, #root { height: 100%; }
 	box-shadow: 0 18px 50px rgba(16, 24, 40, 0.3);
 }
 .cart-modal h2 { margin: 0 0 14px; font-size: 18px; }
+
+/* Подготовка ценников из базы товаров. */
+.price-tags-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 12000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 18px;
+	background: rgba(20, 31, 48, .46);
+}
+.price-tags-modal {
+	display: flex;
+	flex-direction: column;
+	width: min(1320px, calc(100vw - 36px));
+	height: min(850px, calc(100vh - 36px));
+	min-width: 900px;
+	overflow: hidden;
+	border: 1px solid #cbd6e2;
+	border-radius: 8px;
+	background: #f6f8fb;
+	box-shadow: 0 18px 60px rgba(20, 31, 48, .28);
+}
+.price-tags-modal > header,
+.price-tags-modal > footer {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 18px;
+	background: #fff;
+}
+.price-tags-modal > header { border-bottom: 1px solid #dce4ed; }
+.price-tags-modal > footer { justify-content: flex-end; border-top: 1px solid #dce4ed; }
+.price-tags-modal > footer > span { margin-right: auto; color: #6f7d8d; font-size: 12px; }
+.price-tags-modal h2 { margin: 0; color: #182435; font-size: 19px; }
+.price-tags-modal header p { margin: 3px 0 0; color: #748296; font-size: 12px; }
+.price-tags-close,
+.price-tags-remove {
+	border: 0;
+	background: transparent;
+	color: #607086;
+	cursor: pointer;
+}
+.price-tags-close { margin-left: auto; font-size: 27px; line-height: 1; }
+.price-tags-body {
+	display: grid;
+	grid-template-columns: minmax(560px, 1fr) 430px;
+	gap: 16px;
+	min-height: 0;
+	padding: 16px;
+}
+.price-tags-editor {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	border: 1px solid #d9e1ea;
+	border-radius: 6px;
+	background: #fff;
+}
+.price-tags-settings {
+	display: grid;
+	grid-template-columns: 150px minmax(180px, 1fr) auto auto;
+	align-items: end;
+	gap: 12px;
+	padding: 12px;
+	border-bottom: 1px solid #e2e8ef;
+}
+.price-tags-settings label:not(.price-tags-check) {
+	display: grid;
+	gap: 5px;
+	color: #68778a;
+	font-size: 11px;
+}
+.price-tags-settings input,
+.price-tags-settings select,
+.price-tags-number {
+	height: 34px;
+	min-width: 0;
+	border: 1px solid #bdc9d8;
+	border-radius: 5px;
+	background: #fff;
+	color: #172337;
+	font: inherit;
+}
+.price-tags-settings input,
+.price-tags-settings select { padding: 0 9px; }
+.price-tags-check {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 34px;
+	color: #35445a;
+	font-size: 12px;
+	white-space: nowrap;
+}
+.price-tags-check input { width: 15px; height: 15px; }
+.price-tags-list-head,
+.price-tags-item {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) 115px 76px 30px;
+	gap: 10px;
+	align-items: center;
+}
+.price-tags-list-head {
+	padding: 9px 12px;
+	border-bottom: 1px solid #e2e8ef;
+	background: #f7f9fb;
+	color: #728095;
+	font-size: 10px;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+.price-tags-list { min-height: 0; overflow: auto; }
+.price-tags-item { padding: 9px 12px; border-bottom: 1px solid #e8edf3; }
+.price-tags-item strong {
+	display: block;
+	overflow: hidden;
+	color: #172337;
+	font-size: 13px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.price-tags-item small { display: block; margin-top: 3px; color: #8491a3; }
+.price-tags-number { width: 100%; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.price-tags-number.copies { text-align: center; }
+.price-tags-remove { font-size: 22px; }
+.price-tags-empty { padding: 30px; color: #768599; text-align: center; }
+.price-tags-preview {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	min-height: 0;
+	padding: 12px;
+	border: 1px solid #d9e1ea;
+	border-radius: 6px;
+	background: #e8edf3;
+}
+.price-tags-preview-title { width: 100%; margin-bottom: 9px; color: #59697d; font-size: 12px; font-weight: 700; }
+.price-tags-sheet {
+	position: relative;
+	width: 378px;
+	height: 535px;
+	overflow: hidden;
+	background: #fff;
+	box-shadow: 0 4px 18px rgba(28, 43, 61, .16);
+}
+.price-tags-sheet iframe {
+	width: 794px;
+	height: 1123px;
+	border: 0;
+	transform: scale(.476);
+	transform-origin: top left;
+	pointer-events: none;
+}
+.price-tags-preview > small { margin-top: 9px; color: #748296; }
 .cart-items { display: flex; flex-direction: column; gap: 8px; }
 /* Шапка и строки — ОДИН набор ширин колонок, иначе заголовки не выровнены. */
 .cart-head,

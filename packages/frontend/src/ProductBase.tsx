@@ -19,6 +19,7 @@ import {
 } from './b24.js';
 import { SalesReport } from './SalesReport.js';
 import { Realizations } from './Realizations.js';
+import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -276,6 +277,10 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [showNewProduct, setShowNewProduct] = useState(false);
 	// Скидка % на КАЖДУЮ позицию: productId → процент.
 	const [discounts, setDiscounts] = useState<Map<number, number>>(() => new Map());
+	// Ценники живут отдельно от корзины продажи и пикеров документов.
+	const [priceTagMode, setPriceTagMode] = useState(false);
+	const [priceTagQty, setPriceTagQty] = useState<Map<number, number>>(() => new Map());
+	const [showPriceTags, setShowPriceTags] = useState(false);
 
 	// тулбар
 	const [store, setStore] = useState<string>(ALL);
@@ -440,6 +445,22 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		setCart(new Map());
 		setDiscounts(new Map());
 	}
+	function setPriceTagCopies(id: number, copies: number): void {
+		setPriceTagQty((current) => {
+			const next = new Map(current);
+			if (copies <= 0) next.delete(id);
+			else next.set(id, Math.max(1, Math.floor(copies)));
+			return next;
+		});
+	}
+	const priceTagItems = useMemo<PriceTagSelection[]>(() => {
+		const result: PriceTagSelection[] = [];
+		for (const [id, copies] of priceTagQty) {
+			const row = rowById.get(id);
+			if (row && !row.isService) result.push({ row, copies });
+		}
+		return result;
+	}, [priceTagQty, rowById]);
 	function useCatalogProduct(row: BaseRow): void {
 		setRows((current) => current.some((item) => item.id === row.id) ? current : [...current, row]);
 		if (pickMode || canQuickSale) setCart((current) => new Map(current).set(row.id, current.get(row.id) ?? 1));
@@ -563,6 +584,12 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					))}
 				</div>}
 				<div className="tb-spacer" />
+				{!pickMode && (
+					<>
+						<button className={priceTagMode ? 'btn-primary' : 'btn-secondary'} type="button" onClick={() => setPriceTagMode((value) => !value)}>{priceTagMode ? '✓ Выбор ценников' : 'Ценники'}</button>
+						{priceTagMode && priceTagItems.length > 0 && <button className="btn-primary" type="button" onClick={() => setShowPriceTags(true)}>Подготовить ({priceTagItems.length})</button>}
+					</>
+				)}
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
@@ -586,6 +613,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 							<th className="num c-store" onClick={() => toggleSort('stock')}>Остаток{sortMark('stock')}</th>
 							<th onClick={() => toggleSort('total')}>Остатки по складам{sortMark('total')}</th>
 							{(canQuickSale || pickMode) && <th className="sale-col">{pickMode ? 'Кол-во' : 'В продажу'}</th>}
+							{priceTagMode && <th className="sale-col">Ценники</th>}
 						</tr>
 					</thead>
 					<tbody>
@@ -624,9 +652,20 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 											)}
 										</td>
 									)}
+									{priceTagMode && (
+										<td className="sale-col" onClick={(e) => e.stopPropagation()}>
+											{d.isService ? <span className="muted">—</span> : priceTagQty.has(d.id) ? (
+												<div className="qty-stepper">
+													<button onClick={() => setPriceTagCopies(d.id, (priceTagQty.get(d.id) ?? 1) - 1)} aria-label="меньше">−</button>
+													<QtyInput value={priceTagQty.get(d.id) ?? 1} onChange={(n) => setPriceTagCopies(d.id, n)} />
+													<button onClick={() => setPriceTagCopies(d.id, (priceTagQty.get(d.id) ?? 0) + 1)} aria-label="больше">+</button>
+												</div>
+											) : <button className="btn-add" onClick={() => setPriceTagCopies(d.id, 1)} title="Добавить ценник">＋</button>}
+										</td>
+									)}
 								</tr>
 							);
-						}) : <tr><td colSpan={(canQuickSale || pickMode) ? 11 : 10} className="base-empty">Ничего не найдено</td></tr>}
+						}) : <tr><td colSpan={10 + ((canQuickSale || pickMode) ? 1 : 0) + (priceTagMode ? 1 : 0)} className="base-empty">Ничего не найдено</td></tr>}
 					</tbody>
 				</table>
 			</div>
@@ -647,6 +686,8 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				)}
 
 			{(pickMode || allowCreateProduct) && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
+
+			{showPriceTags && <PriceTagsModal items={priceTagItems} onClose={() => setShowPriceTags(false)} />}
 
 				{!pickMode && showCart && (
 				<div className="cart-overlay" onClick={() => setShowCart(false)}>
