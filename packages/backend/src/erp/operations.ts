@@ -394,7 +394,7 @@ async function ensurePlanField(erp: ErpClient): Promise<void> {
 // priceListRate = базовая цена (до скидки), discountPercent = скидка %. rate (итог) ERPNext считает сам.
 export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
 export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean }
-export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; isService: boolean }
+export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
 export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
 
 /** Черновик плана сделки (Sales Order docstatus 0 по b24_deal_id) — имя или null. */
@@ -501,6 +501,54 @@ export async function appendDealStageItems(erp: ErpClient, dealId: number, stage
 		}
 	}
 	await erp.update('Sales Order', name, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
+}
+
+/** Правит одну строку этапа и ту же агрегированную позицию плана одним обновлением Sales Order. */
+export async function updateDealStageItem(
+	erp: ErpClient,
+	dealId: number,
+	stageId: string,
+	productId: number,
+	qty: number,
+	price: number,
+	discountPercent: number,
+): Promise<PlanItem[]> {
+	await ensurePlanField(erp);
+	const name = await findDealPlan(erp, dealId);
+	if (!name) throw new Error('план сделки не найден');
+	const plan = await erp.get<Record<string, unknown>>('Sales Order', name);
+	const stages = parseDealStages(plan?.[DEAL_STAGES_FIELD]);
+	const stage = stages.find((row) => row.id === stageId);
+	if (!stage) throw new Error('этап сделки не найден');
+	const stageItem = stage.items.find((row) => row.productId === productId);
+	if (!stageItem) throw new Error('позиция этапа не найдена');
+
+	const items = ((plan?.['items'] as Array<Record<string, unknown>>) ?? []).map((row) => ({ ...row }));
+	const planItem = items.find((row) => Number(row['item_code']) === productId);
+	if (!planItem) throw new Error('позиция общего плана не найдена');
+	const nextPlanQty = Number(planItem['qty'] ?? 0) - stageItem.qty + qty;
+	if (!Number.isFinite(nextPlanQty) || nextPlanQty <= 0) throw new Error('количество общего плана должно быть больше нуля');
+
+	stageItem.qty = qty;
+	stageItem.price = price;
+	stageItem.discountPercent = discountPercent;
+	planItem['qty'] = nextPlanQty;
+	planItem['price_list_rate'] = price;
+	planItem['discount_percentage'] = discountPercent;
+
+	const deliveryDate = String(plan?.['delivery_date'] ?? new Date().toISOString().slice(0, 10));
+	await erp.update('Sales Order', name, {
+		delivery_date: deliveryDate,
+		items: items.map((row) => ({
+			item_code: String(row['item_code'] ?? ''),
+			qty: Number(row['qty'] ?? 0),
+			price_list_rate: Number(row['price_list_rate'] ?? row['rate'] ?? 0),
+			discount_percentage: Number(row['discount_percentage'] ?? 0),
+			delivery_date: String(row['delivery_date'] ?? deliveryDate),
+		})),
+		[DEAL_STAGES_FIELD]: JSON.stringify(stages),
+	});
+	return listDealPlan(erp, dealId);
 }
 
 /** Заказ для дисплея снабжения: один Sales Order = спрос одной сделки. */

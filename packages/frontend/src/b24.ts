@@ -874,7 +874,7 @@ export interface DealPlanItem {
 	isService?: boolean;
 }
 
-export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; isService: boolean }
+export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
 export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
 
 /** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24.
@@ -977,6 +977,18 @@ export interface SupplyCard {
 	stageId: string;
 	source?: 'b24' | 'core';
 	productIds?: number[];
+}
+
+/** Изменить одну строку конкретного этапа и синхронно пересчитать общий план сделки. */
+export async function updateDealStageItem(dealId: number, stageId: string, productId: number, quantity: number, price: number, discountPercent: number): Promise<number> {
+	const res = await fetch('/api/deal/stage-item-update', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, stageId, productId, quantity, price, discountPercent }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить строку этапа');
+	return json.total ?? 0;
 }
 
 export async function fetchDealStages(dealId: number): Promise<DealStage[]> {

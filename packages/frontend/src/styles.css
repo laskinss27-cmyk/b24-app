@@ -2731,11 +2731,11 @@ body.deal-placement-body #root {
 .deal-stage-inline-add {
 	flex: 0 0 auto;
 	min-height: 30px;
-	border: 1px solid #9eb4d0;
+	border: 1px solid #1769aa;
 	border-radius: 4px;
 	padding: 5px 10px;
-	background: #fff;
-	color: #145f9b;
+	background: #1769aa;
+	color: #fff;
 	font: inherit;
 	font-size: 12px;
 	font-weight: 600;
@@ -2745,9 +2745,9 @@ body.deal-placement-body #root {
 	content: '+ ';
 }
 .deal-stage-inline-add:hover {
-	border-color: #6f91bb;
-	background: #f5f9ff;
-	color: #0b4f86;
+	border-color: #0f558d;
+	background: #0f558d;
+	color: #fff;
 }
 .deal-stage-addbar {
 	display: flex;

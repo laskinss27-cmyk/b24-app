@@ -11,6 +11,7 @@ import {
 	removeDealProduct,
 	updateDealProduct,
 	setDealPlan,
+	updateDealStageItem,
 	createDealSupplyRequest,
 	fetchDealShipped,
 	fetchDealRealizationsCore,
@@ -478,7 +479,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 		if (q === r.quantity && Math.abs(p - baseOf(r)) < 0.005 && Math.abs(d - discPct(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
 		setSavingRow(r.id); setNotice(null);
 		try {
-			if (isPlanRow(r)) {
+			if (r.segmentKind === 'stage' && r.stageId) {
+				await updateDealStageItem(dealId, r.stageId, r.productId, q, p, d);
+			} else if (r.segmentKind === 'base') {
+				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId
+					? { ...x, qty: x.qty - r.quantity + q, priceListRate: p, discountPercent: d }
+					: x)));
+			} else if (isPlanRow(r)) {
 				// Товар плана: пишем НОВЫЙ состав в ядро (база p + скидка d% — скидка сохраняется, цену вернуть можно)
 				// + пересчёт «Выезд инженера» в Б24.
 				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
@@ -667,8 +674,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 				id: `stage-${stage.id}-${item.productId}-${itemIndex}`,
 				name: item.itemName || source.name,
 				quantity: item.qty,
-				price: item.price,
-				discountSum: 0,
+				price: item.price * (1 - (item.discountPercent ?? 0) / 100),
+				discountSum: item.price * ((item.discountPercent ?? 0) / 100),
 				segmentKind: 'stage',
 				stageId: stage.id,
 				stageNumber: index + 1,
@@ -748,23 +755,23 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 				<div className="row-controls">
 					<button
 						className="row-del-x"
-						disabled={busy || removing != null || realizePhase !== 'idle' || (!summaryView && Boolean(r.segmentKind))}
+						disabled={busy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind)}
 						onClick={() => void doRemove(r)}
-						title={!summaryView && r.segmentKind ? 'Редактирование состава доступно в сводном виде' : 'Удалить работу из сделки'}
+						title={r.segmentKind ? 'Удаление строк этапов пока недоступно' : 'Удалить работу из сделки'}
 					>{removing === r.id ? '…' : '✕'}</button>
 				</div>
 			</td>
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
-				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 			</td>
 			<td className="num">
-				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 			</td>
 			<td className="num">
-				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
+				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
 			</td>
 			<td className="num"><span className="none">—</span></td>
 			<td className="num"><span className="none">—</span></td>
@@ -813,9 +820,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 						<div className="row-controls">
 							<button
 								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || (!summaryView && Boolean(r.segmentKind))}
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind)}
 								onClick={() => void doRemove(r)}
-								title={!summaryView && r.segmentKind ? 'Редактирование состава доступно в сводном виде' : 'Удалить товар из сделки'}
+								title={r.segmentKind ? 'Удаление строк этапов пока недоступно' : 'Удалить товар из сделки'}
 							>{removing === r.id ? '…' : '✕'}</button>
 							<input
 								type="checkbox"
@@ -832,17 +839,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 					</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
-						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 						<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 						{r.purchasingPrice != null
 							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
 							: <div className="purchase-hint muted-hint">закуп —</div>}
 					</td>
 					<td className="num">
-						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 					</td>
 					<td className="num">
-						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
+						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
 					</td>
 					<td className="num"><b className="realized-qty">{shippedForRow(r)}</b></td>
 					<td className="num">

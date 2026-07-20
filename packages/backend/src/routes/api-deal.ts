@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, updateDealStageItem, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 
 /**
@@ -467,7 +467,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
 				await upsertDealPlan(erp, dealId, lines, today);
-				const stageItems = priced.map((item) => ({ productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, price: item.price, isService: item.isService }));
+				const stageItems = priced.map((item) => ({ productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, price: item.price, discountPercent: 0, isService: item.isService }));
 				const targetStageId = String(b.stageId ?? '').trim();
 				if (targetStageId) {
 					await appendDealStageItems(erp, dealId, targetStageId, stageItems);
@@ -657,6 +657,34 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return { ok: true, stages: await listDealStages(erp, dealId) };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/stages] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/deal/stage-item-update', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; stageId?: unknown; productId?: unknown; quantity?: unknown; price?: unknown; discountPercent?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const dealId = Number(b.dealId);
+		const stageId = String(b.stageId ?? '').trim();
+		const productId = Number(b.productId);
+		const quantity = Number(b.quantity);
+		const price = Number(b.price);
+		const discountPercent = Number(b.discountPercent);
+		if (!Number.isInteger(dealId) || dealId <= 0 || !stageId || !Number.isInteger(productId) || productId <= 0
+			|| !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0
+			|| !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+			return reply.code(400).send({ ok: false, error: 'некорректные данные строки этапа' });
+		}
+		try {
+			const lines = await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
+			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
+			await setDealB24Service(client, dealId, total);
+			return { ok: true, total };
+		} catch (err) {
+			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-update] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
