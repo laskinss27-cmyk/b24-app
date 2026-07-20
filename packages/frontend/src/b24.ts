@@ -661,11 +661,11 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 }
 
 /** Добавить НЕСКОЛЬКО товаров в сделку за раз (корзина пикера → «Готово»). Возвращает кол-во добавленных. */
-export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean; stageId?: string } = {}): Promise<number> {
+export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean; stageId?: string; variantId?: string } = {}): Promise<number> {
 	const res = await fetch('/api/deal/add-products', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true, ...(options.stageId ? { stageId: options.stageId } : {}) }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true, ...(options.stageId ? { stageId: options.stageId } : {}), ...(options.variantId ? { variantId: options.variantId } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
@@ -876,6 +876,9 @@ export interface DealPlanItem {
 
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
 export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
+export interface DealQuoteVariantItem { productId: number; itemName: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
+export interface DealQuoteVariant { id: string; name: string; createdAt: string; createdById: string; createdByName: string; items: DealQuoteVariantItem[] }
+export interface DealQuoteVariants { enabled: boolean; selectedId: string | null; variants: DealQuoteVariant[] }
 
 /** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24.
  *  Ядро не подключено / read-only фолбэк → []. */
@@ -892,11 +895,11 @@ export async function fetchDealPlan(dealId: number): Promise<DealPlanItem[]> {
 
 /** Перезаписать состав сделки в ядре (план = Sales Order) целиком — правка/удаление строк из вкладки.
  *  Б24 пересчитывается в одну «Выезд инженера». Возвращает итоговую сумму. */
-export async function setDealPlan(dealId: number, items: DealPlanItem[]): Promise<number> {
+export async function setDealPlan(dealId: number, items: DealPlanItem[], variantId?: string): Promise<number> {
 	const res = await fetch('/api/deal/plan-set', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, items }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, items, ...(variantId ? { variantId } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить состав сделки');
@@ -1000,6 +1003,35 @@ export async function fetchDealStages(dealId: number): Promise<DealStage[]> {
 	const json = (await res.json()) as { ok: boolean; stages?: DealStage[] };
 	if (!json.ok) return [];
 	return json.stages ?? [];
+}
+
+async function dealVariantMutation(path: string, body: Record<string, unknown>): Promise<DealQuoteVariants> {
+	const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), ...body }) });
+	const json = (await res.json()) as { ok: boolean; error?: string; variants?: DealQuoteVariants };
+	if (!json.ok || !json.variants) throw new Error(json.error ?? 'не удалось изменить варианты КП');
+	return json.variants;
+}
+
+export async function fetchDealQuoteVariants(dealId: number): Promise<DealQuoteVariants> {
+	const res = await fetch('/api/deal/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), dealId }) });
+	const json = (await res.json()) as { ok: boolean; variants?: DealQuoteVariants };
+	return json.ok && json.variants ? json.variants : { enabled: false, selectedId: null, variants: [] };
+}
+
+export async function createDealQuoteVariant(dealId: number, name: string, sourceVariantId?: string): Promise<DealQuoteVariants> {
+	return dealVariantMutation('/api/deal/variant-create', { dealId, name, ...(sourceVariantId ? { sourceVariantId } : {}) });
+}
+
+export async function renameDealQuoteVariant(dealId: number, variantId: string, name: string): Promise<DealQuoteVariants> {
+	return dealVariantMutation('/api/deal/variant-rename', { dealId, variantId, name });
+}
+
+export async function deleteDealQuoteVariant(dealId: number, variantId: string): Promise<DealQuoteVariants> {
+	return dealVariantMutation('/api/deal/variant-delete', { dealId, variantId });
+}
+
+export async function selectDealQuoteVariant(dealId: number, variantId: string): Promise<DealQuoteVariants> {
+	return dealVariantMutation('/api/deal/variant-select', { dealId, variantId });
 }
 
 export interface DealShippedInfo {
@@ -1548,12 +1580,13 @@ export interface KpData {
 	sumGoods: number;
 	sumWorks: number;
 	total: number;
+	variantName?: string;
 }
 
-export async function fetchDealKp(dealId: number): Promise<KpData> {
+export async function fetchDealKp(dealId: number, variantId?: string): Promise<KpData> {
 	const res = await fetch('/api/deal/kp', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, ...(variantId ? { variantId } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; kp?: KpData };
 	if (!json.ok || !json.kp) throw new Error(json.error ?? 'не удалось собрать КП');

@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, updateDealStageItem, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, updateDealStageItem, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplySectionUrl, taskLink } from '../b24/supply-task.js';
 
@@ -304,6 +304,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			if (action === 'draft') {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				await assertDealQuoteVariantSelected(erp, dealId);
 				const groups = Array.isArray(b.groups) ? b.groups : [];
 				const parsedGroups = groups.map((g) => {
 					const gg = g as { storeTitle?: unknown; lines?: unknown };
@@ -349,6 +350,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				}
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				await assertDealQuoteVariantSelected(erp, dealId);
 				const note = String(b.note ?? '').trim();
 				const lines = (Array.isArray(b.lines) ? b.lines : [])
 					.map((l) => l as { productId?: unknown; qty?: unknown; store?: unknown })
@@ -432,7 +434,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	// Добавить НЕСКОЛЬКО товарных строк в сделку за раз (корзина из пикера «Готово»).
 	app.post('/api/deal/add-products', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; stage?: unknown; stageId?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; stage?: unknown; stageId?: unknown; variantId?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(b.dealId);
@@ -455,6 +457,24 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 			const erp = ErpClient.fromEnv();
 			if (erp) {
+				const variantId = String(b.variantId ?? '').trim();
+				if (variantId) {
+					const state = await listDealQuoteVariants(erp, dealId);
+					if (state.selectedId) throw new Error('вариант уже выбран клиентом; добавляйте новые позиции через этап');
+					const variant = state.variants.find((row) => row.id === variantId);
+					if (!variant) throw new Error('вариант КП не найден');
+					const byId = new Map(variant.items.map((item) => [item.productId, { ...item }]));
+					for (const item of priced) {
+						const previous = byId.get(item.productId);
+						if (previous) { previous.qty += item.quantity; previous.priceListRate = item.price; previous.isService = previous.isService || item.isService; }
+						else byId.set(item.productId, { productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, priceListRate: item.price, discountPercent: 0, isService: item.isService });
+					}
+					const variantItems = [...byId.values()];
+					await updateDealQuoteVariantItems(erp, dealId, variantId, variantItems);
+					const total = Math.round(variantItems.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
+					return { ok: true, added: priced.length, plan: variantItems.length, total };
+				}
+				await assertDealQuoteVariantSelected(erp, dealId);
 				// ПОКРЫВАЛО: состав сделки → ПЛАН в ядре (Sales Order), а Б24 несёт ОДНУ свёрнутую
 				// услугу «Выезд инженера». Новые товары мёржим в план по productId (кол-во суммируем).
 				const byId = new Map<number, { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }>();
@@ -662,6 +682,79 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
+	app.post('/api/deal/variants', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return { ok: true, variants: { enabled: false, selectedId: null, variants: [] } };
+		try { return { ok: true, variants: await listDealQuoteVariants(erp, dealId) }; }
+		catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
+	});
+
+	app.post('/api/deal/variant-create', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; name?: unknown; sourceVariantId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		try {
+			const current = await listDealQuoteVariants(erp, dealId);
+			if (!current.enabled) {
+				const [stages, realizations, supply] = await Promise.all([listDealStages(erp, dealId), listDealRealizations(erp, dealId), listSupplyRequestsForDeal(erp, dealId)]);
+				if (stages.length || realizations.length || supply.length) throw new Error('варианты КП можно включить только до этапов, заказов снабжению и реализаций');
+			}
+			const me = await client.call<{ ID?: unknown; NAME?: unknown; LAST_NAME?: unknown }>('user.current', {});
+			const variants = await createDealQuoteVariant(erp, dealId, {
+				name: String(b.name ?? ''),
+				...(String(b.sourceVariantId ?? '').trim() ? { sourceVariantId: String(b.sourceVariantId).trim() } : {}),
+				createdById: String(me?.ID ?? ''),
+				createdByName: [String(me?.NAME ?? '').trim(), String(me?.LAST_NAME ?? '').trim()].filter(Boolean).join(' '),
+			});
+			return { ok: true, variants };
+		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
+	});
+
+	app.post('/api/deal/variant-rename', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown; name?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		try { return { ok: true, variants: await renameDealQuoteVariant(erp, Number(b.dealId), String(b.variantId ?? ''), String(b.name ?? '')) }; }
+		catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
+	});
+
+	app.post('/api/deal/variant-delete', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		try { return { ok: true, variants: await deleteDealQuoteVariant(erp, Number(b.dealId), String(b.variantId ?? '')) }; }
+		catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
+	});
+
+	app.post('/api/deal/variant-select', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		try {
+			const variants = await selectDealQuoteVariant(erp, dealId, String(b.variantId ?? ''), new Date().toISOString().slice(0, 10));
+			const items = await listDealPlan(erp, dealId);
+			const total = Math.round(items.reduce((sum, item) => sum + item.rate * item.qty, 0) * 100) / 100;
+			await setDealB24Service(client, dealId, total);
+			return { ok: true, variants, total };
+		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
+	});
+
 	app.post('/api/deal/stage-item-update', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; stageId?: unknown; productId?: unknown; quantity?: unknown; price?: unknown; discountPercent?: unknown };
 		const client = clientFrom(b);
@@ -680,6 +773,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return reply.code(400).send({ ok: false, error: 'некорректные данные строки этапа' });
 		}
 		try {
+			await assertDealQuoteVariantSelected(erp, dealId);
 			const lines = await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
 			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
@@ -693,7 +787,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	// ПЕРЕЗАПИСАТЬ состав плана сделки целиком (из вкладки: правка кол-ва/цены, удаление строк) →
 	// затем пересчитать «Выезд инженера» в Б24. items=[] → план пуст и Б24-строки очищаются.
 	app.post('/api/deal/plan-set', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; variantId?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -707,6 +801,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		try {
 			const serviceIds = await fetchServiceProductIds(client, lines.map((l) => l.productId));
 			for (const line of lines) line.isService = line.isService || serviceIds.has(line.productId);
+			const variantId = String(b.variantId ?? '').trim();
+			if (variantId) {
+				const variantItems: DealQuoteVariantItem[] = lines.map((line) => ({ productId: line.productId, itemName: line.itemName || `#${line.productId}`, qty: line.qty, priceListRate: line.priceListRate, discountPercent: line.discountPercent, isService: line.isService }));
+				await updateDealQuoteVariantItems(erp, dealId, variantId, variantItems);
+				const total = Math.round(variantItems.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
+				return { ok: true, total, lines: variantItems.length };
+			}
+			await assertDealQuoteVariantSelected(erp, dealId);
 			const today = new Date().toISOString().slice(0, 10);
 			await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
 			const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
@@ -722,7 +824,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	// Данные для КП (коммерческого предложения) из сделки: клиент, менеджер, товары/работы,
 	// артикулы, итоги. Фото товаров добавятся позже (read из ядра Item.image). Документ собирает фронт.
 	app.post('/api/deal/kp', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(b.dealId);
@@ -750,8 +852,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			// в Б24 мы специально держим одну служебную строку «Выезд инженера» на всю сумму.
 			const erp = ErpClient.fromEnv();
 			let source: 'core' | 'b24-fallback' = 'core';
+			const variantId = String(b.variantId ?? '').trim();
+			const variantState = erp && variantId ? await listDealQuoteVariants(erp, dealId) : null;
+			const variant = variantState?.variants.find((row) => row.id === variantId);
+			const variantItems = variant?.items ?? null;
+			const variantName = variant?.name ?? '';
+			if (erp && variantId && !variantItems) throw new Error('вариант КП не найден');
 			let raw = erp
-				? (await listDealPlan(erp, dealId).catch((err) => {
+				? (variantItems ?? await listDealPlan(erp, dealId).catch((err) => {
 					app.log.warn({ dealId }, `[api/deal/kp] core plan failed — ${errInfo(err)}`);
 					return [];
 				})).map((r) => ({
@@ -759,10 +867,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					name: r.itemName || `#${r.productId}`,
 					type: r.isService ? 7 : 1,
 					qty: r.qty,
-					price: r.rate,
+					price: 'rate' in r ? r.rate : r.priceListRate * (1 - r.discountPercent / 100),
 				}))
 				: [];
-			if (!raw.length) {
+			if (!raw.length && !variantId) {
 				source = 'b24-fallback';
 				const old = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId }).catch(() => [] as Array<Record<string, unknown>>);
 				raw = (old ?? [])
@@ -773,6 +881,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					.filter((r) => r.productId !== VYEZD_PRODUCT_ID);
 			}
 			const rows = raw
+				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price) }))
 				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
 				.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7 }));
 			const goods = rows.filter((r) => !r.isWork);
@@ -786,7 +895,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					number: dealId, date: String(deal?.['DATE_CREATE'] ?? ''), title: String(deal?.['TITLE'] ?? ''),
 					client: { name: clientName, phone: clientPhone },
 					manager: { name: mgrName, phone: mgrPhone },
-					goods, works, sumGoods, sumWorks, total: sumGoods + sumWorks,
+					goods, works, sumGoods, sumWorks, total: sumGoods + sumWorks, ...(variantName ? { variantName } : {}),
 				},
 			};
 		} catch (err) {

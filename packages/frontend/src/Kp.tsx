@@ -34,15 +34,15 @@ const MOCK_KP: KpData = {
 	sumGoods: 25500, sumWorks: 18000, total: 43500,
 };
 
-export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mock: boolean; onBack: () => void }): JSX.Element {
+export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number | null; variantId?: string; mock: boolean; onBack: () => void }): JSX.Element {
 	const [kp, setKp] = useState<KpData | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (mock) { setKp(MOCK_KP); return; }
 		if (dealId == null) { setErr('Не пришёл ID сделки.'); return; }
-		withTimeout(fetchDealKp(dealId), 30000, 'deal/kp').then(setKp).catch((e: unknown) => setErr(String(e instanceof Error ? e.message : e)));
-	}, [dealId, mock]);
+		withTimeout(fetchDealKp(dealId, variantId), 30000, 'deal/kp').then(setKp).catch((e: unknown) => setErr(String(e instanceof Error ? e.message : e)));
+	}, [dealId, mock, variantId]);
 
 	// Единая сетка колонок для таблиц товаров и работ — чтобы цифры (кол-во/цена/сумма) стояли в один столбец.
 	const renderCols = (): JSX.Element => (
@@ -91,6 +91,7 @@ export function KpDocument({ dealId, mock, onBack }: { dealId: number | null; mo
 					</div>
 
 					<div className="kp-title">Коммерческое предложение № {kp.number}</div>
+					{kp.variantName && <div className="kp-meta"><b>{kp.variantName}</b></div>}
 					<div className="kp-meta">от {ruDate(kp.date)}{kp.manager.name ? ` · менеджер: ${kp.manager.name}` : ''}{kp.manager.phone ? ` · ${kp.manager.phone}` : ''}</div>
 					<div className="kp-client">Клиент: <b>{kp.client.name || '—'}</b>{kp.client.phone && <> · {kp.client.phone}</>}</div>
 

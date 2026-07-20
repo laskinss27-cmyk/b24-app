@@ -17,6 +17,11 @@ import {
 	fetchDealRealizationsCore,
 	fetchDealPlan,
 	fetchDealStages,
+	fetchDealQuoteVariants,
+	createDealQuoteVariant,
+	renameDealQuoteVariant,
+	deleteDealQuoteVariant,
+	selectDealQuoteVariant,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	createDealReturn,
@@ -32,6 +37,7 @@ import {
 	type CoreRealization,
 	type DealPlanItem,
 	type DealStage,
+	type DealQuoteVariants,
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type SupplyCard,
@@ -65,6 +71,9 @@ interface TableData {
 	stores: StoreInfo[];
 	/** Дополнительные этапы комплектации сделки. */
 	stages: DealStage[];
+	/** Альтернативные комплектации КП. Старые сделки: enabled=false. */
+	quoteVariants: DealQuoteVariants;
+	variantRows: Record<string, EnrichedRow[]>;
 }
 
 type State =
@@ -98,6 +107,8 @@ const MOCK_DATA: TableData = {
 		{ id: 'mock-stage-1', at: '2026-07-18T10:30:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 1, price: 1000, isService: false }] },
 		{ id: 'mock-stage-2', at: '2026-07-20T08:15:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 2, price: 1000, isService: false }] },
 	],
+	quoteVariants: { enabled: false, selectedId: null, variants: [] },
+	variantRows: {},
 	rows: [
 		// всего хватает на ОБОИХ складах — все строки «✓ хватит», крути склады/кол-ва как хочешь
 		{ id: '1', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 2400, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: 1500, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
@@ -123,6 +134,17 @@ const dealContentHeight = (minHeight = 0): number => {
 	));
 };
 
+const mockVariantData = (selected = false): TableData => {
+	const first = { id: 'mock-min', name: 'Минимальный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: MOCK_DATA.plan.map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: Boolean(item.isService) })) };
+	const second = { id: 'mock-max', name: 'Расширенный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: first.items.map((item) => ({ ...item, qty: item.qty * 2 })) };
+	const toRows = (variant: typeof first): EnrichedRow[] => variant.items.map((item) => {
+		const source = MOCK_DATA.planRows.find((row) => row.productId === item.productId);
+		const rate = item.priceListRate * (1 - item.discountPercent / 100);
+		return { ...(source ?? { type: item.isService ? 7 : 1, measure: 'шт', stocks: [], purchasingPrice: null }), id: `variant-${variant.id}-${item.productId}`, productId: item.productId, name: item.itemName, price: rate, quantity: item.qty, discountSum: item.priceListRate - rate };
+	});
+	return { ...MOCK_DATA, rows: [], stages: [], payment: null, quoteVariants: { enabled: true, selectedId: selected ? first.id : null, variants: [first, second] }, variantRows: { [first.id]: toRows(first), [second.id]: toRows(second) } };
+};
+
 const requestB24FitWindow = (delay = 120): void => {
 	window.setTimeout(() => {
 		try {
@@ -137,7 +159,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [bxRows, stores, coef, shippedInfo, coreReals, plan, stages] = await Promise.all([
+	const [bxRows, stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
 		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
@@ -148,6 +170,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		// Состав сделки (план = Sales Order ядра) — реальные товары, мимо подмены Б24. Ядро не подключено → [].
 		withTimeout(fetchDealPlan(dealId), 25000, 'deal/plan').catch(() => [] as DealPlanItem[]),
 		withTimeout(fetchDealStages(dealId), 25000, 'deal/stages').catch(() => [] as DealStage[]),
+		withTimeout(fetchDealQuoteVariants(dealId), 25000, 'deal/variants').catch((): DealQuoteVariants => ({ enabled: false, selectedId: null, variants: [] })),
 	]);
 	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
 	// если бэкенд их не отдал — берём BX24-результат.
@@ -157,7 +180,8 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// + productId строк Б24 (на случай старых сделок без плана) — подстраховка.
 	const planIds = plan.map((p) => p.productId).filter((id) => id > 0);
 	const b24GoodsIds = rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0);
-	const allIds = [...new Set([...planIds, ...b24GoodsIds])];
+	const variantIds = quoteVariants.variants.flatMap((variant) => variant.items.map((item) => item.productId));
+	const allIds = [...new Set([...planIds, ...b24GoodsIds, ...variantIds])];
 	const enrich: Record<number, ProductEnrichment> = allIds.length
 		? await withTimeout(fetchStockPreferCore(allIds), 25000, 'stock/purchasing').catch(() => ({}))
 		: {};
@@ -188,7 +212,22 @@ async function loadAll(dealId: number): Promise<TableData> {
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
 	const b24OnlyGoods = enriched.filter((r) => !isWorkRow(r.type) && r.productId > 0 && !planIdsSet.has(r.productId));
 	const planRows = [...planRowsFromCore, ...b24OnlyGoods];
-	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active), stages };
+	const variantRows = Object.fromEntries(quoteVariants.variants.map((variant) => [variant.id, variant.items.map((item) => {
+		const rate = Math.round(item.priceListRate * (1 - item.discountPercent / 100) * 100) / 100;
+		return {
+			id: `variant-${variant.id}-${item.productId}`,
+			productId: item.productId,
+			name: item.itemName || `#${item.productId}`,
+			type: item.isService || item.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? 7 : 1,
+			price: rate,
+			quantity: item.qty,
+			discountSum: Math.round((item.priceListRate - rate) * 100) / 100,
+			measure: 'шт',
+			stocks: item.isService ? [] : mkStocks(item.productId),
+			purchasingPrice: item.isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
+		} satisfies EnrichedRow;
+	})]));
+	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -242,11 +281,13 @@ export function DealProductsTab(): JSX.Element {
 	const [state, setState] = useState<State>({ phase: 'init' });
 	const [adding, setAdding] = useState<
 		| { kind: 'deal' }
+		| { kind: 'variant'; variantId: string; variantName: string }
 		| { kind: 'new-stage' }
 		| { kind: 'stage'; stageId: string; stageNumber: number }
 		| null
 	>(null);
 	const [showKp, setShowKp] = useState(false);
+	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!ctx.__mock) {
@@ -290,7 +331,10 @@ export function DealProductsTab(): JSX.Element {
 	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
 		if (ctx.__mock) {
-			setState({ phase: 'ready', data: MOCK_DATA, viewer: 'dev (mock)', dev: true, canReturn: true });
+			const params = new URLSearchParams(window.location.search);
+			const data = params.has('variants') ? mockVariantData(params.has('selected')) : MOCK_DATA;
+			setState({ phase: 'ready', data, viewer: 'dev (mock)', dev: true, canReturn: true });
+			setActiveVariantId(data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
 			return;
 		}
 		const bx24 = window.BX24;
@@ -313,7 +357,10 @@ export function DealProductsTab(): JSX.Element {
 					const canReturn = ['1', '1858', '986'].includes(viewerId) || depts.includes(10);
 					setState({ phase: 'loading' });
 					loadAll(dealId)
-						.then((data) => setState({ phase: 'ready', data, viewer: viewerName, dev: false, canReturn }))
+						.then((data) => {
+							setState({ phase: 'ready', data, viewer: viewerName, dev: false, canReturn });
+							setActiveVariantId(data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
+						})
 						.catch((err: unknown) => setState({ phase: 'error', message: String(err instanceof Error ? err.message : err) }));
 				})
 				.catch((err: unknown) => setState({ phase: 'error', message: `user.current: ${String(err instanceof Error ? err.message : err)}` }));
@@ -350,6 +397,9 @@ export function DealProductsTab(): JSX.Element {
 		if (ctx.__mock || ctx.dealId == null) return;
 		const data = await loadAll(ctx.dealId);
 		setState((s) => (s.phase === 'ready' ? { ...s, data } : s));
+		setActiveVariantId((current) => data.quoteVariants.variants.some((variant) => variant.id === current)
+			? current
+			: data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
 	};
 
 	// «Добавить товар» → открываем «Базу» как страницу-каталог (пикер). «Готово» → пачкой в сделку.
@@ -357,10 +407,13 @@ export function DealProductsTab(): JSX.Element {
 		const dealId = ctx.dealId;
 		const isNewStage = adding.kind === 'new-stage';
 		const isExistingStage = adding.kind === 'stage';
+		const isVariant = adding.kind === 'variant';
 		return (
 			<ProductBase
 				picker={{
-					title: isNewStage
+					title: isVariant
+						? `Добавить в вариант «${adding.variantName}»`
+						: isNewStage
 						? `Новый этап сделки #${dealId}`
 						: isExistingStage
 							? `Добавить в этап ${adding.stageNumber}`
@@ -370,7 +423,7 @@ export function DealProductsTab(): JSX.Element {
 						await addProductsToDeal(
 							dealId,
 							items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })),
-							{ stage: isNewStage, ...(isExistingStage ? { stageId: adding.stageId } : {}) },
+							{ stage: isNewStage, ...(isExistingStage ? { stageId: adding.stageId } : {}), ...(isVariant ? { variantId: adding.variantId } : {}) },
 						);
 						setAdding(null);
 						await reload();
@@ -381,10 +434,23 @@ export function DealProductsTab(): JSX.Element {
 	}
 
 	if (showKp) {
-		return <KpDocument dealId={ctx.dealId} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
+		const selected = state.data.quoteVariants.selectedId;
+		return <KpDocument dealId={ctx.dealId} {...(activeVariantId && activeVariantId !== selected ? { variantId: activeVariantId } : {})} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
 	}
 
-	return <RealTable data={state.data} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} onAdd={() => setAdding({ kind: 'deal' })} onStage={() => setAdding({ kind: 'new-stage' })} onAddToStage={(stageId, stageNumber) => setAdding({ kind: 'stage', stageId, stageNumber })} onKp={() => setShowKp(true)} onReload={reload} />;
+	const activeVariant = state.data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
+	const viewingSelected = Boolean(activeVariant && state.data.quoteVariants.selectedId === activeVariant.id);
+	const displayData = activeVariant && !viewingSelected
+		? {
+			...state.data,
+			rows: [],
+			plan: activeVariant.items.map((item) => ({ ...item, rate: Math.round(item.priceListRate * (1 - item.discountPercent / 100) * 100) / 100, delivered: 0 })),
+			planRows: state.data.variantRows[activeVariant.id] ?? [],
+			stages: [],
+			payment: null,
+		}
+		: state.data;
+	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={() => setAdding({ kind: 'new-stage' })} onAddToStage={(stageId, stageNumber) => setAdding({ kind: 'stage', stageId, stageNumber })} onKp={() => setShowKp(true)} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -454,8 +520,15 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; onAdd: () => void; onStage: () => void; onAddToStage: (stageId: string, stageNumber: number) => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: () => void; onAddToStage: (stageId: string, stageNumber: number) => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
+	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
+	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
+	const viewingSelected = Boolean(activeVariant && data.quoteVariants.selectedId === activeVariant.id);
+	const workingMode = !data.quoteVariants.enabled || viewingSelected;
+	const proposalEditable = variantsPending && Boolean(activeVariant);
+	const tableEditable = workingMode || proposalEditable;
+	const rejectedView = data.quoteVariants.enabled && Boolean(data.quoteVariants.selectedId) && !viewingSelected;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
 	const discPct = (r: EnrichedRow): number => { const base = r.price + r.discountSum; return base > 0 && r.discountSum > 0 ? Math.round((r.discountSum / base) * 1000) / 10 : 0; };
@@ -471,6 +544,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 	const finalUnitOf = (r: EnrichedRow): number => { const e = editOf(r); const p = Number(e.price.replace(',', '.')) || 0; const d = Number(e.disc.replace(',', '.')) || 0; return Math.round(p * (1 - d / 100) * 100) / 100; };
 	// Строка ТОВАРА — из плана ядра (id вида 'plan-<productId>'); работы — из Б24 (числовой rowId).
 	const isPlanRow = (r: EnrichedRow): boolean => String(r.id).startsWith('plan-');
+	const isVariantRow = (r: EnrichedRow): boolean => String(r.id).startsWith('variant-');
 	const saveRow = async (r: EnrichedRow): Promise<void> => {
 		if (dealId == null || savingRow) return;
 		const e = editOf(r);
@@ -479,7 +553,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 		if (q === r.quantity && Math.abs(p - baseOf(r)) < 0.005 && Math.abs(d - discPct(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
 		setSavingRow(r.id); setNotice(null);
 		try {
-			if (r.segmentKind === 'stage' && r.stageId) {
+			if (proposalEditable && activeVariantId && isVariantRow(r)) {
+				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)), activeVariantId);
+			} else if (r.segmentKind === 'stage' && r.stageId) {
 				await updateDealStageItem(dealId, r.stageId, r.productId, q, p, d);
 			} else if (r.segmentKind === 'base') {
 				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId
@@ -547,6 +623,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const [showDealDocuments, setShowDealDocuments] = useState(false);
 	const [summaryView, setSummaryView] = useState(false);
+	const [variantDialog, setVariantDialog] = useState<null | { kind: 'create' | 'rename'; value: string }>(null);
+	const [variantBusy, setVariantBusy] = useState(false);
+	const [variantError, setVariantError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
@@ -632,7 +711,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 		setRemoving(r.id);
 		setNotice(null);
 		try {
-			if (isPlanRow(r)) {
+			if (proposalEditable && activeVariantId && isVariantRow(r)) {
+				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId), activeVariantId);
+			} else if (isPlanRow(r)) {
 				// Товар плана: убираем из состава ядра + пересчёт «Выезд инженера» в Б24.
 				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId));
 			} else {
@@ -645,6 +726,44 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 		} finally {
 			setRemoving(null);
 		}
+	};
+	const variantTotal = (variant: DealQuoteVariants['variants'][number]): number => variant.items.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0);
+	const submitVariantDialog = async (): Promise<void> => {
+		if (!variantDialog || dealId == null || variantBusy) return;
+		const name = variantDialog.value.trim();
+		if (!name) { setVariantError('Укажи название варианта.'); return; }
+		setVariantBusy(true); setVariantError(null);
+		try {
+			if (variantDialog.kind === 'create') {
+				const result = await createDealQuoteVariant(dealId, name, data.quoteVariants.enabled ? (activeVariantId ?? undefined) : undefined);
+				onActiveVariant(result.variants.at(-1)?.id ?? null);
+			} else if (activeVariantId) {
+				await renameDealQuoteVariant(dealId, activeVariantId, name);
+			}
+			setVariantDialog(null);
+			await onReload();
+		} catch (error) { setVariantError(String(error instanceof Error ? error.message : error)); }
+		finally { setVariantBusy(false); }
+	};
+	const removeVariant = async (): Promise<void> => {
+		if (!activeVariant || dealId == null || variantBusy || !window.confirm(`Удалить вариант «${activeVariant.name}»?`)) return;
+		setVariantBusy(true); setVariantError(null);
+		try {
+			const result = await deleteDealQuoteVariant(dealId, activeVariant.id);
+			onActiveVariant(result.variants[0]?.id ?? null);
+			await onReload();
+		} catch (error) { setVariantError(String(error instanceof Error ? error.message : error)); }
+		finally { setVariantBusy(false); }
+	};
+	const chooseVariant = async (): Promise<void> => {
+		if (!activeVariant || dealId == null || variantBusy || !window.confirm(`Клиент выбрал «${activeVariant.name}». После подтверждения состав станет рабочим, а остальные варианты останутся только для истории. Продолжить?`)) return;
+		setVariantBusy(true); setVariantError(null);
+		try {
+			await selectDealQuoteVariant(dealId, activeVariant.id);
+			onActiveVariant(activeVariant.id);
+			await onReload();
+		} catch (error) { setVariantError(String(error instanceof Error ? error.message : error)); }
+		finally { setVariantBusy(false); }
 	};
 
 	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
@@ -659,7 +778,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 	for (const stage of data.stages) {
 		for (const item of stage.items) stageQtyByProduct.set(item.productId, (stageQtyByProduct.get(item.productId) ?? 0) + item.qty);
 	}
-	const basePlanRows = data.planRows.flatMap((row): EnrichedRow[] => {
+	const basePlanRows = !workingMode ? data.planRows : data.planRows.flatMap((row): EnrichedRow[] => {
 		const quantity = Math.max(0, row.quantity - (stageQtyByProduct.get(row.productId) ?? 0));
 		return quantity > 0.000001 ? [{ ...row, id: `base-${row.productId}`, quantity, segmentKind: 'base' }] : [];
 	});
@@ -752,26 +871,26 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>
 			<td className="check-col">
-				<div className="row-controls">
+				{tableEditable && <div className="row-controls">
 					<button
 						className="row-del-x"
-						disabled={busy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind)}
+						disabled={busy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind) || rejectedView}
 						onClick={() => void doRemove(r)}
 						title={r.segmentKind ? 'Удаление строк этапов пока недоступно' : 'Удалить работу из сделки'}
 					>{removing === r.id ? '…' : '✕'}</button>
-				</div>
+				</div>}
 			</td>
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
-				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 			</td>
 			<td className="num">
-				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 			</td>
 			<td className="num">
-				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
+				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
 			</td>
 			<td className="num"><span className="none">—</span></td>
 			<td className="num"><span className="none">—</span></td>
@@ -818,20 +937,20 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 				<tr key={r.id} className={`goods-row st-${status}${isSel(r) ? ' sel-row' : ''}`}>
 					<td className="check-col">
 						<div className="row-controls">
-							<button
+							{tableEditable && <button
 								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind)}
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind) || rejectedView}
 								onClick={() => void doRemove(r)}
 								title={r.segmentKind ? 'Удаление строк этапов пока недоступно' : 'Удалить товар из сделки'}
-							>{removing === r.id ? '…' : '✕'}</button>
-							<input
+							>{removing === r.id ? '…' : '✕'}</button>}
+							{workingMode && <input
 								type="checkbox"
 								className="row-check"
 								checked={isSel(r)}
 								disabled={realizePhase !== 'idle' || busy || supplyBusy}
 								onChange={() => toggleSel(r)}
 								title={status === 'ready' ? 'Отметить: реализовать (если хватает) или отправить в снабжение' : 'Отметить, чтобы отправить в снабжение (на складе не хватает)'}
-							/>
+							/>}
 						</div>
 					</td>
 					<td>
@@ -839,21 +958,21 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 					</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
-						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 						<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 						{r.purchasingPrice != null
 							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
 							: <div className="purchase-hint muted-hint">закуп —</div>}
 					</td>
 					<td className="num">
-						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 					</td>
 					<td className="num">
-						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
+						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
 					</td>
-					<td className="num"><b className="realized-qty">{shippedForRow(r)}</b></td>
+					<td className="num">{workingMode ? <b className="realized-qty">{shippedForRow(r)}</b> : <span className="none">—</span>}</td>
 					<td className="num">
-						<input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} onBlur={(e) => onRowBlur(r, e)} title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} />
+						{workingMode ? <input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} /> : <span className="none">—</span>}
 					</td>
 					<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 					<td className="row-store">
@@ -873,6 +992,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 						) : <span className="none">нет нигде</span>}
 					</td>
 					<td className="realize-cell">
+						{!workingMode ? <span className="st-badge proposal">{rejectedView ? 'не выбран' : 'расчёт'}</span> : <>
 						<select
 							className="store-select" value={storeOf(r)} disabled={realizePhase !== 'idle' || busy}
 							onChange={(e) => setRowStore((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
@@ -899,6 +1019,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 								? <span className="st-badge order" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>
 								: <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
 						)}
+						</>}
 					</td>
 				</tr>,
 			);
@@ -1049,19 +1170,19 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 			<header className="deal-head">
 				<div>
 					<h1>Товары сделки</h1>
-					<p className="subtitle">Сделка #{dealId ?? '—'} · {rows.length} {plural(rows.length, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
+					<p className="subtitle">Сделка #{dealId ?? '—'} · {goods.length + realWorks.length} {plural(goods.length + realWorks.length, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
 				</div>
 				<div className="deal-head-stats">
 					<div><span>Товары</span><b>{goods.length}</b></div>
 					<div><span>Работы</span><b>{realWorks.length}</b></div>
-					<div><span>К реализации</span><b>{readyGoods.length}</b></div>
+					<div><span>{workingMode ? 'К реализации' : 'В варианте'}</span><b>{workingMode ? readyGoods.length : goods.length + realWorks.length}</b></div>
 					<div><span>Сумма</span><b>{rub(sumGoods + sumRealWorks)}</b></div>
 				</div>
 			</header>
 
 			{dev && <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>}
 
-			{data.payment && data.payment.total > 0 && (() => {
+			{workingMode && data.payment && data.payment.total > 0 && (() => {
 				const { total, paid } = data.payment;
 				const rem = Math.max(0, total - paid);
 				const full = paid >= total - 0.01;
@@ -1074,10 +1195,34 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 				return <div className={`deal-pay ${cls}`}>{text}</div>;
 			})()}
 
+			{data.quoteVariants.enabled && (
+				<section className="deal-variants" aria-label="Варианты коммерческого предложения">
+					<div className="deal-variant-tabs">
+						{data.quoteVariants.variants.map((variant) => {
+							const selectedVariant = data.quoteVariants.selectedId === variant.id;
+							const rejectedVariant = Boolean(data.quoteVariants.selectedId) && !selectedVariant;
+							return <button type="button" key={variant.id} className={`deal-variant-tab${activeVariantId === variant.id ? ' active' : ''}${selectedVariant ? ' selected' : ''}${rejectedVariant ? ' rejected' : ''}`} onClick={() => onActiveVariant(variant.id)}>
+								<span><b>{variant.name}</b><small>{variant.items.length} {plural(variant.items.length, 'позиция', 'позиции', 'позиций')} · {rub(variantTotal(variant))}</small></span>
+								<em>{selectedVariant ? 'Выбран клиентом' : rejectedVariant ? 'Не выбран' : 'Черновик'}</em>
+							</button>;
+						})}
+					</div>
+					{variantsPending && <div className="deal-variant-notice">До выбора клиента это варианты расчёта. Складские действия и этапы пока недоступны.</div>}
+				</section>
+			)}
+
 			<div className="deal-addbar">
 				<div className="deal-actions">
-				<button className="btn-primary" onClick={onAdd}>Добавить товар</button>
-				{data.stages.length > 0 && (
+				{(!data.quoteVariants.enabled || proposalEditable) && <button className="btn-primary" onClick={onAdd}>Добавить товар</button>}
+				{!data.quoteVariants.enabled && data.stages.length === 0 && data.supply.length === 0 && data.coreReals.length === 0 && dealTransfers.length === 0 && (
+					<button className="btn-secondary" onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: 'Вариант 1' }); }}>Варианты КП</button>
+				)}
+				{proposalEditable && activeVariant && <>
+					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: `Копия ${activeVariant.name}` }); }}>Дублировать</button>
+					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); }}>Переименовать</button>
+					{data.quoteVariants.variants.length > 1 && <button className="btn-secondary danger" disabled={variantBusy} onClick={() => void removeVariant()}>Удалить</button>}
+				</>}
+				{workingMode && data.stages.length > 0 && (
 					<button className={`btn-secondary${summaryView ? ' active' : ''}`} onClick={() => {
 						setSummaryView((shown) => !shown);
 						setSelected({});
@@ -1085,24 +1230,25 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
 				<button className="btn-secondary" onClick={onKp}>КП</button>
-				<button
+				{proposalEditable && activeVariant && <button className="btn-primary" disabled={variantBusy || activeVariant.items.length === 0} onClick={() => void chooseVariant()}>Выбран клиентом</button>}
+				{workingMode && <button
 					className="btn-secondary"
 					disabled={!canReturn || dev}
 					onClick={() => setShowReturn(true)}
 					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Возврат оформляет снабжение'}
-				>Возврат</button>
-				<button
+				>Возврат</button>}
+				{workingMode && <button
 					className={`btn-secondary${showDealDocuments ? ' active' : ''}`}
 					onClick={() => {
 						setShowDealDocuments((shown) => !shown);
 						requestB24FitWindow(160);
 					}}
-				>Документы по сделке{hiddenDocumentCount ? ` (${hiddenDocumentCount})` : ''}</button>
+				>Документы по сделке{hiddenDocumentCount ? ` (${hiddenDocumentCount})` : ''}</button>}
 				</div>
-				<span className="hint">Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.</span>
+				<span className="hint">{workingMode ? 'Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.' : rejectedView ? 'Этот вариант сохранён для истории.' : 'КП формируется только из открытого варианта.'}</span>
 			</div>
 
-			{showDealDocuments && (
+			{workingMode && showDealDocuments && (
 				<section className="deal-documents-panel" aria-label="Документы по сделке">
 					<header><h2>Документы по сделке</h2><span>{hiddenDocumentCount || 'нет документов'}</span></header>
 					{returnDocuments.length > 0 && (
@@ -1146,17 +1292,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 			<table className="products-table">
 				<thead>
 					<tr>
-						<th className="check-col" title="Универсальный выбор строк для действий: реализовать, заказать и дальше"></th>
+						<th className="check-col" title={workingMode ? 'Выбор строк для действий' : undefined}></th>
 						<th>Товар / работа</th>
 						<th>Тип</th>
 						<th className="num">Цена</th>
 						<th className="num">Скидка</th>
 						<th className="num">Кол-во</th>
-						<th className="num">Реализовано</th>
-						<th className="num">К отгрузке</th>
+						<th className="num">{workingMode ? 'Реализовано' : ''}</th>
+						<th className="num">{workingMode ? 'К отгрузке' : ''}</th>
 						<th className="num">Сумма</th>
 						<th>Остатки по складам</th>
-						<th>Склад · статус</th>
+						<th>{workingMode ? 'Склад · статус' : 'Статус'}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -1175,7 +1321,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 								const all = [...baseGoods, ...baseWorks];
 								return (
 									<Fragment key="base-deal">
-										{sectionBand('Основная сделка', '', all)}
+								{sectionBand(activeVariant && !workingMode ? activeVariant.name : 'Основная сделка', '', all)}
 										{baseGoods.length > 0 && groupBand('Оборудование', baseGoods, baseGoods.reduce((sum, row) => sum + line(row), 0))}
 										{baseGoods.flatMap(renderGoodsRows)}
 										{baseWorks.length > 0 && groupBand('Работы и услуги', baseWorks, baseWorks.reduce((sum, row) => sum + line(row), 0))}
@@ -1204,9 +1350,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 			</table>
 			</div>
 
-			<div className="deal-stage-addbar">
+			{workingMode && <div className="deal-stage-addbar">
 				<button className="btn-secondary" onClick={onStage}>Добавить этап</button>
-			</div>
+			</div>}
 
 			<div className="totals">
 				<div className="trow"><span>Сумма товаров</span><span>{rub(sumGoods)}</span></div>
@@ -1221,7 +1367,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 				<div className="trow grand"><span>Итого</span><span>{rub(sumGoods + sumRealWorks)}</span></div>
 			</div>
 
-			<div className="realize-bar">
+			{workingMode && <div className="realize-bar">
 				{realizePhase === 'drafted' ? (
 					<div className="realize-plan">
 						<b>Черновики в ядре: {draftNames.length} — проверь партии выше и проведи.</b>
@@ -1262,9 +1408,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 					)}
 				</div>
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
-			</div>
+			</div>}
 
-			{showSupplyOrder && (
+			{workingMode && showSupplyOrder && (
 				<div className="deal-supply-order-overlay" onClick={() => !supplyBusy && setShowSupplyOrder(false)}>
 					<section className="deal-supply-order-modal" role="dialog" aria-modal="true" aria-label="Заказ снабжению" onClick={(e) => e.stopPropagation()}>
 						<header>
@@ -1308,7 +1454,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 				</div>
 			)}
 
-			{splitRow && dealId != null && (() => {
+			{workingMode && splitRow && dealId != null && (() => {
 				const dest = storeOf(splitRow);
 				const srcs = splitRow.stocks.filter((s) => s.amount > 0 && s.storeId !== dest).map((s) => ({ storeName: s.storeName, amount: s.amount }));
 				return <TransferSplitModal dealId={dealId} productId={splitRow.productId} name={splitRow.name} need={remaining(splitRow)} destName={storeName(dest)} sources={srcs}
@@ -1316,7 +1462,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); const fresh = await listTransfers(dealId).catch(() => null); if (fresh) setDealTransfers(fresh.transfers); }} />;
 			})()}
 
-			{showReturn && dealId != null && (
+			{workingMode && showReturn && dealId != null && (
 				<ReturnModal
 					dealId={dealId}
 					stores={data.stores}
@@ -1324,6 +1470,18 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onAdd
 					onClose={() => setShowReturn(false)}
 					onDone={async (msg) => { setShowReturn(false); setNotice({ kind: 'ok', text: msg }); await onReload(); }}
 				/>
+			)}
+
+			{variantDialog && (
+				<div className="deal-supply-order-overlay" onClick={() => !variantBusy && setVariantDialog(null)}>
+					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'create' ? 'Новый вариант' : 'Название варианта'} onClick={(event) => event.stopPropagation()}>
+						<header><h2>{variantDialog.kind === 'create' ? (data.quoteVariants.enabled ? 'Новый вариант' : 'Варианты КП') : 'Переименовать вариант'}</h2><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>×</button></header>
+						<label><span>Название</span><input autoFocus maxLength={80} value={variantDialog.value} disabled={variantBusy} onChange={(event) => { setVariantDialog({ ...variantDialog, value: event.target.value }); setVariantError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') void submitVariantDialog(); }} /></label>
+						{variantDialog.kind === 'create' && <p>{data.quoteVariants.enabled ? 'Состав текущего варианта будет скопирован.' : 'Текущий состав сделки станет первым вариантом.'}</p>}
+						{variantError && <div className="deal-supply-order-error">{variantError}</div>}
+						<footer><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>Отмена</button><button className="primary" type="button" disabled={variantBusy || !variantDialog.value.trim()} onClick={() => void submitVariantDialog()}>{variantBusy ? 'Сохраняю…' : 'Сохранить'}</button></footer>
+					</section>
+				</div>
 			)}
 
 		</div>

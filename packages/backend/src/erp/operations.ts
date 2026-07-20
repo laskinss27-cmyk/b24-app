@@ -8,6 +8,7 @@
  *  - документы создаются ЧЕРНОВИКАМИ; проведение — отдельный явный шаг (submit);
  *  - company везде явно (в инсталляции есть демо-компания, и она дефолтная).
  */
+import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
 
 const DEAL_FIELD = 'b24_deal_id';
@@ -372,6 +373,7 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 // ERPNext считает сам (delivered_qty/per_delivered). Источник правды о составе сделки.
 let planFieldDone = false;
 const DEAL_STAGES_FIELD = 'b24_deal_stages';
+const DEAL_VARIANTS_FIELD = 'b24_quote_variants';
 async function ensurePlanField(erp: ErpClient): Promise<void> {
 	if (planFieldDone) return;
 	const cfName = `Sales Order-${DEAL_FIELD}`;
@@ -388,6 +390,13 @@ async function ensurePlanField(erp: ErpClient): Promise<void> {
 			insert_after: DEAL_FIELD,
 		});
 	}
+	const variantsName = `Sales Order-${DEAL_VARIANTS_FIELD}`;
+	if (!(await erp.get('Custom Field', variantsName))) {
+		await erp.create('Custom Field', {
+			dt: 'Sales Order', fieldname: DEAL_VARIANTS_FIELD, label: 'B24 Quote Variants', fieldtype: 'Long Text',
+			insert_after: DEAL_STAGES_FIELD,
+		});
+	}
 	planFieldDone = true;
 }
 
@@ -396,6 +405,20 @@ export interface PlanLine { productId: number; itemName?: string; qty: number; p
 export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean }
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
 export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
+export interface DealQuoteVariantItem extends PlanLine { itemName: string }
+export interface DealQuoteVariant {
+	id: string;
+	name: string;
+	createdAt: string;
+	createdById: string;
+	createdByName: string;
+	items: DealQuoteVariantItem[];
+}
+export interface DealQuoteVariants {
+	enabled: boolean;
+	selectedId: string | null;
+	variants: DealQuoteVariant[];
+}
 
 /** Черновик плана сделки (Sales Order docstatus 0 по b24_deal_id) — имя или null. */
 async function findDealPlan(erp: ErpClient, dealId: number): Promise<string | null> {
@@ -450,6 +473,139 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 		delivered: Number(it['delivered_qty'] ?? 0),
 		isService: Number(it['item_code']) === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
 	}));
+}
+
+const emptyDealQuoteVariants = (): DealQuoteVariants => ({ enabled: false, selectedId: null, variants: [] });
+
+function parseDealQuoteVariants(raw: unknown): DealQuoteVariants {
+	if (typeof raw !== 'string' || !raw.trim()) return emptyDealQuoteVariants();
+	try {
+		const value = JSON.parse(raw) as Partial<DealQuoteVariants>;
+		if (!Array.isArray(value.variants) || value.variants.length === 0) return emptyDealQuoteVariants();
+		const variants = value.variants.flatMap((variant): DealQuoteVariant[] => {
+			if (!variant || typeof variant !== 'object') return [];
+			const row = variant as Partial<DealQuoteVariant>;
+			const id = String(row.id ?? '').trim();
+			const name = String(row.name ?? '').trim();
+			if (!id || !name || !Array.isArray(row.items)) return [];
+			const items = row.items.flatMap((item): DealQuoteVariantItem[] => {
+				if (!item || typeof item !== 'object') return [];
+				const source = item as Partial<DealQuoteVariantItem>;
+				const productId = Number(source.productId);
+				const qty = Number(source.qty);
+				const priceListRate = Number(source.priceListRate);
+				const discountPercent = Number(source.discountPercent ?? 0);
+				if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(priceListRate) || priceListRate < 0) return [];
+				return [{ productId, itemName: String(source.itemName ?? `#${productId}`), qty, priceListRate, discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0, isService: Boolean(source.isService) }];
+			});
+			return [{ id, name, createdAt: String(row.createdAt ?? ''), createdById: String(row.createdById ?? ''), createdByName: String(row.createdByName ?? ''), items }];
+		});
+		if (!variants.length) return emptyDealQuoteVariants();
+		const selected = String(value.selectedId ?? '').trim();
+		return { enabled: true, selectedId: variants.some((variant) => variant.id === selected) ? selected : null, variants };
+	} catch {
+		return emptyDealQuoteVariants();
+	}
+}
+
+async function dealPlanDocument(erp: ErpClient, dealId: number): Promise<{ name: string; doc: Record<string, unknown> } | null> {
+	await ensurePlanField(erp);
+	const name = await findDealPlan(erp, dealId);
+	if (!name) return null;
+	const doc = await erp.get<Record<string, unknown>>('Sales Order', name);
+	return doc ? { name, doc } : null;
+}
+
+async function saveDealQuoteVariants(erp: ErpClient, planName: string, state: DealQuoteVariants): Promise<void> {
+	await erp.update('Sales Order', planName, { [DEAL_VARIANTS_FIELD]: JSON.stringify(state) });
+}
+
+export async function listDealQuoteVariants(erp: ErpClient, dealId: number): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	return plan ? parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]) : emptyDealQuoteVariants();
+}
+
+export async function createDealQuoteVariant(erp: ErpClient, dealId: number, args: {
+	name: string;
+	sourceVariantId?: string;
+	createdById: string;
+	createdByName: string;
+}): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	if (!plan) throw new Error('сначала добавьте в сделку хотя бы одну позицию');
+	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
+	if (state.selectedId) throw new Error('вариант уже выбран клиентом; новые варианты недоступны');
+	const cleanName = args.name.trim().slice(0, 80);
+	if (!cleanName) throw new Error('укажите название варианта');
+	if (state.variants.some((variant) => variant.name.toLocaleLowerCase('ru-RU') === cleanName.toLocaleLowerCase('ru-RU'))) throw new Error('вариант с таким названием уже есть');
+	let items: DealQuoteVariantItem[];
+	if (!state.enabled) {
+		items = (await listDealPlan(erp, dealId)).map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
+	} else {
+		const source = state.variants.find((variant) => variant.id === args.sourceVariantId) ?? state.variants[0];
+		items = (source?.items ?? []).map((item) => ({ ...item }));
+	}
+	const variant: DealQuoteVariant = { id: randomUUID(), name: cleanName, createdAt: new Date().toISOString(), createdById: args.createdById, createdByName: args.createdByName, items };
+	const next: DealQuoteVariants = { enabled: true, selectedId: null, variants: [...state.variants, variant] };
+	await saveDealQuoteVariants(erp, plan.name, next);
+	return next;
+}
+
+export async function renameDealQuoteVariant(erp: ErpClient, dealId: number, variantId: string, name: string): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	if (!plan) throw new Error('план сделки не найден');
+	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
+	if (state.selectedId) throw new Error('после выбора клиента названия вариантов зафиксированы');
+	const cleanName = name.trim().slice(0, 80);
+	if (!cleanName) throw new Error('укажите название варианта');
+	if (!state.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
+	if (state.variants.some((variant) => variant.id !== variantId && variant.name.toLocaleLowerCase('ru-RU') === cleanName.toLocaleLowerCase('ru-RU'))) throw new Error('вариант с таким названием уже есть');
+	const next = { ...state, variants: state.variants.map((variant) => variant.id === variantId ? { ...variant, name: cleanName } : variant) };
+	await saveDealQuoteVariants(erp, plan.name, next);
+	return next;
+}
+
+export async function deleteDealQuoteVariant(erp: ErpClient, dealId: number, variantId: string): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	if (!plan) throw new Error('план сделки не найден');
+	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
+	if (state.selectedId) throw new Error('после выбора клиента варианты зафиксированы');
+	if (state.variants.length <= 1) throw new Error('последний вариант удалить нельзя');
+	const next = { ...state, variants: state.variants.filter((variant) => variant.id !== variantId) };
+	if (next.variants.length === state.variants.length) throw new Error('вариант не найден');
+	await saveDealQuoteVariants(erp, plan.name, next);
+	return next;
+}
+
+export async function updateDealQuoteVariantItems(erp: ErpClient, dealId: number, variantId: string, items: DealQuoteVariantItem[]): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	if (!plan) throw new Error('план сделки не найден');
+	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
+	if (state.selectedId) throw new Error('выбранный вариант изменяется через рабочий состав и этапы');
+	if (!state.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
+	for (const item of items) await ensureCoreItem(erp, { productId: item.productId, name: item.itemName, isService: Boolean(item.isService) });
+	const next = { ...state, variants: state.variants.map((variant) => variant.id === variantId ? { ...variant, items: items.map((item) => ({ ...item })) } : variant) };
+	await saveDealQuoteVariants(erp, plan.name, next);
+	return next;
+}
+
+export async function selectDealQuoteVariant(erp: ErpClient, dealId: number, variantId: string, deliveryDate: string): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	if (!plan) throw new Error('план сделки не найден');
+	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
+	if (state.selectedId) throw new Error('вариант уже выбран клиентом');
+	const selected = state.variants.find((variant) => variant.id === variantId);
+	if (!selected) throw new Error('вариант не найден');
+	if (!selected.items.length) throw new Error('нельзя выбрать пустой вариант');
+	await upsertDealPlan(erp, dealId, selected.items, deliveryDate);
+	const next = { ...state, selectedId: selected.id };
+	await saveDealQuoteVariants(erp, plan.name, next);
+	return next;
+}
+
+export async function assertDealQuoteVariantSelected(erp: ErpClient, dealId: number): Promise<void> {
+	const state = await listDealQuoteVariants(erp, dealId);
+	if (state.enabled && !state.selectedId) throw new Error('сначала отметьте вариант КП, выбранный клиентом');
 }
 
 function parseDealStages(raw: unknown): DealStage[] {

@@ -3,7 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureTransferRequestsEntity, ensureTransfersEntity, TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { completeTransferFromTransit, fetchErpStocksFor, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
+import { assertDealQuoteVariantSelected, completeTransferFromTransit, fetchErpStocksFor, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 import {
 	newTransferData,
@@ -414,6 +414,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		await ensureTransfersEntity(client);
 		try {
+			await assertDealQuoteVariantSelected(erp, Number(dealId));
 			const me = await currentUser(client);
 			const now = new Date().toISOString();
 			const created: Array<TransferData & { id: number; name: string }> = [];
