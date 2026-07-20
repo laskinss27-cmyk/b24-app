@@ -103,7 +103,7 @@ export function registerInstallRoute(app: FastifyInstance): void {
 <head><meta charset="utf-8"><title>b24-app установлен</title></head>
 <body>
 	<h1>b24-app установлен ✅</h1>
-	<p>Откройте любую сделку — увидите вкладку <strong>b24-app</strong> рядом со стандартными.</p>
+	<p>Откройте любую сделку — увидите вкладку <strong>Товары 2.0</strong> рядом со стандартными.</p>
 	<script src="//api.bitrix24.com/api/v1/"></script>
 	<script>BX24.init(function(){ BX24.installFinish(); });</script>
 </body>

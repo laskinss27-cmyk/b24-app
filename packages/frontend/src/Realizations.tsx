@@ -7,7 +7,7 @@ import {
 	openRealization,
 	isPortalAdmin,
 	withTimeout,
-	BETA_USER_IDS,
+	MANAGEMENT_USER_IDS,
 	type RealizationRow,
 } from './b24.js';
 
@@ -16,7 +16,7 @@ import {
  * + колонка СДЕЛКА, которой в родном экране нет (клик → открыть сделку).
  *
  * Вход: кнопка в «Базе товаров» (onBack). 100% read-only, сборка на бэкенде
- * (/api/realizations/list). Канарейка (BETA_USER_IDS) — как у Базы/Отчёта.
+ * (/api/realizations/list). Доступ ограничен управленческими учётными записями.
  */
 
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
@@ -91,7 +91,7 @@ export function Realizations({ onBack }: { onBack?: (() => void) | undefined }):
 		bx.init(() => {
 			void (async () => {
 				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
-				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) {
+				if (!isPortalAdmin() && !MANAGEMENT_USER_IDS.includes(uid)) {
 					setPhase({ k: 'denied' });
 					return;
 				}

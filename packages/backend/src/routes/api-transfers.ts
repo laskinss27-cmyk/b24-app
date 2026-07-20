@@ -5,7 +5,6 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { completeTransferFromTransit, fetchErpStocksFor, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
-import { STOCK_CREATE_IDS } from './api-stock.js';
 import {
 	newTransferData,
 	normalizeTransferLines,
@@ -435,7 +434,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 
 	// ── Ручное перемещение из окна «Складской учёт» (без сделки) ────────────────
 	// body: { fromStore, toStore, lines: [{productId, name, qty}] } → один документ «Запрошено».
-	// Создаёт канарейка; дальше штатные «В пути»/«Получено» проводит снабжение. Задачи нет (ручной инструмент).
+	// Создаёт снабжение; дальше идут штатные этапы перемещения. Задачи нет (ручной инструмент).
 	app.post('/api/transfers/create-manual', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(b);
@@ -454,7 +453,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		await ensureTransfersEntity(client);
 		try {
 			const me = await currentUser(client);
-			if (!STOCK_CREATE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только канарейка' });
+			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только снабжение' });
 			const transfer = await createDraftTransfer({ client, erp, me, fromStore, toStore, lines, ...(note ? { note } : {}), historyNote: 'создано вручную в окне' });
 			app.log.info({ id: transfer.id, fromStore, toStore }, '[api/transfers/create-manual] ok');
 			return { ok: true, transfer };

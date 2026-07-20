@@ -12,7 +12,7 @@ import { B24ApiError, type B24Client } from './client.js';
  */
 
 export const DEAL_TAB_PLACEMENT = 'CRM_DEAL_DETAIL_TAB';
-export const DEAL_TAB_TITLE = 'b24-app';
+export const DEAL_TAB_TITLE = 'Товары 2.0';
 export const DEAL_TAB_DESCRIPTION = 'Кастомная вкладка товаров — N/M отгружено, селектор склада, массовая реализация';
 
 export interface BindDealTabOptions {

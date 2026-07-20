@@ -11,7 +11,6 @@ import {
 	photoFullUrl,
 	withTimeout,
 	withRetry,
-	BETA_USER_IDS,
 	QUICKSALE_USER_IDS,
 	type BaseRow,
 	type CatalogProductCandidate,
@@ -27,11 +26,11 @@ import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
  * Остаток(склад)·по-складам; выбор склада + «Все», поиск, фильтр остаток>0, сортировка по
  * колонке, клик по строке → нативная карточка товара.
  *
- * Канарейка: Базу видит только бета-юзер (Сергей 1858). Инвентаризация живёт отдельной
- * вкладкой в «Складском учёте».
+ * Каталог доступен всем сотрудникам. Инвентаризация живёт отдельной вкладкой
+ * в «Складском учёте».
  */
 
-type Gate = 'checking' | 'beta' | 'plain' | 'error';
+type Gate = 'checking' | 'ready' | 'error';
 type Mode = 'loading' | 'base' | 'report' | 'realizations';
 
 const ALL = 'all';
@@ -295,7 +294,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 
 	useEffect(() => {
 		if (ctx.__mock) {
-			setGate('beta');
+			setGate('ready');
 			setUid('1858');
 			setStores(MOCK_STORES);
 			setRows(MOCK_ROWS);
@@ -314,11 +313,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				// BX24-вызовы на фронте флапают (особенно при возврате во вкладку из нативного окна —
 				// Сергей ловил «таймаут 15с» в пикере) → каждому по 2 попытки со своим таймаутом.
 				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
-				if (!BETA_USER_IDS.includes(uid) && !pickMode) {
-					setGate('plain');
-					return;
-				}
-				setGate('beta');
+				setGate('ready');
 				setUid(uid);
 				const sts = await withRetry(() => fetchStores(), 2, 15000, 'catalog.store.list');
 				setStores(sts.filter((s) => s.active));
@@ -531,7 +526,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	// ── рендер ──────────────────────────────────────────────────────────────────
 	if (gate === 'checking') return <div className="base"><header><h1>База товаров</h1></header><p className="base-load">Загрузка…</p></div>;
 	if (gate === 'error') return <div className="base"><header><h1>База товаров</h1></header><p className="error">⛔ {errMsg}</p></div>;
-	if (gate === 'plain') return <div className="base"><header><h1>Продажи</h1></header><p className="base-load">Инвентаризация перенесена в раздел «Складской учёт».</p></div>;
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}

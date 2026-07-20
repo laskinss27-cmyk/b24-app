@@ -231,13 +231,10 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
 	return fetchStockAndPurchasing(ids);
 }
 
-/** Канареечный доступ к новым экранам: Сергей Ласкин (1858) + Игорь Бекасов (986, рук. розницы)
- *  + Владимир Дранишников (1, владелец — видит всё).
- *  Константин Ласкин (1246) УБРАН из канареек 2026-06-18 — Сергей держит его как обычного юзера
- *  для ручного тестирования (быстро отвечает): видит ровно то, что рядовой менеджер. */
-export const BETA_USER_IDS = ['1858', '986', '1'];
+/** Руководящие учётки: отчёты и действия, которые не относятся к рядовой работе менеджера. */
+export const MANAGEMENT_USER_IDS = ['1858', '986', '1'];
 
-/** ID текущего пользователя, который смотрит (для канареечного гейта).
+/** ID текущего пользователя (для ролевых прав).
  *  КЭШ на сессию: фронтовый BX24 user.current флапает (таймаут 15с) при повторных вызовах —
  *  напр. кнопка «Реализации» в Базе монтирует ещё один гейт. Первый успешный id запоминаем,
  *  дальше отдаём из кэша, не дёргая BX24. Кэшируем и in-flight промис (дедуп параллельных). */
@@ -1345,7 +1342,7 @@ export async function fetchItemHistory(productId: number): Promise<ItemMovement[
 /** Найденный в каталоге ядра товар (пикер позиций). stocks/total — остатки по складам (для наличия в пикере). */
 export interface StockItem { productId: number; name: string; article: string; brand: string; stocks?: Record<string, number>; total?: number }
 
-/** Справочники для форм: склады, поставщики (Б24-воронка контрагентов), право создавать (канарейка). */
+/** Справочники для форм и ролевое право на складские документы. */
 export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean }> {
 	const res = await fetch('/api/stock/form-data', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },

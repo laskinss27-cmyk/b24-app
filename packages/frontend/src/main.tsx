@@ -19,7 +19,7 @@ if (!root) {
 //  - view='mobileCount' (/m, телефон вне iframe) → мобильный подсчёт точки из QR;
 //  - view='inventory' (placement левого меню) → База товаров / инвентаризация;
 //  - dealId (placement сделки) → вкладка товаров сделки.
-// ProductBase сам решает по канарейке: бета (Сергей) → База товаров, остальные → GA-инвентаризация.
+// Разделы сами применяют ролевые права текущей учётной записи.
 const ctx = getContext();
 const repairId = Number(new URLSearchParams(window.location.search).get('repairId') ?? 0);
 const opensRepair = (Number.isInteger(repairId) && repairId > 0) || (Number.isInteger(ctx.repairId) && Number(ctx.repairId) > 0);

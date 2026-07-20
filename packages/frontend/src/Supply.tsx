@@ -3,7 +3,6 @@ import { getContext } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { LedgerTab, StockMovementsTab, StockTransfersTab, TransferRequestsTab, type StockMovementKind } from './StockLedger.js';
 import {
-	BETA_USER_IDS,
 	cancelTransfer,
 	createIssueDoc,
 	createManualTransfer,
@@ -18,7 +17,6 @@ import {
 	fetchStockFormData,
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
-	isPortalAdmin,
 	receiveSupplyPurchase,
 	receiveTransfer,
 	collectTransfer,
@@ -1466,11 +1464,14 @@ export function Supply(): JSX.Element {
 		}
 		bx.init(() => {
 			void (async () => {
-				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
+				const [uid, access] = await Promise.all([
+					withTimeout(fetchCurrentUserId(), 15000, 'user.current'),
+					withTimeout(fetchStockFormData(), 15000, 'stock.form-data'),
+				]);
 				setCurrentUserId(uid);
-				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) { setPhase('denied'); return; }
+				setStockForm(access);
+				if (!access.canCreate) { setLoading(false); setPhase('denied'); return; }
 				setPhase('ready');
-				void fetchStockFormData().then(setStockForm).catch(() => setStockForm({ stores: [], suppliers: [], canCreate: false }));
 				try {
 					const [loaded, supplierList] = await Promise.all([fetchSupplyOrders(), fetchSupplySuppliers()]);
 					setOrders(loaded);
@@ -1588,7 +1589,7 @@ export function Supply(): JSX.Element {
 	};
 
 	if (phase === 'init') return <div className="supply-proto-state">Загрузка...</div>;
-	if (phase === 'denied') return <div className="supply-proto-state">Раздел «Снаб» в обкатке. Доступ ограничен.</div>;
+	if (phase === 'denied') return <div className="supply-proto-state">Раздел «Снаб» доступен сотрудникам снабжения.</div>;
 
 	return (
 		<div className="supply-proto-shell">

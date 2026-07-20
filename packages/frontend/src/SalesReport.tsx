@@ -6,7 +6,7 @@ import {
 	fetchSalesReport,
 	isPortalAdmin,
 	withTimeout,
-	BETA_USER_IDS,
+	MANAGEMENT_USER_IDS,
 	type SalesReportRow,
 } from './b24.js';
 
@@ -15,7 +15,7 @@ import {
  * Вход: кнопка в «Базе товаров» (onBack) ИЛИ пункт меню списка сделок (placement, без onBack).
  * Сборка — на бэкенде (/api/reports/sales); тут период/воронки → превью + выгрузка CSV.
  *
- * Доступ режется тут (канарейка троих) — placement списка сделок портально-широкий.
+ * Доступ к отчёту ограничен управленческими учётными записями.
  */
 
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
@@ -123,7 +123,7 @@ export function SalesReport({ onBack }: { onBack?: (() => void) | undefined }): 
 		bx.init(() => {
 			void (async () => {
 				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
-				if (!isPortalAdmin() && !BETA_USER_IDS.includes(uid)) {
+				if (!isPortalAdmin() && !MANAGEMENT_USER_IDS.includes(uid)) {
 					setPhase({ k: 'denied' });
 					return;
 				}

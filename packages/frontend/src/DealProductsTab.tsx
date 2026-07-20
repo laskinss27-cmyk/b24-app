@@ -25,7 +25,6 @@ import {
 	withTimeout,
 	call,
 	isWorkRow,
-	BETA_USER_IDS,
 	type DealProductRow,
 	type StoreInfo,
 	type ProductEnrichment,
@@ -69,7 +68,6 @@ interface TableData {
 
 type State =
 	| { phase: 'init' }
-	| { phase: 'denied' }
 	| { phase: 'loading' }
 	| { phase: 'error'; message: string }
 	| { phase: 'ready'; data: TableData; viewer: string; dev: boolean; canReturn: boolean };
@@ -304,10 +302,6 @@ export function DealProductsTab(): JSX.Element {
 				.then((user) => {
 					const viewerId = String(user.ID ?? '');
 					const viewerName = `${user.NAME ?? ''} ${user.LAST_NAME ?? ''}`.trim() || viewerId;
-					if (!BETA_USER_IDS.includes(viewerId)) {
-						setState({ phase: 'denied' });
-						return;
-					}
 					// Возврат оформляет снабжение+ (Вова 1 / Сергей 1858 / Бекасов 986 + отдел Снабжение 10).
 					const depts = Array.isArray(user.UF_DEPARTMENT) ? user.UF_DEPARTMENT.map(Number) : [];
 					const canReturn = ['1', '1858', '986'].includes(viewerId) || depts.includes(10);
@@ -327,22 +321,6 @@ export function DealProductsTab(): JSX.Element {
 		requestB24FitWindow(80);
 		requestB24FitWindow(360);
 	}, [ctx.__mock, state.phase]);
-
-	if (state.phase === 'denied') {
-		return (
-			<div className="deal-products-tab">
-				<header>
-					<h1>Товары сделки</h1>
-				</header>
-				<section>
-					<p className="stub-calm">
-						Раздел в разработке. Пользуйтесь, пожалуйста, стандартной вкладкой <strong>«Товары»</strong> —
-						здесь скоро появится обновлённый вид с остатками по складам и реализацией.
-					</p>
-				</section>
-			</div>
-		);
-	}
 
 	if (state.phase === 'init' || state.phase === 'loading') {
 		return (
@@ -1055,9 +1033,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 				</div>
 			</header>
 
-			{dev
-				? <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>
-				: <div className="beta-banner">Бета-доступ: эту таблицу пока видишь только ты. Остальные работают в стандартной вкладке «Товары».</div>}
+			{dev && <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>}
 
 			{data.payment && data.payment.total > 0 && (() => {
 				const { total, paid } = data.payment;

@@ -4,7 +4,7 @@ import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import {
 	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements, openDeal,
-	fetchCurrentUserId, isPortalAdmin, withTimeout, BETA_USER_IDS,
+	fetchCurrentUserId, withTimeout,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createSupplyTtRequest, createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
 	fetchDocDetail, fetchItemHistory,
@@ -24,7 +24,7 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
 
 /**
  * Окно «Складской учёт» (левое меню, view='stock'). Вкладки:
- *  - Перемещения — список + кнопки «В пути»/«Получено» (снабжение) + «Создать перемещение» (канарейка);
+ *  - Перемещения — список и рабочие действия снабжения;
  *  - Списания / Оприходования — журнал ядра + формы создания (черновик → «Провести»);
  *  - Реализации — read-only журнал (создаются из сделки).
  *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
@@ -609,7 +609,7 @@ export function StockLedger(): JSX.Element {
 	const [form, setForm] = useState<StockForm | null>(null);
 	const [fullAccess, setFullAccess] = useState(false);
 
-	// Складские документы остаются канарейкой; инвентаризация доступна прежнему кругу пользователей.
+	// Снабжение видит весь складской учёт; менеджеры — заявки ТТ и инвентаризацию.
 	useEffect(() => {
 		if (ctx.__mock) {
 			setFullAccess(true);
@@ -621,20 +621,19 @@ export function StockLedger(): JSX.Element {
 		if (!bx) { setFullAccess(true); setPhase({ k: 'ready' }); return; }
 		bx.init(() => {
 			void (async () => {
-				const uid = await withTimeout(fetchCurrentUserId(), 15000, 'user.current');
-				const canUseStockDocuments = isPortalAdmin() || BETA_USER_IDS.includes(uid);
-				setFullAccess(canUseStockDocuments);
-				if (!canUseStockDocuments) setTab('inventory');
+				const access = await withTimeout(fetchStockFormData(), 15000, 'stock.form-data');
+				setForm(access);
+				setFullAccess(access.canCreate);
+				if (!access.canCreate) setTab('inventory');
 				setPhase({ k: 'ready' });
 				// Справочники форм — best-effort (ядро может быть недоступно: формы просто не покажут селекторы).
-				fetchStockFormData().then(setForm).catch(() => setForm({ stores: [], suppliers: [], canCreate: false }));
 			})().catch(() => setPhase({ k: 'denied' }));
 		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ctx]);
 
 	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
-	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>🔒 Раздел в обкатке — доступен ограниченному кругу.</div>;
+	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>Не удалось определить права доступа. Обновите страницу.</div>;
 	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'requests' || item.key === 'inventory');
 	return (
 		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>

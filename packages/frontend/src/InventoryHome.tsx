@@ -43,7 +43,7 @@ import { InventoryCount } from './InventoryReport.js';
 /** Имя инвентаризации по умолчанию (поле ввода названия убрано — Сергей, 2026-06-05). */
 const INV_TITLE = 'Инвентаризация';
 
-type Phase = { k: 'init' } | { k: 'denied' } | { k: 'error'; msg: string } | { k: 'ready' };
+type Phase = { k: 'init' } | { k: 'error'; msg: string } | { k: 'ready' };
 
 /** Активный подсчёт точки (открыт экран InventoryCount). */
 interface Counting {
@@ -176,10 +176,6 @@ export function InventoryHome(): JSX.Element {
 			void (async () => {
 				const meUser = await withTimeout(fetchCurrentUser(), 15000, 'user.current');
 					const uid = meUser.id;
-				if (false /* GA: канарейка снята — модуль инвентаризации доступен всем */) {
-					setPhase({ k: 'denied' });
-					return;
-				}
 				let initiators: string[] = [];
 				try {
 					initiators = await withTimeout(getInitiators(), 8000, 'app.option.get');
@@ -379,7 +375,6 @@ export function InventoryHome(): JSX.Element {
 	}
 
 	if (phase.k === 'init') return <Shell><p>Загрузка…</p></Shell>;
-	if (phase.k === 'denied') return <Shell><p className="stub-calm">Раздел инвентаризации в разработке. Пока доступен не всем.</p></Shell>;
 	if (phase.k === 'error') return <Shell><p className="error">⛔ {phase.msg}</p></Shell>;
 
 	// Экран подсчёта точки

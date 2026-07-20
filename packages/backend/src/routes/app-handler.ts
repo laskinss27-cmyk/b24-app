@@ -42,7 +42,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 	<p class="subtitle">Кастомные вкладки для сделок, поставок и инвентаризации.</p>
 	__STATUS_BLOCK__
 	<div class="card">
-		<strong>Откройте любую сделку</strong> — приложение появится как вкладка <code>b24-app</code>
+		<strong>Откройте любую сделку</strong> — приложение появится как вкладка <code>Товары 2.0</code>
 		рядом со стандартными «Товары», «История» и т.д.
 	</div>
 </body>

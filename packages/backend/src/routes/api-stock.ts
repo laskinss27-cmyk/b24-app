@@ -19,7 +19,7 @@ import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
  *  - /api/stock/create      — создать ЧЕРНОВИК прихода/списания (Provести — отдельно);
  *  - /api/stock/submit      — провести черновик (двигает остатки ядра).
  * Перемещения — отдельный роут /api/transfers/*.
- * Авторизация — Б24-oauth (домен из allowlist). Создание/проведение — только канарейка.
+ * Авторизация — Б24-oauth (домен из allowlist). Создание/проведение — снабжение и руководители.
  */
 interface AuthBody { domain?: string; accessToken?: string }
 
@@ -27,14 +27,15 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-/** Право создавать/проводить складские документы = канарейка окна (как BETA_USER_IDS на фронте).
- *  Сознательно НЕ пускаем рядовых: создание двигает остатки ядра. */
-export const STOCK_CREATE_IDS = new Set(['1', '986', '1858']);
+const SUPPLY_DEPARTMENT_ID = 10;
+const STOCK_ADMIN_IDS = new Set(['1', '986', '1858']);
 
-/** id текущего пользователя Б24 (для гейта создания). '' — не определён. */
-async function currentUserId(client: B24Client): Promise<string> {
-	const me = await client.call<{ ID?: string | number }>('user.current', {}).catch(() => null);
-	return String(me?.ID ?? '');
+/** Право напрямую двигать склад: отдел снабжения и установленные руководящие учётки. */
+export async function canManageStock(client: B24Client): Promise<boolean> {
+	const me = await client.call<{ ID?: string | number; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
+	const id = String(me?.ID ?? '');
+	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
+	return STOCK_ADMIN_IDS.has(id) || departments.includes(SUPPLY_DEPARTMENT_ID);
 }
 
 async function validateFreeStock(
@@ -192,7 +193,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// Справочники для форм: склады, поставщики, право создавать (канарейка).
+	// Справочники для форм: склады, поставщики, право создавать по учётной записи.
 	app.post('/api/stock/form-data', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody;
 		const client = clientFrom(b);
@@ -200,10 +201,10 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			const [stores, suppliers, uid] = await Promise.all([
-				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), currentUserId(client),
+			const [stores, suppliers, canCreate] = await Promise.all([
+				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), canManageStock(client),
 			]);
-			return { ok: true, stores, suppliers, canCreate: STOCK_CREATE_IDS.has(uid) };
+			return { ok: true, stores, suppliers, canCreate };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
@@ -235,7 +236,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 	});
 
 	// Создать НОВЫЙ товар (которого нет в каталоге): продукт в каталоге Б24 (iblock 24, простой, штуки)
-	// → productId → зеркало Item в ядре. Возвращает {productId, name} для добавления в приход. Гейт — канарейка.
+	// → productId → зеркало Item в ядре. Возвращает {productId, name} для добавления в приход. Доступ — снабжение.
 	app.post('/api/stock/create-product', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { name?: unknown };
 		const client = clientFrom(b);
@@ -245,7 +246,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const name = String(b.name ?? '').trim();
 		if (name.length < 2) return reply.code(400).send({ ok: false, error: 'имя товара слишком короткое' });
 		try {
-			if (!STOCK_CREATE_IDS.has(await currentUserId(client))) return reply.code(403).send({ ok: false, error: 'создавать товар может только канарейка' });
+			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'создавать товар может только снабжение' });
 			// iblock 24 = базовый каталог CRM (productIblockId=null); type 1 = простой товар; measure 9 = штуки (дефолт портала).
 			const r = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', { fields: { iblockId: 24, name, type: 1, measure: 9, active: 'Y' } });
 			const productId = Number(r?.element?.id ?? 0) || 0;
@@ -267,7 +268,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			if (!STOCK_CREATE_IDS.has(await currentUserId(client))) return reply.code(403).send({ ok: false, error: 'создавать складские документы может только канарейка' });
+			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'создавать складские документы может только снабжение' });
 			const kind = b['kind'] === 'receipt' ? 'receipt' : b['kind'] === 'issue' ? 'issue' : null;
 			if (!kind) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
 
@@ -327,7 +328,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const doctype = b.kind === 'receipt' ? 'Purchase Receipt' : b.kind === 'issue' ? 'Stock Entry' : null;
 		if (!doctype) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
 		try {
-			if (!STOCK_CREATE_IDS.has(await currentUserId(client))) return reply.code(403).send({ ok: false, error: 'проводить может только канарейка' });
+			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
 			if (b.kind === 'issue') {
 				const doc = await erp.get<Record<string, unknown>>('Stock Entry', name);
 				const stores = await listActiveStoreTitles(erp);
