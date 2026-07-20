@@ -6,7 +6,7 @@ import {
 	parsePlacementOptions,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, bindRepairsUriPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, refreshDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, bindRepairsUriPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -48,11 +48,12 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 </body>
 </html>`;
 
-	type Status = 'bound' | 'already-bound' | 'failed' | 'no-auth' | 'idle';
+	type Status = 'bound' | 'already-bound' | 'refreshed' | 'failed' | 'no-auth' | 'idle';
 	const renderHtml = (status: Status, taskInfo = '', storageInfo = '', placementsInfo = '', catalogInfo = ''): string => {
 		const blocks: Record<Status, string> = {
 			'bound': '<div class="card ok"><strong>✅ Вкладка сделки зарегистрирована.</strong></div>',
 			'already-bound': '<div class="card ok"><strong>✅ Вкладка сделки уже была зарегистрирована.</strong></div>',
+			'refreshed': '<div class="card ok"><strong>✅ Название вкладки обновлено.</strong></div>',
 			'failed': '<div class="card err"><strong>⛔ Не удалось зарегистрировать вкладку сделки.</strong></div>',
 			'no-auth': '<div class="card err"><strong>⚠️ Нет OAuth-токена.</strong> Открой через карточку приложения.</div>',
 			'idle': '',
@@ -92,6 +93,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 
 	// POST — открытие из Б24. Тело содержит AUTH_ID + DOMAIN.
 	app.post('/app/handler', async (req, reply) => {
+		const rawQuery = (req.query ?? {}) as Record<string, unknown>;
 		const parsedBody = PlacementBodySchema.safeParse(req.body);
 		const parsedQuery = PlacementQuerySchema.safeParse(req.query);
 		const body = parsedBody.success ? parsedBody.data : {};
@@ -138,6 +140,7 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 
 		if (auth) {
 			const client = new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken } });
+			const refreshDealTabTitle = String(rawQuery['refreshDealTabTitle'] ?? '') === '1';
 
 			// СВЕРКА ПРИВЯЗОК С UNBIND УБРАНА (2026-06-17): её unbind-all→rebind создавал окно «нет
 			// привязки» → «приложение не найдено» (инцидент гонки 2026-06-03 повторился). Дубли уже
@@ -145,7 +148,9 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 
 			// 1) Вкладка сделки
 			try {
-				const result = await bindDealTabPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				const result = refreshDealTabTitle
+					? await refreshDealTabPlacement({ client, publicBaseUrl: app.config.publicBaseUrl })
+					: await bindDealTabPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				status = result.status;
 				app.log.info({ placement: DEAL_TAB_PLACEMENT, status: result.status }, '[app/handler] deal placement bound');
 			} catch (err) {

@@ -366,6 +366,26 @@ export async function ensureTransfersEntity(client: B24Client): Promise<{ status
 	}
 }
 
+/** One-shot maintenance action for changing the title of an existing placement. */
+export async function refreshDealTabPlacement(opts: BindDealTabOptions): Promise<{ status: 'refreshed' }> {
+	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/deal-tab`;
+	await opts.client.call('placement.unbind', {
+		PLACEMENT: DEAL_TAB_PLACEMENT,
+		HANDLER: handlerUrl,
+	});
+	await opts.client.call('placement.bind', {
+		PLACEMENT: DEAL_TAB_PLACEMENT,
+		HANDLER: handlerUrl,
+		TITLE: DEAL_TAB_TITLE,
+		DESCRIPTION: DEAL_TAB_DESCRIPTION,
+		LANG_ALL: {
+			ru: { TITLE: DEAL_TAB_TITLE, DESCRIPTION: DEAL_TAB_DESCRIPTION },
+			en: { TITLE: DEAL_TAB_TITLE, DESCRIPTION: 'Custom products tab for deals' },
+		},
+	});
+	return { status: 'refreshed' };
+}
+
 /** Заказы менеджеров на перемещение. Это только просьбы: они не резервируют товар и не создают проводок. */
 // Bitrix24 limits entity codes to 16 characters.
 export const TRANSFER_REQUESTS_ENTITY = 'ctv_tr_requests';
