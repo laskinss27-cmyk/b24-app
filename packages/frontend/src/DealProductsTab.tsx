@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type FocusEvent } from 'react';
+import { Fragment, useEffect, useState, type CSSProperties, type FocusEvent } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument } from './Kp.js';
@@ -41,6 +41,10 @@ import {
 interface EnrichedRow extends DealProductRow {
 	stocks: Array<{ storeId: number; storeName: string; amount: number }>;
 	purchasingPrice: number | null;
+	/** В режиме по этапам одна агрегированная строка плана раскладывается на отдельные партии. */
+	segmentKind?: 'base' | 'stage';
+	stageId?: string;
+	stageNumber?: number;
 }
 interface TableData {
 	rows: EnrichedRow[];
@@ -59,7 +63,7 @@ interface TableData {
 	supply: SupplyCard[];
 	/** Активные склады каталога. */
 	stores: StoreInfo[];
-	/** История дополнительных этапов комплектации сделки. */
+	/** Дополнительные этапы комплектации сделки. */
 	stages: DealStage[];
 }
 
@@ -75,11 +79,11 @@ const MOCK_DATA: TableData = {
 	coef: 0.5,
 	coreReals: [],   // чистый мок: прошлых реализаций нет (реализация считается на проде через ядро)
 	plan: [
-		{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 1, rate: 1000, priceListRate: 1000, discountPercent: 0, delivered: 0 },
+		{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 4, rate: 1000, priceListRate: 1000, discountPercent: 0, delivered: 0 },
 		{ productId: 102, itemName: 'Кабель UTP cat5e, бухта 305 м', qty: 1, rate: 100, priceListRate: 100, discountPercent: 0, delivered: 0 },
 	],
 	planRows: [
-		{ id: 'plan-101', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 1000, quantity: 1, discountSum: 0, measure: 'шт', purchasingPrice: 600, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
+		{ id: 'plan-101', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 1000, quantity: 4, discountSum: 0, measure: 'шт', purchasingPrice: 600, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
 		{ id: 'plan-102', productId: 102, name: 'Кабель UTP cat5e, бухта 305 м', type: 1, price: 100, quantity: 1, discountSum: 0, measure: 'шт', purchasingPrice: 80, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 30 }] },
 	],
 	payment: { total: 103500, paid: 50000 },   // мок: частичная оплата для демонстрации баннера
@@ -91,7 +95,10 @@ const MOCK_DATA: TableData = {
 		// Склад без остатков по товарам сделки — чтобы в dev видеть статус «↪ Переместить».
 		{ id: 12, title: 'Максидом Богатырский 15', active: true },
 	],
-	stages: [],
+	stages: [
+		{ id: 'mock-stage-1', at: '2026-07-18T10:30:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 1, price: 1000, isService: false }] },
+		{ id: 'mock-stage-2', at: '2026-07-20T08:15:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 2, price: 1000, isService: false }] },
+	],
 	rows: [
 		// всего хватает на ОБОИХ складах — все строки «✓ хватит», крути склады/кол-ва как хочешь
 		{ id: '1', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 2400, quantity: 20, discountSum: 0, measure: 'шт', purchasingPrice: 1500, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
@@ -540,7 +547,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 	const [showReturn, setShowReturn] = useState(false);
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const [showDealDocuments, setShowDealDocuments] = useState(false);
-	const [showStages, setShowStages] = useState(false);
+	const [summaryView, setSummaryView] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
@@ -566,7 +573,27 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 	/** Фактически проведено: черновики сюда не входят, возвраты уменьшают итог. */
 	const shippedOf = (productId: number): number =>
 		Math.max(0, data.coreReals.filter((document) => document.submitted).reduce((sum, document) => sum + document.items.filter((item) => item.productId === productId).reduce((itemSum, item) => itemSum + item.qty, 0), 0));
-	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - realizedOf(r.productId));
+	const segmentRealized = new Map<string, number>();
+	for (const planRow of data.planRows) {
+		let left = Math.max(0, realizedOf(planRow.productId));
+		const stagedQty = data.stages.reduce((sum, stage) => sum + stage.items.filter((item) => item.productId === planRow.productId).reduce((itemSum, item) => itemSum + item.qty, 0), 0);
+		const baseQty = Math.max(0, planRow.quantity - stagedQty);
+		const baseId = `base-${planRow.productId}`;
+		segmentRealized.set(baseId, Math.min(baseQty, left));
+		left = Math.max(0, left - baseQty);
+		for (let stageIndex = 0; stageIndex < data.stages.length; stageIndex++) {
+			const stage = data.stages[stageIndex]!;
+			stage.items.forEach((item, itemIndex) => {
+				if (item.productId !== planRow.productId) return;
+				const id = `stage-${stage.id}-${item.productId}-${itemIndex}`;
+				segmentRealized.set(id, Math.min(item.qty, left));
+				left = Math.max(0, left - item.qty);
+			});
+		}
+	}
+	const realizedForRow = (r: EnrichedRow): number => r.segmentKind ? (segmentRealized.get(r.id) ?? 0) : realizedOf(r.productId);
+	const shippedForRow = (r: EnrichedRow): number => r.segmentKind ? Math.min(r.quantity, segmentRealized.get(r.id) ?? 0) : shippedOf(r.productId);
+	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - realizedForRow(r));
 	const qtyOf = (r: EnrichedRow): number => {
 		const v = Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.')) || 0;
 		return Math.min(Math.max(0, v), remaining(r)); // нельзя реализовать больше, чем осталось в строке
@@ -629,6 +656,35 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 	const works = rows.filter((r) => isWorkRow(r.type));
 	// «Выезд инженера» (productId 9814) — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
 	const realWorks = [...planWorks, ...works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)];
+	const stageQtyByProduct = new Map<number, number>();
+	for (const stage of data.stages) {
+		for (const item of stage.items) stageQtyByProduct.set(item.productId, (stageQtyByProduct.get(item.productId) ?? 0) + item.qty);
+	}
+	const basePlanRows = data.planRows.flatMap((row): EnrichedRow[] => {
+		const quantity = Math.max(0, row.quantity - (stageQtyByProduct.get(row.productId) ?? 0));
+		return quantity > 0.000001 ? [{ ...row, id: `base-${row.productId}`, quantity, segmentKind: 'base' }] : [];
+	});
+	const stageSections = data.stages.map((stage, index) => ({
+		stage,
+		number: index + 1,
+		rows: stage.items.flatMap((item, itemIndex): EnrichedRow[] => {
+			const source = data.planRows.find((row) => row.productId === item.productId);
+			if (!source || item.qty <= 0) return [];
+			return [{
+				...source,
+				id: `stage-${stage.id}-${item.productId}-${itemIndex}`,
+				name: item.itemName || source.name,
+				quantity: item.qty,
+				price: item.price,
+				discountSum: 0,
+				segmentKind: 'stage',
+				stageId: stage.id,
+				stageNumber: index + 1,
+			}];
+		}),
+	}));
+	const stagedPlanRows = [...basePlanRows, ...stageSections.flatMap((section) => section.rows)];
+	const visibleGoods = summaryView ? goods : stagedPlanRows.filter((row) => !isWorkRow(row.type));
 	const sumRealWorks = realWorks.reduce((a, r) => a + line(r), 0);
 	const sumGoods = goods.reduce((a, r) => a + line(r), 0);
 	const sumWorks = sumRealWorks;
@@ -646,6 +702,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
 	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
 	const partsOf = (r: EnrichedRow): Part[] => {
+		if (!summaryView && r.segmentKind) return [];
 		const linkedReturns = new Map<string, number>();
 		let unlinkedReturns = 0;
 		for (const document of data.coreReals.filter((item) => item.isReturn && item.submitted)) {
@@ -699,23 +756,23 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 				<div className="row-controls">
 					<button
 						className="row-del-x"
-						disabled={busy || removing != null || realizePhase !== 'idle'}
+						disabled={busy || removing != null || realizePhase !== 'idle' || (!summaryView && Boolean(r.segmentKind))}
 						onClick={() => void doRemove(r)}
-						title="Удалить работу из сделки"
+						title={!summaryView && r.segmentKind ? 'Редактирование состава доступно в сводном виде' : 'Удалить работу из сделки'}
 					>{removing === r.id ? '…' : '✕'}</button>
 				</div>
 			</td>
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
-				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 			</td>
 			<td className="num">
-				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 			</td>
 			<td className="num">
-				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
+				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
 			</td>
 			<td className="num"><span className="none">—</span></td>
 			<td className="num"><span className="none">—</span></td>
@@ -764,9 +821,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 						<div className="row-controls">
 							<button
 								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle'}
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || (!summaryView && Boolean(r.segmentKind))}
 								onClick={() => void doRemove(r)}
-								title="Удалить товар из сделки"
+								title={!summaryView && r.segmentKind ? 'Редактирование состава доступно в сводном виде' : 'Удалить товар из сделки'}
 							>{removing === r.id ? '…' : '✕'}</button>
 							<input
 								type="checkbox"
@@ -783,19 +840,19 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 					</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
-						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 						<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 						{r.purchasingPrice != null
 							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
 							: <div className="purchase-hint muted-hint">закуп —</div>}
 					</td>
 					<td className="num">
-						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 					</td>
 					<td className="num">
-						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
+						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || (!summaryView && Boolean(r.segmentKind))} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
 					</td>
-					<td className="num"><b className="realized-qty">{shippedOf(r.productId)}</b></td>
+					<td className="num"><b className="realized-qty">{shippedForRow(r)}</b></td>
 					<td className="num">
 						<input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} onBlur={(e) => onRowBlur(r, e)} title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} />
 					</td>
@@ -871,6 +928,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
+	const sectionBand = (title: string, subtitle: string, list: EnrichedRow[]): JSX.Element => (
+		<tr className="deal-stage-band">
+			<td colSpan={8}><b>{title}</b>{subtitle && <small>{subtitle}</small>}</td>
+			<td className="num" colSpan={3}>{rub(list.reduce((sum, row) => sum + line(row), 0))}</td>
+		</tr>
+	);
 
 	// Готовые к реализации строки → группируем по складу (на каждый склад — свой Delivery Note в ядре).
 	// Можно ли отгрузить строку сейчас (остаток есть + хватает на выбранном складе) — отсюда доступность галочки.
@@ -878,7 +941,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 		const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
 		const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
 		// В реализацию идут ТОЛЬКО отмеченные галочкой строки (дефолт — ничего не отмечено).
-		const selectedGoods = goods.filter((r) => isSel(r) && remaining(r) > 0);
+		const selectedGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0);
 		const blockedSelectedGoods = selectedGoods.filter((r) => !canRealize(r));
 		const readyGoods = selectedGoods.filter(canRealize);
 	const realizeGroups = new Map<number, EnrichedRow[]>();
@@ -890,7 +953,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
-	const supplyGoods = goods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
+	const supplyGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
 	const doCreateSupply = async (): Promise<void> => {
 		if (dealId == null || !supplyGoods.length || supplyBusy || busy || realizePhase !== 'idle') return;
 		setSupplyFormError(null);
@@ -1012,12 +1075,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 			<div className="deal-addbar">
 				<div className="deal-actions">
 				<button className="btn-primary" onClick={onAdd}>Добавить товар</button>
-				<button className="btn-secondary" onClick={onStage}>Этап</button>
 				{data.stages.length > 0 && (
-					<button className={`btn-secondary${showStages ? ' active' : ''}`} onClick={() => {
-						setShowStages((shown) => !shown);
+					<button className={`btn-secondary${summaryView ? ' active' : ''}`} onClick={() => {
+						setSummaryView((shown) => !shown);
+						setSelected({});
 						requestB24FitWindow(160);
-					}}>История этапов ({data.stages.length})</button>
+					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
 				<button className="btn-secondary" onClick={onKp}>КП</button>
 				<button
@@ -1036,22 +1099,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 				</div>
 				<span className="hint">Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.</span>
 			</div>
-
-			{showStages && data.stages.length > 0 && (
-				<section className="deal-stages-panel" aria-label="История этапов сделки">
-					{[...data.stages].reverse().map((stage, reverseIndex) => {
-						const number = data.stages.length - reverseIndex;
-						const at = new Date(stage.at);
-						const when = Number.isNaN(at.getTime()) ? stage.at : at.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
-						return (
-							<div className="deal-stage-row" key={stage.id}>
-								<span className="deal-stage-meta"><b>Этап {number}</b><small>{when}{stage.byName ? ` · ${stage.byName}` : ''}</small></span>
-								<span className="deal-stage-items">{stage.items.map((item) => `${item.itemName} ×${item.qty}`).join(' · ')}</span>
-							</div>
-						);
-					})}
-				</section>
-			)}
 
 			{showDealDocuments && (
 				<section className="deal-documents-panel" aria-label="Документы по сделке">
@@ -1111,14 +1158,48 @@ function RealTable({ data, viewer, dev, canReturn, dealId, onAdd, onStage, onKp,
 					</tr>
 				</thead>
 				<tbody>
-					{/* ТОВАРЫ = строки плана из ядра, через штатный движок (чекбоксы/склад/статусы/партии/
-					    реализация). «Выезд инженера» (Б24) скрыт; реальные работы — ниже. */}
-					{goods.length > 0 && groupBand('Товары', goods, sumGoods)}
-					{goods.flatMap(renderGoodsRows)}
-					{realWorks.length > 0 && groupBand('Работы и услуги', realWorks, sumRealWorks)}
-					{realWorks.map(renderWorkRow)}
+					{summaryView ? (
+						<>
+							{goods.length > 0 && groupBand('Товары', goods, sumGoods)}
+							{goods.flatMap(renderGoodsRows)}
+							{realWorks.length > 0 && groupBand('Работы и услуги', realWorks, sumRealWorks)}
+							{realWorks.map(renderWorkRow)}
+						</>
+					) : (
+						<>
+							{(() => {
+								const baseWorks = [...basePlanRows.filter((row) => isWorkRow(row.type)), ...works.filter((row) => row.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)];
+								const baseGoods = basePlanRows.filter((row) => !isWorkRow(row.type));
+								const all = [...baseGoods, ...baseWorks];
+								return (
+									<Fragment key="base-deal">
+										{sectionBand('Основная сделка', '', all)}
+										{baseGoods.flatMap(renderGoodsRows)}
+										{baseWorks.map(renderWorkRow)}
+									</Fragment>
+								);
+							})()}
+							{stageSections.map(({ stage, number, rows: stageRows }) => {
+								const at = new Date(stage.at);
+								const when = Number.isNaN(at.getTime()) ? stage.at : at.toLocaleDateString('ru-RU');
+								const stageGoods = stageRows.filter((row) => !isWorkRow(row.type));
+								const stageWorks = stageRows.filter((row) => isWorkRow(row.type));
+								return (
+									<Fragment key={stage.id}>
+										{sectionBand(`Этап ${number}`, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows)}
+										{stageGoods.flatMap(renderGoodsRows)}
+										{stageWorks.map(renderWorkRow)}
+									</Fragment>
+								);
+							})}
+						</>
+					)}
 				</tbody>
 			</table>
+			</div>
+
+			<div className="deal-stage-addbar">
+				<button className="btn-secondary" onClick={onStage}>Добавить этап</button>
 			</div>
 
 			<div className="totals">

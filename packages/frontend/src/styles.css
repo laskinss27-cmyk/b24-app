@@ -2699,38 +2699,33 @@ body.deal-placement-body #root {
 	background: #eef5ff;
 	color: #174f8a;
 }
-.deal-stages-panel {
-	margin: -2px 0 14px;
-	border: 1px solid #d9dee7;
-	background: #fff;
+.deal-stage-band td {
+	padding: 12px 14px;
+	border-top: 10px solid #f4f6f9;
+	border-bottom: 1px solid #c8d4e5;
+	background: #eef3f9;
+	color: #17243a;
 }
-.deal-stage-row {
-	display: grid;
-	grid-template-columns: 220px minmax(0, 1fr);
-	align-items: center;
-	gap: 18px;
-	padding: 10px 14px;
-	border-top: 1px solid #edf0f4;
+.deal-stage-band:first-child td {
+	border-top-width: 0;
 }
-.deal-stage-row:first-child {
-	border-top: 0;
-}
-.deal-stage-meta {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-}
-.deal-stage-meta b {
+.deal-stage-band b {
 	font-size: 13px;
 }
-.deal-stage-meta small,
-.deal-stage-items {
-	color: #66758a;
+.deal-stage-band small {
+	margin-left: 10px;
+	color: #6c7b90;
 	font-size: 12px;
 }
-.deal-stage-items {
-	min-width: 0;
-	overflow-wrap: anywhere;
+.deal-stage-addbar {
+	display: flex;
+	justify-content: flex-start;
+	padding: 10px 0 2px;
+}
+.products-table input:disabled {
+	color: #26364d;
+	background: #f5f7fa;
+	opacity: 1;
 }
 .deal-documents-panel {
 	margin: -2px 0 14px;
