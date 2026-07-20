@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { PlacementBodySchema, PlacementQuerySchema, buildPlacementContext } from '../handlers/placement-context.js';
 import { verifyBitrixRequest } from '../security.js';
+import { B24Client } from '../b24/client.js';
+import { ensureDealTabTitleV2 } from '../b24/placement.js';
 
 /**
  * POST /placement/deal-tab — Б24 дёргает когда юзер открывает нашу вкладку
@@ -33,6 +35,12 @@ export function registerPlacementDealTabRoute(app: FastifyInstance): void {
 
 		const ctx = buildPlacementContext(parsed.data);
 		app.log.info(ctx, '[placement/deal-tab] opened');
+		if (parsed.data.DOMAIN && parsed.data.AUTH_ID) {
+			const client = new B24Client({ auth: { kind: 'oauth', domain: parsed.data.DOMAIN, accessToken: parsed.data.AUTH_ID } });
+			void ensureDealTabTitleV2({ client, publicBaseUrl: app.config.publicBaseUrl })
+				.then((status) => app.log.info({ status }, '[placement/deal-tab] title migration'))
+				.catch((error: unknown) => app.log.warn({ error: String(error) }, '[placement/deal-tab] title migration failed'));
+		}
 
 		const indexHtml = await app.readFrontendIndex();
 		if (!indexHtml) {

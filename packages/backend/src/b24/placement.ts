@@ -386,6 +386,26 @@ export async function refreshDealTabPlacement(opts: BindDealTabOptions): Promise
 	return { status: 'refreshed' };
 }
 
+let dealTabTitleChecked = false;
+
+/** Persisted one-time migration for the title of the deal placement. */
+export async function ensureDealTabTitleV2(opts: BindDealTabOptions): Promise<'skipped' | 'current' | 'refreshed'> {
+	if (dealTabTitleChecked) return 'skipped';
+	const me = await opts.client.call<{ ID?: string | number }>('user.current', {}).catch(() => null);
+	if (!['1', '986', '1858'].includes(String(me?.ID ?? ''))) return 'skipped';
+
+	const options = await opts.client.call<Record<string, unknown>>('app.option.get', {}).catch((): Record<string, unknown> => ({}));
+	if (String(options['deal_tab_title_version'] ?? '') === '2') {
+		dealTabTitleChecked = true;
+		return 'current';
+	}
+
+	await refreshDealTabPlacement(opts);
+	await opts.client.call('app.option.set', { options: { deal_tab_title_version: '2' } });
+	dealTabTitleChecked = true;
+	return 'refreshed';
+}
+
 /** Заказы менеджеров на перемещение. Это только просьбы: они не резервируют товар и не создают проводок. */
 // Bitrix24 limits entity codes to 16 characters.
 export const TRANSFER_REQUESTS_ENTITY = 'ctv_tr_requests';
