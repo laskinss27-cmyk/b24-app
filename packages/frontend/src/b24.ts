@@ -1136,6 +1136,7 @@ export interface TransferRequestDoc {
 	convertedById: string;
 	convertedByName: string;
 	transferId: number | null;
+	taskId: number | null;
 	canceledAt: string;
 	canceledById: string;
 	canceledByName: string;
@@ -1704,6 +1705,17 @@ export async function createRepair(input: NewRepairInput): Promise<Repair> {
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось принять в ремонт');
 	if ('taskCreated' in json && !json.taskCreated) json.repair.taskWarning = `Задача не создана: ${json.taskError || 'Б24 не вернул ID задачи'}`;
 	return json.repair;
+}
+
+/** Открыть нативную карточку задачи Б24. */
+export function openTask(taskId: number): void {
+	const path = `/company/personal/user/0/tasks/task/view/${taskId}/`;
+	const bx = window.BX24;
+	if (bx && typeof bx.openPath === 'function') bx.openPath(path);
+	else {
+		const auth = bx ? bx.getAuth() : false;
+		window.open(`https://${auth ? (auth.domain ?? '') : ''}${path}`, '_blank');
+	}
 }
 
 /** Остатки склада из ядра — пикер аппарата для предпродажного ремонта. */

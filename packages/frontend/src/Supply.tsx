@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
-import { LedgerTab, StockMovementsTab, StockTransfersTab, TransferRequestsTab, type StockMovementKind } from './StockLedger.js';
+import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, type StockMovementKind } from './StockLedger.js';
 import {
 	cancelTransfer,
 	createIssueDoc,
@@ -15,6 +15,7 @@ import {
 	deleteTransfer,
 	fetchCurrentUserId,
 	fetchStockFormData,
+	openDeal,
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
 	receiveSupplyPurchase,
@@ -1280,11 +1281,15 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onCreateSupplier, onCl
 
 export function Supply(): JSX.Element {
 	const ctx = getContext();
+	const query = new URLSearchParams(window.location.search);
+	const requestId = Number(query.get('request') ?? 0);
+	const transferDeepLinkId = Number(query.get('transfer') ?? ctx.transferId ?? 0);
+	const dealSupplyId = Number(query.get('dealSupply') ?? 0);
 	const [phase, setPhase] = useState<Phase>('init');
 	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
 	const [suppliers, setSuppliers] = useState<string[]>(DEFAULT_SUPPLIERS);
 	const [loading, setLoading] = useState(!ctx.__mock);
-	const [view, setView] = useState<ViewKey>('orders');
+	const [view, setView] = useState<ViewKey>(requestId > 0 ? 'incoming' : 'orders');
 	const [sort, setSort] = useState<SortKey>('dateDesc');
 	const [expanded, setExpanded] = useState('');
 	const [decisions, setDecisions] = useState<DecisionMap>({});
@@ -1501,6 +1506,14 @@ export function Supply(): JSX.Element {
 		setDeepLinkHandled(true);
 	}, [ctx.transferId, deepLinkHandled, loading, orders]);
 
+	useEffect(() => {
+		if (loading || dealSupplyId <= 0) return;
+		const order = orders.find((item) => Number(item.dealId) === dealSupplyId);
+		if (!order) return;
+		setView('orders');
+		setExpanded(order.name);
+	}, [dealSupplyId, loading, orders]);
+
 	const requestOrders = useMemo(() => orders.filter((order) => !order.standalone), [orders]);
 	const sortedOrders = useMemo(() => [...requestOrders].sort((a, b) => {
 		if (sort === 'dateAsc') return String(a.date).localeCompare(String(b.date));
@@ -1589,6 +1602,8 @@ export function Supply(): JSX.Element {
 	};
 
 	if (phase === 'init') return <div className="supply-proto-state">Загрузка...</div>;
+	if (phase === 'denied' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
+	if (phase === 'denied' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
 	if (phase === 'denied') return <div className="supply-proto-state">Раздел «Снаб» доступен сотрудникам снабжения.</div>;
 
 	return (
@@ -1642,7 +1657,7 @@ export function Supply(): JSX.Element {
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
 				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
-				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
+				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>
 					<div className="supply-proto-card supply-stock-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} supplyMode /></div>
 				</>}
@@ -1675,4 +1690,9 @@ export function Supply(): JSX.Element {
 			{printApprovalOrder && <SupplyApprovalPrint order={printApprovalOrder} />}
 		</div>
 	);
+}
+
+function DealSupplyFallback({ dealId }: { dealId: number }): JSX.Element {
+	useEffect(() => { openDeal(dealId); }, [dealId]);
+	return <div className="supply-proto-state"><button className="btn-primary" type="button" onClick={() => openDeal(dealId)}>Открыть сделку #{dealId}</button></div>;
 }

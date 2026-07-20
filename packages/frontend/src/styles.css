@@ -2446,6 +2446,11 @@ html, body, #root { height: 100%; }
 
 .rc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .rc-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rc-related-links { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0 16px; }
+.rc-related-link { min-width: 150px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 10px 13px; border: 1px solid #a9bdd8; border-radius: 6px; background: #f7faff; color: #174f8a; cursor: pointer; font: inherit; text-align: left; }
+.rc-related-link span { font-size: 13px; color: #52677f; }
+.rc-related-link b { font-size: 17px; }
+.rc-related-link:hover { border-color: #6f91bb; background: #edf5ff; }
 .btn-danger { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; padding: 7px 14px; font-size: 14px; cursor: pointer; }
 .btn-danger:hover:not([disabled]) { background: #fee2e2; }
 .btn-danger[disabled] { opacity: .5; cursor: not-allowed; }

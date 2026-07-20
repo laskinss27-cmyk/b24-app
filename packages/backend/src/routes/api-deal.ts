@@ -6,6 +6,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { appendDealStage, appendDealStageItems, updateDealStageItem, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
+import { createSupplyTask, supplySectionUrl, taskLink } from '../b24/supply-task.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -914,6 +915,20 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			});
 			const cardId = Number(added?.item?.['id']);
 			if (!cardId) throw new Error('crm.item.add (Снабжение) не вернул id');
+			const supplyTask = await createSupplyTask(client, {
+				title: `Заявка снабжению по сделке #${dealId}`,
+				description: [
+					`Заявка снабжению: ${title}`,
+					`Сделка: #${dealId}`,
+					storeToName ? `Привезти на: ${storeToName}` : '',
+					'',
+					listText,
+					'',
+					taskLink(supplySectionUrl(app.config.portalDomain, { dealSupply: dealId }), `Открыть заявку по сделке #${dealId}`),
+				].filter(Boolean).join('\n'),
+				authorId: Number(me?.ID ?? 0),
+			});
+			if (!supplyTask.taskId) app.log.warn({ dealId, cardId, error: supplyTask.error }, '[api/deal/supply-request] supply task was not created');
 			// Галка «Заявка снабжения создана» — чтобы робот портала не создал дубль.
 			await client.call('crm.deal.update', { id: dealId, fields: { [DEAL_SUPPLY_CREATED_FLAG]: 1 } })
 				.catch((err) => app.log.warn({ dealId }, `[api/deal/supply-request] галка на сделке не встала (не критично) — ${errInfo(err)}`));

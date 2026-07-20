@@ -490,10 +490,11 @@ const TRANSFER_REQUEST_STATUS: Record<TransferRequestDoc['status'], string> = {
 	canceled: 'Отменён',
 };
 
-export function TransferRequestsTab({ form, mode, onChanged }: {
+export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }: {
 	form: StockForm | null;
 	mode: 'manager' | 'supply';
 	onChanged?: () => void;
+	initialRequestId?: number;
 }): JSX.Element {
 	const [requests, setRequests] = useState<TransferRequestDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
@@ -502,6 +503,7 @@ export function TransferRequestsTab({ form, mode, onChanged }: {
 	const [showSupplyForm, setShowSupplyForm] = useState(false);
 	const [openRequest, setOpenRequest] = useState<TransferRequestDoc | null>(null);
 	const [convertRequest, setConvertRequest] = useState<TransferRequestDoc | null>(null);
+	const [initialRequestHandled, setInitialRequestHandled] = useState(false);
 	const [busy, setBusy] = useState<number | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 
@@ -526,6 +528,12 @@ export function TransferRequestsTab({ form, mode, onChanged }: {
 		finally { setBusy(null); }
 	};
 
+	useEffect(() => {
+		if (initialRequestHandled || !initialRequestId || !requests) return;
+		setInitialRequestHandled(true);
+		const target = requests.find((request) => request.id === initialRequestId);
+		if (target) setOpenRequest(target);
+	}, [initialRequestHandled, initialRequestId, requests]);
 	const shown = (requests ?? []).filter((request) => status === 'all' || request.status === status);
 	return (
 		<section>
@@ -604,8 +612,10 @@ type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
 
 export function StockLedger(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
+	const requestId = Number(new URLSearchParams(window.location.search).get('request') ?? 0);
+	const transferId = Number(new URLSearchParams(window.location.search).get('transfer') ?? 0);
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
-	const [tab, setTab] = useState<Tab>('transfers');
+	const [tab, setTab] = useState<Tab>(requestId > 0 ? 'requests' : 'transfers');
 	const [form, setForm] = useState<StockForm | null>(null);
 	const [fullAccess, setFullAccess] = useState(false);
 
@@ -624,7 +634,7 @@ export function StockLedger(): JSX.Element {
 				const access = await withTimeout(fetchStockFormData(), 15000, 'stock.form-data');
 				setForm(access);
 				setFullAccess(access.canCreate);
-				if (!access.canCreate) setTab('inventory');
+				if (!access.canCreate && requestId <= 0 && transferId <= 0) setTab('inventory');
 				setPhase({ k: 'ready' });
 				// Справочники форм — best-effort (ядро может быть недоступно: формы просто не покажут селекторы).
 			})().catch(() => setPhase({ k: 'denied' }));
@@ -634,7 +644,7 @@ export function StockLedger(): JSX.Element {
 
 	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>Не удалось определить права доступа. Обновите страницу.</div>;
-	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'requests' || item.key === 'inventory');
+	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'requests' || item.key === 'inventory' || (transferId > 0 && item.key === 'transfers'));
 	return (
 		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
@@ -644,8 +654,8 @@ export function StockLedger(): JSX.Element {
 				))}
 			</div>
 			{tab === 'inventory' ? <InventoryHome />
-				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" />
-				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} />
+				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
+				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
 				: tab === 'ledger' ? <LedgerTab />
 				: <StockMovementsTab kind={tab} form={form} showCreate={false} />}
 		</div>
@@ -675,7 +685,7 @@ const TRANSFER_STATUS_OPTS = [
 	{ value: 'posted', label: 'Принято / завершено' },
 ];
 
-export function StockTransfersTab({ form, showCreate = true, supplyMode = false }: { form: StockForm | null; showCreate?: boolean; supplyMode?: boolean }): JSX.Element {
+export function StockTransfersTab({ form, showCreate = true, supplyMode = false, initialTransferId }: { form: StockForm | null; showCreate?: boolean; supplyMode?: boolean; initialTransferId?: number }): JSX.Element {
 	const [list, setList] = useState<TransferDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
 	const [busy, setBusy] = useState<number | null>(null);
@@ -690,6 +700,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 	const [showForm, setShowForm] = useState(false);
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openT, setOpenT] = useState<TransferDoc | null>(null);
+	const [initialTransferHandled, setInitialTransferHandled] = useState(false);
 	const [collectT, setCollectT] = useState<TransferDoc | null>(null);
 	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
 	const [destinationStores, setDestinationStores] = useState<string[]>([]);
@@ -703,6 +714,12 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false 
 		finally { setLoading(false); }
 	};
 	useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
+	useEffect(() => {
+		if (initialTransferHandled || !initialTransferId || !list) return;
+		setInitialTransferHandled(true);
+		const target = list.find((transfer) => transfer.id === initialTransferId);
+		if (target) setOpenT(target);
+	}, [initialTransferHandled, initialTransferId, list]);
 	useEffect(() => {
 		if (!canManage) return;
 		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch(() => setDestinationStores([]));

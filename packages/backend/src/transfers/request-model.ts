@@ -26,6 +26,7 @@ export interface TransferRequestData {
 	convertedById: string;
 	convertedByName: string;
 	transferId: number | null;
+	taskId: number | null;
 	canceledAt: string;
 	canceledById: string;
 	canceledByName: string;
@@ -80,6 +81,7 @@ export function parseTransferRequestItem(item: Record<string, unknown>): StoredT
 		convertedById: String(data.convertedById ?? ''),
 		convertedByName: String(data.convertedByName ?? ''),
 		transferId: Number.isInteger(Number(data.transferId)) && Number(data.transferId) > 0 ? Number(data.transferId) : null,
+		taskId: Number.isInteger(Number(data.taskId)) && Number(data.taskId) > 0 ? Number(data.taskId) : null,
 		canceledAt: String(data.canceledAt ?? ''),
 		canceledById: String(data.canceledById ?? ''),
 		canceledByName: String(data.canceledByName ?? ''),
@@ -110,6 +112,7 @@ export function newTransferRequestData(args: {
 		convertedById: '',
 		convertedByName: '',
 		transferId: null,
+		taskId: null,
 		canceledAt: '',
 		canceledById: '',
 		canceledByName: '',
@@ -139,6 +142,7 @@ export function newSupplyRequestData(args: {
 		convertedById: '',
 		convertedByName: '',
 		transferId: null,
+		taskId: null,
 		canceledAt: '',
 		canceledById: '',
 		canceledByName: '',

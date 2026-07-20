@@ -20,6 +20,7 @@ import {
 	uploadRepairFile,
 	fetchStores,
 	openDeal,
+	openTask,
 	type NewRepairInput,
 	type StoreInfo,
 	type Repair,
@@ -863,7 +864,10 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 				</div>
 			</div>
 			{locked && <p className="muted small">🔒 Ремонт принят в офисе — изменения (поля, цены, статус) доступны только снабжению.</p>}
-			{repair.taskId ? <p className="muted small">📌 Задача: #{repair.taskId}</p> : null}
+			{(repair.taskId || (!presale && repair.dealId)) && <div className="rc-related-links">
+				{repair.taskId ? <button type="button" className="rc-related-link" onClick={() => openTask(repair.taskId!)}><span>Задача</span><b>#{repair.taskId}</b></button> : null}
+				{!presale && repair.dealId ? <button type="button" className="rc-related-link" onClick={() => openDeal(repair.dealId!)}><span>Сделка</span><b>#{repair.dealId}</b></button> : null}
+			</div>}
 			{repair.taskWarning ? <p className="error">⚠ {repair.taskWarning}</p> : null}
 
 			<div className="rc-status">
@@ -906,9 +910,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 					{payBusy && <span className="muted small">сохраняю…</span>}
 				</div>
 			)}
-			{!presale && (repair.dealId
-				? <p className="muted small">🤝 Сделка: <button type="button" className="link-btn" onClick={() => openDeal(repair.dealId!)}>#{repair.dealId}</button></p>
-				: (repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку ремонта — привяжи клиента к контакту Б24 (в редактировании).</p>))}
+			{!presale && !repair.dealId && repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку ремонта — привяжи клиента к контакту Б24 (в редактировании).</p>}
 			{dealMsg && <p className="muted small">{dealMsg}</p>}
 			{stErr && <p className="error">⛔ {stErr}</p>}
 

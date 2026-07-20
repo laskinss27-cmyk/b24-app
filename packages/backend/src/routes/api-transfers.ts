@@ -20,6 +20,7 @@ import {
 } from '../transfers/model.js';
 import { newSupplyRequestData, newTransferRequestData, parseTransferRequestItem, type StoredTransferRequest, type SupplyRequestLine, type TransferRequestData } from '../transfers/request-model.js';
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
+import { createSupplyTask, supplySectionUrl, taskLink } from '../b24/supply-task.js';
 
 /**
  * API модуля «Перемещения» (складской учёт). Документ перемещения — в нашем entity-store
@@ -95,6 +96,31 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		await client.call('entity.item.update', { ENTITY: TRANSFER_REQUESTS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 	};
 
+	const createRequestTask = async (client: B24Client, request: StoredTransferRequest, me: CurrentUser): Promise<void> => {
+		try {
+			const isTransfer = request.kind === 'transfer';
+			const lines = isTransfer
+				? formatTransferLines(request.lines)
+				: request.supplyLines.map((line) => `• ${line.name || (line.productId ? `#${line.productId}` : 'позиция')} × ${line.qty}${line.link ? `\n  ${line.link}` : ''}${line.note ? `\n  ${line.note}` : ''}`).join('\n');
+			const link = supplySectionUrl(app.config.portalDomain, { request: request.id });
+			const title = isTransfer ? `Заказ на перемещение #${request.id}` : `Заявка снабжению #${request.id}`;
+			const route = isTransfer ? `${request.fromStore} → ${request.toStore}` : `Привезти на: ${request.toStore}`;
+			const result = await createSupplyTask(client, {
+				title: `${title}: ${isTransfer ? request.fromStore : request.toStore}`,
+				description: [title, route, request.note ? `Комментарий: ${request.note}` : '', '', lines, '', taskLink(link, `Открыть ${isTransfer ? 'заказ на перемещение' : 'заявку снабжению'} #${request.id}`)].filter(Boolean).join('\n'),
+				authorId: me.id,
+			});
+			if (result.taskId) {
+				request.taskId = result.taskId;
+				await saveTransferRequest(client, request);
+			} else {
+				app.log.warn({ requestId: request.id, error: result.error }, '[transfer-requests] supply task was not created');
+			}
+		} catch (error) {
+			app.log.warn({ requestId: request.id, error: errInfo(error) }, '[transfer-requests] supply task sync failed');
+		}
+	};
+
 	const validateReservation = async (
 		erp: ErpClient,
 		client: B24Client,
@@ -167,6 +193,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		supplyRequest?: string;
 		supplyRequestKey?: string;
 		historyNote: string;
+		taskId?: number | null;
 	}): Promise<TransferData & { id: number; name: string }> => {
 		await validateReservation(args.erp, args.client, 0, args.fromStore, args.lines);
 		const now = new Date().toISOString();
@@ -182,6 +209,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			createdByName: args.me.name,
 			historyNote: args.historyNote,
 		});
+		data.taskId = args.taskId ?? null;
 		const itemName = `Перемещение: ${args.fromStore} → ${args.toStore}`;
 		const added = await args.client.call<number | { id?: number }>('entity.item.add', {
 			ENTITY: TRANSFERS_ENTITY, NAME: itemName, DETAIL_TEXT: JSON.stringify(data),
@@ -224,6 +252,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const name = `Заказ на перемещение #${id}: ${fromStore} → ${toStore}`;
 			const request = { id, name, ...data };
 			await saveTransferRequest(client, request);
+			await createRequestTask(client, request, me);
 			app.log.info({ id, fromStore, toStore, lines: lines.length }, '[api/transfer-requests/create] ok');
 			return { ok: true, request };
 		} catch (err) {
@@ -262,6 +291,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!id) throw new Error('entity.item.add не вернул id');
 			const request = { id, name: `Заявка снабжению #${id}: ${toStore}`, ...data };
 			await saveTransferRequest(client, request);
+			await createRequestTask(client, request, me);
 			app.log.info({ id, toStore, lines: lines.length }, '[api/transfer-requests/create-supply] ok');
 			return { ok: true, request };
 		} catch (err) {
@@ -340,6 +370,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				supplyRequest: `Заказ на перемещение #${request.id}`,
 				supplyRequestKey: `transfer-request:${request.id}`,
 				historyNote: `создано по заказу на перемещение #${request.id}`,
+				taskId: request.taskId,
 			});
 			createdTransferId = transfer.id;
 			const converted = {
@@ -408,6 +439,21 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				});
 				const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 				if (!id) throw new Error('entity.item.add не вернул id');
+				const task = await createSupplyTask(client, {
+					title: `Перемещение #${id} по сделке #${dealId}`,
+					description: [
+						`Перемещение #${id}`,
+						`Сделка: #${dealId}`,
+						`${fromStore} → ${toStore}`,
+						'',
+						formatTransferLines(lines),
+						'',
+						taskLink(supplySectionUrl(app.config.portalDomain, { transfer: id }), `Открыть перемещение #${id}`),
+					].join('\n'),
+					authorId: me.id,
+				});
+				if (task.taskId) data.taskId = task.taskId;
+				else app.log.warn({ id, error: task.error }, '[api/transfers/create] supply task was not created');
 				const notification = await notifyStore(
 					client,
 					fromStore,
@@ -415,10 +461,8 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 					'draft',
 					me,
 				);
-				if (notification.event) {
-					data.history.push(notification.event);
-					await saveData(client, id, itemName, data).catch((error) => app.log.warn({ id }, `[api/transfers/create] notification history failed — ${errInfo(error)}`));
-				}
+				if (notification.event) data.history.push(notification.event);
+				if (task.taskId || notification.event) await saveData(client, id, itemName, data).catch((error) => app.log.warn({ id }, `[api/transfers/create] task/notification state save failed — ${errInfo(error)}`));
 
 				created.push({ id, name: itemName, ...data });
 			}
