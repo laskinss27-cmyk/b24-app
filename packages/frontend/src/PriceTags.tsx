@@ -68,7 +68,7 @@ function buildPriceTagsHtml(items: PriceTagDraft[], settings: PriceTagSettings, 
 	const pages: PriceTagDraft[][] = [];
 	for (let i = 0; i < expanded.length; i += perPage) pages.push(expanded.slice(i, i + perPage));
 	if (!pages.length) pages.push([]);
-	const qrSize = isLarge ? Math.round(settings.qrSizeMm * 1.3) : settings.qrSizeMm;
+	const qrSize = settings.qrSizeMm;
 	const modelSize = Math.max(5.5, settings.nameSizePt - 1.5);
 
 	const tag = (item: PriceTagDraft): string => {
@@ -98,11 +98,11 @@ function buildPriceTagsHtml(items: PriceTagDraft[], settings: PriceTagSettings, 
 		html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, "Segoe UI", sans-serif; }
 		.page { width: 210mm; height: 297mm; padding: 10mm; display: grid; grid-template-columns: repeat(${size.columns}, ${size.width}mm); grid-template-rows: repeat(${size.rows}, ${size.height}mm); gap: 3mm; page-break-after: always; }
 		.page:last-child { page-break-after: auto; }
-		.tag { width: ${size.width}mm; height: ${size.height}mm; border: .3mm solid #bbb; border-radius: 1.5mm; padding: ${isLarge ? '3mm 3.5mm' : '2mm 2.5mm'}; display: grid; grid-template-rows: auto 1fr ${size.bottomHeight}mm; overflow: hidden; }
+		.tag { width: ${size.width}mm; height: ${size.height}mm; border: .3mm solid #bbb; border-radius: 1.5mm; padding: ${isLarge ? '3mm 3.5mm' : '2mm 2.5mm'}; display: grid; grid-template-rows: minmax(0, 1fr) auto ${size.bottomHeight}mm; overflow: hidden; }
 		.tag.empty { border: .3mm dashed #eee; }
-		.tag-top { display: grid; gap: .5mm; min-height: 0; }
+		.tag-top { display: block; min-height: 0; overflow: hidden; }
 		.article { min-height: ${isLarge ? '3mm' : '2.4mm'}; color: #777; font-size: ${size.articleFont}pt; }
-		.name { overflow: hidden; color: #111; font-size: ${settings.nameSizePt}pt; font-weight: 700; line-height: 1.15; display: -webkit-box; -webkit-line-clamp: ${isLarge ? 4 : 3}; -webkit-box-orient: vertical; }
+		.name { overflow: hidden; overflow-wrap: anywhere; color: #111; font-size: ${settings.nameSizePt}pt; font-weight: 700; line-height: 1.15; }
 		.model { margin-top: .5mm; overflow: hidden; color: #666; font-size: ${modelSize}pt; text-overflow: ellipsis; white-space: nowrap; }
 		.tag-middle { display: grid; grid-template-columns: ${qrSize}mm 1fr; align-items: center; gap: ${isLarge ? '3mm' : '2mm'}; padding: ${isLarge ? '2mm' : '1.5mm'} 0; border-top: .2mm solid #eee; border-bottom: .2mm solid #eee; }
 		.qr { display: block; width: ${qrSize}mm; height: ${qrSize}mm; }
@@ -163,6 +163,10 @@ export function PriceTagsModal({ items, onClose }: { items: PriceTagSelection[];
 						<label>Компания<input value={settings.companyName} onChange={(event) => setSettings((value) => ({ ...value, companyName: event.target.value }))} /></label>
 						<label className="price-tags-check"><input type="checkbox" checked={settings.showArticle} onChange={(event) => setSettings((value) => ({ ...value, showArticle: event.target.checked }))} /> Артикул</label>
 						<label className="price-tags-check"><input type="checkbox" checked={settings.showModel} onChange={(event) => setSettings((value) => ({ ...value, showModel: event.target.checked }))} /> Модель</label>
+					</div>
+					<div className="price-tags-size-settings">
+						<label><span>Шрифт названия <b>{settings.nameSizePt} пт</b></span><input type="range" min="6" max="18" step="0.5" value={settings.nameSizePt} onChange={(event) => setSettings((value) => ({ ...value, nameSizePt: Number(event.target.value) }))} /></label>
+						<label><span>Размер QR <b>{settings.qrSizeMm} мм</b></span><input type="range" min="8" max="24" step="1" value={settings.qrSizeMm} onChange={(event) => setSettings((value) => ({ ...value, qrSizeMm: Number(event.target.value) }))} /></label>
 					</div>
 					<div className="price-tags-list-head"><span>Товар</span><span>Цена</span><span>Штук</span><span /></div>
 					<div className="price-tags-list">

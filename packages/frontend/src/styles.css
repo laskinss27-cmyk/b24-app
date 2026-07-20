@@ -2148,6 +2148,18 @@ html, body, #root { height: 100%; }
 	white-space: nowrap;
 }
 .price-tags-check input { width: 15px; height: 15px; }
+.price-tags-size-settings {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 22px;
+	padding: 10px 12px;
+	border-bottom: 1px solid #e2e8ef;
+	background: #fbfcfd;
+}
+.price-tags-size-settings label { display: grid; gap: 6px; color: #59697d; font-size: 11px; }
+.price-tags-size-settings label > span { display: flex; justify-content: space-between; gap: 10px; }
+.price-tags-size-settings b { color: #172337; font-weight: 600; }
+.price-tags-size-settings input[type="range"] { width: 100%; accent-color: #2f7de1; }
 .price-tags-list-head,
 .price-tags-item {
 	display: grid;
