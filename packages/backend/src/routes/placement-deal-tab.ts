@@ -27,7 +27,8 @@ export function registerPlacementDealTabRoute(app: FastifyInstance): void {
 		}
 
 		const query = PlacementQuerySchema.safeParse(req.query);
-		const verdict = verifyBitrixRequest(parsed.data, query.success ? query.data : {}, app.config);
+		const queryData = query.success ? query.data : {};
+		const verdict = verifyBitrixRequest(parsed.data, queryData, app.config);
 		if (!verdict.ok) {
 			app.log.warn({ reason: verdict.reason }, '[placement/deal-tab] rejected — failed verification');
 			return reply.code(403).send('forbidden');
@@ -35,8 +36,9 @@ export function registerPlacementDealTabRoute(app: FastifyInstance): void {
 
 		const ctx = buildPlacementContext(parsed.data);
 		app.log.info(ctx, '[placement/deal-tab] opened');
-		if (parsed.data.DOMAIN && parsed.data.AUTH_ID) {
-			const client = new B24Client({ auth: { kind: 'oauth', domain: parsed.data.DOMAIN, accessToken: parsed.data.AUTH_ID } });
+		const domain = parsed.data.DOMAIN ?? queryData.DOMAIN;
+		if (domain && parsed.data.AUTH_ID) {
+			const client = new B24Client({ auth: { kind: 'oauth', domain, accessToken: parsed.data.AUTH_ID } });
 			void ensureDealTabTitleV2({ client, publicBaseUrl: app.config.publicBaseUrl })
 				.then((status) => app.log.info({ status }, '[placement/deal-tab] title migration'))
 				.catch((error: unknown) => app.log.warn({ error: String(error) }, '[placement/deal-tab] title migration failed'));
