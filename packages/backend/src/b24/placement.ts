@@ -453,7 +453,8 @@ export async function bindRepairsUriPlacement(opts: BindDealTabOptions): Promise
 		return { status: 'bound' };
 	} catch (err) {
 		if (err instanceof B24ApiError) {
-			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			const message = `${err.code} ${err.description ?? ''}`;
+			if (/already\s*bind|ERROR_PLACEMENT_MAX_COUNT|placement\s+max\s+count/i.test(message)) return { status: 'already-bound' };
 			return { status: `${err.code}: ${err.description ?? ''}` };
 		}
 		return { status: String(err) };
