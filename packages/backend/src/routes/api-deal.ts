@@ -359,6 +359,19 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 				await assertDealQuoteVariantSelected(erp, dealId);
+				// Старые сделки до первого изменения всё ещё могут хранить весь состав только в Б24.
+				// Фиксируем его в ядре ДО первой реализации: после неё Б24/менеджер может очистить
+				// нативные строки, а проведённые документы восстановят только товары, но не работы.
+				if (!(await listDealPlan(erp, dealId)).length) {
+					const legacyLines = await listLegacyB24DealLines(client, dealId);
+					if (legacyLines.length) {
+						const today = new Date().toISOString().slice(0, 10);
+						const savedPlan = await upsertDealPlan(erp, dealId, legacyLines, today);
+						const total = Math.round(savedPlan.lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
+						await setDealB24Service(client, dealId, total);
+						app.log.info({ dealId, lines: savedPlan.lines.length, total }, '[api/deal/realize-core] legacy composition preserved');
+					}
+				}
 				const groups = Array.isArray(b.groups) ? b.groups : [];
 				const parsedGroups = groups.map((g) => {
 					const gg = g as { storeTitle?: unknown; lines?: unknown };
