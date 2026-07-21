@@ -30,12 +30,23 @@ function errInfo(err: unknown): string {
 const SUPPLY_DEPARTMENT_ID = 10;
 const STOCK_ADMIN_IDS = new Set(['1', '986', '1858']);
 
-/** Право напрямую двигать склад: отдел снабжения и установленные руководящие учётки. */
-export async function canManageStock(client: B24Client): Promise<boolean> {
+interface StockAccess {
+	canManage: boolean;
+	isSupply: boolean;
+}
+
+/** Роль определяет рабочий экран, а расширенные права — доступные действия. */
+async function stockAccess(client: B24Client): Promise<StockAccess> {
 	const me = await client.call<{ ID?: string | number; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
 	const id = String(me?.ID ?? '');
 	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
-	return STOCK_ADMIN_IDS.has(id) || departments.includes(SUPPLY_DEPARTMENT_ID);
+	const isSupply = departments.includes(SUPPLY_DEPARTMENT_ID);
+	return { canManage: STOCK_ADMIN_IDS.has(id) || isSupply, isSupply };
+}
+
+/** Право напрямую двигать склад: отдел снабжения и установленные руководящие учётки. */
+export async function canManageStock(client: B24Client): Promise<boolean> {
+	return (await stockAccess(client)).canManage;
 }
 
 async function validateFreeStock(
@@ -201,10 +212,10 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			const [stores, suppliers, canCreate] = await Promise.all([
-				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), canManageStock(client),
+			const [stores, suppliers, access] = await Promise.all([
+				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), stockAccess(client),
 			]);
-			return { ok: true, stores, suppliers, canCreate };
+			return { ok: true, stores, suppliers, canCreate: access.canManage, isSupply: access.isSupply };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });

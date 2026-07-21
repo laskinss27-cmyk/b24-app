@@ -29,7 +29,9 @@ export const PlacementQuerySchema = z.object({
 	APP_SID: z.string().optional(),
 	LANG: z.string().optional(),
 	PROTOCOL: z.string().optional(),
+	request: z.coerce.number().int().positive().optional(),
 	transfer: z.coerce.number().int().positive().optional(),
+	dealSupply: z.coerce.number().int().positive().optional(),
 	repairId: z.coerce.number().int().positive().optional(),
 });
 
@@ -71,7 +73,9 @@ export function extractInstallAuth(body: PlacementBody, query: PlacementQuery): 
 export interface PlacementContext {
 	dealId: number | null;
 	taskId: number | null;
+	requestId?: number | null;
 	transferId?: number | null;
+	dealSupplyId?: number | null;
 	repairId?: number | null;
 	/** 'inventory' — инвентаризация; 'salesReport' — отчёт по продажам; 'repairs' — ремонты; 'stock' — складской учёт; 'supply' — рабочее место снабженца («Снаб»). */
 	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply';
@@ -97,9 +101,18 @@ function parseIdFromOptions(raw: string | undefined, keys: string[]): number | n
 	}
 }
 
-export function parsePlacementOptions(raw: string | undefined): { dealId: number | null; repairId: number | null } {
+export function parsePlacementOptions(raw: string | undefined): {
+	dealId: number | null;
+	requestId: number | null;
+	transferId: number | null;
+	dealSupplyId: number | null;
+	repairId: number | null;
+} {
 	return {
 		dealId: parseIdFromOptions(raw, ['ID']),
+		requestId: parseIdFromOptions(raw, ['request', 'REQUEST']),
+		transferId: parseIdFromOptions(raw, ['transfer', 'TRANSFER']),
+		dealSupplyId: parseIdFromOptions(raw, ['dealSupply', 'DEAL_SUPPLY']),
 		repairId: parseIdFromOptions(raw, ['repairId', 'REPAIR_ID']),
 	};
 }
@@ -177,11 +190,14 @@ export function buildStockContext(body: PlacementBody): PlacementContext {
 
 /** Контекст для placement левого меню — рабочее место снабженца «Снаб» (view='supply'). */
 export function buildSupplyContext(body: PlacementBody): PlacementContext {
+	const options = parsePlacementOptions(body.PLACEMENT_OPTIONS);
 	return {
 		dealId: null,
 		taskId: null,
-		transferId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['transfer', 'TRANSFER']),
-		repairId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['repairId', 'REPAIR_ID']),
+		requestId: options.requestId,
+		transferId: options.transferId,
+		dealSupplyId: options.dealSupplyId,
+		repairId: options.repairId,
 		view: 'supply',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,

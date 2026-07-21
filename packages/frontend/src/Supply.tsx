@@ -124,7 +124,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 	},
 ];
 
-type Phase = 'init' | 'denied' | 'ready';
+type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
 type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | StockMovementKind | 'ledger';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 
@@ -1282,9 +1282,9 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onCreateSupplier, onCl
 export function Supply(): JSX.Element {
 	const ctx = getContext();
 	const query = new URLSearchParams(window.location.search);
-	const requestId = Number(query.get('request') ?? 0);
+	const requestId = Number(query.get('request') ?? ctx.requestId ?? 0);
 	const transferDeepLinkId = Number(query.get('transfer') ?? ctx.transferId ?? 0);
-	const dealSupplyId = Number(query.get('dealSupply') ?? 0);
+	const dealSupplyId = Number(query.get('dealSupply') ?? ctx.dealSupplyId ?? 0);
 	const [phase, setPhase] = useState<Phase>('init');
 	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
 	const [suppliers, setSuppliers] = useState<string[]>(DEFAULT_SUPPLIERS);
@@ -1305,7 +1305,7 @@ export function Supply(): JSX.Element {
 	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
 	const [stockForm, setStockForm] = useState<Awaited<ReturnType<typeof fetchStockFormData>> | null>(ctx.__mock
-		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: DEFAULT_SUPPLIERS, canCreate: true }
+		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: DEFAULT_SUPPLIERS, canCreate: true, isSupply: true }
 		: null);
 	const [deepLinkHandled, setDeepLinkHandled] = useState(false);
 
@@ -1475,6 +1475,11 @@ export function Supply(): JSX.Element {
 				]);
 				setCurrentUserId(uid);
 				setStockForm(access);
+				if ((requestId > 0 || transferDeepLinkId > 0 || dealSupplyId > 0) && !access.isSupply) {
+					setLoading(false);
+					setPhase('manager-link');
+					return;
+				}
 				if (!access.canCreate) { setLoading(false); setPhase('denied'); return; }
 				setPhase('ready');
 				try {
@@ -1488,7 +1493,7 @@ export function Supply(): JSX.Element {
 				}
 			})().catch(() => setPhase('denied'));
 		});
-	}, [ctx.__mock]);
+	}, [ctx.__mock, dealSupplyId, requestId, transferDeepLinkId]);
 
 	useEffect(() => {
 		if (loading || deepLinkHandled) return;
@@ -1602,6 +1607,8 @@ export function Supply(): JSX.Element {
 	};
 
 	if (phase === 'init') return <div className="supply-proto-state">Загрузка...</div>;
+	if (phase === 'manager-link' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
+	if (phase === 'manager-link' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
 	if (phase === 'denied' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
 	if (phase === 'denied' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
 	if (phase === 'denied') return <div className="supply-proto-state">Раздел «Снаб» доступен сотрудникам снабжения.</div>;

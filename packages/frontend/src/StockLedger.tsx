@@ -612,8 +612,8 @@ type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
 
 export function StockLedger(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
-	const requestId = Number(new URLSearchParams(window.location.search).get('request') ?? 0);
-	const transferId = Number(new URLSearchParams(window.location.search).get('transfer') ?? 0);
+	const requestId = Number(new URLSearchParams(window.location.search).get('request') ?? ctx.requestId ?? 0);
+	const transferId = Number(new URLSearchParams(window.location.search).get('transfer') ?? ctx.transferId ?? 0);
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
 	const [tab, setTab] = useState<Tab>(requestId > 0 ? 'requests' : 'transfers');
 	const [form, setForm] = useState<StockForm | null>(null);
