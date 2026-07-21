@@ -1128,7 +1128,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					'',
 					listText,
 					'',
-					taskLink(supplySectionUrl(app.config.portalDomain, { dealSupply: dealId }), `Открыть заявку по сделке #${dealId}`),
+					taskLink(supplySectionUrl(app.config.portalDomain, { dealSupply: dealId, author: Number(me?.ID ?? 0) }), `Открыть заявку по сделке #${dealId}`),
 				].filter(Boolean).join('\n'),
 				authorId: Number(me?.ID ?? 0),
 			});

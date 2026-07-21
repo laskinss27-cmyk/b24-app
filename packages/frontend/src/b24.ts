@@ -274,6 +274,21 @@ export async function fetchCurrentUser(): Promise<{ id: string; name: string; ph
 	return { id, name, phone };
 }
 
+/** Постановщик и исполнитель задачи нужны для умной ссылки у пользователей с несколькими ролями. */
+export async function fetchTaskActors(taskId: number): Promise<{ creatorId: string; responsibleId: string }> {
+	const response = await call<{ task?: Record<string, unknown> }>('tasks.task.get', { taskId });
+	const task = response?.task ?? {};
+	return {
+		creatorId: String(task['creatorId'] ?? task['createdBy'] ?? task['CREATED_BY'] ?? ''),
+		responsibleId: String(task['responsibleId'] ?? task['RESPONSIBLE_ID'] ?? ''),
+	};
+}
+
+export async function fetchDealResponsibleId(dealId: number): Promise<string> {
+	const deal = await call<Record<string, unknown>>('crm.deal.get', { id: dealId });
+	return String(deal?.['ASSIGNED_BY_ID'] ?? deal?.['assignedById'] ?? '');
+}
+
 /** Админ ли смотрящий — синхронно через BX24.isAdmin() (без REST, не виснет).
  *  Право создавать инвентаризации: «Бекасов и выше» = админы + список инициаторов (app.option). */
 export function isPortalAdmin(): boolean {

@@ -102,7 +102,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const lines = isTransfer
 				? formatTransferLines(request.lines)
 				: request.supplyLines.map((line) => `• ${line.name || (line.productId ? `#${line.productId}` : 'позиция')} × ${line.qty}${line.link ? `\n  ${line.link}` : ''}${line.note ? `\n  ${line.note}` : ''}`).join('\n');
-			const link = supplySectionUrl(app.config.portalDomain, { request: request.id });
+			const link = supplySectionUrl(app.config.portalDomain, { request: request.id, author: me.id });
 			const title = isTransfer ? `Заказ на перемещение #${request.id}` : `Заявка снабжению #${request.id}`;
 			const route = isTransfer ? `${request.fromStore} → ${request.toStore}` : `Привезти на: ${request.toStore}`;
 			const result = await createSupplyTask(client, {
@@ -449,7 +449,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 						'',
 						formatTransferLines(lines),
 						'',
-						taskLink(supplySectionUrl(app.config.portalDomain, { transfer: id }), `Открыть перемещение #${id}`),
+						taskLink(supplySectionUrl(app.config.portalDomain, { transfer: id, author: me.id }), `Открыть перемещение #${id}`),
 					].join('\n'),
 					authorId: me.id,
 				});

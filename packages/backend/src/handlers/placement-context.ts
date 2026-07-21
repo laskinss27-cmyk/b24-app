@@ -32,6 +32,7 @@ export const PlacementQuerySchema = z.object({
 	request: z.coerce.number().int().positive().optional(),
 	transfer: z.coerce.number().int().positive().optional(),
 	dealSupply: z.coerce.number().int().positive().optional(),
+	author: z.coerce.number().int().positive().optional(),
 	repairId: z.coerce.number().int().positive().optional(),
 });
 
@@ -76,6 +77,7 @@ export interface PlacementContext {
 	requestId?: number | null;
 	transferId?: number | null;
 	dealSupplyId?: number | null;
+	linkAuthorId?: number | null;
 	repairId?: number | null;
 	/** 'inventory' — инвентаризация; 'salesReport' — отчёт по продажам; 'repairs' — ремонты; 'stock' — складской учёт; 'supply' — рабочее место снабженца («Снаб»). */
 	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply';
@@ -106,6 +108,7 @@ export function parsePlacementOptions(raw: string | undefined): {
 	requestId: number | null;
 	transferId: number | null;
 	dealSupplyId: number | null;
+	linkAuthorId: number | null;
 	repairId: number | null;
 } {
 	return {
@@ -113,6 +116,7 @@ export function parsePlacementOptions(raw: string | undefined): {
 		requestId: parseIdFromOptions(raw, ['request', 'REQUEST']),
 		transferId: parseIdFromOptions(raw, ['transfer', 'TRANSFER']),
 		dealSupplyId: parseIdFromOptions(raw, ['dealSupply', 'DEAL_SUPPLY']),
+		linkAuthorId: parseIdFromOptions(raw, ['author', 'AUTHOR']),
 		repairId: parseIdFromOptions(raw, ['repairId', 'REPAIR_ID']),
 	};
 }
@@ -197,6 +201,7 @@ export function buildSupplyContext(body: PlacementBody): PlacementContext {
 		requestId: options.requestId,
 		transferId: options.transferId,
 		dealSupplyId: options.dealSupplyId,
+		linkAuthorId: options.linkAuthorId,
 		repairId: options.repairId,
 		view: 'supply',
 		domain: body.DOMAIN ?? null,

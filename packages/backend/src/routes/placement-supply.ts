@@ -26,9 +26,10 @@ export function registerPlacementSupplyRoute(app: FastifyInstance): void {
 			requestId: query.success ? (query.data.request ?? baseContext.requestId) : baseContext.requestId,
 			transferId: query.success ? (query.data.transfer ?? baseContext.transferId) : baseContext.transferId,
 			dealSupplyId: query.success ? (query.data.dealSupply ?? baseContext.dealSupplyId) : baseContext.dealSupplyId,
+			linkAuthorId: query.success ? (query.data.author ?? baseContext.linkAuthorId) : baseContext.linkAuthorId,
 			repairId: query.success ? (query.data.repairId ?? baseContext.repairId) : baseContext.repairId,
 		};
-		app.log.info({ view: ctx.view, requestId: ctx.requestId, transferId: ctx.transferId, dealSupplyId: ctx.dealSupplyId }, '[placement/supply] opened');
+		app.log.info({ view: ctx.view, requestId: ctx.requestId, transferId: ctx.transferId, dealSupplyId: ctx.dealSupplyId, linkAuthorId: ctx.linkAuthorId }, '[placement/supply] opened');
 		const indexHtml = await app.readFrontendIndex();
 		if (!indexHtml) {
 			return reply.code(503).type('text/html; charset=utf-8').send('<!doctype html><html lang="ru"><body><h1>Фронт ещё не собран</h1></body></html>');
