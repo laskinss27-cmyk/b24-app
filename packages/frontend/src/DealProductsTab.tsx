@@ -820,7 +820,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
 	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
 	const partsOf = (r: EnrichedRow): Part[] => {
-		if (!summaryView && r.segmentKind) return [];
 		const linkedReturns = new Map<string, number>();
 		let unlinkedReturns = 0;
 		for (const document of data.coreReals.filter((item) => item.isReturn && item.submitted)) {
@@ -831,7 +830,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			if (document.returnAgainst) linkedReturns.set(document.returnAgainst, (linkedReturns.get(document.returnAgainst) ?? 0) + qty);
 			else unlinkedReturns += qty;
 		}
-		return data.coreReals
+		const parts = data.coreReals
 			.filter((rz) => !rz.isReturn)
 			.map((rz): Part | null => {
 				const its = rz.items.filter((it) => it.productId === r.productId);
@@ -845,6 +844,29 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				return { name: rz.name, submitted: rz.submitted, isReturn: false, qty, storeName: its[0]!.storeTitle };
 			})
 			.filter((p): p is Part => p != null);
+		if (summaryView || !r.segmentKind) return parts;
+
+		// В развёрнутом виде один товар может быть разбит между основной сделкой и этапами.
+		// Документ реализации знает только productId, поэтому последовательно распределяем
+		// его партии по тем же сегментам, что и счётчик «Реализовано» выше.
+		let offset = 0;
+		for (const segment of stagedPlanRows) {
+			if (segment.productId !== r.productId) continue;
+			if (segment.id === r.id) break;
+			offset += segment.quantity;
+		}
+		let left = realizedForRow(r);
+		if (left <= 0.000001) return [];
+		const allocated: Part[] = [];
+		for (const part of parts) {
+			if (offset >= part.qty) { offset -= part.qty; continue; }
+			const qty = Math.min(part.qty - offset, left);
+			if (qty > 0.000001) allocated.push({ ...part, qty });
+			left -= qty;
+			offset = 0;
+			if (left <= 0.000001) break;
+		}
+		return allocated;
 	};
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const hiddenDocumentCount = returnDocuments.length + data.supply.length + dealTransfers.length;
