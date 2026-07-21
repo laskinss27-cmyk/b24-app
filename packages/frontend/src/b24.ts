@@ -1474,6 +1474,8 @@ export interface CoreRealizationItem {
 	productId: number;
 	itemName: string;
 	qty: number;
+	/** Цена продажи за единицу, зафиксированная в документе реализации. */
+	rate: number;
 	/** Склад списания — название склада Б24 (наш UI оперирует ими). */
 	storeTitle: string;
 }

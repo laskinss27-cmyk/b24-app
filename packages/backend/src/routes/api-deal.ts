@@ -367,7 +367,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					.map((item) => ({ ...item, qty: Math.max(0, item.qty - (returnedByProduct.get(item.productId) ?? 0)) }))
 					.filter((item) => item.qty > 0.000001);
 				const today = new Date().toISOString().slice(0, 10);
-				await upsertDealPlan(erp, dealId, nextPlan.map((item) => ({
+				const savedPlan = await upsertDealPlan(erp, dealId, nextPlan.map((item) => ({
 					productId: item.productId,
 					itemName: item.itemName,
 					qty: item.qty,
@@ -375,7 +375,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					discountPercent: item.discountPercent,
 					isService: item.isService,
 				})), today);
-				const total = Math.round(nextPlan.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
+				const total = Math.round(savedPlan.lines.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
 				app.log.info({ dealId, returns: names.length, planLines: nextPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
 				return { ok: true, returns: names };
@@ -487,7 +487,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				}
 				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
-				await upsertDealPlan(erp, dealId, lines, today);
+				const savedPlan = await upsertDealPlan(erp, dealId, lines, today);
 				const stageItems = priced.map((item) => ({ productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, price: item.price, discountPercent: 0, isService: item.isService }));
 				const targetStageId = String(b.stageId ?? '').trim();
 				if (targetStageId) {
@@ -503,10 +503,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 						items: stageItems,
 					});
 				}
-				const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
+				const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
-				app.log.info({ dealId, planLines: lines.length, total }, '[api/deal/add-products] core plan + B24 service');
-				return { ok: true, added: priced.length, plan: lines.length, total };
+				app.log.info({ dealId, planLines: savedPlan.lines.length, total }, '[api/deal/add-products] core plan + B24 service');
+				return { ok: true, added: priced.length, plan: savedPlan.lines.length, total };
 			}
 
 			// ФОЛБЭК (ядро не подключено): как раньше — товары в строки Б24.
@@ -810,11 +810,11 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			}
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const today = new Date().toISOString().slice(0, 10);
-			await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
-			const total = Math.round(lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
+			const savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
+			const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
-			app.log.info({ dealId, lines: lines.length, total }, '[api/deal/plan-set] ok');
-			return { ok: true, total, lines: lines.length };
+			app.log.info({ dealId, lines: savedPlan.lines.length, total }, '[api/deal/plan-set] ok');
+			return { ok: true, total, lines: savedPlan.lines.length };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/plan-set] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });

@@ -180,8 +180,9 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// + productId строк Б24 (на случай старых сделок без плана) — подстраховка.
 	const planIds = plan.map((p) => p.productId).filter((id) => id > 0);
 	const b24GoodsIds = rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0);
+	const realizedIds = coreReals.flatMap((document) => document.items.map((item) => item.productId)).filter((id) => id > 0);
 	const variantIds = quoteVariants.variants.flatMap((variant) => variant.items.map((item) => item.productId));
-	const allIds = [...new Set([...planIds, ...b24GoodsIds, ...variantIds])];
+	const allIds = [...new Set([...planIds, ...b24GoodsIds, ...realizedIds, ...variantIds])];
 	const enrich: Record<number, ProductEnrichment> = allIds.length
 		? await withTimeout(fetchStockPreferCore(allIds), 25000, 'stock/purchasing').catch(() => ({}))
 		: {};
@@ -211,7 +212,38 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// состав через наше окно. Служебная услуга «Выезд инженера» сюда не попадёт: это TYPE 7.
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
 	const b24OnlyGoods = enriched.filter((r) => !isWorkRow(r.type) && r.productId > 0 && !planIdsSet.has(r.productId));
-	const planRows = [...planRowsFromCore, ...b24OnlyGoods];
+	const visibleProductIds = new Set([...planIdsSet, ...b24OnlyGoods.map((row) => row.productId)]);
+	const realizedHistory = new Map<number, { itemName: string; qty: number; amount: number }>();
+	for (const document of coreReals) {
+		for (const item of document.items) {
+			if (item.productId <= 0) continue;
+			const current = realizedHistory.get(item.productId) ?? { itemName: item.itemName || `#${item.productId}`, qty: 0, amount: 0 };
+			current.qty += item.qty;
+			current.amount += item.qty * item.rate;
+			if (item.qty > 0 && item.itemName) current.itemName = item.itemName;
+			realizedHistory.set(item.productId, current);
+		}
+	}
+	// У старых сделок план мог отсутствовать: до перехода на ядро реальные товары жили только
+	// в строках Б24, а после добавления новой позиции Б24 сворачивал их в одну услугу. Проведённые
+	// документы неизменяемы, поэтому восстанавливаем такие строки из истории реализаций.
+	const historicalGoods: EnrichedRow[] = [...realizedHistory.entries()].flatMap(([productId, item]) => {
+		if (visibleProductIds.has(productId) || item.qty <= 0.000001) return [];
+		const price = Math.round((item.amount / item.qty) * 100) / 100;
+		return [{
+			id: `history-${productId}`,
+			productId,
+			name: item.itemName,
+			type: 1,
+			price,
+			quantity: item.qty,
+			discountSum: 0,
+			measure: 'шт',
+			stocks: mkStocks(productId),
+			purchasingPrice: enrich[productId]?.purchasingPrice ?? null,
+		}];
+	});
+	const planRows = [...planRowsFromCore, ...b24OnlyGoods, ...historicalGoods];
 	const variantRows = Object.fromEntries(quoteVariants.variants.map((variant) => [variant.id, variant.items.map((item) => {
 		const rate = Math.round(item.priceListRate * (1 - item.discountPercent / 100) * 100) / 100;
 		return {
@@ -870,25 +902,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	};
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const hiddenDocumentCount = returnDocuments.length + data.supply.length + dealTransfers.length;
-
-		// ВКЛАДКА НЕ СМОТРИТ на товарный состав Б24 (он врёт — Б24 подменяет товар на услугу).
-		// Товары показываем ТОЛЬКО из ядра. Поэтому в матч против строк Б24 берём лишь работы:
-		// все товарные реализации ядра (их productId нет среди работ) попадут в блок «Реализовано из ядра».
-		const rowPids = new Set(works.map((r) => r.productId));
-		type OrphanPart = { key: string; itemName: string; doc: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
-		const orphanParts: OrphanPart[] = data.coreReals.flatMap((rz) =>
-			rz.items
-				.filter((it) => !rowPids.has(it.productId))
-				.map((it, i): OrphanPart => ({
-					key: `${rz.name}-${it.productId}-${i}`,
-					itemName: it.itemName || `Товар ${it.productId}`,
-					doc: rz.name,
-					submitted: rz.submitted,
-					isReturn: Boolean(rz.isReturn),
-					qty: it.qty,
-					storeName: it.storeTitle,
-				})),
-		);
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
 		<tr key={r.id}>

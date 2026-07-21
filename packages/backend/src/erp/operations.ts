@@ -426,29 +426,64 @@ async function findDealPlan(erp: ErpClient, dealId: number): Promise<string | nu
 	return rows[0] ? String(rows[0]['name']) : null;
 }
 
-/** Перезаписать план сделки актуальным составом. lines=[] → удалить черновик плана.
+/** Уже проведённая часть сделки не должна исчезнуть из накопительного плана при следующем изменении. */
+async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanLine[]): Promise<PlanLine[]> {
+	const byId = new Map(lines.map((line) => [line.productId, { ...line }]));
+	const history = new Map<number, { itemName: string; qty: number; amount: number }>();
+	for (const document of await listDealRealizations(erp, dealId)) {
+		for (const item of document.items) {
+			if (item.productId <= 0) continue;
+			const current = history.get(item.productId) ?? { itemName: item.itemName || `#${item.productId}`, qty: 0, amount: 0 };
+			current.qty += item.qty;
+			current.amount += item.qty * item.rate;
+			if (item.qty > 0 && item.itemName) current.itemName = item.itemName;
+			history.set(item.productId, current);
+		}
+	}
+	for (const [productId, item] of history) {
+		if (item.qty <= 0.000001) continue;
+		const existing = byId.get(productId);
+		if (existing) {
+			// Менеджер может удалить ещё не отгруженный остаток, но уже проведённое стереть нельзя.
+			existing.qty = Math.max(existing.qty, item.qty);
+			continue;
+		}
+		byId.set(productId, {
+			productId,
+			itemName: item.itemName,
+			qty: item.qty,
+			priceListRate: Math.round((item.amount / item.qty) * 100) / 100,
+			discountPercent: 0,
+			isService: false,
+		});
+	}
+	return [...byId.values()];
+}
+
+/** Перезаписать накопительный план сделки актуальным составом.
  *  Нет черновика — создаёт; есть — заменяет строки. Новые товары заводит в ядре (ensureCoreItem). */
-export async function upsertDealPlan(erp: ErpClient, dealId: number, lines: PlanLine[], deliveryDate: string): Promise<{ name: string | null }> {
+export async function upsertDealPlan(erp: ErpClient, dealId: number, lines: PlanLine[], deliveryDate: string): Promise<{ name: string | null; lines: PlanLine[] }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensurePlanField(erp);
 	const existing = await findDealPlan(erp, dealId);
-	if (!lines.length) {
+	const durableLines = await withRealizedBaseline(erp, dealId, lines);
+	if (!durableLines.length) {
 		if (existing) await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(existing)}`);
-		return { name: null };
+		return { name: null, lines: [] };
 	}
-	for (const l of lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}`, ...(l.isService !== undefined ? { isService: l.isService } : {}) });
+	for (const l of durableLines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}`, ...(l.isService !== undefined ? { isService: l.isService } : {}) });
 	// Скидку храним нативно: price_list_rate (база) + discount_percentage → rate ERPNext посчитает сам.
-	const items = lines.map((l) => ({ item_code: String(l.productId), qty: l.qty, price_list_rate: l.priceListRate, discount_percentage: l.discountPercent, delivery_date: deliveryDate }));
+	const items = durableLines.map((l) => ({ item_code: String(l.productId), qty: l.qty, price_list_rate: l.priceListRate, discount_percentage: l.discountPercent, delivery_date: deliveryDate }));
 	if (existing) {
 		const doc = await erp.update('Sales Order', existing, { items, delivery_date: deliveryDate });
-		return { name: String(doc['name'] ?? existing) };
+		return { name: String(doc['name'] ?? existing), lines: durableLines };
 	}
 	const doc = await erp.create('Sales Order', {
 		company: ctx.company, customer: TECH_CUSTOMER, delivery_date: deliveryDate,
 		[DEAL_FIELD]: String(dealId), items,
 	});
-	return { name: String(doc['name']) };
+	return { name: String(doc['name']), lines: durableLines };
 }
 
 /** Состав плана сделки (строки черновика Sales Order). delivered = сколько уже отгружено (ядро считает). */
