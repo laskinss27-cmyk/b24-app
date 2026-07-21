@@ -1473,8 +1473,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			)}
 
 			{variantDialog && (
-				<div className="deal-supply-order-overlay" onClick={() => !variantBusy && setVariantDialog(null)}>
-					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'create' ? 'Новый вариант' : 'Название варианта'} onClick={(event) => event.stopPropagation()}>
+				<div className="deal-supply-order-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !variantBusy) setVariantDialog(null); }}>
+					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'create' ? 'Новый вариант' : 'Название варианта'}>
 						<header><h2>{variantDialog.kind === 'create' ? (data.quoteVariants.enabled ? 'Новый вариант' : 'Варианты КП') : 'Переименовать вариант'}</h2><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>×</button></header>
 						<label><span>Название</span><input autoFocus maxLength={80} value={variantDialog.value} disabled={variantBusy} onChange={(event) => { setVariantDialog({ ...variantDialog, value: event.target.value }); setVariantError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') void submitVariantDialog(); }} /></label>
 						{variantDialog.kind === 'create' && <p>{data.quoteVariants.enabled ? 'Состав текущего варианта будет скопирован.' : 'Текущий состав сделки станет первым вариантом.'}</p>}
