@@ -936,7 +936,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.history = Array.isArray(data.history) ? data.history : [];
 			const title = [data.device, data.model].filter(Boolean).join(' ') || 'оборудование';
 			const customerPrice = data.ourPrice ?? data.cost;
-			const uriPlacement = await bindRepairsUriPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+			// Регистрация REST_APP_URI требует административных прав. Снабженец вправе
+			// отправлять цену, но его OAuth-токен закономерно получает ACCESS_DENIED.
+			const notificationClient = systemClient() ?? client;
+			const uriPlacement = await bindRepairsUriPlacement({ client: notificationClient, publicBaseUrl: app.config.publicBaseUrl });
 			if (!['bound', 'already-bound'].includes(uriPlacement.status)) {
 				return reply.code(400).send({ ok: false, error: `не удалось подготовить ссылку на ремонт: ${uriPlacement.status}` });
 			}
@@ -950,9 +953,6 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				'',
 				repairLink(id, data.repairNo),
 			].filter(Boolean).join('\n');
-			const notificationClient = app.config.devWebhook
-				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
-				: client;
 			const sent = await sendStoreChatMessage(notificationClient, point, message);
 			if (!sent) return reply.code(400).send({ ok: false, error: `для точки «${point}» не найден чат` });
 			data.history.push({
