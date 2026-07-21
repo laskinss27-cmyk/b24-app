@@ -12,6 +12,7 @@ import {
 	updateDealProduct,
 	setDealPlan,
 	updateDealStageItem,
+	removeDealStageItem,
 	createDealSupplyRequest,
 	fetchDealShipped,
 	fetchDealRealizationsCore,
@@ -745,6 +746,15 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		try {
 			if (proposalEditable && activeVariantId && isVariantRow(r)) {
 				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId), activeVariantId);
+			} else if (r.segmentKind === 'stage' && r.stageId) {
+				await removeDealStageItem(dealId, r.stageId, r.productId);
+			} else if (r.segmentKind === 'base') {
+				const next = data.plan.flatMap((x): DealPlanItem[] => {
+					if (x.productId !== r.productId) return [x];
+					const qty = x.qty - r.quantity;
+					return qty > 0.000001 ? [{ ...x, qty }] : [];
+				});
+				await setDealPlan(dealId, next);
 			} else if (isPlanRow(r)) {
 				// Товар плана: убираем из состава ядра + пересчёт «Выезд инженера» в Б24.
 				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId));
@@ -909,9 +919,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				{tableEditable && <div className="row-controls">
 					<button
 						className="row-del-x"
-						disabled={busy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind) || rejectedView}
+						disabled={busy || removing != null || realizePhase !== 'idle' || rejectedView}
 						onClick={() => void doRemove(r)}
-						title={r.segmentKind ? 'Удаление строк этапов пока недоступно' : 'Удалить работу из сделки'}
+						title={r.segmentKind === 'stage' ? 'Удалить работу из этого этапа' : 'Удалить работу из сделки'}
 					>{removing === r.id ? '…' : '✕'}</button>
 				</div>}
 			</td>
@@ -974,9 +984,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						<div className="row-controls">
 							{tableEditable && <button
 								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || Boolean(r.segmentKind) || rejectedView}
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || rejectedView}
 								onClick={() => void doRemove(r)}
-								title={r.segmentKind ? 'Удаление строк этапов пока недоступно' : 'Удалить товар из сделки'}
+								title={r.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
 							>{removing === r.id ? '…' : '✕'}</button>}
 							{workingMode && <input
 								type="checkbox"

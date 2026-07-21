@@ -994,6 +994,18 @@ export async function updateDealStageItem(dealId: number, stageId: string, produ
 	return json.total ?? 0;
 }
 
+/** Удалить одну позицию из конкретного этапа, не затрагивая тот же товар в других этапах. */
+export async function removeDealStageItem(dealId: number, stageId: string, productId: number): Promise<number> {
+	const res = await fetch('/api/deal/stage-item-remove', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, stageId, productId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить строку этапа');
+	return json.total ?? 0;
+}
+
 export async function fetchDealStages(dealId: number): Promise<DealStage[]> {
 	const res = await fetch('/api/deal/stages', {
 		method: 'POST',

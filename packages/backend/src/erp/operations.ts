@@ -742,6 +742,57 @@ export async function updateDealStageItem(
 	return listDealPlan(erp, dealId);
 }
 
+/** Удаляет строку именно из выбранного этапа и уменьшает агрегированную позицию плана. */
+export async function removeDealStageItem(
+	erp: ErpClient,
+	dealId: number,
+	stageId: string,
+	productId: number,
+): Promise<PlanItem[]> {
+	await ensurePlanField(erp);
+	const name = await findDealPlan(erp, dealId);
+	if (!name) throw new Error('план сделки не найден');
+	const plan = await erp.get<Record<string, unknown>>('Sales Order', name);
+	const stages = parseDealStages(plan?.[DEAL_STAGES_FIELD]);
+	const stage = stages.find((row) => row.id === stageId);
+	if (!stage) throw new Error('этап сделки не найден');
+	const stageItem = stage.items.find((row) => row.productId === productId);
+	if (!stageItem) throw new Error('позиция этапа не найдена');
+
+	stage.items = stage.items.filter((row) => row.productId !== productId);
+	const lines = ((plan?.['items'] as Array<Record<string, unknown>>) ?? []).flatMap((row): PlanLine[] => {
+		const rowProductId = Number(row['item_code']);
+		const qty = Number(row['qty'] ?? 0) - (rowProductId === productId ? stageItem.qty : 0);
+		if (!Number.isInteger(rowProductId) || rowProductId <= 0 || qty <= 0.000001) return [];
+		return [{
+			productId: rowProductId,
+			itemName: String(row['item_name'] ?? ''),
+			qty,
+			priceListRate: Number(row['price_list_rate'] ?? row['rate'] ?? 0),
+			discountPercent: Number(row['discount_percentage'] ?? 0),
+		}];
+	});
+	const durableLines = await withRealizedBaseline(erp, dealId, lines);
+	if (!durableLines.length) {
+		await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(name)}`);
+		return [];
+	}
+
+	const deliveryDate = String(plan?.['delivery_date'] ?? new Date().toISOString().slice(0, 10));
+	await erp.update('Sales Order', name, {
+		delivery_date: deliveryDate,
+		items: durableLines.map((row) => ({
+			item_code: String(row.productId),
+			qty: row.qty,
+			price_list_rate: row.priceListRate,
+			discount_percentage: row.discountPercent,
+			delivery_date: deliveryDate,
+		})),
+		[DEAL_STAGES_FIELD]: JSON.stringify(stages),
+	});
+	return listDealPlan(erp, dealId);
+}
+
 /** Заказ для дисплея снабжения: один Sales Order = спрос одной сделки. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; rate: number; stocks: Record<string, number> }
 export interface SupplyOrder { name: string; dealId: string; date: string; total: number; items: SupplyOrderItem[] }
