@@ -55,6 +55,8 @@ const ERP = process.env['ERPNEXT_URL'] ?? 'http://localhost:8080';
 const ERP_AUTH = process.env['ERPNEXT_TOKEN'] ?? 'token REDACTED';
 const ITEM_GROUP = 'Каталог Б24';
 const UOM = 'шт';
+const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
+const B24_COLLAPSE_ENGINEER_VISIT_CORE_NAME = 'Выезд инженера не использовать';
 
 const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry') || args.size === 0;
@@ -369,7 +371,7 @@ async function main(): Promise<void> {
 		let created = 0, updated = 0, failed = 0;
 		for (const p of items) {
 			const code = String(p.id);
-			const wantName = p.name.slice(0, 140);
+			const wantName = (p.id === B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID ? B24_COLLAPSE_ENGINEER_VISIT_CORE_NAME : p.name).slice(0, 140);
 			const ex = existing.get(code);
 			if (ex) {
 				// Идемпотентный апдейт: имя/модель/артикул/бренд из Б24 — истина. Шлём только изменившиеся.
