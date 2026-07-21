@@ -157,12 +157,16 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const exactCandidate = duplicateBlocked || candidates.some((candidate) => candidate.exact);
 	const retail = Number(retailText);
 	const section = sections.find((item) => item.id === Number(sectionId));
-	const valid = productType.trim().length >= 3
-		&& manufacturer.trim().length >= 2
-		&& model.trim().length >= 2
-		&& Boolean(section)
-		&& retail > 0;
-	const canCreate = valid && !busy && !exactCandidate && (!candidates.length || reviewed);
+	const validationError = (): string | null => {
+		if (productType.trim().length < 3) return 'Укажи вид товара.';
+		if (manufacturer.trim().length < 2) return 'Укажи производителя.';
+		if (model.trim().length < 2) return 'Укажи полную модель или артикул.';
+		if (!section) return 'Выбери раздел каталога.';
+		if (!(retail > 0)) return 'Цена продажи должна быть больше нуля.';
+		if (exactCandidate) return 'Такая модель уже есть в каталоге. Выбери найденный товар.';
+		if (candidates.length && !reviewed) return 'Проверь найденные совпадения и отметь «Это другая модель».';
+		return null;
+	};
 
 	const resetReview = (): void => {
 		setReviewed(false);
@@ -172,7 +176,11 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	};
 
 	const create = async (): Promise<void> => {
-		if (!section || !canCreate) return;
+		const validationMessage = validationError();
+		if (validationMessage || !section) {
+			setErr(validationMessage ?? 'Проверь данные товара.');
+			return;
+		}
 		setBusy(true);
 		setErr(null);
 		try {
@@ -231,7 +239,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 				{err && <div className="new-product-error">{err}</div>}
 				<div className="new-product-actions">
 					<button type="button" className="btn-secondary" onClick={onClose}>Отмена</button>
-					<button type="button" className="btn-primary" disabled={!canCreate} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать товар'}</button>
+					<button type="button" className="btn-primary" disabled={busy} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать товар'}</button>
 				</div>
 			</div>
 		</div>
