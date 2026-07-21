@@ -82,6 +82,60 @@ async function fetchServiceProductIds(client: B24Client, ids: number[]): Promise
 	return out;
 }
 
+type DealPlanDraftLine = {
+	productId: number;
+	itemName?: string;
+	qty: number;
+	priceListRate: number;
+	discountPercent: number;
+	isService?: boolean;
+};
+
+/**
+ * Before the first core edit, legacy deals still keep their real product rows in B24.
+ * Import them once so replacing B24 rows with the cover service cannot erase the deal composition.
+ */
+async function listLegacyB24DealLines(client: B24Client, dealId: number): Promise<DealPlanDraftLine[]> {
+	const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+	const candidates = (rows ?? []).filter((row) => Number(row['QUANTITY'] ?? 0) > 0 && Number(row['PRODUCT_ID'] ?? 0) !== VYEZD_PRODUCT_ID);
+	const customRows = candidates.filter((row) => Number(row['PRODUCT_ID'] ?? 0) <= 0);
+	if (customRows.length) {
+		const names = customRows.map((row) => String(row['PRODUCT_NAME'] ?? '').trim()).filter(Boolean).slice(0, 3);
+		throw new Error(`в старой сделке есть позиции без карточки товара${names.length ? `: ${names.join(', ')}` : ''}; сначала оформите их как товары каталога`);
+	}
+	if (!candidates.length) return [];
+
+	const ids = candidates.map((row) => Number(row['PRODUCT_ID']));
+	const serviceIds = await fetchServiceProductIds(client, ids);
+	const accumulated = new Map<number, DealPlanDraftLine & { amount: number }>();
+	for (const row of candidates) {
+		const productId = Number(row['PRODUCT_ID']);
+		const qty = Number(row['QUANTITY'] ?? 0);
+		const price = Number(row['PRICE'] ?? 0);
+		if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) continue;
+		const previous = accumulated.get(productId);
+		if (previous) {
+			previous.qty += qty;
+			previous.amount += price * qty;
+			previous.isService = previous.isService || Number(row['TYPE'] ?? 0) === 7 || serviceIds.has(productId);
+			continue;
+		}
+		accumulated.set(productId, {
+			productId,
+			itemName: String(row['PRODUCT_NAME'] ?? '').trim() || `#${productId}`,
+			qty,
+			priceListRate: price,
+			discountPercent: 0,
+			isService: Number(row['TYPE'] ?? 0) === 7 || serviceIds.has(productId),
+			amount: price * qty,
+		});
+	}
+	return [...accumulated.values()].map(({ amount, ...line }) => ({
+		...line,
+		priceListRate: Math.round((amount / line.qty) * 100) / 100,
+	}));
+}
+
 const normName = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 async function resolveDealSourceStoreId(client: B24Client, deal: Record<string, unknown> | null): Promise<number | null> {
@@ -477,8 +531,12 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				await assertDealQuoteVariantSelected(erp, dealId);
 				// ПОКРЫВАЛО: состав сделки → ПЛАН в ядре (Sales Order), а Б24 несёт ОДНУ свёрнутую
 				// услугу «Выезд инженера». Новые товары мёржим в план по productId (кол-во суммируем).
-				const byId = new Map<number, { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }>();
-				for (const p of await listDealPlan(erp, dealId)) byId.set(p.productId, { productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent, isService: p.isService });
+				const byId = new Map<number, DealPlanDraftLine>();
+				const currentPlan = await listDealPlan(erp, dealId);
+				const initialLines = currentPlan.length
+					? currentPlan.map((p) => ({ productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent, isService: p.isService }))
+					: await listLegacyB24DealLines(client, dealId);
+				for (const p of initialLines) byId.set(p.productId, p);
 				for (const it of priced) {
 					const prev = byId.get(it.productId);
 					// Новый товар добавляется БЕЗ скидки (база = цена из пикера). Существующий — копим кол-во, цену обновляем, скидку сохраняем.
