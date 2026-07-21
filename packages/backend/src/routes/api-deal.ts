@@ -6,7 +6,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
-import { createSupplyTask, supplySectionUrl, taskLink } from '../b24/supply-task.js';
+import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -1128,7 +1128,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					'',
 					listText,
 					'',
-					taskLink(supplySectionUrl(app.config.portalDomain, { dealSupply: dealId, author: Number(me?.ID ?? 0) }), `Открыть заявку по сделке #${dealId}`),
+					taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { dealSupply: dealId }, 'supply'), 'Ссылка для снабжения'),
+					taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { dealSupply: dealId }, 'manager'), 'Ссылка для менеджера'),
 				].filter(Boolean).join('\n'),
 				authorId: Number(me?.ID ?? 0),
 			});

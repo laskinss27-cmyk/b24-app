@@ -59,10 +59,22 @@ export async function createSupplyTask(client: B24Client, args: {
 	}
 }
 
-export function supplySectionUrl(portalDomain: string, params: Record<string, string | number>): string {
-	const base = String(process.env['SUPPLY_SECTION_URL'] ?? '').trim() || `https://${portalDomain}/devops/placement/574/`;
+export function supplyTaskUrl(
+	portalDomain: string,
+	appCode: string | undefined,
+	params: Record<string, string | number>,
+	target: 'manager' | 'supply',
+): string {
+	const code = String(appCode ?? '').trim();
+	const configured = String(process.env['SUPPLY_SECTION_URL'] ?? '').trim();
+	const base = code
+		? `https://${portalDomain}/marketplace/view/${encodeURIComponent(code)}/`
+		: configured || `https://${portalDomain}/devops/placement/${target === 'manager' ? '570' : '574'}/`;
 	const url = new URL(base);
-	for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+	for (const [key, value] of Object.entries(params)) {
+		url.searchParams.set(code ? `params[${key}]` : key, String(value));
+	}
+	url.searchParams.set(code ? 'params[target]' : 'target', target);
 	return url.toString();
 }
 

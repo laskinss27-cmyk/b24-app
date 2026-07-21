@@ -20,7 +20,7 @@ import {
 } from '../transfers/model.js';
 import { newSupplyRequestData, newTransferRequestData, parseTransferRequestItem, type StoredTransferRequest, type SupplyRequestLine, type TransferRequestData } from '../transfers/request-model.js';
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
-import { createSupplyTask, supplySectionUrl, taskLink } from '../b24/supply-task.js';
+import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 
 /**
  * API модуля «Перемещения» (складской учёт). Документ перемещения — в нашем entity-store
@@ -102,12 +102,21 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const lines = isTransfer
 				? formatTransferLines(request.lines)
 				: request.supplyLines.map((line) => `• ${line.name || (line.productId ? `#${line.productId}` : 'позиция')} × ${line.qty}${line.link ? `\n  ${line.link}` : ''}${line.note ? `\n  ${line.note}` : ''}`).join('\n');
-			const link = supplySectionUrl(app.config.portalDomain, { request: request.id, author: me.id });
+			const linkParams = { request: request.id };
 			const title = isTransfer ? `Заказ на перемещение #${request.id}` : `Заявка снабжению #${request.id}`;
 			const route = isTransfer ? `${request.fromStore} → ${request.toStore}` : `Привезти на: ${request.toStore}`;
 			const result = await createSupplyTask(client, {
 				title: `${title}: ${isTransfer ? request.fromStore : request.toStore}`,
-				description: [title, route, request.note ? `Комментарий: ${request.note}` : '', '', lines, '', taskLink(link, `Открыть ${isTransfer ? 'заказ на перемещение' : 'заявку снабжению'} #${request.id}`)].filter(Boolean).join('\n'),
+				description: [
+					title,
+					route,
+					request.note ? `Комментарий: ${request.note}` : '',
+					'',
+					lines,
+					'',
+					taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, linkParams, 'supply'), 'Ссылка для снабжения'),
+					taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, linkParams, 'manager'), 'Ссылка для менеджера'),
+				].filter(Boolean).join('\n'),
 				authorId: me.id,
 			});
 			if (result.taskId) {
@@ -449,7 +458,8 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 						'',
 						formatTransferLines(lines),
 						'',
-						taskLink(supplySectionUrl(app.config.portalDomain, { transfer: id, author: me.id }), `Открыть перемещение #${id}`),
+						taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'supply'), 'Ссылка для снабжения'),
+						taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'manager'), 'Ссылка для менеджера'),
 					].join('\n'),
 					authorId: me.id,
 				});

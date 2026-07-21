@@ -32,7 +32,7 @@ export const PlacementQuerySchema = z.object({
 	request: z.coerce.number().int().positive().optional(),
 	transfer: z.coerce.number().int().positive().optional(),
 	dealSupply: z.coerce.number().int().positive().optional(),
-	author: z.coerce.number().int().positive().optional(),
+	target: z.enum(['manager', 'supply']).optional(),
 	repairId: z.coerce.number().int().positive().optional(),
 });
 
@@ -77,7 +77,7 @@ export interface PlacementContext {
 	requestId?: number | null;
 	transferId?: number | null;
 	dealSupplyId?: number | null;
-	linkAuthorId?: number | null;
+	linkTarget?: 'manager' | 'supply' | null;
 	repairId?: number | null;
 	/** 'inventory' — инвентаризация; 'salesReport' — отчёт по продажам; 'repairs' — ремонты; 'stock' — складской учёт; 'supply' — рабочее место снабженца («Снаб»). */
 	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply';
@@ -103,12 +103,22 @@ function parseIdFromOptions(raw: string | undefined, keys: string[]): number | n
 	}
 }
 
+function parseTargetFromOptions(raw: string | undefined): 'manager' | 'supply' | null {
+	if (!raw) return null;
+	try {
+		const value = String((JSON.parse(raw) as Record<string, unknown>)['target'] ?? '').toLowerCase();
+		return value === 'manager' || value === 'supply' ? value : null;
+	} catch {
+		return null;
+	}
+}
+
 export function parsePlacementOptions(raw: string | undefined): {
 	dealId: number | null;
 	requestId: number | null;
 	transferId: number | null;
 	dealSupplyId: number | null;
-	linkAuthorId: number | null;
+	linkTarget: 'manager' | 'supply' | null;
 	repairId: number | null;
 } {
 	return {
@@ -116,7 +126,7 @@ export function parsePlacementOptions(raw: string | undefined): {
 		requestId: parseIdFromOptions(raw, ['request', 'REQUEST']),
 		transferId: parseIdFromOptions(raw, ['transfer', 'TRANSFER']),
 		dealSupplyId: parseIdFromOptions(raw, ['dealSupply', 'DEAL_SUPPLY']),
-		linkAuthorId: parseIdFromOptions(raw, ['author', 'AUTHOR']),
+		linkTarget: parseTargetFromOptions(raw),
 		repairId: parseIdFromOptions(raw, ['repairId', 'REPAIR_ID']),
 	};
 }
@@ -201,7 +211,7 @@ export function buildSupplyContext(body: PlacementBody): PlacementContext {
 		requestId: options.requestId,
 		transferId: options.transferId,
 		dealSupplyId: options.dealSupplyId,
-		linkAuthorId: options.linkAuthorId,
+		linkTarget: options.linkTarget,
 		repairId: options.repairId,
 		view: 'supply',
 		domain: body.DOMAIN ?? null,

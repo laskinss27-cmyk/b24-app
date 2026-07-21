@@ -14,11 +14,7 @@ import {
 	deleteSupplyPurchaseOrder,
 	deleteTransfer,
 	fetchCurrentUserId,
-	fetchDealResponsibleId,
 	fetchStockFormData,
-	fetchTaskActors,
-	listTransferRequests,
-	listTransfers,
 	openDeal,
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
@@ -1289,7 +1285,7 @@ export function Supply(): JSX.Element {
 	const requestId = Number(query.get('request') ?? ctx.requestId ?? 0);
 	const transferDeepLinkId = Number(query.get('transfer') ?? ctx.transferId ?? 0);
 	const dealSupplyId = Number(query.get('dealSupply') ?? ctx.dealSupplyId ?? 0);
-	const linkAuthorId = String(query.get('author') ?? ctx.linkAuthorId ?? '');
+	const linkTarget = query.get('target') ?? ctx.linkTarget ?? '';
 	const [phase, setPhase] = useState<Phase>('init');
 	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
 	const [suppliers, setSuppliers] = useState<string[]>(DEFAULT_SUPPLIERS);
@@ -1481,30 +1477,7 @@ export function Supply(): JSX.Element {
 				setCurrentUserId(uid);
 				setStockForm(access);
 				const hasSmartLink = requestId > 0 || transferDeepLinkId > 0 || dealSupplyId > 0;
-				let managerLink = hasSmartLink && !access.isSupply;
-				if (hasSmartLink && linkAuthorId) {
-					managerLink = uid === linkAuthorId || !access.isSupply;
-				} else if (hasSmartLink && access.isSupply) {
-					try {
-						let creatorId = '';
-						let responsibleId = '';
-						if (requestId > 0) {
-							const request = (await listTransferRequests()).requests.find((item) => item.id === requestId);
-							creatorId = request?.createdById ?? '';
-							if (request?.taskId) ({ creatorId, responsibleId } = await fetchTaskActors(request.taskId));
-						} else if (transferDeepLinkId > 0) {
-							const transfer = (await listTransfers()).transfers.find((item) => item.id === transferDeepLinkId);
-							creatorId = transfer?.createdById ?? '';
-							if (transfer?.taskId) ({ creatorId, responsibleId } = await fetchTaskActors(transfer.taskId));
-						} else if (dealSupplyId > 0) {
-							creatorId = await fetchDealResponsibleId(dealSupplyId);
-						}
-						if (uid && uid === creatorId) managerLink = true;
-						else if (uid && uid === responsibleId) managerLink = false;
-					} catch {
-						// Старые ссылки без автора сохраняют прежнее ролевое поведение, если документ недоступен.
-					}
-				}
+				const managerLink = hasSmartLink && (linkTarget === 'manager' || (linkTarget !== 'supply' && !access.isSupply));
 				if (managerLink) {
 					setLoading(false);
 					setPhase('manager-link');
@@ -1523,7 +1496,7 @@ export function Supply(): JSX.Element {
 				}
 			})().catch(() => setPhase('denied'));
 		});
-	}, [ctx.__mock, dealSupplyId, linkAuthorId, requestId, transferDeepLinkId]);
+	}, [ctx.__mock, dealSupplyId, linkTarget, requestId, transferDeepLinkId]);
 
 	useEffect(() => {
 		if (loading || deepLinkHandled) return;

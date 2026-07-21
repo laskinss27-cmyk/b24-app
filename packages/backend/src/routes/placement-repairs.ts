@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { PlacementBodySchema, PlacementQuerySchema, buildRepairsContext } from '../handlers/placement-context.js';
+import { PlacementBodySchema, PlacementQuerySchema, buildRepairsContext, buildSupplyContext, parsePlacementOptions } from '../handlers/placement-context.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
@@ -24,9 +24,13 @@ export function registerPlacementRepairsRoute(app: FastifyInstance): void {
 			return reply.code(403).send('forbidden');
 		}
 
-		const baseContext = buildRepairsContext(parsed.data);
-		const ctx = { ...baseContext, repairId: query.success ? (query.data.repairId ?? baseContext.repairId) : baseContext.repairId };
-		app.log.info({ view: ctx.view }, '[placement/repairs] opened');
+		const options = parsePlacementOptions(parsed.data.PLACEMENT_OPTIONS);
+		const isSupplyLink = Boolean(options.requestId || options.transferId || options.dealSupplyId);
+		const baseContext = isSupplyLink ? buildSupplyContext(parsed.data) : buildRepairsContext(parsed.data);
+		const ctx = isSupplyLink
+			? baseContext
+			: { ...baseContext, repairId: query.success ? (query.data.repairId ?? baseContext.repairId) : baseContext.repairId };
+		app.log.info({ view: ctx.view, requestId: ctx.requestId, transferId: ctx.transferId, dealSupplyId: ctx.dealSupplyId, linkTarget: ctx.linkTarget }, '[placement/repairs] opened');
 
 		const indexHtml = await app.readFrontendIndex();
 		if (!indexHtml) {
