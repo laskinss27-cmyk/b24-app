@@ -349,6 +349,7 @@ export function Repairs(): JSX.Element {
 				loading={loading}
 				err={err}
 				onAdd={() => setScreen({ k: 'form' })}
+				onPresale={() => setScreen({ k: 'presale' })}
 				onOpen={(r) => setScreen({ k: 'card', repair: r })}
 				onPrintSelected={(selected) => { void openDispatchPrint(selected); }}
 				onReload={() => void load()}
@@ -357,9 +358,9 @@ export function Repairs(): JSX.Element {
 	);
 }
 
-function RepairList({ repairs, loading, err, onAdd, onOpen, onPrintSelected, onReload }: {
+function RepairList({ repairs, loading, err, onAdd, onPresale, onOpen, onPrintSelected, onReload }: {
 	repairs: Repair[]; loading: boolean; err: string | null;
-	onAdd: () => void; onOpen: (r: Repair) => void; onPrintSelected: (repairs: Repair[]) => void; onReload: () => void;
+	onAdd: () => void; onPresale: () => void; onOpen: (r: Repair) => void; onPrintSelected: (repairs: Repair[]) => void; onReload: () => void;
 }): JSX.Element {
 	const [q, setQ] = useState('');
 	const [st, setSt] = useState<RepairStatus | 'all'>('all');
@@ -409,11 +410,7 @@ function RepairList({ repairs, loading, err, onAdd, onOpen, onPrintSelected, onR
 		<>
 			<div className="base-toolbar">
 				<button className="btn-primary" onClick={onAdd}>➕ Принять в ремонт</button>
-				<button
-					className="btn-secondary"
-					disabled
-					title="Временно отключено: предпродажный ремонт двигает товар в ядре, а этот контур пока не используем."
-				>🛠 Предпродажный ремонт</button>
+				<button className="btn-secondary" onClick={onPresale}>🛠 Предпродажный ремонт</button>
 				<button className="btn-secondary" disabled={selectedRepairs.length === 0} onClick={() => onPrintSelected(selectedRepairs)}>Сопроводительное письмо{selectedRepairs.length ? ` (${selectedRepairs.length})` : ''}</button>
 				<label className="tb-field">Статус
 					<select value={st} onChange={(e) => setSt(e.target.value as RepairStatus | 'all')}>
