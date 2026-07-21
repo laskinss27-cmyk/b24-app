@@ -950,6 +950,16 @@ export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[
 	return out;
 }
 
+/** Обновить общий комментарий заявки снабжению, не затрагивая позиции и документы исполнения. */
+export async function updateSupplyRequestNote(erp: ErpClient, name: string, note: string): Promise<string> {
+	await ensureNoteField(erp, 'Material Request');
+	const request = await erp.get<Record<string, unknown>>('Material Request', name);
+	if (!request || Number(request['docstatus'] ?? 0) === 2) throw new Error('заявка снабжению не найдена');
+	const value = note.trim().slice(0, 500);
+	await erp.update('Material Request', name, { [NOTE_FIELD]: value });
+	return value;
+}
+
 let purchaseFieldDone = false;
 async function ensurePurchaseFields(erp: ErpClient): Promise<void> {
 	if (purchaseFieldDone) return;

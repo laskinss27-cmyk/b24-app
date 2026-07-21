@@ -7,6 +7,7 @@ import {
 	fetchRepairs,
 	createRepair,
 	updateRepair,
+	updateRepairInternalComment,
 	updateRepairStatus,
 	setRepairPayType,
 	requestRepairPriceApproval,
@@ -299,6 +300,13 @@ export function Repairs(): JSX.Element {
 					canEditPrice={canEditPrice}
 					onBack={() => setScreen({ k: 'list' })}
 					onEdit={() => setScreen({ k: 'form', initial: screen.repair })}
+					onSaveInternalComment={async (internalComment) => {
+						const next = ctx.__mock
+							? { ...screen.repair, internalComment }
+							: await updateRepairInternalComment(screen.repair.id, internalComment);
+						setScreen({ k: 'card', repair: next });
+						setRepairs((prev) => prev.map((row) => row.id === next.id ? next : row));
+					}}
 					onPrint={() => setScreen({ k: 'print', repair: screen.repair })}
 					onIssuePrint={() => setScreen({ k: 'issue-print', repair: screen.repair })}
 					onStatus={async (st) => {
@@ -769,8 +777,8 @@ function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () =
 	);
 }
 
-function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSetIssueStore, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
+function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternalComment, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSetIssueStore, onDelete }: {
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onSaveInternalComment: (comment: string) => Promise<void>; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
@@ -781,6 +789,9 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 	const [issueStores, setIssueStores] = useState<StoreInfo[]>([]);
 	const [issueVal, setIssueVal] = useState<string>(repair.issueStore ?? '');
 	const [issueBusy, setIssueBusy] = useState(false);
+	const [commentEditing, setCommentEditing] = useState(false);
+	const [commentBusy, setCommentBusy] = useState(false);
+	const [commentVal, setCommentVal] = useState(repair.internalComment ?? '');
 	useEffect(() => { if (!mock) fetchStores().then((s) => setIssueStores(s.filter((x) => x.active))).catch(() => setIssueStores([])); }, [mock]);
 	const presale = repair.kind === 'presale';
 	const canPrintIssue = !presale && (repair.status === 'ready_tt' || repair.status === 'issued');
@@ -845,6 +856,17 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 		setBusy(true); setStErr(null);
 		try { await onDelete(); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); setBusy(false); }
 	}
+	async function saveInternalComment(): Promise<void> {
+		setCommentBusy(true); setStErr(null);
+		try {
+			await onSaveInternalComment(commentVal.trim());
+			setCommentEditing(false);
+		} catch (error) {
+			setStErr(String(error instanceof Error ? error.message : error));
+		} finally {
+			setCommentBusy(false);
+		}
+	}
 	const row = (label: string, value: string): JSX.Element => (
 		<div className="rc-row"><span className="rc-label">{label}</span><span className="rc-val">{value || '—'}</span></div>
 	);
@@ -854,7 +876,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 			<div className="rc-head">
 				<h2>Ремонт #{repairNo(repair)}{repair.status === 'issued' && <span className="status-done"> · завершён</span>}</h2>
 				<div className="rc-head-actions">
-					<button className="btn-secondary" onClick={onEdit} disabled={locked || presale} title={presale ? 'Предпродажный — ведётся статусами, без правки полей' : locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ Редактировать</button>
+					<button className="btn-secondary" onClick={() => presale ? setCommentEditing(true) : onEdit()} disabled={locked} title={locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ {presale ? 'Редактировать комментарий' : 'Редактировать'}</button>
 					<button className="btn-secondary" onClick={onPrint}>Акт приёма</button>
 					{canPrintIssue && <button className="btn-primary" onClick={onIssuePrint}>Акт выдачи</button>}
 					<button className="btn-danger" disabled={busy || locked} onClick={() => void remove()} title={locked ? 'Принят в офисе — удалить может только снабжение' : 'Удалить ремонт (необратимо)'}>🗑 Удалить</button>
@@ -910,6 +932,17 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onPrint, onIss
 			{!presale && !repair.dealId && repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку ремонта — привяжи клиента к контакту Б24 (в редактировании).</p>}
 			{dealMsg && <p className="muted small">{dealMsg}</p>}
 			{stErr && <p className="error">⛔ {stErr}</p>}
+			{presale && commentEditing && (
+				<div className="rc-comment-editor">
+					<label>Внутренний комментарий
+						<textarea rows={3} maxLength={2000} value={commentVal} onChange={(event) => setCommentVal(event.target.value)} autoFocus />
+					</label>
+					<div className="rc-comment-editor-actions">
+						<button className="btn-primary" type="button" disabled={commentBusy} onClick={() => void saveInternalComment()}>{commentBusy ? 'Сохраняю…' : 'Сохранить'}</button>
+						<button className="btn-secondary" type="button" disabled={commentBusy} onClick={() => { setCommentVal(repair.internalComment ?? ''); setCommentEditing(false); }}>Отмена</button>
+					</div>
+				</div>
+			)}
 
 			<div className="rc-body">
 				{presale ? (

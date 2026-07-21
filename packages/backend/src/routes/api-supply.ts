@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
+import { canManageStock } from './api-stock.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData, parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
@@ -378,6 +379,25 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			return { ok: true, name };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/supply/request] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/supply/request-note', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { requestName?: unknown; note?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
+		const requestName = String(b.requestName ?? '').trim();
+		if (!requestName || requestName === STANDALONE_SUPPLY_REQUEST) return reply.code(400).send({ ok: false, error: 'неверная заявка снабжению' });
+		try {
+			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'редактирование комментария доступно снабжению' });
+			const note = await updateSupplyRequestNote(erp, requestName, String(b.note ?? ''));
+			app.log.info({ requestName }, '[api/supply/request-note] updated');
+			return { ok: true, note };
+		} catch (err) {
+			app.log.error({ requestName }, `[api/supply/request-note] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

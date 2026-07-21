@@ -742,6 +742,17 @@ export async function createDealSupplyRequest(dealId: number, lines: Array<{ pro
 	return json.name ?? '';
 }
 
+export async function updateSupplyOrderNote(requestName: string, note: string): Promise<string> {
+	const res = await fetch('/api/supply/request-note', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), requestName, note }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; note?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить комментарий');
+	return json.note ?? '';
+}
+
 export async function createSupplyDocuments(args: { requestName: string; requestKey: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {
 	const res = await fetch('/api/supply/create-documents', {
 		method: 'POST',
@@ -1795,6 +1806,16 @@ export async function updateRepair(id: number, input: NewRepairInput): Promise<R
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось сохранить ремонт');
+	return json.repair;
+}
+
+export async function updateRepairInternalComment(id: number, internalComment: string): Promise<Repair> {
+	const res = await fetch('/api/repairs/update-internal-comment', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, internalComment }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось сохранить комментарий');
 	return json.repair;
 }
 

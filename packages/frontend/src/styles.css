@@ -1025,6 +1025,12 @@ h2.inv-h2 {
 	color: #374151;
 	font-size: 13px;
 }
+.supply-order-note-editor { display: flex; align-items: flex-end; gap: 10px; }
+.supply-order-note-editor label { flex: 1; display: grid; gap: 5px; }
+.supply-order-note-editor textarea { width: min(720px, 100%); min-height: 54px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; background: #fff; color: #1f2937; font: inherit; }
+.supply-order-note-editor button { min-height: 34px; padding: 6px 13px; border: 1px solid #9eb4cf; border-radius: 6px; background: #fff; color: #174f8a; cursor: pointer; }
+.supply-order-note-editor button:disabled { opacity: .5; cursor: default; }
+.supply-order-note-editor .error { align-self: center; }
 .supply-print-note {
 	margin: 0 0 14px;
 	font-size: 12px;
@@ -2506,6 +2512,10 @@ html, body, #root { height: 100%; }
 .rc-row { display: contents; }
 .rc-label { color: #6b7280; font-size: 13px; }
 .rc-val { color: #1a1a1a; }
+.rc-comment-editor { max-width: 720px; margin: 10px 0 16px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; }
+.rc-comment-editor label { display: grid; gap: 6px; color: #475569; font-size: 13px; }
+.rc-comment-editor textarea { width: 100%; min-height: 72px; resize: vertical; border: 1px solid #b8c5d4; border-radius: 6px; padding: 8px 10px; background: #fff; color: #1f2937; font: inherit; }
+.rc-comment-editor-actions { display: flex; gap: 8px; margin-top: 10px; }
 
 .rc-pay { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; }
 .rc-pay-toggle { display: inline-flex; gap: 6px; }

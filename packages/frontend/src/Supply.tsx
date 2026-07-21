@@ -28,6 +28,7 @@ import {
 	updateTransferLines,
 	updateSupplyPurchaseOrder,
 	updateSupplyPurchaseStage,
+	updateSupplyOrderNote,
 	type SupplyDecisionAction,
 	type SupplyDecisionLine,
 	type SupplyOrderItem,
@@ -801,6 +802,33 @@ function DecisionRows({
 	);
 }
 
+function SupplyOrderNoteEditor({ order, onSave }: { order: SupplyOrderRow; onSave: (order: SupplyOrderRow, note: string) => Promise<void> }): JSX.Element {
+	const [value, setValue] = useState(order.note);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState('');
+	const changed = value.trim() !== order.note.trim();
+
+	async function save(): Promise<void> {
+		if (!changed || saving) return;
+		setSaving(true); setError('');
+		try {
+			await onSave(order, value);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : 'Не удалось сохранить комментарий');
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	return (
+		<div className="supply-order-common-note supply-order-note-editor">
+			<label><b>Комментарий</b><textarea rows={2} maxLength={500} value={value} placeholder="Общий комментарий к заказу" onChange={(event) => setValue(event.target.value)} /></label>
+			<button type="button" disabled={!changed || saving} onClick={() => void save()}>{saving ? 'Сохраняю…' : 'Сохранить'}</button>
+			{error && <span className="error">{error}</span>}
+		</div>
+	);
+}
+
 function OrdersView({
 	orders,
 	sort,
@@ -823,6 +851,7 @@ function OrdersView({
 	onOpenPurchase,
 	onOpenTransfer,
 	onPrintApproval,
+	onSaveNote,
 }: {
 	orders: SupplyOrderRow[];
 	sort: SortKey;
@@ -845,6 +874,7 @@ function OrdersView({
 	onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void;
 	onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void;
 	onPrintApproval: (order: SupplyOrderRow) => void;
+	onSaveNote: (order: SupplyOrderRow, note: string) => Promise<void>;
 }): JSX.Element {
 	return (
 		<section className="supply-proto-card">
@@ -912,7 +942,7 @@ function OrdersView({
 							</button>
 							{isOpen && (
 								<div className="supply-order-body">
-									{order.note && <div className="supply-order-common-note"><b>Комментарий:</b> {order.note}</div>}
+									<SupplyOrderNoteEditor order={order} onSave={onSaveNote} />
 									<div className="supply-proto-table-wrap">
 										<table className="supply-proto-table supply-decision-table">
 											<thead><tr><th>Позиция</th><th>Нужно</th><th>Остатки</th><th>Действие</th><th>Откуда / поставщик</th><th>Кол-во</th></tr></thead>
@@ -1331,6 +1361,12 @@ export function Supply(): JSX.Element {
 		setOrders(loaded);
 	};
 
+	const saveOrderNote = async (order: SupplyOrderRow, note: string): Promise<void> => {
+		const saved = ctx.__mock ? note.trim() : await updateSupplyOrderNote(order.name, note);
+		setOrders((current) => current.map((row) => row.name === order.name ? { ...row, note: saved } : row));
+		setNotice(`${order.name}: комментарий сохранён.`);
+	};
+
 	const addSupplier = async (name: string): Promise<string> => {
 		const clean = name.trim();
 		if (ctx.__mock) {
@@ -1665,7 +1701,7 @@ export function Supply(): JSX.Element {
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} />}
+				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>
