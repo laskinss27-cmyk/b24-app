@@ -591,6 +591,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			} else if (r.segmentKind === 'stage' && r.stageId) {
 				await updateDealStageItem(dealId, r.stageId, r.productId, q, p, d);
 			} else if (r.segmentKind === 'base') {
+				const planLine = data.plan.find((item) => item.productId === r.productId);
+				if (!planLine) throw new Error('Состав старой сделки ещё не перенесён в ядро. Обнови вкладку и повтори действие.');
 				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId
 					? { ...x, qty: x.qty - r.quantity + q, priceListRate: p, discountPercent: d }
 					: x)));
@@ -822,7 +824,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	}
 	const basePlanRows = !workingMode ? data.planRows : data.planRows.flatMap((row): EnrichedRow[] => {
 		const quantity = Math.max(0, row.quantity - (stageQtyByProduct.get(row.productId) ?? 0));
-		return quantity > 0.000001 ? [{ ...row, id: `base-${row.productId}`, quantity, segmentKind: 'base' }] : [];
+		if (quantity <= 0.000001) return [];
+		// Реальные строки старой сделки ещё живут в Б24 и должны редактироваться своим
+		// строковым API. Нельзя выдавать их за строки плана ядра: при уходе фокуса это
+		// превращало отсутствующий data.plan в plan-set(items=[]), стирая весь состав.
+		if (!String(row.id).startsWith('plan-')) return [{ ...row, quantity }];
+		return [{ ...row, id: `base-${row.productId}`, quantity, segmentKind: 'base' }];
 	});
 	const stageSections = data.stages.map((stage, index) => ({
 		stage,

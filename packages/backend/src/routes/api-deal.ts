@@ -903,6 +903,12 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const total = Math.round(variantItems.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 				return { ok: true, total, lines: variantItems.length };
 			}
+			if (!lines.length && !(await listDealPlan(erp, dealId)).length) {
+				const legacyLines = await listLegacyB24DealLines(client, dealId);
+				if (legacyLines.length) {
+					return reply.code(409).send({ ok: false, error: 'нельзя очистить старую сделку до переноса её состава в ядро' });
+				}
+			}
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const today = new Date().toISOString().slice(0, 10);
 			const savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
