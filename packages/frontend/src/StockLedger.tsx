@@ -617,24 +617,20 @@ export function StockLedger(): JSX.Element {
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
 	const [tab, setTab] = useState<Tab>(requestId > 0 ? 'requests' : 'transfers');
 	const [form, setForm] = useState<StockForm | null>(null);
-	const [fullAccess, setFullAccess] = useState(false);
 
-	// Снабжение видит весь складской учёт; менеджеры — заявки ТТ и инвентаризацию.
+	// Все сотрудники видят весь складской учёт. Опасные действия отдельно защищены правами API.
 	useEffect(() => {
 		if (ctx.__mock) {
-			setFullAccess(true);
 			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true });
 			setPhase({ k: 'ready' });
 			return;
 		}
 		const bx = window.BX24;
-		if (!bx) { setFullAccess(true); setPhase({ k: 'ready' }); return; }
+		if (!bx) { setPhase({ k: 'ready' }); return; }
 		bx.init(() => {
 			void (async () => {
 				const access = await withTimeout(fetchStockFormData(), 15000, 'stock.form-data');
 				setForm(access);
-				setFullAccess(access.canCreate);
-				if (!access.canCreate && requestId <= 0 && transferId <= 0) setTab('inventory');
 				setPhase({ k: 'ready' });
 				// Справочники форм — best-effort (ядро может быть недоступно: формы просто не покажут селекторы).
 			})().catch(() => setPhase({ k: 'denied' }));
@@ -644,7 +640,7 @@ export function StockLedger(): JSX.Element {
 
 	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>Не удалось определить права доступа. Обновите страницу.</div>;
-	const tabs = fullAccess ? TABS : TABS.filter((item) => item.key === 'requests' || item.key === 'inventory' || (transferId > 0 && item.key === 'transfers'));
+	const tabs = TABS;
 	return (
 		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
