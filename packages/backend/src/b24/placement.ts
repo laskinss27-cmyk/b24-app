@@ -77,31 +77,57 @@ export async function bindTaskInventoryPlacement(opts: BindDealTabOptions): Prom
  * легальное место входа: складской учёт/каталог Битрикс приложениям не отдаёт.
  */
 export const INVENTORY_MENU_PLACEMENT = 'LEFT_MENU';
-export const INVENTORY_MENU_TITLE = 'Продажа';
+export const INVENTORY_MENU_TITLE = 'База товаров и услуг';
 
-export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+let inventoryMenuBindInFlight: Promise<{ status: string }> | null = null;
+
+async function bindInventoryMenuPlacementOnce(opts: BindDealTabOptions): Promise<{ status: string }> {
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/inventory`;
-	// ТОЛЬКО идемпотентный bind, БЕЗ unbind. Прежний unbind+rebind (ради смены TITLE) на
-	// КАЖДОМ открытии оставлял окно «снято → ещё не привязано»; под одновременным открытием
-	// двумя юзерами это давало ГОНКУ и ломало пункт → «приложение не найдено» (инцидент 2026-06-03).
-	// Название «Товары» уже применилось ранее; здесь просто гарантируем, что привязка ЕСТЬ.
+	// Обычно bind остаётся идемпотентным. Unbind делаем только для точечного
+	// переименования этого handler: это исключает повтор на каждом открытии и не трогает соседние пункты.
+	let renamed = false;
 	try {
+		try {
+			const bindings = await opts.client.call<Array<{ placement?: string; handler?: string; title?: string }>>('placement.get', {});
+			const current = Array.isArray(bindings)
+				? bindings.find((binding) => binding.placement === INVENTORY_MENU_PLACEMENT && binding.handler === handlerUrl)
+				: undefined;
+			if (current?.title === INVENTORY_MENU_TITLE) return { status: 'already-bound' };
+			if (current?.title) {
+				await opts.client.call('placement.unbind', {
+					PLACEMENT: INVENTORY_MENU_PLACEMENT,
+					HANDLER: handlerUrl,
+				});
+				renamed = true;
+			}
+		} catch {
+			// Не-админу placement.get может быть недоступен: обычный bind ниже остаётся безопасным.
+		}
 		await opts.client.call('placement.bind', {
 			PLACEMENT: INVENTORY_MENU_PLACEMENT,
 			HANDLER: handlerUrl,
 			TITLE: INVENTORY_MENU_TITLE,
 			LANG_ALL: {
 				ru: { TITLE: INVENTORY_MENU_TITLE },
-				en: { TITLE: 'Products' },
+				en: { TITLE: 'Products and services' },
 			},
 		});
-		return { status: 'bound' };
+		return { status: renamed ? 'renamed' : 'bound' };
 	} catch (err) {
 		if (err instanceof B24ApiError && /already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) {
 			return { status: 'already-bound' };
 		}
 		throw err;
 	}
+}
+
+export async function bindInventoryMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	if (!inventoryMenuBindInFlight) {
+		inventoryMenuBindInFlight = bindInventoryMenuPlacementOnce(opts).finally(() => {
+			inventoryMenuBindInFlight = null;
+		});
+	}
+	return inventoryMenuBindInFlight;
 }
 
 /**
