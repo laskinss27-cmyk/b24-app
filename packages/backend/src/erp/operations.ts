@@ -325,8 +325,20 @@ export async function createRealizationDraft(
 			qty: l.qty,
 			...(!l.isService && l.storeTitle ? { warehouse: erpWarehouse(ctx, l.storeTitle) } : {}),
 			rate: l.rate,
-		})),
+			})),
 	});
+	// У нескладской позиции ERPNext может подставить default warehouse из карточки Item,
+	// даже когда warehouse не передан. Для услуги очищаем его уже в созданной дочерней
+	// строке: документ остаётся единым с товарами, но складских движений по услуге нет.
+	const createdItems = Array.isArray(doc['items']) ? doc['items'] as Array<Record<string, unknown>> : [];
+	for (const [index, line] of args.lines.entries()) {
+		if (!line.isService) continue;
+		const createdLine = createdItems[index];
+		const rowName = String(createdLine?.['name'] ?? '');
+		if (rowName && String(createdLine?.['warehouse'] ?? '')) {
+			await erp.update('Delivery Note Item', rowName, { warehouse: '' });
+		}
+	}
 	return { name: String(doc['name']) };
 }
 
