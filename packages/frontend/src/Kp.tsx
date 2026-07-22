@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { fetchDealKp, withTimeout, type KpData, type KpRow } from './b24.js';
 import { REPAIR_LOGO } from './repair-logo.js';
 
@@ -28,8 +28,8 @@ const MOCK_KP: KpData = {
 		{ productId: 103, name: 'Монитор видеодомофона 7"', article: 'CTV-M5702', qty: 2, price: 3500, sum: 7000, isWork: false },
 	],
 	works: [
-		{ productId: 0, name: 'Монтаж и настройка камер', article: '', qty: 4, price: 2500, sum: 10000, isWork: true },
-		{ productId: 0, name: 'Пусконаладка системы', article: '', qty: 1, price: 8000, sum: 8000, isWork: true },
+		{ productId: 0, name: 'Монтаж и настройка камер', article: '', qty: 4, price: 2500, sum: 10000, isWork: true, stage: 'Монтаж первого этажа' },
+		{ productId: 0, name: 'Пусконаладка системы', article: '', qty: 1, price: 8000, sum: 8000, isWork: true, stage: 'Пусконаладка' },
 	],
 	sumGoods: 25500, sumWorks: 18000, total: 43500,
 };
@@ -71,6 +71,16 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 			<td className="kp-num">{money(r.sum)}</td>
 		</tr>
 	);
+	const allCompositionRows = kp ? [...kp.goods, ...kp.works] : [];
+	const namedStages = [...new Set(allCompositionRows.map((row) => row.stage?.trim()).filter((name): name is string => Boolean(name)))];
+	const compositionGroups = kp
+		? (namedStages.length
+			? [
+				...(allCompositionRows.some((row) => !row.stage?.trim()) ? [{ key: '__base', name: 'Основная сделка', goods: kp.goods.filter((row) => !row.stage?.trim()), works: kp.works.filter((row) => !row.stage?.trim()) }] : []),
+				...namedStages.map((name) => ({ key: `stage:${name}`, name, goods: kp.goods.filter((row) => row.stage === name), works: kp.works.filter((row) => row.stage === name) })),
+			]
+			: [{ key: '__all', name: '', goods: kp.goods, works: kp.works }])
+		: [];
 
 	return (
 		<div className="kp-wrap">
@@ -95,26 +105,30 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 					<div className="kp-meta">от {ruDate(kp.date)}{kp.manager.name ? ` · менеджер: ${kp.manager.name}` : ''}{kp.manager.phone ? ` · ${kp.manager.phone}` : ''}</div>
 					<div className="kp-client">Клиент: <b>{kp.client.name || '—'}</b>{kp.client.phone && <> · {kp.client.phone}</>}</div>
 
-					{kp.goods.length > 0 && (
-						<>
-							<div className="kp-section">Оборудование</div>
-							<table className="kp-table">
-								{renderCols()}
-								<thead><tr><th colSpan={2}>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
-								<tbody>{kp.goods.map(goodsRow)}</tbody>
-							</table>
-						</>
-					)}
-
-					{kp.works.length > 0 && (
-						<>
-							<div className="kp-section">Работы</div>
-							<table className="kp-table">
-								{renderCols()}
-								<tbody>{kp.works.map(workRow)}</tbody>
-							</table>
-						</>
-					)}
+					{compositionGroups.map((group) => (
+						<Fragment key={group.key}>
+							{group.name && <div className="kp-stage-title">{group.name}</div>}
+							{group.goods.length > 0 && (
+								<>
+									<div className="kp-section">Оборудование</div>
+									<table className="kp-table">
+										{renderCols()}
+										<thead><tr><th colSpan={2}>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
+										<tbody>{group.goods.map(goodsRow)}</tbody>
+									</table>
+								</>
+							)}
+							{group.works.length > 0 && (
+								<>
+									<div className="kp-section">Работы</div>
+									<table className="kp-table">
+										{renderCols()}
+										<tbody>{group.works.map(workRow)}</tbody>
+									</table>
+								</>
+							)}
+						</Fragment>
+					))}
 
 					<div className="kp-totals">
 						{kp.goods.length > 0 && <div className="kp-trow"><span>Оборудование</span><span>{money(kp.sumGoods)}</span></div>}

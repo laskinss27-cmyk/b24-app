@@ -674,11 +674,11 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 }
 
 /** Добавить НЕСКОЛЬКО товаров в сделку за раз (корзина пикера → «Готово»). Возвращает кол-во добавленных. */
-export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean; stageId?: string; variantId?: string } = {}): Promise<number> {
+export async function addProductsToDeal(dealId: number, items: { productId: number; quantity: number; price?: number; name?: string; isService?: boolean }[], options: { stage?: boolean; stageId?: string; stageName?: string; variantId?: string } = {}): Promise<number> {
 	const res = await fetch('/api/deal/add-products', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true, ...(options.stageId ? { stageId: options.stageId } : {}), ...(options.variantId ? { variantId: options.variantId } : {}) }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, items, stage: options.stage === true, ...(options.stageId ? { stageId: options.stageId } : {}), ...(options.stageName ? { stageName: options.stageName } : {}), ...(options.variantId ? { variantId: options.variantId } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; added?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось добавить товары');
@@ -899,7 +899,7 @@ export interface DealPlanItem {
 }
 
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
-export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
+export interface DealStage { id: string; name?: string; at: string; byId: string; byName: string; items: DealStageItem[] }
 export interface DealQuoteVariantItem { productId: number; itemName: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
 export interface DealQuoteVariant { id: string; name: string; createdAt: string; createdById: string; createdByName: string; items: DealQuoteVariantItem[] }
 export interface DealQuoteVariants { enabled: boolean; selectedId: string | null; variants: DealQuoteVariant[] }
@@ -1028,6 +1028,17 @@ export async function removeDealStageItem(dealId: number, stageId: string, produ
 	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить строку этапа');
 	return json.total ?? 0;
+}
+
+export async function renameDealStage(dealId: number, stageId: string, name: string): Promise<DealStage[]> {
+	const res = await fetch('/api/deal/stage-rename', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, stageId, name }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; stages?: DealStage[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось переименовать этап');
+	return json.stages ?? [];
 }
 
 export async function fetchDealStages(dealId: number): Promise<DealStage[]> {
@@ -1604,6 +1615,8 @@ export interface KpRow {
 	price: number;
 	sum: number;
 	isWork: boolean;
+	/** Свободное название этапа сделки. Нет у старого Б24-фолбэка. */
+	stage?: string;
 	/** data-URL фото (подключим из ядра позже); пока пусто → рамка-заглушка. */
 	photo?: string;
 }

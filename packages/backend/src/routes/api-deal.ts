@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
@@ -365,7 +365,7 @@ function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realization
 			for (const item of stage.items) {
 				if (item.qty <= 0.000001) continue;
 				segments.push({
-					stage: `Этап ${stageIndex + 1}`,
+					stage: stage.name?.trim() || `Этап ${stageIndex + 1}`,
 					type: item.isService ? 'Услуга' : 'Товар',
 					productId: item.productId,
 					name: item.itemName || `#${item.productId}`,
@@ -602,7 +602,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	// Добавить НЕСКОЛЬКО товарных строк в сделку за раз (корзина из пикера «Готово»).
 	app.post('/api/deal/add-products', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; stage?: unknown; stageId?: unknown; variantId?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; stage?: unknown; stageId?: unknown; stageName?: unknown; variantId?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(b.dealId);
@@ -667,8 +667,11 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				} else if (b.stage === true) {
 					const me = await client.call<{ ID?: unknown; NAME?: unknown; LAST_NAME?: unknown }>('user.current', {}).catch(() => null);
 					const byName = [String(me?.['NAME'] ?? '').trim(), String(me?.['LAST_NAME'] ?? '').trim()].filter(Boolean).join(' ');
+					const stageName = String(b.stageName ?? '').trim();
+					if (stageName.length > 80) throw new Error('название этапа длиннее 80 символов');
 					await appendDealStage(erp, dealId, {
 						id: randomUUID(),
+						...(stageName ? { name: stageName } : {}),
 						at: new Date().toISOString(),
 						byId: String(me?.['ID'] ?? ''),
 						byName,
@@ -850,6 +853,24 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return { ok: true, stages: await listDealStages(erp, dealId) };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/stages] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/deal/stage-rename', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; stageId?: unknown; name?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		const stageId = String(b.stageId ?? '').trim();
+		if (!Number.isInteger(dealId) || dealId <= 0 || !stageId) return reply.code(400).send({ ok: false, error: 'некорректный этап' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		try {
+			await assertDealQuoteVariantSelected(erp, dealId);
+			return { ok: true, stages: await renameDealStage(erp, dealId, stageId, String(b.name ?? '')) };
+		} catch (err) {
+			app.log.error({ dealId, stageId }, `[api/deal/stage-rename] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
@@ -1129,18 +1150,34 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const variantItems = variant?.items ?? null;
 			const variantName = variant?.name ?? '';
 			if (erp && variantId && !variantItems) throw new Error('вариант КП не найден');
-			let raw = erp
-				? (variantItems ?? await listDealPlan(erp, dealId).catch((err) => {
-					app.log.warn({ dealId }, `[api/deal/kp] core plan failed — ${errInfo(err)}`);
-					return [];
-				})).map((r) => ({
+			type KpRawRow = { productId: number; name: string; type: number; qty: number; price: number; stage?: string };
+			let raw: KpRawRow[] = [];
+			if (erp && variantItems) {
+				raw = variantItems.map((r) => ({
 					productId: r.productId,
 					name: r.itemName || `#${r.productId}`,
 					type: r.isService ? 7 : 1,
 					qty: r.qty,
-					price: 'rate' in r ? r.rate : r.priceListRate * (1 - r.discountPercent / 100),
-				}))
-				: [];
+					price: r.priceListRate * (1 - r.discountPercent / 100),
+					stage: `Вариант КП: ${variantName}`,
+				}));
+			} else if (erp) {
+				const [plan, stages] = await Promise.all([
+					listDealPlan(erp, dealId),
+					listDealStages(erp, dealId),
+				]).catch((err) => {
+					app.log.warn({ dealId }, `[api/deal/kp] core plan failed — ${errInfo(err)}`);
+					return [[], []] as [PlanItem[], DealStage[]];
+				});
+				raw = dealExportRows(plan, stages, []).map((r) => ({
+					productId: r.productId,
+					name: r.name,
+					type: r.type === 'Услуга' ? 7 : 1,
+					qty: r.quantity,
+					price: r.priceListRate * (1 - r.discountPercent / 100),
+					stage: r.stage,
+				}));
+			}
 			if (!raw.length && !variantId) {
 				source = 'b24-fallback';
 				const old = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId }).catch(() => [] as Array<Record<string, unknown>>);
@@ -1152,9 +1189,9 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					.filter((r) => r.productId !== VYEZD_PRODUCT_ID);
 			}
 			const rows = raw
-				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price) }))
+				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price), ...(r.stage ? { stage: r.stage } : {}) }))
 				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
-				.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7 }));
+				.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7, ...(r.stage ? { stage: r.stage } : {}) }));
 			const goods = rows.filter((r) => !r.isWork);
 			const works = rows.filter((r) => r.isWork);
 			const sumGoods = goods.reduce((a, r) => a + r.sum, 0);

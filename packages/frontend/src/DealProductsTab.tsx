@@ -13,6 +13,7 @@ import {
 	setDealPlan,
 	updateDealStageItem,
 	removeDealStageItem,
+	renameDealStage,
 	createDealSupplyRequest,
 	fetchDealShipped,
 	fetchDealRealizationsCore,
@@ -106,7 +107,7 @@ const MOCK_DATA: TableData = {
 		{ id: 12, title: 'Максидом Богатырский 15', active: true },
 	],
 	stages: [
-		{ id: 'mock-stage-1', at: '2026-07-18T10:30:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 1, price: 1000, isService: false }] },
+		{ id: 'mock-stage-1', name: 'Первый этаж', at: '2026-07-18T10:30:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 1, price: 1000, isService: false }] },
 		{ id: 'mock-stage-2', at: '2026-07-20T08:15:00.000Z', byId: '1', byName: 'Сергей Ласкин', items: [{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 2, price: 1000, isService: false }] },
 	],
 	quoteVariants: { enabled: false, selectedId: null, variants: [] },
@@ -316,8 +317,8 @@ export function DealProductsTab(): JSX.Element {
 	const [adding, setAdding] = useState<
 		| { kind: 'deal' }
 		| { kind: 'variant'; variantId: string; variantName: string }
-		| { kind: 'new-stage' }
-		| { kind: 'stage'; stageId: string; stageNumber: number }
+		| { kind: 'new-stage'; stageName: string }
+		| { kind: 'stage'; stageId: string; stageName: string }
 		| null
 	>(null);
 	const [showKp, setShowKp] = useState(false);
@@ -449,16 +450,16 @@ export function DealProductsTab(): JSX.Element {
 					title: isVariant
 						? `Добавить в вариант «${adding.variantName}»`
 						: isNewStage
-						? `Новый этап сделки #${dealId}`
+						? `Новый этап «${adding.stageName}»`
 						: isExistingStage
-							? `Добавить в этап ${adding.stageNumber}`
+							? `Добавить в этап «${adding.stageName}»`
 							: `Добавить товар в сделку #${dealId}`,
 					onCancel: () => setAdding(null),
 					onDone: async (items) => {
 						await addProductsToDeal(
 							dealId,
 							items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })),
-							{ stage: isNewStage, ...(isExistingStage ? { stageId: adding.stageId } : {}), ...(isVariant ? { variantId: adding.variantId } : {}) },
+							{ stage: isNewStage, ...(isNewStage ? { stageName: adding.stageName } : {}), ...(isExistingStage ? { stageId: adding.stageId } : {}), ...(isVariant ? { variantId: adding.variantId } : {}) },
 						);
 						setAdding(null);
 						await reload();
@@ -484,7 +485,7 @@ export function DealProductsTab(): JSX.Element {
 			payment: null,
 		}
 		: state.data;
-	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={() => setAdding({ kind: 'new-stage' })} onAddToStage={(stageId, stageNumber) => setAdding({ kind: 'stage', stageId, stageNumber })} onKp={(variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setShowKp(true); }} onReload={reload} />;
+	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onKp={(variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setShowKp(true); }} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -554,7 +555,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: () => void; onAddToStage: (stageId: string, stageNumber: number) => void; onKp: (variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onKp: (variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
 	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
@@ -663,6 +664,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const [variantDialog, setVariantDialog] = useState<null | { kind: 'create' | 'copy' | 'rename'; value: string }>(null);
 	const [variantBusy, setVariantBusy] = useState(false);
 	const [variantError, setVariantError] = useState<string | null>(null);
+	const [stageDialog, setStageDialog] = useState<null | { kind: 'create' | 'rename'; value: string; stageId?: string }>(null);
+	const [stageBusy, setStageBusy] = useState(false);
+	const [stageError, setStageError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 	const [exportBusy, setExportBusy] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
@@ -829,6 +833,24 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			await onReload();
 		} catch (error) { setVariantError(String(error instanceof Error ? error.message : error)); }
 		finally { setVariantBusy(false); }
+	};
+	const submitStageDialog = async (): Promise<void> => {
+		if (!stageDialog || stageBusy) return;
+		const name = stageDialog.value.trim();
+		if (!name) { setStageError('Укажи название этапа.'); return; }
+		if (stageDialog.kind === 'create') {
+			setStageDialog(null);
+			onStage(name);
+			return;
+		}
+		if (dealId == null || !stageDialog.stageId) return;
+		setStageBusy(true); setStageError(null);
+		try {
+			await renameDealStage(dealId, stageDialog.stageId, name);
+			setStageDialog(null);
+			await onReload();
+		} catch (error) { setStageError(String(error instanceof Error ? error.message : error)); }
+		finally { setStageBusy(false); }
 	};
 	const chooseVariant = async (): Promise<void> => {
 		const changing = Boolean(data.quoteVariants.selectedId);
@@ -1158,11 +1180,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
-	const sectionBand = (title: string, subtitle: string, list: EnrichedRow[], onAddItems?: () => void): JSX.Element => (
+	const sectionBand = (title: string, subtitle: string, list: EnrichedRow[], onAddItems?: () => void, onRename?: () => void): JSX.Element => (
 		<tr className="deal-stage-band">
 			<td colSpan={8}>
 				<div className="deal-stage-band-title">
-					<span className="deal-stage-band-heading"><b>{title}</b>{subtitle && <small>{subtitle}</small>}</span>
+					<span className="deal-stage-band-heading"><b>{title}</b>{onRename && <button type="button" className="deal-stage-rename" title="Переименовать этап" aria-label={`Переименовать этап «${title}»`} onClick={onRename}>✎</button>}{subtitle && <small>{subtitle}</small>}</span>
 					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить оборудование или работу</button>}
 				</div>
 			</td>
@@ -1458,11 +1480,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 							{stageSections.map(({ stage, number, rows: stageRows }) => {
 								const at = new Date(stage.at);
 								const when = Number.isNaN(at.getTime()) ? stage.at : at.toLocaleDateString('ru-RU');
+								const stageName = stage.name?.trim() || `Этап ${number}`;
 								const stageGoods = stageRows.filter((row) => !isWorkRow(row.type));
 								const stageWorks = stageRows.filter((row) => isWorkRow(row.type));
 								return (
 									<Fragment key={stage.id}>
-										{sectionBand(`Этап ${number}`, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows, () => onAddToStage(stage.id, number))}
+										{sectionBand(stageName, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows, () => onAddToStage(stage.id, stageName), () => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId: stage.id }); })}
 										{stageGoods.length > 0 && groupBand('Оборудование', stageGoods, stageGoods.reduce((sum, row) => sum + line(row), 0))}
 										{stageGoods.flatMap(renderGoodsRows)}
 										{stageWorks.length > 0 && groupBand('Работы и услуги', stageWorks, stageWorks.reduce((sum, row) => sum + line(row), 0))}
@@ -1477,7 +1500,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			</div>
 
 			{workingMode && <div className="deal-stage-addbar">
-				<button className="btn-secondary" onClick={onStage}>Добавить этап</button>
+				<button className="btn-secondary" onClick={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}>Добавить этап</button>
 			</div>}
 
 			<div className="totals">
@@ -1608,6 +1631,18 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						{variantDialog.kind === 'copy' && <p>Состав варианта «{activeVariant?.name ?? ''}» будет скопирован.</p>}
 						{variantError && <div className="deal-supply-order-error">{variantError}</div>}
 						<footer><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>Отмена</button><button className="primary" type="button" disabled={variantBusy || !variantDialog.value.trim()} onClick={() => void submitVariantDialog()}>{variantBusy ? 'Сохраняю…' : 'Сохранить'}</button></footer>
+					</section>
+				</div>
+			)}
+
+			{stageDialog && (
+				<div className="deal-supply-order-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !stageBusy) setStageDialog(null); }}>
+					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={stageDialog.kind === 'rename' ? 'Переименовать этап' : 'Добавить этап'}>
+						<header><h2>{stageDialog.kind === 'rename' ? 'Переименовать этап' : 'Новый этап'}</h2><button type="button" disabled={stageBusy} onClick={() => setStageDialog(null)}>×</button></header>
+						<label><span>Название</span><input autoFocus maxLength={80} value={stageDialog.value} disabled={stageBusy} onChange={(event) => { setStageDialog({ ...stageDialog, value: event.target.value }); setStageError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') void submitStageDialog(); }} /></label>
+						{stageDialog.kind === 'create' && <p>После сохранения выбери оборудование и работы для этого этапа.</p>}
+						{stageError && <div className="deal-supply-order-error">{stageError}</div>}
+						<footer><button type="button" disabled={stageBusy} onClick={() => setStageDialog(null)}>Отмена</button><button className="primary" type="button" disabled={stageBusy || !stageDialog.value.trim()} onClick={() => void submitStageDialog()}>{stageBusy ? 'Сохраняю…' : stageDialog.kind === 'create' ? 'Продолжить' : 'Сохранить'}</button></footer>
 					</section>
 				</div>
 			)}

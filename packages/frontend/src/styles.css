@@ -2711,6 +2711,7 @@ html, body, #root { height: 100%; }
 .kp-title { font-size: 18px; font-weight: 500; padding: 18px 28px 2px; }
 .kp-meta { font-size: 12px; color: #6b7280; padding: 0 28px; }
 .kp-client { font-size: 13px; padding: 10px 28px 0; }
+.kp-stage-title { margin: 20px 28px 0; padding: 7px 10px; border-left: 3px solid #ED2024; background: #f7f8fa; color: #27364b; font-size: 14px; font-weight: 600; }
 .kp-section { font-size: 13.5px; font-weight: 500; color: #ED2024; border-bottom: 1px solid #f3c9ca; padding-bottom: 5px; margin: 16px 28px 6px; }
 .kp-table { width: calc(100% - 56px); margin: 0 28px; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
 .kp-table td { word-wrap: break-word; }
@@ -2875,6 +2876,17 @@ body.deal-placement-body #root {
 	align-items: baseline;
 	flex-wrap: wrap;
 }
+.deal-stage-rename {
+	margin-left: 6px;
+	padding: 1px 5px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: #58708f;
+	cursor: pointer;
+	font: inherit;
+}
+.deal-stage-rename:hover { background: #dce7f4; color: #174f8a; }
 .deal-stage-inline-add {
 	flex: 0 0 auto;
 	min-height: 30px;

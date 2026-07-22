@@ -513,7 +513,7 @@ async function ensurePlanField(erp: ErpClient): Promise<void> {
 export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
 export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean }
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
-export interface DealStage { id: string; at: string; byId: string; byName: string; items: DealStageItem[] }
+export interface DealStage { id: string; name?: string; at: string; byId: string; byName: string; items: DealStageItem[] }
 export interface DealQuoteVariantItem extends PlanLine { itemName: string }
 export interface DealQuoteVariant {
 	id: string;
@@ -804,6 +804,22 @@ export async function appendDealStageItems(erp: ErpClient, dealId: number, stage
 		}
 	}
 	await erp.update('Sales Order', name, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
+}
+
+export async function renameDealStage(erp: ErpClient, dealId: number, stageId: string, rawName: string): Promise<DealStage[]> {
+	await ensurePlanField(erp);
+	const name = rawName.trim();
+	if (!name) throw new Error('укажи название этапа');
+	if (name.length > 80) throw new Error('название этапа длиннее 80 символов');
+	const planName = await findDealPlan(erp, dealId);
+	if (!planName) throw new Error('план сделки не найден');
+	const plan = await erp.get<Record<string, unknown>>('Sales Order', planName);
+	const stages = parseDealStages(plan?.[DEAL_STAGES_FIELD]);
+	const stage = stages.find((row) => row.id === stageId);
+	if (!stage) throw new Error('этап сделки не найден');
+	stage.name = name;
+	await erp.update('Sales Order', planName, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
+	return stages;
 }
 
 /** Правит одну строку этапа и ту же агрегированную позицию плана одним обновлением Sales Order. */
