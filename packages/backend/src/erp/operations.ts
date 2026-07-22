@@ -195,6 +195,21 @@ export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): 
 	return out;
 }
 
+/** Розничные цены каталога ядра для сделок и подборщиков. */
+export async function fetchErpRetailPrices(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+	const out = new Map<number, number>();
+	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200).map(String);
+		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
+			['item_code', 'in', chunk],
+			['price_list', '=', 'Standard Selling'],
+		]);
+		for (const row of prices) out.set(Number(row['item_code']), Number(row['price_list_rate'] ?? 0));
+	}
+	return out;
+}
+
 export interface CoreCatalogPrices {
 	retail?: number;
 	purchase?: number;
@@ -250,14 +265,18 @@ async function upsertCoreItemPrice(erp: ErpClient, itemCode: string, priceList: 
 /** Записать розничную и закупочную цены товара в штатные прайс-листы ERPNext. */
 export async function updateCoreCatalogPrices(
 	erp: ErpClient,
-	args: { productId: number; retail: number; purchase: number },
+	args: { productId: number; retail?: number; purchase?: number },
 ): Promise<void> {
 	const itemCode = String(args.productId);
 	if (!(await erp.get('Item', itemCode))) throw new Error(`товар #${args.productId} не найден в ядре`);
-	await ensureCorePriceList(erp, 'Standard Selling', 'selling');
-	await ensureCorePriceList(erp, 'Standard Buying', 'buying');
-	await upsertCoreItemPrice(erp, itemCode, 'Standard Selling', args.retail);
-	await upsertCoreItemPrice(erp, itemCode, 'Standard Buying', args.purchase);
+	if (args.retail !== undefined) {
+		await ensureCorePriceList(erp, 'Standard Selling', 'selling');
+		await upsertCoreItemPrice(erp, itemCode, 'Standard Selling', args.retail);
+	}
+	if (args.purchase !== undefined) {
+		await ensureCorePriceList(erp, 'Standard Buying', 'buying');
+		await upsertCoreItemPrice(erp, itemCode, 'Standard Buying', args.purchase);
+	}
 }
 
 export interface RealizationLine {

@@ -69,19 +69,6 @@ async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
 	return departments.includes(SUPPLY_DEPARTMENT_ID) || isKonstantinLaskin;
 }
 
-async function updateRetailPrice(client: B24Client, productId: number, retail: number): Promise<void> {
-	const existing = await client.call<{ prices?: Array<{ id?: number | string }> }>('catalog.price.list', {
-		filter: { productId, catalogGroupId: 2 },
-		select: ['id'],
-	});
-	const id = Number(existing?.prices?.[0]?.id ?? 0) || 0;
-	if (id) {
-		await client.call('catalog.price.update', { id, fields: { price: retail, currency: 'RUB' } });
-		return;
-	}
-	await client.call('catalog.price.add', { fields: { productId, catalogGroupId: 2, price: retail, currency: 'RUB' } });
-}
-
 function productTitle(productType: string, manufacturer: string, model: string): string {
 	return [productType, manufacturer, model].map(cleanText).filter(Boolean).join(' ');
 }
@@ -264,10 +251,6 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
 			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
-			const writeClient = app.config.devWebhook
-				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
-				: client;
-			await updateRetailPrice(writeClient, productId, retail);
 			baseCache.delete(normalizeDomain(body.domain ?? ''));
 			app.log.info({ productId, retail, purchase }, '[api/catalog/update-prices] ok');
 			return { ok: true, productId, retail, purchase };
@@ -327,8 +310,8 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					});
 					productId = Number(created?.element?.id ?? 0) || 0;
 					if (!productId) throw new Error('catalog.product.add не вернул id');
-					await client.call('catalog.price.add', { fields: { productId, catalogGroupId: 2, price: retail, currency: 'RUB' } });
 					await ensureCoreItem(erp, { productId, name, model, article: model, brand: manufacturer, section: sectionName });
+					await updateCoreCatalogPrices(erp, { productId, retail, purchase: 0 });
 				} catch (error) {
 					if (productId) await client.call('catalog.product.delete', { id: productId }).catch(() => undefined);
 					throw error;

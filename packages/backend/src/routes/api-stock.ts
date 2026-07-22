@@ -5,7 +5,7 @@ import { ErpClient } from '../erp/client.js';
 import {
 	listCoreMovements, searchErpItems, listActiveStoreTitles, fetchErpStocksFor,
 	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
-	fetchCoreDocDetail, itemStockLedger,
+	fetchCoreDocDetail, itemStockLedger, updateCoreCatalogPrices,
 } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
@@ -114,24 +114,6 @@ async function fetchSupplierCompanies(client: B24Client, log: FastifyInstance['l
 	return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
-
-/** Розничная цена в Б24 (тип «Розница» = catalogGroupId 2). Best-effort: обновляем, иначе добавляем; не бросаем. */
-async function pushRetailToB24(client: B24Client, productId: number, price: number, log: FastifyInstance['log']): Promise<void> {
-	if (!(price > 0)) return;
-	try {
-		const existing = await client.call<{ prices?: Array<{ id?: number }> }>('catalog.price.list', {
-			filter: { productId, catalogGroupId: 2 }, select: ['id'],
-		});
-		const id = Number(existing?.prices?.[0]?.id ?? 0) || 0;
-		if (id) {
-			await client.call('catalog.price.update', { id, fields: { price, currency: 'RUB' } });
-		} else {
-			await client.call('catalog.price.add', { fields: { productId, catalogGroupId: 2, price, currency: 'RUB' } });
-		}
-	} catch (e) {
-		log.warn({ productId }, `[api/stock] розница в Б24 не записана (best-effort) — ${errInfo(e)}`);
-	}
-}
 
 interface ReceiptLine { productId: number; qty: number; purchase: number; retail: number }
 interface IssueLine { productId: number; qty: number }
@@ -298,8 +280,12 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 					...(note ? { note } : {}),
 					lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, toStore, rate: l.purchase })),
 				});
-				// Розница → Б24 (best-effort, только заполненные). Запись розницы как мастер в ядро — следующий шаг.
-				for (const l of lines.filter((x) => x.retail > 0)) await pushRetailToB24(client, l.productId, l.retail, app.log);
+				for (const line of lines) {
+					const prices: { productId: number; retail?: number; purchase?: number } = { productId: line.productId };
+					if (line.retail > 0) prices.retail = line.retail;
+					if (line.purchase > 0) prices.purchase = line.purchase;
+					if (prices.retail !== undefined || prices.purchase !== undefined) await updateCoreCatalogPrices(erp, prices);
+				}
 				app.log.info({ name, lines: lines.length }, '[api/stock/create] receipt draft');
 				return { ok: true, kind, name };
 			}

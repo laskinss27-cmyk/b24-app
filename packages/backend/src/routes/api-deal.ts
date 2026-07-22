@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 
@@ -52,15 +52,24 @@ async function setDealB24Service(client: B24Client, dealId: number, total: numbe
 	});
 }
 
-/** Розничная цена (BASE, catalogGroupId=2) для набора productId — батчем. */
+/** Розничная цена из ядра. Старый каталог Б24 остаётся fallback для ещё не перенесённых цен. */
 async function fetchBasePrices(client: B24Client, ids: number[]): Promise<Map<number, number>> {
 	const map = new Map<number, number>();
 	const uniq = [...new Set(ids.filter((x) => x > 0))];
 	if (!uniq.length) return map;
+	const erp = ErpClient.fromEnv();
+	if (erp) {
+		try {
+			const corePrices = await fetchErpRetailPrices(erp, uniq);
+			for (const [productId, price] of corePrices) map.set(productId, price);
+		} catch { /* Для старых цен ниже остаётся read-only fallback Б24. */ }
+	}
+	const missing = uniq.filter((productId) => !map.has(productId));
+	if (!missing.length) return map;
 	const calls: Record<string, BatchCall> = {};
-	for (const id of uniq) calls[`pr${id}`] = { method: 'catalog.price.list', params: { filter: { productId: id, catalogGroupId: 2 }, select: ['productId', 'price'] } };
+	for (const id of missing) calls[`pr${id}`] = { method: 'catalog.price.list', params: { filter: { productId: id, catalogGroupId: 2 }, select: ['productId', 'price'] } };
 	const res = await client.callBatch(calls);
-	for (const id of uniq) {
+	for (const id of missing) {
 		const pr = (res.result[`pr${id}`] as { prices?: Array<Record<string, unknown>> } | undefined)?.prices?.[0];
 		if (pr) map.set(id, Number(pr['price'] ?? 0));
 	}
