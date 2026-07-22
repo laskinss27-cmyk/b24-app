@@ -659,7 +659,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const [showDealDocuments, setShowDealDocuments] = useState(false);
 	const [summaryView, setSummaryView] = useState(false);
-	const [variantDialog, setVariantDialog] = useState<null | { kind: 'create' | 'rename'; value: string }>(null);
+	const [variantDialog, setVariantDialog] = useState<null | { kind: 'create' | 'copy' | 'rename'; value: string }>(null);
 	const [variantBusy, setVariantBusy] = useState(false);
 	const [variantError, setVariantError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
@@ -773,14 +773,28 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		}
 	};
 	const variantTotal = (variant: DealQuoteVariants['variants'][number]): number => variant.items.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0);
+	const availableVariantName = (base: string): string => {
+		const names = new Set(data.quoteVariants.variants.map((variant) => variant.name.toLocaleLowerCase('ru-RU')));
+		if (!names.has(base.toLocaleLowerCase('ru-RU'))) return base;
+		for (let suffix = 2; ; suffix += 1) {
+			const candidate = `${base} ${suffix}`;
+			if (!names.has(candidate.toLocaleLowerCase('ru-RU'))) return candidate;
+		}
+	};
+	const nextVariantName = (): string => {
+		for (let number = 1; ; number += 1) {
+			const candidate = `Вариант ${number}`;
+			if (!data.quoteVariants.variants.some((variant) => variant.name.toLocaleLowerCase('ru-RU') === candidate.toLocaleLowerCase('ru-RU'))) return candidate;
+		}
+	};
 	const submitVariantDialog = async (): Promise<void> => {
 		if (!variantDialog || dealId == null || variantBusy) return;
 		const name = variantDialog.value.trim();
 		if (!name) { setVariantError('Укажи название варианта.'); return; }
 		setVariantBusy(true); setVariantError(null);
 		try {
-			if (variantDialog.kind === 'create') {
-				const result = await createDealQuoteVariant(dealId, name, data.quoteVariants.enabled ? (activeVariantId ?? undefined) : undefined);
+			if (variantDialog.kind === 'create' || variantDialog.kind === 'copy') {
+				const result = await createDealQuoteVariant(dealId, name, variantDialog.kind === 'copy' ? (activeVariantId ?? undefined) : undefined);
 				onActiveVariant(result.variants.at(-1)?.id ?? null);
 			} else if (activeVariantId) {
 				await renameDealQuoteVariant(dealId, activeVariantId, name);
@@ -1312,7 +1326,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					<button className="btn-secondary" onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: 'Вариант 1' }); }}>Варианты КП</button>
 				)}
 				{proposalEditable && activeVariant && <>
-					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: `Копия ${activeVariant.name}` }); }}>Дублировать</button>
+					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: nextVariantName() }); }}>Добавить вариант</button>
+					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'copy', value: availableVariantName(`Копия ${activeVariant.name}`) }); }}>Копировать</button>
 					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); }}>Переименовать</button>
 					{data.quoteVariants.variants.length > 1 && <button className="btn-secondary danger" disabled={variantBusy} onClick={() => void removeVariant()}>Удалить</button>}
 				</>}
@@ -1569,10 +1584,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 
 			{variantDialog && (
 				<div className="deal-supply-order-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !variantBusy) setVariantDialog(null); }}>
-					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'create' ? 'Новый вариант' : 'Название варианта'}>
-						<header><h2>{variantDialog.kind === 'create' ? (data.quoteVariants.enabled ? 'Новый вариант' : 'Варианты КП') : 'Переименовать вариант'}</h2><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>×</button></header>
+					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'rename' ? 'Название варианта' : variantDialog.kind === 'copy' ? 'Копировать вариант' : 'Добавить вариант'}>
+						<header><h2>{variantDialog.kind === 'rename' ? 'Переименовать вариант' : variantDialog.kind === 'copy' ? 'Копировать вариант' : data.quoteVariants.enabled ? 'Добавить вариант' : 'Варианты КП'}</h2><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>×</button></header>
 						<label><span>Название</span><input autoFocus maxLength={80} value={variantDialog.value} disabled={variantBusy} onChange={(event) => { setVariantDialog({ ...variantDialog, value: event.target.value }); setVariantError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') void submitVariantDialog(); }} /></label>
-						{variantDialog.kind === 'create' && <p>{data.quoteVariants.enabled ? 'Состав текущего варианта будет скопирован.' : 'Текущий состав сделки станет первым вариантом.'}</p>}
+						{variantDialog.kind === 'create' && <p>{data.quoteVariants.enabled ? 'Создастся новый вариант. Товары и услуги добавьте после создания.' : 'Текущий состав сделки станет первым вариантом.'}</p>}
+						{variantDialog.kind === 'copy' && <p>Состав варианта «{activeVariant?.name ?? ''}» будет скопирован.</p>}
 						{variantError && <div className="deal-supply-order-error">{variantError}</div>}
 						<footer><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>Отмена</button><button className="primary" type="button" disabled={variantBusy || !variantDialog.value.trim()} onClick={() => void submitVariantDialog()}>{variantBusy ? 'Сохраняю…' : 'Сохранить'}</button></footer>
 					</section>

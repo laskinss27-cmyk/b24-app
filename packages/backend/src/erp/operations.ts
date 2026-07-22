@@ -685,9 +685,12 @@ export async function createDealQuoteVariant(erp: ErpClient, dealId: number, arg
 	let items: DealQuoteVariantItem[];
 	if (!state.enabled) {
 		items = (await listDealPlan(erp, dealId)).map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
+	} else if (!args.sourceVariantId) {
+		items = [];
 	} else {
-		const source = state.variants.find((variant) => variant.id === args.sourceVariantId) ?? state.variants[0];
-		items = (source?.items ?? []).map((item) => ({ ...item }));
+		const source = state.variants.find((variant) => variant.id === args.sourceVariantId);
+		if (!source) throw new Error('вариант для копирования не найден');
+		items = source.items.map((item) => ({ ...item }));
 	}
 	const variant: DealQuoteVariant = { id: randomUUID(), name: cleanName, createdAt: new Date().toISOString(), createdById: args.createdById, createdByName: args.createdByName, items };
 	const next: DealQuoteVariants = { enabled: true, selectedId: null, variants: [...state.variants, variant] };
