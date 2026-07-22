@@ -1631,6 +1631,38 @@ export async function fetchDealKp(dealId: number, variantId?: string): Promise<K
 	return json.kp;
 }
 
+/** Скачать Excel-снимок текущего состава сделки или открытого варианта КП. */
+export async function downloadDealXlsx(dealId: number, variantId?: string): Promise<void> {
+	const res = await fetch('/api/deal/export-xlsx', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, ...(variantId ? { variantId } : {}) }),
+	});
+	const contentType = res.headers.get('content-type') ?? '';
+	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+		let message = `не удалось сформировать Excel (HTTP ${res.status})`;
+		try {
+			const json = (await res.json()) as { error?: string };
+			if (json.error) message = json.error;
+		} catch { /* сервер вернул не-JSON ошибку */ }
+		throw new Error(message);
+	}
+	const blob = await res.blob();
+	const disposition = res.headers.get('content-disposition') ?? '';
+	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? `deal-${dealId}.xlsx`;
+	const url = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+}
+
 /** Открыть карточку сделки в Б24 (слайдером). */
 export function openDeal(dealId: number): void {
 	const path = `/crm/deal/details/${dealId}/`;

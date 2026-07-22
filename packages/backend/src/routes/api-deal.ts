@@ -4,9 +4,10 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
+import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -334,6 +335,75 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 		} catch { /* памяти нет/не читается — партии просто без склада */ }
 	}
 	return info;
+}
+
+type ExportPlanLine = Pick<PlanItem, 'productId' | 'qty' | 'priceListRate' | 'discountPercent'> & { itemName?: string; isService?: boolean };
+
+function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realizations: ErpRealization[], variantName?: string): DealExportRow[] {
+	const stageQuantity = new Map<number, number>();
+	for (const stage of stages) {
+		for (const item of stage.items) stageQuantity.set(item.productId, (stageQuantity.get(item.productId) ?? 0) + item.qty);
+	}
+
+	const segments: Array<Omit<DealExportRow, 'realized' | 'warehouses'>> = [];
+	for (const item of plan) {
+		const quantity = variantName ? item.qty : Math.max(0, item.qty - (stageQuantity.get(item.productId) ?? 0));
+		if (quantity <= 0.000001) continue;
+		segments.push({
+			stage: variantName ? `Вариант КП: ${variantName}` : 'Основная сделка',
+			type: item.isService ? 'Услуга' : 'Товар',
+			productId: item.productId,
+			name: item.itemName || `#${item.productId}`,
+			quantity,
+			unit: item.isService ? 'усл.' : 'шт.',
+			priceListRate: item.priceListRate,
+			discountPercent: item.discountPercent,
+		});
+	}
+	if (!variantName) {
+		stages.forEach((stage, stageIndex) => {
+			for (const item of stage.items) {
+				if (item.qty <= 0.000001) continue;
+				segments.push({
+					stage: `Этап ${stageIndex + 1}`,
+					type: item.isService ? 'Услуга' : 'Товар',
+					productId: item.productId,
+					name: item.itemName || `#${item.productId}`,
+					quantity: item.qty,
+					unit: item.isService ? 'усл.' : 'шт.',
+					priceListRate: item.price,
+					discountPercent: item.discountPercent ?? 0,
+				});
+			}
+		});
+	}
+
+	const realizedByProduct = new Map<number, number>();
+	const warehouseQuantity = new Map<number, Map<string, number>>();
+	if (!variantName) {
+		for (const document of realizations.filter((item) => item.submitted)) {
+			for (const item of document.items) {
+				realizedByProduct.set(item.productId, (realizedByProduct.get(item.productId) ?? 0) + item.qty);
+				if (item.storeTitle) {
+					const byWarehouse = warehouseQuantity.get(item.productId) ?? new Map<string, number>();
+					byWarehouse.set(item.storeTitle, (byWarehouse.get(item.storeTitle) ?? 0) + item.qty);
+					warehouseQuantity.set(item.productId, byWarehouse);
+				}
+			}
+		}
+	}
+	for (const [productId, quantity] of realizedByProduct) realizedByProduct.set(productId, Math.max(0, quantity));
+
+	return segments.map((item) => {
+		const available = realizedByProduct.get(item.productId) ?? 0;
+		const realized = Math.min(item.quantity, available);
+		realizedByProduct.set(item.productId, Math.max(0, available - realized));
+		const warehouses = [...(warehouseQuantity.get(item.productId)?.entries() ?? [])]
+			.filter(([, quantity]) => quantity > 0.000001)
+			.map(([name]) => name)
+			.join(', ');
+		return { ...item, realized, warehouses };
+	});
 }
 
 export function registerApiDealRoute(app: FastifyInstance): void {
@@ -965,6 +1035,59 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			return { ok: true, total, lines: savedPlan.lines.length };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/plan-set] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Excel-снимок состава сделки: товары и услуги, этапы, цены, скидки и фактически проведённая реализация.
+	// Для ещё не выбранного варианта КП выгружается сам вариант без складской истории рабочей сделки.
+	app.post('/api/deal/export-xlsx', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
+			const erp = ErpClient.fromEnv();
+			const variantId = String(b.variantId ?? '').trim();
+			if (variantId && !erp) throw new Error('ядро недоступно — вариант КП нельзя выгрузить');
+
+			let plan: ExportPlanLine[] = [];
+			let stages: DealStage[] = [];
+			let realizations: ErpRealization[] = [];
+			let variantName = '';
+			if (erp) {
+				if (variantId) {
+					const variants = await listDealQuoteVariants(erp, dealId);
+					const variant = variants.variants.find((item) => item.id === variantId);
+					if (!variant) throw new Error('вариант КП не найден');
+					variantName = variant.name;
+					plan = variant.items.map((item) => ({ ...item, isService: Boolean(item.isService) }));
+				} else {
+					[plan, stages, realizations] = await Promise.all([
+						listDealPlan(erp, dealId),
+						listDealStages(erp, dealId),
+						listDealRealizations(erp, dealId),
+					]);
+				}
+			}
+			if (!plan.length && !variantId) plan = await listLegacyB24DealLines(client, dealId);
+			const rows = dealExportRows(plan, stages, realizations, variantName || undefined);
+			const file = await buildDealExportXlsx({
+				dealId,
+				dealTitle: String(deal?.['TITLE'] ?? ''),
+				...(variantName ? { variantName } : {}),
+				rows,
+			});
+			app.log.info({ dealId, variantId: variantId || undefined, rows: rows.length }, '[api/deal/export-xlsx] ok');
+			return reply
+				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+				.header('Content-Disposition', `attachment; filename="deal-${dealId}.xlsx"`)
+				.header('Cache-Control', 'no-store')
+				.send(file);
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/export-xlsx] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

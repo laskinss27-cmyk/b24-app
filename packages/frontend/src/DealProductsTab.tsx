@@ -23,6 +23,7 @@ import {
 	renameDealQuoteVariant,
 	deleteDealQuoteVariant,
 	selectDealQuoteVariant,
+	downloadDealXlsx,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	createDealReturn,
@@ -663,7 +664,22 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const [variantBusy, setVariantBusy] = useState(false);
 	const [variantError, setVariantError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
+	const [exportBusy, setExportBusy] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
+	const exportXlsx = async (): Promise<void> => {
+		if (dealId == null || exportBusy) return;
+		setExportBusy(true);
+		setNotice(null);
+		try {
+			const variantId = activeVariantId && activeVariantId !== data.quoteVariants.selectedId ? activeVariantId : undefined;
+			await downloadDealXlsx(dealId, variantId);
+			setNotice({ kind: 'ok', text: '✅ Excel сформирован и скачан.' });
+		} catch (error) {
+			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
+		} finally {
+			setExportBusy(false);
+		}
+	};
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const [dealTransfers, setDealTransfers] = useState<TransferDoc[]>([]);
 	useEffect(() => {
@@ -1339,6 +1355,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
 				<button className="btn-secondary" onClick={() => onKp()}>КП</button>
+				<button className="btn-secondary" disabled={dealId == null || exportBusy} onClick={() => void exportXlsx()}>{exportBusy ? 'Формируем…' : 'Скачать Excel'}</button>
 				{(proposalEditable || canSwitchVariant) && activeVariant && <button className="btn-primary" disabled={variantBusy || activeVariant.items.length === 0} onClick={() => void chooseVariant()}>{canSwitchVariant ? 'Выбрать вместо текущего' : 'Выбран клиентом'}</button>}
 				{workingMode && <button
 					className="btn-secondary"
