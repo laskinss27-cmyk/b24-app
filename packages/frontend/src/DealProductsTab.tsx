@@ -821,8 +821,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const goods = data.planRows.filter((r) => !isWorkRow(r.type));
 	const planWorks = data.planRows.filter((r) => isWorkRow(r.type));
 	const works = rows.filter((r) => isWorkRow(r.type));
+	const planWorkIds = new Set(planWorks.map((row) => row.productId));
 	// «Выезд инженера» (productId 9814) — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
-	const realWorks = [...planWorks, ...works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)];
+	// У старых сделок оказанную услугу Б24 удалить запрещает: если она уже перенесена в план ядра,
+	// оставляем строку Б24 на месте, но второй раз во вкладке не рисуем.
+	const realWorks = [...planWorks, ...works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID && !planWorkIds.has(r.productId))];
 	const stageQtyByProduct = new Map<number, number>();
 	for (const stage of data.stages) {
 		for (const item of stage.items) stageQtyByProduct.set(item.productId, (stageQtyByProduct.get(item.productId) ?? 0) + item.qty);
