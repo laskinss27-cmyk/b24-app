@@ -638,8 +638,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		const s = (v: unknown): string => String(v ?? '').trim();
 		const device = s(b['device']);
 		const clientName = s((b['client'] as { name?: unknown } | undefined)?.name);
+		const point = s(b['point']);
 		// Клиент обязателен для любого ремонта (платный/гарантийный): на него вешаем сделку и подписываем позицию склада.
 		if (!clientName) return reply.code(400).send({ ok: false, error: 'клиент обязателен — укажи ФИО или организацию' });
+		if (!point) return reply.code(400).send({ ok: false, error: 'выбери склад приёмки — без него ремонт сохранить нельзя' });
 
 		const photos: RepairPhoto[] = Array.isArray(b['photos'])
 			? (b['photos'] as Array<Record<string, unknown>>).map((p) => ({ id: Number(p['id']) || 0, name: s(p['name']), url: s(p['url']) })).filter((p) => p.url)
@@ -671,7 +673,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				device,
 				model: s(b['model']),
 				serial: s(b['serial']),
-				point: s(b['point']),
+				point,
 				appearance: s(b['appearance']),
 				defect: s(b['defect']),
 				payType,
@@ -801,6 +803,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		const id = Number(b['id']);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		const s = (v: unknown): string => String(v ?? '').trim();
+		const point = s(b['point']);
+		if (!point) return reply.code(400).send({ ok: false, error: 'выбери склад приёмки — без него ремонт сохранить нельзя' });
 		try {
 			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
 			const raw = (items ?? [])[0];
@@ -821,7 +825,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.device = s(b['device']);
 			data.model = s(b['model']);
 			data.serial = s(b['serial']);
-			data.point = s(b['point']);
+			data.point = point;
 			data.appearance = s(b['appearance']);
 			data.defect = s(b['defect']);
 			data.internalComment = s(b['internalComment']);

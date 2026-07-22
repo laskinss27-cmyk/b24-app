@@ -2541,6 +2541,14 @@ html, body, #root { height: 100%; }
 .repair-form h2, .repair-card h2 { font-size: 18px; margin: 8px 0 12px; }
 .rf-grid { display: grid; grid-template-columns: minmax(260px, 420px) minmax(260px, 420px); gap: 12px 16px; align-items: start; }
 .rf-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #334155; position: relative; }
+.rf-required { color: #b42318; font-size: 11px; font-weight: 700; }
+.rf-field.rf-field-error { color: #b42318; font-weight: 600; }
+.rf-field.rf-field-error input[type=text], .rf-field.rf-field-error select {
+	border-color: #d92d20;
+	background: #fff5f5;
+	box-shadow: 0 0 0 2px rgba(217, 45, 32, 0.14);
+}
+.rf-field-error-text { color: #b42318; font-size: 12px; font-weight: 600; }
 .rf-field.rf-wide { grid-column: 1 / -1; max-width: 760px; }
 /* Две цены (СЦ + наша) — рядом в одной строке, а не одна под другой. */
 .rf-field.rf-prices { flex-direction: row; gap: 16px; align-items: flex-start; }

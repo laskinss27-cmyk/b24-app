@@ -505,6 +505,7 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	const [uploading, setUploading] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [formErr, setFormErr] = useState<string | null>(null);
+	const [pointMissing, setPointMissing] = useState(false);
 
 	useEffect(() => { fetchStores().then((s) => setStores(s.filter((x) => x.active))).catch(() => setStores([])); }, []);
 
@@ -516,6 +517,13 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	}
 	function pickContact(c: RepairContact): void {
 		setClientName(c.name); setClientPhone(c.phone); setContactId(c.id); setResults([]); setPhoneMatch(null);
+	}
+	function changePoint(value: string): void {
+		setPoint(value);
+		if (value.trim()) {
+			setPointMissing(false);
+			if (formErr === 'Выбери склад приёмки — без него ремонт сохранить нельзя.') setFormErr(null);
+		}
 	}
 	/** Проактивный подбор по номеру: при уходе из поля телефона ищем занявший его контакт и показываем плашку. */
 	async function checkPhone(): Promise<void> {
@@ -548,6 +556,11 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 	async function onSubmit(): Promise<void> {
 		if (!clientName.trim()) { setFormErr('Клиент обязателен — выбери из базы или впиши ФИО (новый создастся в Б24).'); return; }
 		if (!contactId && !clientPhone.trim()) { setFormErr('Укажи телефон клиента — по нему найдём существующего или заведём нового в Б24.'); return; }
+		if (!point.trim()) {
+			setPointMissing(true);
+			setFormErr('Выбери склад приёмки — без него ремонт сохранить нельзя.');
+			return;
+		}
 		// Контроль дублей: номер занят существующим контактом — спрашиваем приёмщика ДО сохранения,
 		// чтобы ремонт не повис молча на чужом контакте (Б24 всё равно не создаст дубль по номеру).
 		if (!contactId && !mock && clientPhone.trim()) {
@@ -614,15 +627,16 @@ function RepairForm({ mock, canEditPrice, initial, onCancel, submit, onDone }: {
 				<label className="rf-field">Серийный №
 					<input type="text" value={serial} placeholder="с корпуса устройства" onChange={(e) => setSerial(e.target.value)} />
 				</label>
-				<label className="rf-field">Торговая точка
+				<label className={`rf-field${pointMissing ? ' rf-field-error' : ''}`}><span>Склад приёмки <span className="rf-required">обязательно</span></span>
 					{stores.length ? (
-						<select value={point} onChange={(e) => setPoint(e.target.value)}>
-							<option value="">— выбрать точку —</option>
+						<select required aria-invalid={pointMissing} value={point} onChange={(e) => changePoint(e.target.value)}>
+							<option value="">— обязательно выбери склад —</option>
 							{stores.map((s) => <option key={s.id} value={s.title}>{s.title}</option>)}
 						</select>
 					) : (
-						<input type="text" value={point} placeholder="точка приёма" onChange={(e) => setPoint(e.target.value)} />
+						<input required aria-invalid={pointMissing} type="text" value={point} placeholder="укажи склад приёмки" onChange={(e) => changePoint(e.target.value)} />
 					)}
+					{pointMissing && <span className="rf-field-error-text">Выбери склад приёмки</span>}
 				</label>
 
 				<label className="rf-field rf-wide">Внешний вид и комплектация
