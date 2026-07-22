@@ -1106,7 +1106,8 @@ h2.inv-h2 {
 	margin-right: 4px;
 }
 
-.new-product-overlay {
+.new-product-overlay,
+.catalog-price-overlay {
 	position: fixed;
 	inset: 0;
 	z-index: 1400;
@@ -1118,6 +1119,63 @@ h2.inv-h2 {
 	padding: 44px 20px;
 	background: rgba(28, 38, 54, 0.48);
 }
+.catalog-price-modal {
+	box-sizing: border-box;
+	width: min(520px, calc(100vw - 40px));
+	padding: 20px;
+	border: 1px solid #d9e0e9;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: 0 18px 45px rgba(15, 23, 42, 0.24);
+}
+.catalog-price-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 20px;
+	padding-bottom: 14px;
+	border-bottom: 1px solid #e4e8ee;
+}
+.catalog-price-head span,
+.catalog-price-head small {
+	display: block;
+	color: #718096;
+	font-size: 11px;
+}
+.catalog-price-head span { margin-bottom: 3px; text-transform: uppercase; }
+.catalog-price-head small { margin-top: 4px; }
+.catalog-price-head h2 { margin: 0; font-size: 17px; line-height: 1.35; }
+.catalog-price-head .icon-close {
+	flex: 0 0 34px;
+	width: 34px;
+	height: 34px;
+	border: 1px solid #cfd7e2;
+	border-radius: 6px;
+	background: #fff;
+	color: #344054;
+	font-size: 22px;
+	line-height: 1;
+	cursor: pointer;
+}
+.catalog-price-fields {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 14px;
+	padding: 18px 0;
+}
+.catalog-price-fields label { display: grid; gap: 6px; color: #596579; font-size: 12px; }
+.catalog-price-fields input {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 10px 11px;
+	border: 1px solid #aebccd;
+	border-radius: 6px;
+	background: #fff;
+	color: #172033;
+	font: inherit;
+	font-size: 15px;
+}
+.catalog-price-fields input:focus { border-color: #2878d0; outline: 2px solid rgba(40, 120, 208, 0.14); }
 .new-product-modal {
 	box-sizing: border-box;
 	width: min(760px, calc(100vw - 40px));
@@ -1986,6 +2044,23 @@ html, body, #root { height: 100%; }
 .base-table .money {
 	font-variant-numeric: tabular-nums;
 }
+.catalog-price-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+	min-width: 76px;
+	padding: 4px 6px;
+	border: 1px solid transparent;
+	border-radius: 5px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+}
+.catalog-price-button span:last-child { color: #7b8da5; font-size: 14px; }
+.catalog-price-button:hover { border-color: #b8c8dc; background: #f2f7fc; }
 .base-table .stock {
 	font-weight: 700;
 }

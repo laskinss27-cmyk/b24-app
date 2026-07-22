@@ -2,7 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
-import { ensureCoreItem, fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
+import {
+	ensureCoreItem, fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing,
+	fetchCoreCatalogPrices, updateCoreCatalogPrices,
+} from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -32,6 +35,7 @@ interface CacheEntry {
 	expires: number;
 }
 const baseCache = new Map<string, CacheEntry>();
+const SUPPLY_DEPARTMENT_ID = 10;
 
 interface CatalogCandidate {
 	id: number;
@@ -55,6 +59,27 @@ function cleanText(value: unknown): string {
 
 function normalized(value: unknown): string {
 	return cleanText(value).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, '');
+}
+
+async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
+	const me = await client.call<{ NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
+	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
+	const isKonstantinLaskin = normalized(me?.NAME) === normalized('Константин')
+		&& normalized(me?.LAST_NAME) === normalized('Ласкин');
+	return departments.includes(SUPPLY_DEPARTMENT_ID) || isKonstantinLaskin;
+}
+
+async function updateRetailPrice(client: B24Client, productId: number, retail: number): Promise<void> {
+	const existing = await client.call<{ prices?: Array<{ id?: number | string }> }>('catalog.price.list', {
+		filter: { productId, catalogGroupId: 2 },
+		select: ['id'],
+	});
+	const id = Number(existing?.prices?.[0]?.id ?? 0) || 0;
+	if (id) {
+		await client.call('catalog.price.update', { id, fields: { price: retail, currency: 'RUB' } });
+		return;
+	}
+	await client.call('catalog.price.add', { fields: { productId, catalogGroupId: 2, price: retail, currency: 'RUB' } });
 }
 
 function productTitle(productType: string, manufacturer: string, model: string): string {
@@ -167,12 +192,13 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
+		const canEditPrices = await canEditCatalogPrices(client);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		const now = Date.now();
 		const hit = baseCache.get(cacheKey);
 		if (!body.force && hit && hit.expires > now) {
 			app.log.info({ rows: hit.data.rows.length, cached: true }, '[api/catalog/browse] cache hit');
-			return { ok: true, rows: hit.data.rows, generatedAt: hit.data.generatedAt, cached: true };
+			return { ok: true, rows: hit.data.rows, generatedAt: hit.data.generatedAt, cached: true, canEditPrices };
 		}
 
 		const t0 = Date.now();
@@ -185,8 +211,9 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			const erp = ErpClient.fromEnv();
 			if (erp) {
 				try {
-					const [coreStocks, storeRes] = await Promise.all([
+					const [coreStocks, corePrices, storeRes] = await Promise.all([
 						fetchErpStocks(erp),
+						fetchCoreCatalogPrices(erp),
 						client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] }),
 					]);
 					const titleToId = new Map<string, number>();
@@ -202,6 +229,9 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 						}
 						r.stockByStore = byStore;
 						r.total = Object.values(byStore).reduce((a, b) => a + b, 0);
+						const prices = corePrices.get(r.id);
+						if (prices?.retail !== undefined) r.retail = prices.retail;
+						if (prices?.purchase !== undefined) r.purchase = prices.purchase;
 					}
 					stockSource = 'core';
 				} catch (e) {
@@ -210,10 +240,40 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			}
 			baseCache.set(cacheKey, { data, expires: now + CACHE_TTL_MS });
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached: false, stock: stockSource }, '[api/catalog/browse] ok');
-			return { ok: true, rows: data.rows, generatedAt: data.generatedAt, cached: false };
+			return { ok: true, rows: data.rows, generatedAt: data.generatedAt, cached: false, canEditPrices };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/catalog/update-prices', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (!(await canEditCatalogPrices(client))) {
+			return reply.code(403).send({ ok: false, error: 'редактирование цен доступно снабжению и Константину Ласкину' });
+		}
+		const productId = Number(body['productId']);
+		const retail = Number(body['retail']);
+		const purchase = Number(body['purchase']);
+		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
+		if (!Number.isFinite(retail) || retail < 0) return reply.code(400).send({ ok: false, error: 'розничная цена должна быть 0 или больше' });
+		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		try {
+			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
+			const writeClient = app.config.devWebhook
+				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+				: client;
+			await updateRetailPrice(writeClient, productId, retail);
+			baseCache.delete(normalizeDomain(body.domain ?? ''));
+			app.log.info({ productId, retail, purchase }, '[api/catalog/update-prices] ok');
+			return { ok: true, productId, retail, purchase };
+		} catch (error) {
+			app.log.error({ productId }, `[api/catalog/update-prices] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});
 

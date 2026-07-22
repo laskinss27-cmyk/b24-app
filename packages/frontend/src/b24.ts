@@ -558,6 +558,8 @@ export interface ProductBaseResult {
 	generatedAt: string;
 	/** true — отдано из кэша бэкенда (не пересобиралось). */
 	cached: boolean;
+	/** Право менять справочные цены: отдел снабжения или Константин Ласкин. */
+	canEditPrices: boolean;
 }
 
 /**
@@ -571,9 +573,20 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; generatedAt?: string; cached?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; generatedAt?: string; cached?: boolean; canEditPrices?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
-	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached) };
+	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached), canEditPrices: Boolean(json.canEditPrices) };
+}
+
+export async function updateCatalogPrices(productId: number, retail: number, purchase: number): Promise<{ retail: number; purchase: number }> {
+	const res = await fetch('/api/catalog/update-prices', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), productId, retail, purchase }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; retail?: number; purchase?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить цены');
+	return { retail: Number(json.retail ?? retail), purchase: Number(json.purchase ?? purchase) };
 }
 
 export interface NewCatalogProductInput {

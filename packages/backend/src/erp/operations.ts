@@ -181,10 +181,83 @@ export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): 
 	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
 	for (let i = 0; i < ids.length; i += 200) {
 		const chunk = ids.slice(i, i + 200).map(String);
+		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
+			['item_code', 'in', chunk],
+			['price_list', '=', 'Standard Buying'],
+		]);
+		for (const row of prices) out.set(Number(row['item_code']), Number(row['price_list_rate'] ?? 0));
 		const rows = await erp.list('Item', ['name', 'valuation_rate'], [['name', 'in', chunk]]);
-		for (const r of rows) out.set(Number(r['name']), Number(r['valuation_rate'] ?? 0));
+		for (const r of rows) {
+			const productId = Number(r['name']);
+			if (!out.has(productId)) out.set(productId, Number(r['valuation_rate'] ?? 0));
+		}
 	}
 	return out;
+}
+
+export interface CoreCatalogPrices {
+	retail?: number;
+	purchase?: number;
+}
+
+/** Справочные цены каталога ядра. Они не меняют складскую valuation_rate. */
+export async function fetchCoreCatalogPrices(erp: ErpClient): Promise<Map<number, CoreCatalogPrices>> {
+	const rows = await erp.list('Item Price', ['item_code', 'price_list', 'price_list_rate'], [
+		['price_list', 'in', ['Standard Selling', 'Standard Buying']],
+	]);
+	const out = new Map<number, CoreCatalogPrices>();
+	for (const row of rows) {
+		const productId = Number(row['item_code']);
+		if (!(productId > 0)) continue;
+		const current = out.get(productId) ?? {};
+		const rate = Number(row['price_list_rate'] ?? 0);
+		if (row['price_list'] === 'Standard Selling') current.retail = rate;
+		if (row['price_list'] === 'Standard Buying') current.purchase = rate;
+		out.set(productId, current);
+	}
+	return out;
+}
+
+async function ensureCorePriceList(erp: ErpClient, name: string, kind: 'selling' | 'buying'): Promise<void> {
+	if (await erp.get('Price List', name)) return;
+	await erp.create('Price List', {
+		price_list_name: name,
+		currency: 'RUB',
+		enabled: 1,
+		selling: kind === 'selling' ? 1 : 0,
+		buying: kind === 'buying' ? 1 : 0,
+	});
+}
+
+async function upsertCoreItemPrice(erp: ErpClient, itemCode: string, priceList: string, rate: number): Promise<void> {
+	const existing = await erp.list('Item Price', ['name'], [
+		['item_code', '=', itemCode],
+		['price_list', '=', priceList],
+	], 1, 'modified desc');
+	const name = String(existing[0]?.['name'] ?? '');
+	if (name) {
+		await erp.update('Item Price', name, { price_list_rate: rate, currency: 'RUB' });
+		return;
+	}
+	await erp.create('Item Price', {
+		item_code: itemCode,
+		price_list: priceList,
+		price_list_rate: rate,
+		currency: 'RUB',
+	});
+}
+
+/** Записать розничную и закупочную цены товара в штатные прайс-листы ERPNext. */
+export async function updateCoreCatalogPrices(
+	erp: ErpClient,
+	args: { productId: number; retail: number; purchase: number },
+): Promise<void> {
+	const itemCode = String(args.productId);
+	if (!(await erp.get('Item', itemCode))) throw new Error(`товар #${args.productId} не найден в ядре`);
+	await ensureCorePriceList(erp, 'Standard Selling', 'selling');
+	await ensureCorePriceList(erp, 'Standard Buying', 'buying');
+	await upsertCoreItemPrice(erp, itemCode, 'Standard Selling', args.retail);
+	await upsertCoreItemPrice(erp, itemCode, 'Standard Buying', args.purchase);
 }
 
 export interface RealizationLine {

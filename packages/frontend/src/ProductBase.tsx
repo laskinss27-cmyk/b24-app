@@ -3,6 +3,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
 	createCatalogProduct,
+	updateCatalogPrices,
 	fetchStores,
 	fetchCurrentUserId,
 	openProductCard,
@@ -246,6 +247,53 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	);
 }
 
+function CatalogPriceModal({ row, onSave, onClose }: {
+	row: BaseRow;
+	onSave: (retail: number, purchase: number) => Promise<void>;
+	onClose: () => void;
+}): JSX.Element {
+	const [retailText, setRetailText] = useState(String(row.retail ?? 0));
+	const [purchaseText, setPurchaseText] = useState(String(row.purchase ?? 0));
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+	const save = async (): Promise<void> => {
+		const retail = retailText.trim() === '' ? NaN : Number(retailText.replace(',', '.'));
+		const purchase = purchaseText.trim() === '' ? NaN : Number(purchaseText.replace(',', '.'));
+		if (!Number.isFinite(retail) || retail < 0 || !Number.isFinite(purchase) || purchase < 0) {
+			setError('Укажи обе цены: 0 или больше.');
+			return;
+		}
+		setBusy(true);
+		setError('');
+		try {
+			await onSave(retail, purchase);
+		} catch (err) {
+			setError(String(err instanceof Error ? err.message : err));
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<div className="catalog-price-overlay" onClick={onClose}>
+			<div className="catalog-price-modal" onClick={(event) => event.stopPropagation()}>
+				<div className="catalog-price-head">
+					<div><span>Цены товара</span><h2>{row.name}</h2><small>#{row.id}</small></div>
+					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
+				</div>
+				<div className="catalog-price-fields">
+					<label>Розничная, ₽<input autoFocus inputMode="decimal" value={retailText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setRetailText(event.target.value)} /></label>
+					<label>Закупочная, ₽<input inputMode="decimal" value={purchaseText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setPurchaseText(event.target.value)} /></label>
+				</div>
+				{error && <div className="new-product-error">{error}</div>}
+				<div className="new-product-actions">
+					<button type="button" className="btn-secondary" disabled={busy} onClick={onClose}>Отмена</button>
+					<button type="button" className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
 export interface ProductPickItem {
 	productId: number;
@@ -276,6 +324,8 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [meta, setMeta] = useState<{ generatedAt: string; cached: boolean } | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 	const [uid, setUid] = useState('');
+	const [canEditPrices, setCanEditPrices] = useState(false);
+	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
 	// Корзина быстрой продажи: productId → количество.
 	const [cart, setCart] = useState<Map<number, number>>(() => new Map());
 	const [showCart, setShowCart] = useState(false);
@@ -307,6 +357,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			setStores(MOCK_STORES);
 			setRows(MOCK_ROWS);
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
+			setCanEditPrices(true);
 			setMode('base');
 			return;
 		}
@@ -328,6 +379,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				const base = await withTimeout(fetchProductBase(), 90000, 'catalog/browse');
 				setRows(base.rows);
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
+				setCanEditPrices(base.canEditPrices);
 				setMode('base');
 			})().catch((e: unknown) => {
 				setGate('error');
@@ -403,6 +455,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			const base = await withTimeout(fetchProductBase(true), 90000, 'catalog/browse');
 			setRows(base.rows);
 			setMeta({ generatedAt: base.generatedAt, cached: false });
+			setCanEditPrices(base.canEditPrices);
 		} catch {
 			/* пересборка не удалась — оставляем текущие данные */
 		} finally {
@@ -474,6 +527,13 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		setOnlyStock(false);
 		setQ(row.name);
 		setShowNewProduct(false);
+	}
+
+	async function saveCatalogPrices(retail: number, purchase: number): Promise<void> {
+		if (!priceRow) return;
+		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase);
+		setRows((current) => current.map((row) => row.id === priceRow.id ? { ...row, ...saved } : row));
+		setPriceRow(null);
 	}
 
 	async function createSale(): Promise<void> {
@@ -637,8 +697,16 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 									<td>{d.article || d.model ? <span className="art">{d.article ?? d.model}</span> : <span className="muted">—</span>}</td>
 									<td>{d.manufacturer ? <span className="brand">{d.manufacturer}</span> : <span className="muted">—</span>}</td>
 									<td className="muted">{d.sectionName ?? '—'}</td>
-									<td className="num money">{fmt(d.retail)}</td>
-									<td className="num money">{d.purchase ? fmt(d.purchase) : <span className="muted">0</span>}</td>
+									<td className="num money" onClick={(event) => event.stopPropagation()}>
+										{canEditPrices && !pickMode
+											? <button type="button" className="catalog-price-button" title="Изменить розничную и закупочную цены" onClick={() => setPriceRow(d)}><span>{fmt(d.retail)}</span><span aria-hidden="true">✎</span></button>
+											: fmt(d.retail)}
+									</td>
+									<td className="num money" onClick={(event) => event.stopPropagation()}>
+										{canEditPrices && !pickMode
+											? <button type="button" className="catalog-price-button" title="Изменить розничную и закупочную цены" onClick={() => setPriceRow(d)}><span>{d.purchase ? fmt(d.purchase) : '0'}</span><span aria-hidden="true">✎</span></button>
+											: d.purchase ? fmt(d.purchase) : <span className="muted">0</span>}
+									</td>
 									<td className="num c-store"><span className={`stock${qty > 0 ? '' : ' zero'}`}>{isAll ? '' : qty}</span></td>
 									<td>
 										<div className="whs">
@@ -692,6 +760,8 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				)}
 
 			{(pickMode || allowCreateProduct) && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
+
+			{priceRow && <CatalogPriceModal row={priceRow} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
 
 			{showPriceTags && <PriceTagsModal items={priceTagItems} onClose={() => setShowPriceTags(false)} />}
 
