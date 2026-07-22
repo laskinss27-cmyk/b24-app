@@ -183,13 +183,10 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		}
 	};
 
-	const transferLink = (id: number): string => {
-		const base = String(process.env['SUPPLY_SECTION_URL'] ?? '').trim()
-			|| `https://${app.config.portalDomain}/devops/placement/574/`;
-		const url = new URL(base);
-		url.searchParams.set('transfer', String(id));
-		return `[URL=${url.toString()}]Открыть перемещение #${id}[/URL]`;
-	};
+	const transferLinks = (id: number): string => [
+		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'supply'), 'Ссылка для снабжения'),
+		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'manager'), 'Ссылка для менеджера'),
+	].join('\n');
 
 	const createDraftTransfer = async (args: {
 		client: B24Client;
@@ -228,7 +225,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		const notification = await notifyStore(
 			args.client,
 			args.fromStore,
-			`[B]Нужно собрать перемещение #${id}[/B]\n${args.fromStore} → ${args.toStore}\n\n${formatTransferLines(args.lines)}\n\n${transferLink(id)}`,
+			`[B]Нужно собрать перемещение #${id}[/B]\n${args.fromStore} → ${args.toStore}\n\n${formatTransferLines(args.lines)}\n\n${transferLinks(id)}`,
 			'draft',
 			args.me,
 		);
@@ -468,7 +465,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				const notification = await notifyStore(
 					client,
 					fromStore,
-					`[B]Нужно собрать перемещение #${id}[/B]\n${fromStore} → ${toStore}\n\n${formatTransferLines(lines)}\n\n${transferLink(id)}`,
+					`[B]Нужно собрать перемещение #${id}[/B]\n${fromStore} → ${toStore}\n\n${formatTransferLines(lines)}\n\n${transferLinks(id)}`,
 					'draft',
 					me,
 				);
@@ -714,7 +711,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const notification = await notifyStore(
 				client,
 				doc.fromStore,
-				`[B]Перемещение #${id} ${mismatch ? 'собрано с расхождениями' : 'собрано полностью'}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(collectedLines)}\n\n${transferLink(id)}`,
+				`[B]Перемещение #${id} ${mismatch ? 'собрано с расхождениями' : 'собрано полностью'}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(collectedLines)}\n\n${transferLinks(id)}`,
 				'collected',
 				me,
 			);
@@ -770,7 +767,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const notification = await notifyStore(
 				client,
 				notificationStore ?? '',
-				`[B]Ожидается перемещение #${id}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(doc.collectedLines)}\n\n${transferLink(id)}`,
+				`[B]Ожидается перемещение #${id}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(doc.collectedLines)}\n\n${transferLinks(id)}`,
 				'in_transit',
 				me,
 			);
@@ -836,7 +833,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const notification = await notifyStore(
 				client,
 				notificationStore ?? '',
-				`[B]Перемещение #${id} ${mismatch ? 'принято с расхождениями' : 'принято полностью'}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(acceptedLines)}\n\n${transferLink(id)}`,
+				`[B]Перемещение #${id} ${mismatch ? 'принято с расхождениями' : 'принято полностью'}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(acceptedLines)}\n\n${transferLinks(id)}`,
 				'accepted',
 				me,
 			);

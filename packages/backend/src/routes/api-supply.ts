@@ -7,6 +7,7 @@ import { canManageStock } from './api-stock.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData, parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
+import { supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 
 /**
  * API рабочего места «Снаб». Источник спроса — ЗАЯВКИ (Material Request) ядра по сделкам:
@@ -212,13 +213,10 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		if (normalizeDomain(b.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: b.domain, accessToken: b.accessToken } });
 	};
-	const transferLink = (id: number): string => {
-		const base = String(process.env['SUPPLY_SECTION_URL'] ?? '').trim()
-			|| `https://${app.config.portalDomain}/devops/placement/574/`;
-		const url = new URL(base);
-		url.searchParams.set('transfer', String(id));
-		return `[URL=${url.toString()}]Открыть перемещение #${id}[/URL]`;
-	};
+	const transferLinks = (id: number): string => [
+		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'supply'), 'Ссылка для снабжения'),
+		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'manager'), 'Ссылка для менеджера'),
+	].join('\n');
 	const notifyTransferCreated = async (
 		client: B24Client,
 		id: number,
@@ -226,7 +224,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		data: TransferData,
 		me: CurrentUser,
 	): Promise<TransferData> => {
-		const message = `[B]Нужно собрать перемещение #${id}[/B]\n${data.fromStore} → ${data.toStore}\n\n${data.lines.map((line) => `• ${line.name || `#${line.productId}`} × ${line.qty}`).join('\n')}\n\n${transferLink(id)}`;
+		const message = `[B]Нужно собрать перемещение #${id}[/B]\n${data.fromStore} → ${data.toStore}\n\n${data.lines.map((line) => `• ${line.name || `#${line.productId}`} × ${line.qty}`).join('\n')}\n\n${transferLinks(id)}`;
 		const at = new Date().toISOString();
 		let next = data;
 		try {
