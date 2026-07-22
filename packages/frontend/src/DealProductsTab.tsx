@@ -1140,8 +1140,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		</tr>
 	);
 
-	// Готовые товары группируем по складу. Выбранные услуги идут отдельным Delivery Note:
-	// склад им не нужен и складской остаток они не изменяют.
+	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
+	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
+	// отдельный документ только с услугами.
 		const canRealize = (r: EnrichedRow): boolean => remaining(r) > 0 && (isWorkRow(r.type) || rowStatus(r) === 'ready');
 		const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
 		const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
@@ -1157,7 +1158,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		if (!realizeGroups.has(s)) realizeGroups.set(s, []);
 		realizeGroups.get(s)!.push(r);
 	}
-	const realizeDocumentCount = realizeGroups.size + (readyWorks.length ? 1 : 0);
+	const realizeDocumentCount = realizeGroups.size || (readyWorks.length ? 1 : 0);
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
@@ -1200,7 +1201,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	};
 
 	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре
-	// (по одному на склад для товаров и отдельный документ без склада для услуг);
+	// (по одному на склад для товаров; услуги входят в первый товарный документ,
+	// а без товаров создаётся отдельный документ услуг без склада);
 	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
 	const doDraft = async (): Promise<void> => {
 		if (dealId == null || busy || supplyBusy || !realizeDocumentCount) return;
@@ -1217,10 +1219,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			lines: rs.map((r) => ({ productId: r.productId, qty: qtyOf(r), rate: r.price })),
 		}));
 		if (readyWorks.length) {
-			groups.push({
-				storeTitle: '',
-				lines: readyWorks.map((row) => ({ productId: row.productId, qty: qtyOf(row), rate: row.price, isService: true })),
-			});
+			const serviceLines = readyWorks.map((row) => ({ productId: row.productId, qty: qtyOf(row), rate: row.price, isService: true }));
+			if (groups[0]) groups[0].lines.push(...serviceLines);
+			else groups.push({ storeTitle: '', lines: serviceLines });
 		}
 		setBusy(true);
 		setNotice(null);
@@ -1228,7 +1229,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			const drafts = await realizeCoreDraft(dealId, groups);
 			setDraftNames(drafts.map((d) => d.name));
 			setRealizePhase('drafted');
-			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length}. Товары разбиты по складам, услуги идут без склада. Проверь партии и нажми «Провести».` });
+			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length}. Услуги включены в товарный документ без склада на строке. Проверь партии и нажми «Провести».` });
 			await onReload(); // черновики появятся строками-партиями (остаток уменьшится)
 		} catch (err) {
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
@@ -1472,7 +1473,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						{[...realizeGroups.entries()].map(([sid, rs]) => (
 							<span key={sid} className="plan-group">{storeName(sid)}: {rs.map((r) => `${r.name.slice(0, 22)} ×${qtyOf(r)}`).join(' · ')}</span>
 						))}
-						{readyWorks.length > 0 && <span className="plan-group">Услуги · без склада: {readyWorks.map((row) => `${row.name.slice(0, 22)} ×${qtyOf(row)}`).join(' · ')}</span>}
+						{readyWorks.length > 0 && <span className="plan-group">Услуги · в едином документе, без склада: {readyWorks.map((row) => `${row.name.slice(0, 22)} ×${qtyOf(row)}`).join(' · ')}</span>}
 					</div>
 				) : (
 					<span className="hint">Отметь строки галочками и выбери действие: реализовать доступное со склада или заказать через снабжение.</span>

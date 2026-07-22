@@ -1547,7 +1547,7 @@ export interface RealizeCoreGroup {
 	lines: Array<{ productId: number; qty: number; rate: number; isService?: boolean }>;
 }
 
-/** Создать черновики реализации: товары — по складам, услуги — отдельной группой без склада. */
+/** Создать черновики реализации: товары — по складам, услуги могут входить в товарную группу без склада на строке. */
 export async function realizeCoreDraft(dealId: number, groups: RealizeCoreGroup[]): Promise<Array<{ name: string; storeTitle: string }>> {
 	const res = await fetch('/api/deal/realize-core', {
 		method: 'POST',
