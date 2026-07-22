@@ -720,9 +720,9 @@ export async function selectDealQuoteVariant(erp: ErpClient, dealId: number, var
 	const plan = await dealPlanDocument(erp, dealId);
 	if (!plan) throw new Error('план сделки не найден');
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
-	if (state.selectedId) throw new Error('вариант уже выбран клиентом');
 	const selected = state.variants.find((variant) => variant.id === variantId);
 	if (!selected) throw new Error('вариант не найден');
+	if (state.selectedId === selected.id) return state;
 	if (!selected.items.length) throw new Error('нельзя выбрать пустой вариант');
 	await upsertDealPlan(erp, dealId, selected.items, deliveryDate);
 	const next = { ...state, selectedId: selected.id };

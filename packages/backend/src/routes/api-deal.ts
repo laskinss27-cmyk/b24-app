@@ -827,7 +827,23 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
-			const variants = await selectDealQuoteVariant(erp, dealId, String(b.variantId ?? ''), new Date().toISOString().slice(0, 10));
+			const variantId = String(b.variantId ?? '').trim();
+			const current = await listDealQuoteVariants(erp, dealId);
+			if (!current.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
+			if (current.selectedId && current.selectedId !== variantId) {
+				await ensureTransfersEntity(client);
+				const [stages, realizations, supply, transferItems] = await Promise.all([
+					listDealStages(erp, dealId),
+					listDealRealizations(erp, dealId),
+					listSupplyRequestsForDeal(erp, dealId),
+					client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
+				]);
+				const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
+				if (stages.length || realizations.length || supply.length || transfers.length) {
+					throw new Error('смена варианта недоступна: по сделке уже есть этапы, заявки снабжению, реализации или перемещения');
+				}
+			}
+			const variants = await selectDealQuoteVariant(erp, dealId, variantId, new Date().toISOString().slice(0, 10));
 			const items = await listDealPlan(erp, dealId);
 			const total = Math.round(items.reduce((sum, item) => sum + item.rate * item.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);

@@ -320,6 +320,7 @@ export function DealProductsTab(): JSX.Element {
 		| null
 	>(null);
 	const [showKp, setShowKp] = useState(false);
+	const [kpVariantId, setKpVariantId] = useState<string | null>(null);
 	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -467,8 +468,7 @@ export function DealProductsTab(): JSX.Element {
 	}
 
 	if (showKp) {
-		const selected = state.data.quoteVariants.selectedId;
-		return <KpDocument dealId={ctx.dealId} {...(activeVariantId && activeVariantId !== selected ? { variantId: activeVariantId } : {})} mock={Boolean(ctx.__mock)} onBack={() => setShowKp(false)} />;
+		return <KpDocument dealId={ctx.dealId} {...(kpVariantId ? { variantId: kpVariantId } : {})} mock={Boolean(ctx.__mock)} onBack={() => { setShowKp(false); setKpVariantId(null); }} />;
 	}
 
 	const activeVariant = state.data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
@@ -483,7 +483,7 @@ export function DealProductsTab(): JSX.Element {
 			payment: null,
 		}
 		: state.data;
-	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={() => setAdding({ kind: 'new-stage' })} onAddToStage={(stageId, stageNumber) => setAdding({ kind: 'stage', stageId, stageNumber })} onKp={() => setShowKp(true)} onReload={reload} />;
+	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={() => setAdding({ kind: 'new-stage' })} onAddToStage={(stageId, stageNumber) => setAdding({ kind: 'stage', stageId, stageNumber })} onKp={(variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setShowKp(true); }} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -553,7 +553,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: () => void; onAddToStage: (stageId: string, stageNumber: number) => void; onKp: () => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: () => void; onAddToStage: (stageId: string, stageNumber: number) => void; onKp: (variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
 	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
@@ -562,6 +562,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const proposalEditable = variantsPending && Boolean(activeVariant);
 	const tableEditable = workingMode || proposalEditable;
 	const rejectedView = data.quoteVariants.enabled && Boolean(data.quoteVariants.selectedId) && !viewingSelected;
+	const canSwitchVariant = rejectedView && Boolean(activeVariant);
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
 	const discPct = (r: EnrichedRow): number => { const base = r.price + r.discountSum; return base > 0 && r.discountSum > 0 ? Math.round((r.discountSum / base) * 1000) / 10 : 0; };
@@ -800,7 +801,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		finally { setVariantBusy(false); }
 	};
 	const chooseVariant = async (): Promise<void> => {
-		if (!activeVariant || dealId == null || variantBusy || !window.confirm(`Клиент выбрал «${activeVariant.name}». После подтверждения состав станет рабочим, а остальные варианты останутся только для истории. Продолжить?`)) return;
+		const changing = Boolean(data.quoteVariants.selectedId);
+		const message = changing
+			? `Заменить выбранный клиентом вариант на «${activeVariant?.name ?? ''}»? Рабочий состав сделки будет заменён.`
+			: `Клиент выбрал «${activeVariant?.name ?? ''}». После подтверждения состав станет рабочим, а остальные варианты останутся для истории. Продолжить?`;
+		if (!activeVariant || dealId == null || variantBusy || !window.confirm(message)) return;
 		setVariantBusy(true); setVariantError(null);
 		try {
 			await selectDealQuoteVariant(dealId, activeVariant.id);
@@ -1253,10 +1258,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						{data.quoteVariants.variants.map((variant) => {
 							const selectedVariant = data.quoteVariants.selectedId === variant.id;
 							const rejectedVariant = Boolean(data.quoteVariants.selectedId) && !selectedVariant;
-							return <button type="button" key={variant.id} className={`deal-variant-tab${activeVariantId === variant.id ? ' active' : ''}${selectedVariant ? ' selected' : ''}${rejectedVariant ? ' rejected' : ''}`} onClick={() => onActiveVariant(variant.id)}>
-								<span><b>{variant.name}</b><small>{variant.items.length} {plural(variant.items.length, 'позиция', 'позиции', 'позиций')} · {rub(variantTotal(variant))}</small></span>
-								<em>{selectedVariant ? 'Выбран клиентом' : rejectedVariant ? 'Не выбран' : 'Черновик'}</em>
-							</button>;
+							return <div key={variant.id} className={`deal-variant-tab${activeVariantId === variant.id ? ' active' : ''}${selectedVariant ? ' selected' : ''}${rejectedVariant ? ' rejected' : ''}`}>
+								<button type="button" className="deal-variant-open" onClick={() => onActiveVariant(variant.id)}>
+									<span><b>{variant.name}</b><small>{variant.items.length} {plural(variant.items.length, 'позиция', 'позиции', 'позиций')} · {rub(variantTotal(variant))}</small></span>
+									<em>{selectedVariant ? 'Выбран клиентом' : rejectedVariant ? 'Не выбран' : 'Черновик'}</em>
+								</button>
+								<button type="button" className="deal-variant-print" onClick={() => onKp(variant.id)}>Печать КП</button>
+							</div>;
 						})}
 					</div>
 					{variantsPending && <div className="deal-variant-notice">До выбора клиента это варианты расчёта. Складские действия и этапы пока недоступны.</div>}
@@ -1281,8 +1289,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						requestB24FitWindow(160);
 					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
-				<button className="btn-secondary" onClick={onKp}>КП</button>
-				{proposalEditable && activeVariant && <button className="btn-primary" disabled={variantBusy || activeVariant.items.length === 0} onClick={() => void chooseVariant()}>Выбран клиентом</button>}
+				<button className="btn-secondary" onClick={() => onKp()}>КП</button>
+				{(proposalEditable || canSwitchVariant) && activeVariant && <button className="btn-primary" disabled={variantBusy || activeVariant.items.length === 0} onClick={() => void chooseVariant()}>{canSwitchVariant ? 'Выбрать вместо текущего' : 'Выбран клиентом'}</button>}
 				{workingMode && <button
 					className="btn-secondary"
 					disabled={!canReturn || dev}
