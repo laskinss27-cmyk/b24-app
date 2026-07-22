@@ -382,15 +382,36 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					}
 				}
 				const groups = Array.isArray(b.groups) ? b.groups : [];
+				const requestedProductIds = groups.flatMap((g) => {
+					const gg = g as { lines?: unknown };
+					return (Array.isArray(gg.lines) ? gg.lines : []).map((line) => Number((line as { productId?: unknown }).productId)).filter((id) => Number.isInteger(id) && id > 0);
+				});
+				// Тип строки определяем на сервере, а не доверяем флагу клиента: товар нельзя
+				// выдать за услугу, чтобы обойти склад и проверку остатка.
+				const [dealPlan, catalogServiceIds] = await Promise.all([
+					listDealPlan(erp, dealId).catch(() => []),
+					fetchServiceProductIds(client, requestedProductIds),
+				]);
+				const serviceIds = new Set([
+					...dealPlan.filter((item) => item.isService).map((item) => item.productId),
+					...catalogServiceIds,
+				]);
 				const parsedGroups = groups.map((g) => {
 					const gg = g as { storeTitle?: unknown; lines?: unknown };
 					const storeTitle = String(gg.storeTitle ?? '').trim();
 					const lines = (Array.isArray(gg.lines) ? gg.lines : [])
 						.map((l) => l as { productId?: unknown; qty?: unknown; rate?: unknown })
-						.map((l) => ({ productId: Number(l.productId), qty: Number(l.qty), rate: Number(l.rate) || 0, storeTitle }))
+						.map((l) => {
+							const productId = Number(l.productId);
+							const isService = serviceIds.has(productId);
+							return { productId, qty: Number(l.qty), rate: Number(l.rate) || 0, ...(storeTitle ? { storeTitle } : {}), isService };
+						})
 						.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 					return { storeTitle, lines };
-				}).filter((group) => group.storeTitle && group.lines.length);
+				}).filter((group) => group.lines.length);
+				for (const group of parsedGroups) for (const line of group.lines) {
+					if (!line.isService && !group.storeTitle) throw new Error(`для товара #${line.productId} не выбран склад реализации`);
+				}
 				await ensureTransfersEntity(client);
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 				const reserved = new Map<string, number>();
@@ -400,17 +421,18 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 						reserved.set(key, (reserved.get(key) ?? 0) + line.qty);
 					}
 				}
-				const productIds = parsedGroups.flatMap((group) => group.lines.map((line) => line.productId));
+				const productIds = parsedGroups.flatMap((group) => group.lines.filter((line) => !line.isService).map((line) => line.productId));
 				const stocks = await fetchErpStocksFor(erp, productIds);
 				for (const group of parsedGroups) for (const line of group.lines) {
+					if (line.isService) continue;
 					const available = Math.max(Number(stocks.get(line.productId)?.[group.storeTitle] ?? 0) - (reserved.get(`${line.productId}:${group.storeTitle}`) ?? 0), 0);
 					if (line.qty > available + 0.000001) throw new Error(`на складе «${group.storeTitle}» для товара #${line.productId} свободно ${available}, к реализации выбрано ${line.qty}`);
 				}
 				const drafts: Array<{ name: string; storeTitle: string }> = [];
 				for (const { storeTitle, lines } of parsedGroups) {
-					if (!storeTitle || !lines.length) continue;
+					if (!lines.length) continue;
 					const { name } = await createRealizationDraft(erp, { dealId, lines });
-					drafts.push({ name, storeTitle });
+					drafts.push({ name, storeTitle: storeTitle || 'Услуги' });
 				}
 				if (!drafts.length) return reply.code(400).send({ ok: false, error: 'нет валидных строк для реализации' });
 				app.log.info({ dealId, drafts: drafts.length }, '[api/deal/realize-core] drafts created');

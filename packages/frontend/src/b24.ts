@@ -1542,12 +1542,12 @@ export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRea
 }
 
 export interface RealizeCoreGroup {
-	/** Название склада Б24 — один Delivery Note на склад. */
+	/** Название склада Б24. Для отдельной группы услуг пусто: склад им не нужен. */
 	storeTitle: string;
-	lines: Array<{ productId: number; qty: number; rate: number }>;
+	lines: Array<{ productId: number; qty: number; rate: number; isService?: boolean }>;
 }
 
-/** Создать черновики реализации в ядре — по одному Delivery Note на склад. */
+/** Создать черновики реализации: товары — по складам, услуги — отдельной группой без склада. */
 export async function realizeCoreDraft(dealId: number, groups: RealizeCoreGroup[]): Promise<Array<{ name: string; storeTitle: string }>> {
 	const res = await fetch('/api/deal/realize-core', {
 		method: 'POST',

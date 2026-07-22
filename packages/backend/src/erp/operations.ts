@@ -282,8 +282,9 @@ export async function updateCoreCatalogPrices(
 export interface RealizationLine {
 	productId: number;
 	qty: number;
-	/** Склад списания — название склада Б24 (наш UI оперирует ими). */
-	storeTitle: string;
+	/** Для товара — склад списания. У услуги склада нет и остаток не двигается. */
+	storeTitle?: string;
+	isService?: boolean;
 	/** Цена продажи за единицу (для суммы документа). */
 	rate: number;
 }
@@ -309,6 +310,10 @@ export async function createRealizationDraft(
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	if (!args.lines.length) throw new Error('пустая партия');
+	for (const line of args.lines) {
+		if (!line.isService && !line.storeTitle?.trim()) throw new Error(`для товара #${line.productId} не выбран склад реализации`);
+		await ensureCoreItem(erp, { productId: line.productId, name: `#${line.productId}`, isService: Boolean(line.isService) });
+	}
 	const doc = await erp.create('Delivery Note', {
 		company: ctx.company,
 		customer: TECH_CUSTOMER,
@@ -318,7 +323,7 @@ export async function createRealizationDraft(
 		items: args.lines.map((l) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
-			warehouse: erpWarehouse(ctx, l.storeTitle),
+			...(!l.isService && l.storeTitle ? { warehouse: erpWarehouse(ctx, l.storeTitle) } : {}),
 			rate: l.rate,
 		})),
 	});

@@ -825,7 +825,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	// «Выезд инженера» (productId 9814) — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
 	// У старых сделок оказанную услугу Б24 удалить запрещает: если она уже перенесена в план ядра,
 	// оставляем строку Б24 на месте, но второй раз во вкладке не рисуем.
-	const realWorks = [...planWorks, ...works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID && !planWorkIds.has(r.productId))];
+	const legacyWorks = works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID && !planWorkIds.has(r.productId));
+	const realWorks = [...planWorks, ...legacyWorks];
 	const stageQtyByProduct = new Map<number, number>();
 	for (const stage of data.stages) {
 		for (const item of stage.items) stageQtyByProduct.set(item.productId, (stageQtyByProduct.get(item.productId) ?? 0) + item.qty);
@@ -860,6 +861,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	}));
 	const stagedPlanRows = [...basePlanRows, ...stageSections.flatMap((section) => section.rows)];
 	const visibleGoods = summaryView ? goods : stagedPlanRows.filter((row) => !isWorkRow(row.type));
+	const visibleWorks = summaryView ? realWorks : [...stagedPlanRows.filter((row) => isWorkRow(row.type)), ...legacyWorks];
 	const sumRealWorks = realWorks.reduce((a, r) => a + line(r), 0);
 	const sumGoods = goods.reduce((a, r) => a + line(r), 0);
 	const sumWorks = sumRealWorks;
@@ -928,17 +930,28 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const hiddenDocumentCount = returnDocuments.length + data.supply.length + dealTransfers.length;
 
-	const renderWorkRow = (r: EnrichedRow): JSX.Element => (
-		<tr key={r.id}>
+	const renderWorkRow = (r: EnrichedRow): JSX.Element => {
+		const left = remaining(r);
+		const drafted = realizedForRow(r) > shippedForRow(r);
+		return (
+		<tr key={r.id} className={isSel(r) ? 'sel-row' : undefined}>
 			<td className="check-col">
-				{tableEditable && <div className="row-controls">
-					<button
+				<div className="row-controls">
+					{tableEditable && <button
 						className="row-del-x"
 						disabled={busy || removing != null || realizePhase !== 'idle' || rejectedView}
 						onClick={() => void doRemove(r)}
 						title={r.segmentKind === 'stage' ? 'Удалить работу из этого этапа' : 'Удалить работу из сделки'}
-					>{removing === r.id ? '…' : '✕'}</button>
-				</div>}
+					>{removing === r.id ? '…' : '✕'}</button>}
+					{workingMode && left > 0 && <input
+						type="checkbox"
+						className="row-check"
+						checked={isSel(r)}
+						disabled={realizePhase !== 'idle' || busy || supplyBusy}
+						onChange={() => toggleSel(r)}
+						title="Отметить услугу для реализации — склад не требуется"
+					/>}
+				</div>
 			</td>
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
@@ -952,13 +965,20 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			<td className="num">
 				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !tableEditable || rejectedView} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
 			</td>
-			<td className="num"><span className="none">—</span></td>
-			<td className="num"><span className="none">—</span></td>
+			<td className="num">{workingMode ? <b className="realized-qty">{shippedForRow(r)}</b> : <span className="none">—</span>}</td>
+			<td className="num">
+				{workingMode && left > 0
+					? <input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={realizePhase !== 'idle' || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} title={`Сколько услуг реализовать сейчас (остаток ${left})`} />
+					: <span className="none">—</span>}
+			</td>
 			<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
-			<td><span className="none">—</span></td>
-			<td><span className="none">—</span></td>
+			<td><span className="muted small">не требуется</span></td>
+			<td>{workingMode
+				? <span className={`st-badge ${drafted ? 'requested' : left <= 0 ? 'ready' : 'proposal'}`}>{drafted ? 'черновик' : left <= 0 ? '✓ реализовано' : 'без склада'}</span>
+				: <span className="st-badge proposal">{rejectedView ? 'не выбран' : 'расчёт'}</span>}</td>
 		</tr>
-	);
+		);
+	};
 
 	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
 	// под ними — строка остатка с селектором склада, полем кол-ва и кнопкой «Реализовать».
@@ -1120,21 +1140,24 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		</tr>
 	);
 
-	// Готовые к реализации строки → группируем по складу (на каждый склад — свой Delivery Note в ядре).
-	// Можно ли отгрузить строку сейчас (остаток есть + хватает на выбранном складе) — отсюда доступность галочки.
-		const canRealize = (r: EnrichedRow): boolean => remaining(r) > 0 && rowStatus(r) === 'ready';
+	// Готовые товары группируем по складу. Выбранные услуги идут отдельным Delivery Note:
+	// склад им не нужен и складской остаток они не изменяют.
+		const canRealize = (r: EnrichedRow): boolean => remaining(r) > 0 && (isWorkRow(r.type) || rowStatus(r) === 'ready');
 		const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
 		const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
 		// В реализацию идут ТОЛЬКО отмеченные галочкой строки (дефолт — ничего не отмечено).
-		const selectedGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0);
-		const blockedSelectedGoods = selectedGoods.filter((r) => !canRealize(r));
-		const readyGoods = selectedGoods.filter(canRealize);
+		const selectedRows = [...visibleGoods, ...visibleWorks].filter((r) => isSel(r) && remaining(r) > 0);
+		const blockedSelectedGoods = selectedRows.filter((r) => !isWorkRow(r.type) && !canRealize(r));
+		const readyRows = selectedRows.filter(canRealize);
+		const readyGoods = readyRows.filter((row) => !isWorkRow(row.type));
+		const readyWorks = readyRows.filter((row) => isWorkRow(row.type));
 	const realizeGroups = new Map<number, EnrichedRow[]>();
 	for (const r of readyGoods) {
 		const s = storeOf(r);
 		if (!realizeGroups.has(s)) realizeGroups.set(s, []);
 		realizeGroups.get(s)!.push(r);
 	}
+	const realizeDocumentCount = realizeGroups.size + (readyWorks.length ? 1 : 0);
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
@@ -1176,10 +1199,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		}
 	};
 
-	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре (по одному на склад);
+	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре
+	// (по одному на склад для товаров и отдельный документ без склада для услуг);
 	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
 	const doDraft = async (): Promise<void> => {
-		if (dealId == null || busy || supplyBusy || !realizeGroups.size) return;
+		if (dealId == null || busy || supplyBusy || !realizeDocumentCount) return;
 		if (blockedSelectedGoods.length) {
 			const details = blockedSelectedGoods.map((row) => {
 				const selectedStore = storeOf(row);
@@ -1192,13 +1216,19 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			storeTitle: storeName(sid),
 			lines: rs.map((r) => ({ productId: r.productId, qty: qtyOf(r), rate: r.price })),
 		}));
+		if (readyWorks.length) {
+			groups.push({
+				storeTitle: '',
+				lines: readyWorks.map((row) => ({ productId: row.productId, qty: qtyOf(row), rate: row.price, isService: true })),
+			});
+		}
 		setBusy(true);
 		setNotice(null);
 		try {
 			const drafts = await realizeCoreDraft(dealId, groups);
 			setDraftNames(drafts.map((d) => d.name));
 			setRealizePhase('drafted');
-			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length} (по складам). Проверь партии и нажми «Провести».` });
+			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length}. Товары разбиты по складам, услуги идут без склада. Проверь партии и нажми «Провести».` });
 			await onReload(); // черновики появятся строками-партиями (остаток уменьшится)
 		} catch (err) {
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
@@ -1235,7 +1265,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				<div className="deal-head-stats">
 					<div><span>Товары</span><b>{goods.length}</b></div>
 					<div><span>Работы</span><b>{realWorks.length}</b></div>
-					<div><span>{workingMode ? 'К реализации' : 'В варианте'}</span><b>{workingMode ? readyGoods.length : goods.length + realWorks.length}</b></div>
+					<div><span>{workingMode ? 'К реализации' : 'В варианте'}</span><b>{workingMode ? readyRows.length : goods.length + realWorks.length}</b></div>
 					<div><span>Сумма</span><b>{rub(sumGoods + sumRealWorks)}</b></div>
 				</div>
 			</header>
@@ -1379,7 +1409,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					) : (
 						<>
 							{(() => {
-								const baseWorks = [...basePlanRows.filter((row) => isWorkRow(row.type)), ...works.filter((row) => row.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)];
+								const baseWorks = [...basePlanRows.filter((row) => isWorkRow(row.type)), ...legacyWorks];
 								const baseGoods = basePlanRows.filter((row) => !isWorkRow(row.type));
 								const all = [...baseGoods, ...baseWorks];
 								return (
@@ -1436,12 +1466,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						<b>Черновики в ядре: {draftNames.length} — проверь партии выше и проведи.</b>
 						<span className="hint">«Провести» спишет остаток ядра. «Отмена» оставит черновики (можно провести/удалить позже).</span>
 					</div>
-				) : readyGoods.length > 0 ? (
+				) : readyRows.length > 0 ? (
 					<div className="realize-plan">
-						<b>К реализации — {realizeGroups.size} {plural(realizeGroups.size, 'документ', 'документа', 'документов')} (по складам):</b>
+						<b>К реализации — {realizeDocumentCount} {plural(realizeDocumentCount, 'документ', 'документа', 'документов')}:</b>
 						{[...realizeGroups.entries()].map(([sid, rs]) => (
 							<span key={sid} className="plan-group">{storeName(sid)}: {rs.map((r) => `${r.name.slice(0, 22)} ×${qtyOf(r)}`).join(' · ')}</span>
 						))}
+						{readyWorks.length > 0 && <span className="plan-group">Услуги · без склада: {readyWorks.map((row) => `${row.name.slice(0, 22)} ×${qtyOf(row)}`).join(' · ')}</span>}
 					</div>
 				) : (
 					<span className="hint">Отметь строки галочками и выбери действие: реализовать доступное со склада или заказать через снабжение.</span>
@@ -1449,11 +1480,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				<div className="realize-actions">
 					<button
 						className={`btn-realize-all${realizePhase === 'drafted' ? ' submit' : ''}`}
-						disabled={dev || busy || supplyBusy || (realizePhase === 'idle' ? realizeGroups.size === 0 : draftNames.length === 0)}
+						disabled={dev || busy || supplyBusy || (realizePhase === 'idle' ? realizeDocumentCount === 0 : draftNames.length === 0)}
 						title={dev ? 'В dev-режиме недоступно — реализация считается на проде через ядро' : undefined}
 						onClick={() => void (realizePhase === 'idle' ? doDraft() : doSubmit())}
 					>
-						{busy ? '…' : realizePhase === 'idle' ? `Реализация${realizeGroups.size ? ` (${realizeGroups.size})` : ''}` : '✓ Провести'}
+						{busy ? '…' : realizePhase === 'idle' ? `Реализация${realizeDocumentCount ? ` (${realizeDocumentCount})` : ''}` : '✓ Провести'}
 					</button>
 					{realizePhase === 'drafted' && (
 						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
