@@ -154,6 +154,7 @@ function MarketplaceSaleModal({
 					title: 'Товары для реализации на маркетплейсе',
 					kindFilter: 'goods',
 					onlyStockDefault: true,
+					forceRefreshOnMount: true,
 					onCancel: () => setPicking(false),
 					onDone: async (items) => { addPicked(items); setPicking(false); },
 				}} />
@@ -279,6 +280,7 @@ function MarketplaceBundleModal({
 					title: 'Товар для формирования комплекта',
 					kindFilter: 'goods',
 					onlyStockDefault: true,
+					forceRefreshOnMount: true,
 					onCancel: () => setPicking(false),
 					onDone: async (items) => {
 						const picked = items.find((item) => !item.isService);
@@ -434,6 +436,7 @@ function MarketplaceReturnModal({
 					title: 'Товар, который вернул покупатель',
 					kindFilter: 'goods',
 					onlyStockDefault: false,
+					forceRefreshOnMount: true,
 					onCancel: () => setPicking(false),
 					onDone: async (items) => {
 						const picked = items.find((item) => !item.isService);

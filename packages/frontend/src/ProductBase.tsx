@@ -309,12 +309,15 @@ export interface ProductPicker {
 	title?: string | undefined;
 	kindFilter?: 'goods' | 'services';
 	onlyStockDefault?: boolean;
+	/** Для складских операций, где критичны только что созданные товары и актуальные остатки. */
+	forceRefreshOnMount?: boolean;
 }
 
 export function ProductBase({ picker, readOnly = false, allowCreateProduct = false }: { picker?: ProductPicker; readOnly?: boolean; allowCreateProduct?: boolean } = {}): JSX.Element {
 	const pickMode = !!picker;
 	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
+	const [forceInitialRefresh] = useState(Boolean(picker?.forceRefreshOnMount));
 	const [gate, setGate] = useState<Gate>('checking');
 	const [errMsg, setErrMsg] = useState<string>('');
 	const [mode, setMode] = useState<Mode>('loading');
@@ -373,7 +376,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
 				setGate('ready');
 				setUid(uid);
-				const base = await withTimeout(fetchProductBase(), 90000, 'catalog/browse');
+				const base = await withTimeout(fetchProductBase(forceInitialRefresh), 90000, 'catalog/browse');
 				setRows(base.rows);
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
@@ -384,7 +387,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				setErrMsg(String(e instanceof Error ? e.message : e));
 			});
 		});
-	}, [ctx]);
+	}, [ctx, forceInitialRefresh]);
 
 	const isAll = store === ALL;
 	const sid = isAll ? null : Number(store);
