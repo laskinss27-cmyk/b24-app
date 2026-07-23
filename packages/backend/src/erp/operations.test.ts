@@ -5,7 +5,10 @@ import {
 	MARKETPLACE_NAME_FIELD,
 	MARKETPLACE_OPERATION_FIELD,
 	MARKETPLACE_TITLE_FIELD,
+	MARKETPLACE_BUNDLE_SOURCE_FIELD,
+	MARKETPLACE_BUNDLE_UNITS_FIELD,
 	REALIZATION_SEGMENT_FIELD,
+	createMarketplaceBundle,
 	createMarketplaceSale,
 	listMarketplaceOperations,
 	marketplaceSaleTitle,
@@ -16,15 +19,17 @@ type Doc = Record<string, unknown> & {
 	name: string;
 	docstatus: number;
 	items: Array<Record<string, unknown>>;
+	_doctype?: string;
 };
 
 class FakeErp {
 	private readonly documents = new Map<string, Doc>();
+	private readonly itemPatches = new Map<string, Record<string, unknown>>();
 	private readonly salesOrder: Record<string, unknown> | null;
 	private sequence = 0;
 
 	constructor(documents: Doc[], salesOrder: Record<string, unknown> | null = null) {
-		for (const document of documents) this.documents.set(document.name, structuredClone(document));
+		for (const document of documents) this.documents.set(document.name, structuredClone({ _doctype: 'Delivery Note', ...document }));
 		this.salesOrder = salesOrder ? structuredClone(salesOrder) : null;
 	}
 
@@ -36,11 +41,15 @@ class FakeErp {
 		return [...this.documents.values()].filter((document) => document.docstatus !== 2);
 	}
 
+	itemPatch(name: string): Record<string, unknown> {
+		return this.itemPatches.get(name) ?? {};
+	}
+
 	async list(doctype: string): Promise<Array<Record<string, unknown>>> {
 		if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
 		if (doctype === 'Sales Order') return this.salesOrder ? [{ name: String(this.salesOrder['name']) }] : [];
-		if (doctype !== 'Delivery Note') return [];
-		return this.active().map((document) => ({
+		if (doctype !== 'Delivery Note' && doctype !== 'Stock Entry') return [];
+		return this.active().filter((document) => (document._doctype ?? 'Delivery Note') === doctype).map((document) => ({
 			name: document.name,
 			docstatus: document.docstatus,
 			is_return: document['is_return'] ?? 0,
@@ -52,26 +61,31 @@ class FakeErp {
 		if (doctype === 'Custom Field' || doctype === 'Customer' || doctype === 'Supplier'
 			|| doctype === 'Item' || doctype === 'UOM' || doctype === 'Item Group') return { name };
 		if (doctype === 'Sales Order') return this.salesOrder ? structuredClone(this.salesOrder) : null;
-		if (doctype !== 'Delivery Note') return null;
+		if (doctype !== 'Delivery Note' && doctype !== 'Stock Entry') return null;
 		const document = this.documents.get(name);
-		return document ? structuredClone(document) : null;
+		return document && (document._doctype ?? 'Delivery Note') === doctype ? structuredClone(document) : null;
 	}
 
-	async update(_doctype: string, name: string, fields: Record<string, unknown>): Promise<Doc> {
+	async update(doctype: string, name: string, fields: Record<string, unknown>): Promise<Doc | Record<string, unknown>> {
+		if (doctype === 'Item') {
+			const patch = { ...(this.itemPatches.get(name) ?? {}), ...structuredClone(fields) };
+			this.itemPatches.set(name, patch);
+			return { name, ...patch };
+		}
 		const document = this.documents.get(name);
 		if (!document) throw new Error(`missing ${name}`);
 		Object.assign(document, structuredClone(fields));
 		return structuredClone(document);
 	}
 
-	async create(_doctype: string, fields: Record<string, unknown>): Promise<Doc> {
+	async create(doctype: string, fields: Record<string, unknown>): Promise<Doc> {
 		const base = String(fields['amended_from'] ?? 'DN');
 		const name = `${base}-A${++this.sequence}`;
 		const items = (fields['items'] as Array<Record<string, unknown>>).map((item, index) => ({
 			...structuredClone(item),
 			name: `${name}-ROW-${index + 1}`,
 		}));
-		const document: Doc = { ...structuredClone(fields), name, docstatus: 0, items };
+		const document: Doc = { ...structuredClone(fields), name, docstatus: 0, items, _doctype: doctype };
 		this.documents.set(name, document);
 		return structuredClone(document);
 	}
@@ -253,4 +267,45 @@ test('marketplace realization gets a human title, warehouse marker and is submit
 	assert.equal(journal[0]?.operation, 'sale');
 	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
 	assert.equal(journal[0]?.quantity, 2);
+});
+
+test('marketplace bundle repacks source units into finished bundle units on the same warehouse', async () => {
+	const erp = new FakeErp([]);
+	const result = await createMarketplaceBundle(erp.asClient(), {
+		sourceProductId: 101,
+		sourceItemName: 'Датчик',
+		bundleProductId: 202,
+		bundleItemName: 'Комплект Датчик 3 шт',
+		unitsPerBundle: 3,
+		bundleQty: 4,
+		storeTitle: 'Маркетплейс',
+		postingDate: '2026-07-23',
+	});
+	assert.equal(result.sourceQty, 12);
+	assert.equal(result.title, '23.07.26_Комплект Датчик 3 шт');
+
+	const created = erp.active()[0];
+	assert.ok(created);
+	assert.equal(created._doctype, 'Stock Entry');
+	assert.equal(created.docstatus, 1);
+	assert.equal(created['stock_entry_type'], 'Repack');
+	assert.equal(created[MARKETPLACE_OPERATION_FIELD], 'bundle');
+	assert.equal(created.items.length, 2);
+	assert.equal(created.items[0]?.['item_code'], '101');
+	assert.equal(created.items[0]?.['qty'], 12);
+	assert.equal(created.items[0]?.['s_warehouse'], 'Маркетплейс - TEST');
+	assert.equal(created.items[1]?.['item_code'], '202');
+	assert.equal(created.items[1]?.['qty'], 4);
+	assert.equal(created.items[1]?.['t_warehouse'], 'Маркетплейс - TEST');
+	assert.equal(created.items[1]?.['is_finished_item'], 1);
+
+	assert.equal(erp.itemPatch('202')[MARKETPLACE_BUNDLE_SOURCE_FIELD], '101');
+	assert.equal(erp.itemPatch('202')[MARKETPLACE_BUNDLE_UNITS_FIELD], 3);
+
+	const journal = await listMarketplaceOperations(erp.asClient());
+	assert.equal(journal.length, 1);
+	assert.equal(journal[0]?.operation, 'bundle');
+	assert.equal(journal[0]?.itemCount, 1);
+	assert.equal(journal[0]?.quantity, 4);
+	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
 });

@@ -1572,6 +1572,50 @@ export async function createMarketplaceSale(input: {
 	return { name: json.name, title: json.title };
 }
 
+export async function createMarketplaceBundle(input: {
+	sourceProductId: number;
+	unitsPerBundle: number;
+	bundleQty: number;
+	postingDate: string;
+}): Promise<{
+	name: string;
+	title: string;
+	sourceQty: number;
+	bundleProductId: number;
+	bundleItemName: string;
+	bundleQty: number;
+	storeTitle: string;
+}> {
+	const res = await fetch('/api/marketplaces/bundle', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as {
+		ok: boolean;
+		error?: string;
+		name?: string;
+		title?: string;
+		sourceQty?: number;
+		bundleProductId?: number;
+		bundleItemName?: string;
+		bundleQty?: number;
+		storeTitle?: string;
+	};
+	if (!json.ok || !json.name || !json.title || !json.bundleProductId || !json.bundleItemName || !json.storeTitle) {
+		throw new Error(json.error ?? 'Не удалось сформировать комплект');
+	}
+	return {
+		name: json.name,
+		title: json.title,
+		sourceQty: Number(json.sourceQty ?? 0),
+		bundleProductId: json.bundleProductId,
+		bundleItemName: json.bundleItemName,
+		bundleQty: Number(json.bundleQty ?? 0),
+		storeTitle: json.storeTitle,
+	};
+}
+
 export async function createManualTransfer(input: { fromStore: string; toStore: string; note?: string; lines: TransferLineDto[] }): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/create-manual', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },

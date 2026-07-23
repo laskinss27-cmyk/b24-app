@@ -2,11 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { B24ApiError, B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import {
+	createMarketplaceBundle,
 	createMarketplaceSale,
 	listActiveStoreTitles,
 	listMarketplaceOperations,
 } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
+import { invalidateCatalogCache } from './api-catalog.js';
 import { canManageStock, validateFreeStock } from './api-stock.js';
 
 interface AuthBody {
@@ -30,6 +32,32 @@ function errInfo(error: unknown): string {
 function marketplaceStores(stores: string[]): string[] {
 	const allowed = new Set(MARKETPLACE_STORE_NAMES.map(normalizeTitle));
 	return stores.filter((store) => allowed.has(normalizeTitle(store)));
+}
+
+const cleanItemName = (value: string): string => value.trim().replace(/\s+/g, ' ');
+
+async function sourceProductName(client: B24Client, productId: number): Promise<string> {
+	const result = await client.call<{ product?: Record<string, unknown> }>('catalog.product.get', { id: productId });
+	const name = cleanItemName(String(result?.product?.['name'] ?? ''));
+	if (!name) throw new Error(`товар #${productId} не найден в каталоге`);
+	return name;
+}
+
+async function ensureBundleProduct(client: B24Client, title: string): Promise<number> {
+	const listed = await client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', {
+		filter: { iblockId: 24, name: title },
+		select: ['id', 'iblockId', 'name'],
+	});
+	const exact = (listed?.products ?? []).find((product) =>
+		normalizeTitle(String(product['name'] ?? '')) === normalizeTitle(title));
+	const existingId = Number(exact?.['id'] ?? 0);
+	if (Number.isInteger(existingId) && existingId > 0) return existingId;
+	const created = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', {
+		fields: { iblockId: 24, name: title, type: 1, measure: 9, active: 'Y' },
+	});
+	const productId = Number(created?.element?.id ?? 0);
+	if (!Number.isInteger(productId) || productId <= 0) throw new Error('Битрикс24 не вернул ID позиции комплекта');
+	return productId;
 }
 
 export function registerApiMarketplacesRoute(app: FastifyInstance): void {
@@ -135,6 +163,67 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			return { ok: true, ...result };
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/sale] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/marketplaces/bundle', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
+		try {
+			if (!(await canManageStock(client))) {
+				return reply.code(403).send({ ok: false, error: 'формировать комплекты может только снабжение' });
+			}
+			const sourceProductId = Number(body['sourceProductId']);
+			const unitsPerBundle = Number(body['unitsPerBundle']);
+			const bundleQty = Number(body['bundleQty']);
+			const postingDate = String(body['postingDate'] ?? '').trim();
+			if (!Number.isInteger(sourceProductId) || sourceProductId <= 0) {
+				return reply.code(400).send({ ok: false, error: 'не выбран исходный товар' });
+			}
+			if (!Number.isInteger(unitsPerBundle) || unitsPerBundle < 2) {
+				return reply.code(400).send({ ok: false, error: 'в комплекте должно быть не меньше двух штук' });
+			}
+			if (!Number.isInteger(bundleQty) || bundleQty < 1) {
+				return reply.code(400).send({ ok: false, error: 'укажите целое количество комплектов' });
+			}
+			if (!DATE_RE.test(postingDate)) {
+				return reply.code(400).send({ ok: false, error: 'неверная дата формирования комплекта' });
+			}
+			const activeStores = await listActiveStoreTitles(erp);
+			const storeTitle = activeStores.find((store) => normalizeTitle(store) === normalizeTitle('Маркетплейс'));
+			if (!storeTitle) {
+				return reply.code(400).send({ ok: false, error: 'склад Маркетплейс не найден' });
+			}
+			const sourceItemName = await sourceProductName(client, sourceProductId);
+			const bundleItemName = `Комплект ${sourceItemName} ${unitsPerBundle} шт`;
+			const sourceQty = unitsPerBundle * bundleQty;
+			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }]);
+			const bundleProductId = await ensureBundleProduct(client, bundleItemName);
+			const result = await createMarketplaceBundle(erp, {
+				sourceProductId,
+				sourceItemName,
+				bundleProductId,
+				bundleItemName,
+				unitsPerBundle,
+				bundleQty,
+				storeTitle,
+				postingDate,
+			});
+			invalidateCatalogCache(body.domain ?? '');
+			app.log.info({
+				name: result.name,
+				sourceProductId,
+				bundleProductId,
+				unitsPerBundle,
+				bundleQty,
+			}, '[api/marketplaces/bundle] submitted');
+			return { ok: true, ...result, bundleProductId, bundleItemName, bundleQty, storeTitle };
+		} catch (error) {
+			app.log.error({}, `[api/marketplaces/bundle] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});

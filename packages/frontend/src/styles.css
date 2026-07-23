@@ -6233,6 +6233,78 @@ body.deal-placement-body #root {
 	margin: 0 20px 14px;
 }
 
+.marketplace-bundle-body {
+	display: grid;
+	gap: 16px;
+	padding: 18px 20px;
+}
+
+.marketplace-bundle-source {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 15px;
+	border: 1px solid #dce3ec;
+	border-radius: 9px;
+}
+
+.marketplace-bundle-source > div {
+	display: grid;
+	gap: 3px;
+}
+
+.marketplace-bundle-source span,
+.marketplace-bundle-result span {
+	color: #7a8699;
+	font-size: 11px;
+}
+
+.marketplace-bundle-source small {
+	color: #7a8699;
+	font-size: 11px;
+}
+
+.marketplace-bundle-source button {
+	padding: 8px 12px;
+	border: 1px solid #cdd5e0;
+	border-radius: 7px;
+	background: #fff;
+	cursor: pointer;
+}
+
+.marketplace-bundle-body .marketplace-sale-fields {
+	padding: 0;
+	background: transparent;
+}
+
+.marketplace-bundle-result {
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	align-items: center;
+	gap: 12px;
+}
+
+.marketplace-bundle-result > div:not(.marketplace-bundle-arrow) {
+	display: grid;
+	min-height: 64px;
+	align-content: center;
+	gap: 5px;
+	padding: 13px 15px;
+	border-radius: 9px;
+	background: #f4f7fa;
+}
+
+.marketplace-bundle-result > div:last-child {
+	background: #eaf7ef;
+	color: #17633f;
+}
+
+.marketplace-bundle-arrow {
+	color: #8090a3;
+	font-size: 24px;
+}
+
 .marketplace-modal footer .primary {
 	border-color: #185fa5;
 	background: #185fa5;
@@ -6273,6 +6345,13 @@ body.deal-placement-body #root {
 	.marketplace-modal {
 		max-height: 100vh;
 		border-radius: 0;
+	}
+	.marketplace-bundle-result {
+		grid-template-columns: 1fr;
+	}
+	.marketplace-bundle-arrow {
+		transform: rotate(90deg);
+		text-align: center;
 	}
 }
 

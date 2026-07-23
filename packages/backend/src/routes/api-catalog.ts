@@ -35,6 +35,11 @@ interface CacheEntry {
 	expires: number;
 }
 const baseCache = new Map<string, CacheEntry>();
+
+export function invalidateCatalogCache(domain: string): void {
+	baseCache.delete(normalizeDomain(domain));
+}
+
 const SUPPLY_DEPARTMENT_ID = 10;
 
 interface CatalogCandidate {

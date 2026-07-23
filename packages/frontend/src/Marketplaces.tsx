@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import {
+	createMarketplaceBundle,
 	createMarketplaceSale,
 	fetchMarketplaceFormData,
 	fetchMarketplaceOperations,
@@ -201,6 +202,129 @@ function MarketplaceSaleModal({
 	);
 }
 
+function MarketplaceBundleModal({
+	form,
+	mock,
+	onClose,
+	onDone,
+}: {
+	form: MarketplaceFormData;
+	mock: boolean;
+	onClose: () => void;
+	onDone: (row: MarketplaceOperationRow) => void;
+}): JSX.Element {
+	const [source, setSource] = useState<ProductPickItem | null>(null);
+	const [unitsPerBundle, setUnitsPerBundle] = useState(3);
+	const [bundleQty, setBundleQty] = useState(1);
+	const [postingDate, setPostingDate] = useState(localDate);
+	const [picking, setPicking] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+	const marketplaceStore = form.stores.find((store) => store.toLocaleLowerCase('ru-RU') === 'маркетплейс') ?? '';
+	const sourceQty = unitsPerBundle * bundleQty;
+	const available = source && marketplaceStore ? Number(source.stocks?.[marketplaceStore] ?? 0) : 0;
+	const bundleItemName = source ? `Комплект ${source.name} ${unitsPerBundle} шт` : '';
+
+	const submit = async (): Promise<void> => {
+		setError('');
+		if (!source) return setError('Выберите исходный товар.');
+		if (!marketplaceStore) return setError('Склад «Маркетплейс» не найден.');
+		if (!Number.isInteger(unitsPerBundle) || unitsPerBundle < 2) return setError('В комплекте должно быть не меньше двух штук.');
+		if (!Number.isInteger(bundleQty) || bundleQty < 1) return setError('Количество комплектов должно быть целым и больше нуля.');
+		if (sourceQty > available) return setError(`На складе «Маркетплейс» доступно ${available} шт., требуется ${sourceQty} шт.`);
+		setBusy(true);
+		try {
+			const result = mock
+				? {
+					name: `MAT-STE-DEMO-${Date.now()}`,
+					title: `${postingDate.slice(8, 10)}.${postingDate.slice(5, 7)}.${postingDate.slice(2, 4)}_${bundleItemName}`,
+					sourceQty,
+					bundleProductId: 9900000 + source.productId,
+					bundleItemName,
+					bundleQty,
+					storeTitle: marketplaceStore,
+				}
+				: await createMarketplaceBundle({
+					sourceProductId: source.productId,
+					unitsPerBundle,
+					bundleQty,
+					postingDate,
+				});
+			onDone({
+				name: result.name,
+				title: result.title,
+				operation: 'bundle',
+				marketplace: '',
+				date: postingDate,
+				storeTitle: result.storeTitle,
+				submitted: true,
+				total: 0,
+				itemCount: 1,
+				quantity: result.bundleQty,
+			});
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	if (picking) {
+		return (
+			<div className="marketplace-picker">
+				<ProductBase picker={{
+					title: 'Товар для формирования комплекта',
+					kindFilter: 'goods',
+					onlyStockDefault: true,
+					onCancel: () => setPicking(false),
+					onDone: async (items) => {
+						const picked = items.find((item) => !item.isService);
+						if (picked) setSource(picked);
+						setPicking(false);
+					},
+				}} />
+			</div>
+		);
+	}
+
+	return (
+		<div className="marketplace-modal-backdrop">
+			<section className="marketplace-modal marketplace-bundle-modal" role="dialog" aria-modal="true" aria-labelledby="marketplace-bundle-title">
+				<header>
+					<div><small>Новая операция</small><h2 id="marketplace-bundle-title">Сформировать комплект</h2></div>
+					<button type="button" className="marketplace-close" onClick={onClose} aria-label="Закрыть">×</button>
+				</header>
+				<div className="marketplace-bundle-body">
+					<div className="marketplace-bundle-source">
+						<div>
+							<span>Исходный товар</span>
+							{source
+								? <><b>{source.name}</b><small>#{source.productId} · на складе «Маркетплейс»: {available} шт.</small></>
+								: <b>Товар не выбран</b>}
+						</div>
+						<button type="button" onClick={() => setPicking(true)}>{source ? 'Заменить' : 'Выбрать товар'}</button>
+					</div>
+					<div className="marketplace-sale-fields">
+						<label>Штук в одном комплекте<input type="number" min="2" step="1" value={unitsPerBundle} onChange={(event) => setUnitsPerBundle(Number(event.target.value))} /></label>
+						<label>Количество комплектов<input type="number" min="1" step="1" value={bundleQty} onChange={(event) => setBundleQty(Number(event.target.value))} /></label>
+						<label>Дата формирования<input type="date" value={postingDate} onChange={(event) => setPostingDate(event.target.value)} /></label>
+					</div>
+					<div className="marketplace-bundle-result">
+						<div><span>Будет списано</span><b>{source ? `${sourceQty} шт. · ${source.name}` : '—'}</b></div>
+						<div className="marketplace-bundle-arrow">→</div>
+						<div><span>Будет зачислено</span><b>{source ? `${bundleQty} шт. · ${bundleItemName}` : '—'}</b></div>
+					</div>
+				</div>
+				{error && <div className="marketplace-error">{error}</div>}
+				<footer>
+					<button type="button" onClick={onClose}>Отмена</button>
+					<button type="button" className="primary" disabled={busy || !form.canCreate} onClick={() => void submit()}>{busy ? 'Формирую…' : 'Сформировать'}</button>
+				</footer>
+			</section>
+		</div>
+	);
+}
+
 export function Marketplaces(): JSX.Element {
 	const ctx = getContext();
 	const [form, setForm] = useState<MarketplaceFormData | null>(ctx.__mock ? MOCK_FORM : null);
@@ -212,6 +336,7 @@ export function Marketplaces(): JSX.Element {
 	const [from, setFrom] = useState('');
 	const [to, setTo] = useState('');
 	const [saleOpen, setSaleOpen] = useState(false);
+	const [bundleOpen, setBundleOpen] = useState(false);
 	const [catalogOpen, setCatalogOpen] = useState(false);
 
 	const load = async (): Promise<void> => {
@@ -251,7 +376,7 @@ export function Marketplaces(): JSX.Element {
 			<div className="marketplace-actions">
 				<button type="button" className="marketplace-action primary" disabled={!form?.canCreate} onClick={() => setSaleOpen(true)}><span>↗</span><b>Реализация</b><small>Списать проданный товар</small></button>
 				<button type="button" className="marketplace-action" onClick={() => setCatalogOpen(true)}><span>＋</span><b>Добавить новый товар</b><small>Открыть базу товаров</small></button>
-				<button type="button" className="marketplace-action" onClick={() => setNotice('Формирование комплектов подключим следующим этапом.')}><span>▦</span><b>Сформировать комплект</b><small>Объединить несколько штук</small></button>
+				<button type="button" className="marketplace-action" disabled={!form?.canCreate} onClick={() => setBundleOpen(true)}><span>▦</span><b>Сформировать комплект</b><small>Объединить несколько штук</small></button>
 				<button type="button" className="marketplace-action" onClick={() => setNotice('Связанный возврат подключим после формирования комплектов.')}><span>↩</span><b>Возврат товара</b><small>Вернуть из реализации</small></button>
 			</div>
 
@@ -294,6 +419,7 @@ export function Marketplaces(): JSX.Element {
 				</div>
 			</div>
 			{saleOpen && form && <MarketplaceSaleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setSaleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setSaleOpen(false); setNotice(`Реализация «${row.title}» проведена.`); }} />}
+			{bundleOpen && form && <MarketplaceBundleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setBundleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setBundleOpen(false); setNotice(`Комплект сформирован. Операция «${row.title}» проведена.`); }} />}
 		</section>
 	);
 }
