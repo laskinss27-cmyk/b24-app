@@ -571,15 +571,11 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				return { ok: true, drafts };
 			}
 			if (action === 'return') {
-				// Возврат ОТ КЛИЕНТА — только снабжение+ (Вова 1 / Сергей 1858 / Бекасов 986 + отдел Снабжение 10).
-				const me = await client.call<{ ID?: unknown; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
-				const uid = String(me?.['ID'] ?? '');
-				const depts = Array.isArray(me?.['UF_DEPARTMENT']) ? (me!['UF_DEPARTMENT'] as unknown[]).map(Number) : [];
-				if (!(['1', '1858', '986'].includes(uid) || depts.includes(10))) {
-					return reply.code(403).send({ ok: false, error: 'возврат оформляет снабжение' });
-				}
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				// Возврат доступен менеджеру только в сделке, к которой Битрикс даёт ему доступ.
+				// Проверяем это до создания складских документов, чтобы не расширять прочие права пользователя.
+				await client.call('crm.deal.get', { id: dealId });
 				await assertDealQuoteVariantSelected(erp, dealId);
 				const note = String(b.note ?? '').trim();
 				const lines = (Array.isArray(b.lines) ? b.lines : [])

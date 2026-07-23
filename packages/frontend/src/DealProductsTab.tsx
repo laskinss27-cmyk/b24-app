@@ -386,13 +386,10 @@ export function DealProductsTab(): JSX.Element {
 		}
 		const dealId = ctx.dealId;
 		bx24.init(() => {
-			call<{ ID?: string | number; NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current')
+			call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current')
 				.then((user) => {
 					const viewerId = String(user.ID ?? '');
 					const viewerName = `${user.NAME ?? ''} ${user.LAST_NAME ?? ''}`.trim() || viewerId;
-					// Возврат оформляет снабжение+ (Вова 1 / Сергей 1858 / Бекасов 986 + отдел Снабжение 10).
-					const depts = Array.isArray(user.UF_DEPARTMENT) ? user.UF_DEPARTMENT.map(Number) : [];
-					const canReturn = ['1', '1858', '986'].includes(viewerId) || depts.includes(10);
 					const setupKey = 'b24-fulfillment-setup-2026-07-20-v1';
 					if (window.BX24?.isAdmin() && window.localStorage.getItem(setupKey) !== 'done') {
 						void setupDealFulfillment('2026-07-20', dealId)
@@ -404,7 +401,7 @@ export function DealProductsTab(): JSX.Element {
 					setState({ phase: 'loading' });
 					loadAll(dealId)
 						.then((data) => {
-							setState({ phase: 'ready', data, viewer: viewerName, dev: false, canReturn });
+							setState({ phase: 'ready', data, viewer: viewerName, dev: false, canReturn: true });
 							setActiveVariantId(data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
 						})
 						.catch((err: unknown) => setState({ phase: 'error', message: String(err instanceof Error ? err.message : err) }));
@@ -1407,7 +1404,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					className="btn-secondary"
 					disabled={!canReturn || dev}
 					onClick={() => setShowReturn(true)}
-					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Возврат оформляет снабжение'}
+					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Нет доступа к возврату'}
 				>Возврат</button>}
 				{workingMode && <button
 					className={`btn-secondary${showDealDocuments ? ' active' : ''}`}
