@@ -8,6 +8,7 @@ import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStage
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
+import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -412,6 +413,43 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
+	const syncFulfillment = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
+		try {
+			const result = await syncDealFulfillmentStatus(client, erp, dealId);
+			app.log.info({ dealId, ...result }, '[deal-fulfillment] synchronized');
+		} catch (err) {
+			app.log.error({ dealId }, `[deal-fulfillment] synchronization failed — ${errInfo(err)}`);
+		}
+	};
+
+	// Однократная административная настройка: создать служебное поле и заполнить новые сделки.
+	app.post('/api/deal/fulfillment-setup', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { from?: unknown; dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const from = String(b.from ?? '2026-07-20').trim();
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return reply.code(400).send({ ok: false, error: 'bad from' });
+		const dealId = Number(b.dealId);
+		if (b.dealId !== undefined && (!Number.isInteger(dealId) || dealId <= 0)) {
+			return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		}
+		try {
+			const me = await client.call<{ ID?: unknown }>('user.current', {});
+			if (!['1', '1858'].includes(String(me?.['ID'] ?? ''))) return reply.code(403).send({ ok: false, error: 'настройка доступна администратору' });
+			const field = await ensureDealFulfillmentField(client);
+			const result = await backfillDealFulfillmentSince(client, erp, from);
+			const currentDeal = Number.isInteger(dealId) && dealId > 0
+				? await syncDealFulfillmentStatus(client, erp, dealId)
+				: null;
+			app.log.info({ from, dealId: currentDeal ? dealId : undefined, field, currentDeal, ...result }, '[deal-fulfillment] setup completed');
+			return { ok: true, field, currentDeal, ...result };
+		} catch (err) {
+			app.log.error({}, `[deal-fulfillment] setup failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
 
 	// РЕАЛИЗАЦИЯ В ЯДРЕ (Delivery Note) — «покрывало»: складской документ живёт в ERPNext, не в Б24.
 	// action='list': что уже реализовано по сделке (из ядра по b24_deal_id) — черновики + проведённые;
@@ -545,15 +583,22 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				})), today);
 				const total = Math.round(savedPlan.lines.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
+				await syncFulfillment(client, erp, dealId);
 				app.log.info({ dealId, returns: names.length, planLines: nextPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
 				return { ok: true, returns: names };
 			}
 			if (action === 'submit') {
+				const dealId = Number(b.dealId);
+				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 				const names = (Array.isArray(b.names) ? b.names : []).map(String).filter((n) => n && n !== 'undefined');
 				if (!names.length) return reply.code(400).send({ ok: false, error: 'нет документов для проведения' });
+				const dealDocuments = await listDealRealizations(erp, dealId);
+				const allowedDrafts = new Set(dealDocuments.filter((document) => !document.submitted).map((document) => document.name));
+				if (names.some((name) => !allowedDrafts.has(name))) throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
 				const submitted: string[] = [];
 				for (const name of names) { await submitRealization(erp, name); submitted.push(name); }
-				app.log.info({ submitted: submitted.length }, '[api/deal/realize-core] submitted');
+				await syncFulfillment(client, erp, dealId);
+				app.log.info({ dealId, submitted: submitted.length }, '[api/deal/realize-core] submitted');
 				return { ok: true, submitted };
 			}
 			return reply.code(400).send({ ok: false, error: 'bad action' });
@@ -680,6 +725,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				}
 				const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
+				await syncFulfillment(client, erp, dealId);
 				app.log.info({ dealId, planLines: savedPlan.lines.length, total }, '[api/deal/add-products] core plan + B24 service');
 				return { ok: true, added: priced.length, plan: savedPlan.lines.length, total };
 			}
@@ -960,6 +1006,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const items = await listDealPlan(erp, dealId);
 			const total = Math.round(items.reduce((sum, item) => sum + item.rate * item.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
+			await syncFulfillment(client, erp, dealId);
 			return { ok: true, variants, total };
 		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
 	});
@@ -1012,6 +1059,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const lines = await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
 			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
+			await syncFulfillment(client, erp, dealId);
 			return { ok: true, total };
 		} catch (err) {
 			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-update] failed — ${errInfo(err)}`);
@@ -1036,6 +1084,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const lines = await removeDealStageItem(erp, dealId, stageId, productId);
 			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
+			await syncFulfillment(client, erp, dealId);
 			return { ok: true, total };
 		} catch (err) {
 			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-remove] failed — ${errInfo(err)}`);
@@ -1078,6 +1127,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
 			const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
+			await syncFulfillment(client, erp, dealId);
 			app.log.info({ dealId, lines: savedPlan.lines.length, total }, '[api/deal/plan-set] ok');
 			return { ok: true, total, lines: savedPlan.lines.length };
 		} catch (err) {

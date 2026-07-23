@@ -28,6 +28,7 @@ import {
 	downloadDealXlsx,
 	realizeCoreDraft,
 	realizeCoreSubmit,
+	setupDealFulfillment,
 	createDealReturn,
 	openSupplyCard,
 	createTransfers,
@@ -392,6 +393,14 @@ export function DealProductsTab(): JSX.Element {
 					// Возврат оформляет снабжение+ (Вова 1 / Сергей 1858 / Бекасов 986 + отдел Снабжение 10).
 					const depts = Array.isArray(user.UF_DEPARTMENT) ? user.UF_DEPARTMENT.map(Number) : [];
 					const canReturn = ['1', '1858', '986'].includes(viewerId) || depts.includes(10);
+					const setupKey = 'b24-fulfillment-setup-2026-07-20-v1';
+					if (window.BX24?.isAdmin() && window.localStorage.getItem(setupKey) !== 'done') {
+						void setupDealFulfillment('2026-07-20', dealId)
+							.then((result) => {
+								if (result.failed === 0) window.localStorage.setItem(setupKey, 'done');
+							})
+							.catch(() => undefined);
+					}
 					setState({ phase: 'loading' });
 					loadAll(dealId)
 						.then((data) => {
@@ -1307,7 +1316,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		setBusy(true);
 		setNotice(null);
 		try {
-			const submitted = await realizeCoreSubmit(draftNames);
+			if (dealId == null) return;
+			const submitted = await realizeCoreSubmit(dealId, draftNames);
 			setBatchQty({}); // поля кол-ва сбрасываем — встанут новые остатки
 			setDraftNames([]);
 			setRealizePhase('idle');

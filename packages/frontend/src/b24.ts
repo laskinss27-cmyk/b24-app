@@ -1575,11 +1575,11 @@ export async function realizeCoreDraft(dealId: number, groups: RealizeCoreGroup[
 }
 
 /** Провести черновики реализации в ядре (submit → остаток ядра списывается). */
-export async function realizeCoreSubmit(names: string[]): Promise<string[]> {
+export async function realizeCoreSubmit(dealId: number, names: string[]): Promise<string[]> {
 	const res = await fetch('/api/deal/realize-core', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), action: 'submit', names }),
+		body: JSON.stringify({ ...bx24Auth(), action: 'submit', dealId, names }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; submitted?: string[] };
 	if (!json.ok || !json.submitted) throw new Error(json.error ?? 'не удалось провести реализацию');
@@ -1635,6 +1635,18 @@ export interface KpData {
 	sumGoods: number;
 	sumWorks: number;
 	total: number;
+}
+
+/** Один раз создать служебное поле реализации и заполнить сделки с указанной даты. */
+export async function setupDealFulfillment(from = '2026-07-20', dealId?: number): Promise<{ checked: number; changed: number; failed: number }> {
+	const res = await fetch('/api/deal/fulfillment-setup', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), from, ...(dealId ? { dealId } : {}) }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; checked?: number; changed?: number; failed?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось настроить статус реализации');
+	return { checked: json.checked ?? 0, changed: json.changed ?? 0, failed: json.failed ?? 0 };
 }
 
 export async function fetchDealKp(dealId: number, variantId?: string): Promise<KpData> {
