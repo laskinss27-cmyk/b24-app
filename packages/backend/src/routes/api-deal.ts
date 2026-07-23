@@ -913,6 +913,15 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const items = await listDealPlan(erp, dealId);
 			const serviceIds = await fetchServiceProductIds(client, items.map((item) => item.productId));
 			for (const item of items) item.isService = item.isService || serviceIds.has(item.productId);
+			// Поле могло остаться пустым, если состав был создан до появления синхронизации
+			// или менялся не через наше окно. Открытие вкладки — безопасная точка сверки:
+			// syncDealServiceSum не пишет сделку повторно, когда сумма уже актуальна.
+			try {
+				const serviceSum = await syncDealServiceSum(client, erp, dealId);
+				app.log.info({ dealId, ...serviceSum }, '[deal-service-sum] synchronized on plan load');
+			} catch (error) {
+				app.log.error({ dealId }, `[deal-service-sum] plan-load synchronization failed — ${errInfo(error)}`);
+			}
 			return { ok: true, items };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/plan] failed — ${errInfo(err)}`);
