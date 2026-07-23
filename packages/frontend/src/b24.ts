@@ -1529,6 +1529,18 @@ export interface MarketplaceFormData {
 	canCreate: boolean;
 }
 
+export interface MarketplaceReturnOption {
+	saleName: string;
+	saleTitle: string;
+	marketplace: string;
+	saleDate: string;
+	productId: number;
+	itemName: string;
+	soldQty: number;
+	returnedQty: number;
+	availableQty: number;
+}
+
 export async function fetchMarketplaceFormData(): Promise<MarketplaceFormData> {
 	const res = await fetch('/api/marketplaces/form-data', {
 		method: 'POST',
@@ -1570,6 +1582,65 @@ export async function createMarketplaceSale(input: {
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string; title?: string };
 	if (!json.ok || !json.name || !json.title) throw new Error(json.error ?? 'Не удалось провести реализацию маркетплейса');
 	return { name: json.name, title: json.title };
+}
+
+export async function fetchMarketplaceReturnOptions(productId: number): Promise<MarketplaceReturnOption[]> {
+	const res = await fetch('/api/marketplaces/return-options', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), productId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; options?: MarketplaceReturnOption[] };
+	if (!json.ok) throw new Error(json.error ?? 'Не удалось найти реализации для возврата');
+	return json.options ?? [];
+}
+
+export async function createMarketplaceReturn(input: {
+	saleName: string;
+	productId: number;
+	qty: number;
+	storeTitle: string;
+	postingDate: string;
+}): Promise<{
+	name: string;
+	title: string;
+	marketplace: string;
+	itemName: string;
+	rate: number;
+	total: number;
+	qty: number;
+	storeTitle: string;
+}> {
+	const res = await fetch('/api/marketplaces/return', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as {
+		ok: boolean;
+		error?: string;
+		name?: string;
+		title?: string;
+		marketplace?: string;
+		itemName?: string;
+		rate?: number;
+		total?: number;
+		qty?: number;
+		storeTitle?: string;
+	};
+	if (!json.ok || !json.name || !json.title || !json.marketplace || !json.itemName || !json.storeTitle) {
+		throw new Error(json.error ?? 'Не удалось провести возврат');
+	}
+	return {
+		name: json.name,
+		title: json.title,
+		marketplace: json.marketplace,
+		itemName: json.itemName,
+		rate: Number(json.rate ?? 0),
+		total: Number(json.total ?? 0),
+		qty: Number(json.qty ?? 0),
+		storeTitle: json.storeTitle,
+	};
 }
 
 export async function createMarketplaceBundle(input: {

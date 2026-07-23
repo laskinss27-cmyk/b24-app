@@ -6305,6 +6305,76 @@ body.deal-placement-body #root {
 	font-size: 24px;
 }
 
+.marketplace-return-body {
+	display: grid;
+	gap: 16px;
+	padding: 18px 20px;
+}
+
+.marketplace-return-sale {
+	display: grid;
+	gap: 6px;
+	color: #657184;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.marketplace-return-sale select {
+	width: 100%;
+	padding: 9px 10px;
+	border: 1px solid #cdd5e0;
+	border-radius: 7px;
+	background: #fff;
+	color: #253347;
+	font-size: 13px;
+	text-transform: none;
+}
+
+.marketplace-return-summary {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(120px, 1fr));
+	gap: 10px;
+}
+
+.marketplace-return-summary > div {
+	display: grid;
+	gap: 4px;
+	padding: 12px 14px;
+	border-radius: 8px;
+	background: #f4f7fa;
+}
+
+.marketplace-return-summary span {
+	color: #7a8699;
+	font-size: 11px;
+}
+
+.marketplace-return-summary b {
+	font-size: 14px;
+}
+
+.marketplace-return-body .marketplace-sale-fields {
+	padding: 0;
+	background: transparent;
+}
+
+.marketplace-return-empty {
+	padding: 13px 14px;
+	border: 1px solid #f0d79f;
+	border-radius: 8px;
+	background: #fff8e7;
+	color: #72521c;
+	font-size: 12px;
+}
+
+.marketplace-return-help {
+	margin: 0;
+	color: #657184;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
 .marketplace-modal footer .primary {
 	border-color: #185fa5;
 	background: #185fa5;
@@ -6348,6 +6418,9 @@ body.deal-placement-body #root {
 	}
 	.marketplace-bundle-result {
 		grid-template-columns: 1fr;
+	}
+	.marketplace-return-summary {
+		grid-template-columns: repeat(2, minmax(120px, 1fr));
 	}
 	.marketplace-bundle-arrow {
 		transform: rotate(90deg);

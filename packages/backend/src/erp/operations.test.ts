@@ -9,8 +9,10 @@ import {
 	MARKETPLACE_BUNDLE_UNITS_FIELD,
 	REALIZATION_SEGMENT_FIELD,
 	createMarketplaceBundle,
+	createMarketplaceReturn,
 	createMarketplaceSale,
 	listMarketplaceOperations,
+	listMarketplaceReturnOptions,
 	marketplaceSaleTitle,
 	syncDealRealizationPrices,
 } from './operations.js';
@@ -308,4 +310,66 @@ test('marketplace bundle repacks source units into finished bundle units on the 
 	assert.equal(journal[0]?.itemCount, 1);
 	assert.equal(journal[0]?.quantity, 4);
 	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
+});
+
+test('marketplace return is linked to its sale and cannot exceed the quantity left to return', async () => {
+	const erp = new FakeErp([]);
+	const sale = await createMarketplaceSale(erp.asClient(), {
+		marketplace: 'Озон',
+		storeTitle: 'Маркетплейс',
+		postingDate: '2026-07-23',
+		lines: [{ productId: 101, itemName: 'Датчик', qty: 5, rate: 1500 }],
+	});
+
+	const before = await listMarketplaceReturnOptions(erp.asClient(), 101);
+	assert.equal(before.length, 1);
+	assert.equal(before[0]?.saleName, sale.name);
+	assert.equal(before[0]?.soldQty, 5);
+	assert.equal(before[0]?.returnedQty, 0);
+	assert.equal(before[0]?.availableQty, 5);
+
+	const returned = await createMarketplaceReturn(erp.asClient(), {
+		saleName: sale.name,
+		productId: 101,
+		qty: 2,
+		storeTitle: 'Shelly',
+		postingDate: '2026-07-24',
+	});
+	assert.equal(returned.title, '24.07.26_Возврат_Озон');
+	assert.equal(returned.total, -3000);
+
+	const documents = erp.active();
+	const returnDocument = documents.find((document) => document.name === returned.name);
+	assert.ok(returnDocument);
+	assert.equal(returnDocument.docstatus, 1);
+	assert.equal(returnDocument['is_return'], 1);
+	assert.equal(returnDocument['return_against'], sale.name);
+	assert.equal(returnDocument[MARKETPLACE_OPERATION_FIELD], 'return');
+	assert.equal(returnDocument[MARKETPLACE_NAME_FIELD], 'Озон');
+	assert.equal(returnDocument.items[0]?.['item_code'], '101');
+	assert.equal(returnDocument.items[0]?.['qty'], -2);
+	assert.equal(returnDocument.items[0]?.['warehouse'], 'Shelly - TEST');
+	assert.ok(returnDocument.items[0]?.['dn_detail']);
+
+	const after = await listMarketplaceReturnOptions(erp.asClient(), 101);
+	assert.equal(after.length, 1);
+	assert.equal(after[0]?.returnedQty, 2);
+	assert.equal(after[0]?.availableQty, 3);
+
+	await assert.rejects(
+		createMarketplaceReturn(erp.asClient(), {
+			saleName: sale.name,
+			productId: 101,
+			qty: 4,
+			storeTitle: 'Маркетплейс',
+			postingDate: '2026-07-24',
+		}),
+		/доступно для возврата 3/,
+	);
+
+	const journal = await listMarketplaceOperations(erp.asClient());
+	assert.equal(journal.length, 2);
+	assert.equal(journal[0]?.operation, 'return');
+	assert.equal(journal[0]?.storeTitle, 'Shelly');
+	assert.equal(journal[0]?.quantity, 2);
 });

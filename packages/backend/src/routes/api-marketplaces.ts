@@ -3,9 +3,11 @@ import { B24ApiError, B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	createMarketplaceBundle,
+	createMarketplaceReturn,
 	createMarketplaceSale,
 	listActiveStoreTitles,
 	listMarketplaceOperations,
+	listMarketplaceReturnOptions,
 } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { invalidateCatalogCache } from './api-catalog.js';
@@ -109,6 +111,24 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		}
 	});
 
+	app.post('/api/marketplaces/return-options', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
+		const productId = Number(body['productId']);
+		if (!Number.isInteger(productId) || productId <= 0) {
+			return reply.code(400).send({ ok: false, error: 'не выбран товар для возврата' });
+		}
+		try {
+			return { ok: true, options: await listMarketplaceReturnOptions(erp, productId) };
+		} catch (error) {
+			app.log.error({}, `[api/marketplaces/return-options] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
 	app.post('/api/marketplaces/sale', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(body);
@@ -163,6 +183,57 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			return { ok: true, ...result };
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/sale] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/marketplaces/return', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
+		try {
+			if (!(await canManageStock(client))) {
+				return reply.code(403).send({ ok: false, error: 'проводить возвраты может только снабжение' });
+			}
+			const saleName = String(body['saleName'] ?? '').trim();
+			const productId = Number(body['productId']);
+			const qty = Number(body['qty']);
+			const storeTitle = String(body['storeTitle'] ?? '').trim();
+			const postingDate = String(body['postingDate'] ?? '').trim();
+			if (!saleName) return reply.code(400).send({ ok: false, error: 'не выбрана исходная реализация' });
+			if (!Number.isInteger(productId) || productId <= 0) {
+				return reply.code(400).send({ ok: false, error: 'не выбран товар для возврата' });
+			}
+			if (!(qty > 0)) return reply.code(400).send({ ok: false, error: 'количество возврата должно быть больше нуля' });
+			if (!DATE_RE.test(postingDate)) {
+				return reply.code(400).send({ ok: false, error: 'неверная дата возврата' });
+			}
+			const activeStores = await listActiveStoreTitles(erp);
+			const allowedStores = marketplaceStores(activeStores);
+			const resolvedStore = allowedStores.find((store) =>
+				normalizeTitle(store) === normalizeTitle(storeTitle));
+			if (!resolvedStore) {
+				return reply.code(400).send({ ok: false, error: 'вернуть товар можно только на склад Shelly или Маркетплейс' });
+			}
+			const result = await createMarketplaceReturn(erp, {
+				saleName,
+				productId,
+				qty,
+				storeTitle: resolvedStore,
+				postingDate,
+			});
+			app.log.info({
+				name: result.name,
+				saleName,
+				productId,
+				qty,
+				storeTitle: resolvedStore,
+			}, '[api/marketplaces/return] submitted');
+			return { ok: true, ...result, qty, storeTitle: resolvedStore };
+		} catch (error) {
+			app.log.error({}, `[api/marketplaces/return] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});
