@@ -554,6 +554,8 @@ export interface BaseRow {
 
 export interface ProductBaseResult {
 	rows: BaseRow[];
+	/** Активные склады Битрикса и складского ядра; ERP-only склады имеют служебные ID. */
+	stores: StoreInfo[];
 	/** ISO-время сборки на бэкенде (для метки свежести). */
 	generatedAt: string;
 	/** true — отдано из кэша бэкенда (не пересобиралось). */
@@ -573,9 +575,9 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; generatedAt?: string; cached?: boolean; canEditPrices?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditPrices?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
-	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached), canEditPrices: Boolean(json.canEditPrices) };
+	return { rows: json.rows ?? [], stores: json.stores ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached), canEditPrices: Boolean(json.canEditPrices) };
 }
 
 export async function updateCatalogPrices(productId: number, retail: number, purchase: number): Promise<{ retail: number; purchase: number }> {

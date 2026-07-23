@@ -4,7 +4,6 @@ import {
 	fetchProductBase,
 	createCatalogProduct,
 	updateCatalogPrices,
-	fetchStores,
 	fetchCurrentUserId,
 	openProductCard,
 	createQuickSale,
@@ -374,10 +373,9 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
 				setGate('ready');
 				setUid(uid);
-				const sts = await withRetry(() => fetchStores(), 2, 15000, 'catalog.store.list');
-				setStores(sts.filter((s) => s.active));
 				const base = await withTimeout(fetchProductBase(), 90000, 'catalog/browse');
 				setRows(base.rows);
+				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setCanEditPrices(base.canEditPrices);
 				setMode('base');
@@ -454,6 +452,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		try {
 			const base = await withTimeout(fetchProductBase(true), 90000, 'catalog/browse');
 			setRows(base.rows);
+			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
 			setCanEditPrices(base.canEditPrices);
 		} catch {

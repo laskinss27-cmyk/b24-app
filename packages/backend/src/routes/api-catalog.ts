@@ -4,7 +4,7 @@ import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	ensureCoreItem, fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing,
-	fetchCoreCatalogPrices, updateCoreCatalogPrices,
+	fetchCoreCatalogPrices, listActiveStoreTitles, updateCoreCatalogPrices,
 } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 
@@ -30,8 +30,14 @@ function errInfo(err: unknown): string {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+interface CatalogStore {
+	id: number;
+	title: string;
+	active: boolean;
+}
 interface CacheEntry {
 	data: ProductBaseData;
+	stores: CatalogStore[];
 	expires: number;
 }
 const baseCache = new Map<string, CacheEntry>();
@@ -64,6 +70,10 @@ function cleanText(value: unknown): string {
 
 function normalized(value: unknown): string {
 	return cleanText(value).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, '');
+}
+
+function normalizedStoreTitle(value: unknown): string {
+	return cleanText(value).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
 }
 
 async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
@@ -190,33 +200,54 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const hit = baseCache.get(cacheKey);
 		if (!body.force && hit && hit.expires > now) {
 			app.log.info({ rows: hit.data.rows.length, cached: true }, '[api/catalog/browse] cache hit');
-			return { ok: true, rows: hit.data.rows, generatedAt: hit.data.generatedAt, cached: true, canEditPrices };
+			return { ok: true, rows: hit.data.rows, stores: hit.stores, generatedAt: hit.data.generatedAt, cached: true, canEditPrices };
 		}
 
 		const t0 = Date.now();
 		try {
-			const data = await buildProductBase(client);
+			const [data, storeRes] = await Promise.all([
+				buildProductBase(client),
+				client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', {
+					select: ['id', 'title', 'active'],
+					order: { id: 'ASC' },
+				}),
+			]);
+			const stores: CatalogStore[] = (storeRes?.stores ?? [])
+				.map((store) => ({
+					id: Number(store['id']),
+					title: String(store['title'] ?? '').trim(),
+					active: store['active'] === 'Y',
+				}))
+				.filter((store) => Number.isInteger(store.id) && store.id > 0 && store.title && store.active);
 			// Остатки из ЯДРА (как во вкладке сделки): подменяем Б24-остатки ядерными, если ядро подключено.
-			// Один Bin-запрос на весь каталог + список складов Б24 для карты «имя склада → storeId».
+			// Склады, живущие только в ядре (например Shelly и Маркетплейс), получают служебные
+			// отрицательные ID: они нужны лишь фронту для фильтра и обратно уходят по названию.
 			// Ядро недоступно/ошибка → молча оставляем остатки Б24 (мягкий фолбэк). Радиус — только «База» (канарейка).
 			let stockSource = 'b24';
 			const erp = ErpClient.fromEnv();
 			if (erp) {
 				try {
-					const [coreStocks, corePrices, storeRes] = await Promise.all([
+					const [coreStocks, corePrices, coreStoreTitles] = await Promise.all([
 						fetchErpStocks(erp),
 						fetchCoreCatalogPrices(erp),
-						client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] }),
+						listActiveStoreTitles(erp),
 					]);
-					const titleToId = new Map<string, number>();
-					for (const s of storeRes?.stores ?? []) titleToId.set(String(s['title'] ?? ''), Number(s['id']));
+					const titleToId = new Map(stores.map((store) => [normalizedStoreTitle(store.title), store.id]));
+					let virtualStoreId = -1;
+					for (const title of coreStoreTitles) {
+						const key = normalizedStoreTitle(title);
+						if (titleToId.has(key)) continue;
+						stores.push({ id: virtualStoreId, title, active: true });
+						titleToId.set(key, virtualStoreId);
+						virtualStoreId -= 1;
+					}
 					for (const r of data.rows) {
 						const byTitle = coreStocks.get(r.id);
 						const byStore: Record<number, number> = {};
 						if (byTitle) {
 							for (const [title, qty] of Object.entries(byTitle)) {
-								const sid = titleToId.get(title);
-								if (sid) byStore[sid] = (byStore[sid] ?? 0) + qty;
+								const sid = titleToId.get(normalizedStoreTitle(title));
+								if (sid != null) byStore[sid] = (byStore[sid] ?? 0) + qty;
 							}
 						}
 						r.stockByStore = byStore;
@@ -230,9 +261,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					app.log.warn({}, `[api/catalog/browse] ядро недоступно — остатки из Б24 (фолбэк): ${errInfo(e)}`);
 				}
 			}
-			baseCache.set(cacheKey, { data, expires: now + CACHE_TTL_MS });
+			stores.sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+			baseCache.set(cacheKey, { data, stores, expires: now + CACHE_TTL_MS });
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached: false, stock: stockSource }, '[api/catalog/browse] ok');
-			return { ok: true, rows: data.rows, generatedAt: data.generatedAt, cached: false, canEditPrices };
+			return { ok: true, rows: data.rows, stores, generatedAt: data.generatedAt, cached: false, canEditPrices };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
