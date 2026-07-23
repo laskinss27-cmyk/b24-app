@@ -9,6 +9,7 @@ import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
 import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
+import { backfillDealServiceSumSince, ensureDealServiceSumField, syncDealServiceSum } from '../deal-service-sum.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
 
 /**
@@ -414,12 +415,18 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
-	const syncFulfillment = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
+	const syncDealTechnicalFields = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
 		try {
 			const result = await syncDealFulfillmentStatus(client, erp, dealId);
 			app.log.info({ dealId, ...result }, '[deal-fulfillment] synchronized');
 		} catch (err) {
 			app.log.error({ dealId }, `[deal-fulfillment] synchronization failed — ${errInfo(err)}`);
+		}
+		try {
+			const result = await syncDealServiceSum(client, erp, dealId);
+			app.log.info({ dealId, ...result }, '[deal-service-sum] synchronized');
+		} catch (err) {
+			app.log.error({ dealId }, `[deal-service-sum] synchronization failed — ${errInfo(err)}`);
 		}
 	};
 
@@ -440,14 +447,21 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const me = await client.call<{ ID?: unknown }>('user.current', {});
 			if (!['1', '1858'].includes(String(me?.['ID'] ?? ''))) return reply.code(403).send({ ok: false, error: 'настройка доступна администратору' });
 			const field = await ensureDealFulfillmentField(client);
+			const serviceSumField = await ensureDealServiceSumField(client);
 			const currentDeal = Number.isInteger(dealId) && dealId > 0
-				? await syncDealFulfillmentStatus(client, erp, dealId)
+				? {
+					fulfillment: await syncDealFulfillmentStatus(client, erp, dealId),
+					serviceSum: await syncDealServiceSum(client, erp, dealId),
+				}
 				: null;
 			void backfillDealFulfillmentSince(client, erp, from)
 				.then((result) => app.log.info({ from, ...result }, '[deal-fulfillment] background backfill completed'))
 				.catch((err) => app.log.error({ from }, `[deal-fulfillment] background backfill failed — ${errInfo(err)}`));
-			app.log.info({ from, dealId: currentDeal ? dealId : undefined, field, currentDeal }, '[deal-fulfillment] setup scheduled');
-			return { ok: true, field, currentDeal, backfillScheduled: true, checked: 0, changed: 0, failed: 0 };
+			void backfillDealServiceSumSince(client, erp, from)
+				.then((result) => app.log.info({ from, ...result }, '[deal-service-sum] background backfill completed'))
+				.catch((err) => app.log.error({ from }, `[deal-service-sum] background backfill failed — ${errInfo(err)}`));
+			app.log.info({ from, dealId: currentDeal ? dealId : undefined, field, serviceSumField, currentDeal }, '[deal-technical-fields] setup scheduled');
+			return { ok: true, field, serviceSumField, currentDeal, backfillScheduled: true, checked: 0, changed: 0, failed: 0 };
 		} catch (err) {
 			app.log.error({}, `[deal-fulfillment] setup failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -586,7 +600,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				})), today);
 				const total = Math.round(savedPlan.lines.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
-				await syncFulfillment(client, erp, dealId);
+				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, returns: names.length, planLines: nextPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
 				return { ok: true, returns: names };
 			}
@@ -600,7 +614,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				if (names.some((name) => !allowedDrafts.has(name))) throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
 				const submitted: string[] = [];
 				for (const name of names) { await submitRealization(erp, name); submitted.push(name); }
-				await syncFulfillment(client, erp, dealId);
+				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, submitted: submitted.length }, '[api/deal/realize-core] submitted');
 				return { ok: true, submitted };
 			}
@@ -728,7 +742,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				}
 				const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 				await setDealB24Service(client, dealId, total);
-				await syncFulfillment(client, erp, dealId);
+				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, planLines: savedPlan.lines.length, total }, '[api/deal/add-products] core plan + B24 service');
 				return { ok: true, added: priced.length, plan: savedPlan.lines.length, total };
 			}
@@ -1009,7 +1023,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const items = await listDealPlan(erp, dealId);
 			const total = Math.round(items.reduce((sum, item) => sum + item.rate * item.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
-			await syncFulfillment(client, erp, dealId);
+			await syncDealTechnicalFields(client, erp, dealId);
 			return { ok: true, variants, total };
 		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
 	});
@@ -1062,7 +1076,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const lines = await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
 			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
-			await syncFulfillment(client, erp, dealId);
+			await syncDealTechnicalFields(client, erp, dealId);
 			return { ok: true, total };
 		} catch (err) {
 			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-update] failed — ${errInfo(err)}`);
@@ -1087,7 +1101,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const lines = await removeDealStageItem(erp, dealId, stageId, productId);
 			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
-			await syncFulfillment(client, erp, dealId);
+			await syncDealTechnicalFields(client, erp, dealId);
 			return { ok: true, total };
 		} catch (err) {
 			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-remove] failed — ${errInfo(err)}`);
@@ -1130,7 +1144,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
 			const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
-			await syncFulfillment(client, erp, dealId);
+			await syncDealTechnicalFields(client, erp, dealId);
 			app.log.info({ dealId, lines: savedPlan.lines.length, total }, '[api/deal/plan-set] ok');
 			return { ok: true, total, lines: savedPlan.lines.length };
 		} catch (err) {
