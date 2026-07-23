@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindRepairsUriPlacement, ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
+import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { receiveRepairUnit, renameRepairItem, moveRepairUnit, deliverRepairUnit, fetchErpStoreStockFull } from '../erp/operations.js';
@@ -964,13 +964,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			data.history = Array.isArray(data.history) ? data.history : [];
 			const title = [data.device, data.model].filter(Boolean).join(' ') || 'оборудование';
 			const customerPrice = data.ourPrice ?? data.cost;
-			// Регистрация REST_APP_URI требует административных прав. Снабженец вправе
-			// отправлять цену, но его OAuth-токен закономерно получает ACCESS_DENIED.
 			const notificationClient = systemClient() ?? client;
-			const uriPlacement = await bindRepairsUriPlacement({ client: notificationClient, publicBaseUrl: app.config.publicBaseUrl });
-			if (!['bound', 'already-bound'].includes(uriPlacement.status)) {
-				return reply.code(400).send({ ok: false, error: `не удалось подготовить ссылку на ремонт: ${uriPlacement.status}` });
-			}
+			// Ссылка ведёт на обычную страницу уже установленного приложения
+			// /marketplace/view/<appCode>/ и не требует placement.bind при каждом сообщении.
+			// Повторный bind через токен снабженца давал ACCESS_DENIED и блокировал отправку.
 			const message = [
 				`[B]Согласуйте стоимость ремонта с клиентом[/B]`,
 				`Ремонт #${data.repairNo || id}: ${title}`,
