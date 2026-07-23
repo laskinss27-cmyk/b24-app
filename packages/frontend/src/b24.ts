@@ -1081,6 +1081,10 @@ export async function selectDealQuoteVariant(dealId: number, variantId: string):
 	return dealVariantMutation('/api/deal/variant-select', { dealId, variantId });
 }
 
+export async function cancelDealQuoteVariantSelection(dealId: number): Promise<DealQuoteVariants> {
+	return dealVariantMutation('/api/deal/variant-selection-cancel', { dealId });
+}
+
 export interface DealShippedInfo {
 	orderId: number | null;
 	/** rowId строки сделки → суммарно отгружено партиями (черновики + проведённые). */

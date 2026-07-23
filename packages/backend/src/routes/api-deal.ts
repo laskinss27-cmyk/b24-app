@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
@@ -961,6 +961,32 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const total = Math.round(items.reduce((sum, item) => sum + item.rate * item.qty, 0) * 100) / 100;
 			await setDealB24Service(client, dealId, total);
 			return { ok: true, variants, total };
+		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
+	});
+
+	app.post('/api/deal/variant-selection-cancel', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		try {
+			const current = await listDealQuoteVariants(erp, dealId);
+			if (!current.selectedId) return { ok: true, variants: current };
+			await ensureTransfersEntity(client);
+			const [stages, realizations, supply, transferItems] = await Promise.all([
+				listDealStages(erp, dealId),
+				listDealRealizations(erp, dealId),
+				listSupplyRequestsForDeal(erp, dealId),
+				client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
+			]);
+			const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
+			if (stages.length || realizations.length || supply.length || transfers.length) {
+				throw new Error('отмена выбора недоступна: по сделке уже есть этапы, заявки снабжению, реализации или перемещения');
+			}
+			return { ok: true, variants: await cancelDealQuoteVariantSelection(erp, dealId) };
 		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
 	});
 

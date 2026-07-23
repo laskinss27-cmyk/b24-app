@@ -744,8 +744,48 @@ export async function selectDealQuoteVariant(erp: ErpClient, dealId: number, var
 	if (!selected) throw new Error('вариант не найден');
 	if (state.selectedId === selected.id) return state;
 	if (!selected.items.length) throw new Error('нельзя выбрать пустой вариант');
+	const currentItems = state.selectedId
+		? (await listDealPlan(erp, dealId)).map((item): DealQuoteVariantItem => ({
+			productId: item.productId,
+			itemName: item.itemName,
+			qty: item.qty,
+			priceListRate: item.priceListRate,
+			discountPercent: item.discountPercent,
+			isService: item.isService,
+		}))
+		: null;
 	await upsertDealPlan(erp, dealId, selected.items, deliveryDate);
-	const next = { ...state, selectedId: selected.id };
+	const next: DealQuoteVariants = {
+		...state,
+		selectedId: selected.id,
+		variants: currentItems
+			? state.variants.map((variant) => variant.id === state.selectedId ? { ...variant, items: currentItems } : variant)
+			: state.variants,
+	};
+	await saveDealQuoteVariants(erp, plan.name, next);
+	return next;
+}
+
+export async function cancelDealQuoteVariantSelection(erp: ErpClient, dealId: number): Promise<DealQuoteVariants> {
+	const plan = await dealPlanDocument(erp, dealId);
+	if (!plan) throw new Error('план сделки не найден');
+	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
+	if (!state.selectedId) return state;
+	const currentItems = (await listDealPlan(erp, dealId)).map((item): DealQuoteVariantItem => ({
+		productId: item.productId,
+		itemName: item.itemName,
+		qty: item.qty,
+		priceListRate: item.priceListRate,
+		discountPercent: item.discountPercent,
+		isService: item.isService,
+	}));
+	const next: DealQuoteVariants = {
+		...state,
+		selectedId: null,
+		variants: state.variants.map((variant) => variant.id === state.selectedId
+			? { ...variant, items: currentItems }
+			: variant),
+	};
 	await saveDealQuoteVariants(erp, plan.name, next);
 	return next;
 }

@@ -24,6 +24,7 @@ import {
 	renameDealQuoteVariant,
 	deleteDealQuoteVariant,
 	selectDealQuoteVariant,
+	cancelDealQuoteVariantSelection,
 	downloadDealXlsx,
 	realizeCoreDraft,
 	realizeCoreSubmit,
@@ -866,6 +867,18 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		} catch (error) { setVariantError(String(error instanceof Error ? error.message : error)); }
 		finally { setVariantBusy(false); }
 	};
+	const cancelVariantSelection = async (): Promise<void> => {
+		const selected = data.quoteVariants.variants.find((variant) => variant.id === data.quoteVariants.selectedId);
+		const message = `Отменить выбор клиента${selected ? ` «${selected.name}»` : ''}? Текущий состав сохранится в этом варианте, после чего снова можно будет создавать и редактировать варианты КП.`;
+		if (dealId == null || variantBusy || !window.confirm(message)) return;
+		setVariantBusy(true); setVariantError(null);
+		try {
+			const result = await cancelDealQuoteVariantSelection(dealId);
+			onActiveVariant(result.variants.find((variant) => variant.id === data.quoteVariants.selectedId)?.id ?? result.variants[0]?.id ?? null);
+			await onReload();
+		} catch (error) { setVariantError(String(error instanceof Error ? error.message : error)); }
+		finally { setVariantBusy(false); }
+	};
 
 	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
 	// монитор-вариация выпадал из «только TYPE 1» и был невидим при видимой сумме).
@@ -1378,7 +1391,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				)}
 				<button className="btn-secondary" onClick={() => onKp()}>КП</button>
 				<button className="btn-secondary" disabled={dealId == null || exportBusy} onClick={() => void exportXlsx()}>{exportBusy ? 'Формируем…' : 'Скачать Excel'}</button>
-				{(proposalEditable || canSwitchVariant) && activeVariant && <button className="btn-primary" disabled={variantBusy || activeVariant.items.length === 0} onClick={() => void chooseVariant()}>{canSwitchVariant ? 'Выбрать вместо текущего' : 'Выбран клиентом'}</button>}
+				{(proposalEditable || canSwitchVariant || viewingSelected) && activeVariant && (
+					<button
+						className={viewingSelected ? 'btn-secondary danger' : 'btn-primary'}
+						disabled={variantBusy || (!viewingSelected && activeVariant.items.length === 0)}
+						onClick={() => void (viewingSelected ? cancelVariantSelection() : chooseVariant())}
+					>{viewingSelected ? 'Отменить выбор клиента' : canSwitchVariant ? 'Выбрать вместо текущего' : 'Выбран клиентом'}</button>
+				)}
 				{workingMode && <button
 					className="btn-secondary"
 					disabled={!canReturn || dev}
