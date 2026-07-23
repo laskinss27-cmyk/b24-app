@@ -1635,7 +1635,6 @@ export interface KpData {
 	sumGoods: number;
 	sumWorks: number;
 	total: number;
-	variantName?: string;
 }
 
 export async function fetchDealKp(dealId: number, variantId?: string): Promise<KpData> {

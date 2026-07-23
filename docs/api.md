@@ -29,7 +29,7 @@
 | `POST /api/deal/add-products` | `dealId, items[{productId,quantity,price?}]` | пачка `crm.item.productrow.add` (существующие строки не трогает) |
 | `POST /api/deal/add-product` | `dealId, productId, quantity, price?` | одна строка (легаси одиночного флоу) |
 | `POST /api/deal/variant-selection-cancel` | `dealId` | отменяет выбор клиента до начала складских операций и сохраняет текущий рабочий состав в ранее выбранном варианте КП |
-| `POST /api/deal/export-xlsx` | `dealId, variantId?` | формирует Excel-снимок сделки или варианта КП: товары идут перед работами, внизу расположены раздельные суммы и общий итог |
+| `POST /api/deal/export-xlsx` | `dealId, variantId?` | формирует Excel-снимок сделки или варианта КП без внутреннего названия варианта: товары идут перед работами, внизу расположены раздельные суммы и общий итог |
 | `POST /api/deal/shipped` | `dealId` | состояние сделки: `rows` (строки серверным клиентом), `shipped` (rowId→отгружено), `reserves` (rowId→склады из резервов черновиков), `shipments` (партии с раскладкой `items`), `supply` (заявки снабжения), `orderId` |
 | `POST /api/deal/realize` | `dealId, items[{rowId,productId,quantity,rowQuantity,price,name}]` | черновик-партия реализации (цикл см. features.md); ответ `{orderId, orderReused, shipmentId, accountNumber, dupRemoved}`; при ошибке `{ok:false, error, created{...}}` — артефакты для ручной зачистки |
 | `POST /api/deal/supply-request` | `dealId, items[{name,quantity,measure}], storeToName?` | заявка снабжения: append в открытую или создание «Поставка № N_…» (+галка на сделке против робота); ответ `{mode:'created'\|'appended', cardId, title}` |

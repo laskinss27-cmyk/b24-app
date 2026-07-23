@@ -101,7 +101,6 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 					</div>
 
 					<div className="kp-title">Коммерческое предложение № {kp.number}</div>
-					{kp.variantName && <div className="kp-meta"><b>{kp.variantName}</b></div>}
 					<div className="kp-meta">от {ruDate(kp.date)}{kp.manager.name ? ` · менеджер: ${kp.manager.name}` : ''}{kp.manager.phone ? ` · ${kp.manager.phone}` : ''}</div>
 					<div className="kp-client">Клиент: <b>{kp.client.name || '—'}</b>{kp.client.phone && <> · {kp.client.phone}</>}</div>
 

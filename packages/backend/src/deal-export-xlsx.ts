@@ -16,7 +16,6 @@ export interface DealExportRow {
 export interface DealExportInput {
 	dealId: number;
 	dealTitle: string;
-	variantName?: string;
 	createdAt?: Date;
 	rows: DealExportRow[];
 }
@@ -81,7 +80,7 @@ export function createDealExportWorkbook(input: DealExportInput): ExcelJS.Workbo
 	sheet.mergeCells('A2:N2');
 	const meta = sheet.getCell('A2');
 	const created = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Moscow' }).format(input.createdAt ?? new Date());
-	meta.value = `${input.variantName ? `Вариант КП: ${safeText(input.variantName, 80)} · ` : ''}Сформировано: ${created}`;
+	meta.value = `Сформировано: ${created}`;
 	meta.font = { name: 'Arial', size: 10, color: { argb: 'FF52657A' } };
 	meta.alignment = { vertical: 'middle', horizontal: 'left' };
 	sheet.getRow(2).height = 23;

@@ -339,7 +339,7 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 
 type ExportPlanLine = Pick<PlanItem, 'productId' | 'qty' | 'priceListRate' | 'discountPercent'> & { itemName?: string; isService?: boolean };
 
-function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realizations: ErpRealization[], variantName?: string): DealExportRow[] {
+function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realizations: ErpRealization[], isVariant = false): DealExportRow[] {
 	const stageQuantity = new Map<number, number>();
 	for (const stage of stages) {
 		for (const item of stage.items) stageQuantity.set(item.productId, (stageQuantity.get(item.productId) ?? 0) + item.qty);
@@ -347,10 +347,10 @@ function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realization
 
 	const segments: Array<Omit<DealExportRow, 'realized' | 'warehouses'>> = [];
 	for (const item of plan) {
-		const quantity = variantName ? item.qty : Math.max(0, item.qty - (stageQuantity.get(item.productId) ?? 0));
+		const quantity = isVariant ? item.qty : Math.max(0, item.qty - (stageQuantity.get(item.productId) ?? 0));
 		if (quantity <= 0.000001) continue;
 		segments.push({
-			stage: variantName ? `Вариант КП: ${variantName}` : 'Основная сделка',
+			stage: isVariant ? '' : 'Основная сделка',
 			type: item.isService ? 'Работа' : 'Товар',
 			productId: item.productId,
 			name: item.itemName || `#${item.productId}`,
@@ -360,7 +360,7 @@ function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realization
 			discountPercent: item.discountPercent,
 		});
 	}
-	if (!variantName) {
+	if (!isVariant) {
 		stages.forEach((stage, stageIndex) => {
 			for (const item of stage.items) {
 				if (item.qty <= 0.000001) continue;
@@ -380,7 +380,7 @@ function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realization
 
 	const realizedByProduct = new Map<number, number>();
 	const warehouseQuantity = new Map<number, Map<string, number>>();
-	if (!variantName) {
+	if (!isVariant) {
 		for (const document of realizations.filter((item) => item.submitted)) {
 			for (const item of document.items) {
 				realizedByProduct.set(item.productId, (realizedByProduct.get(item.productId) ?? 0) + item.qty);
@@ -1103,13 +1103,11 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			let plan: ExportPlanLine[] = [];
 			let stages: DealStage[] = [];
 			let realizations: ErpRealization[] = [];
-			let variantName = '';
 			if (erp) {
 				if (variantId) {
 					const variants = await listDealQuoteVariants(erp, dealId);
 					const variant = variants.variants.find((item) => item.id === variantId);
 					if (!variant) throw new Error('вариант КП не найден');
-					variantName = variant.name;
 					plan = variant.items.map((item) => ({ ...item, isService: Boolean(item.isService) }));
 				} else {
 					[plan, stages, realizations] = await Promise.all([
@@ -1120,11 +1118,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				}
 			}
 			if (!plan.length && !variantId) plan = await listLegacyB24DealLines(client, dealId);
-			const rows = dealExportRows(plan, stages, realizations, variantName || undefined);
+			const rows = dealExportRows(plan, stages, realizations, Boolean(variantId));
 			const file = await buildDealExportXlsx({
 				dealId,
 				dealTitle: String(deal?.['TITLE'] ?? ''),
-				...(variantName ? { variantName } : {}),
 				rows,
 			});
 			app.log.info({ dealId, variantId: variantId || undefined, rows: rows.length }, '[api/deal/export-xlsx] ok');
@@ -1174,7 +1171,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const variantState = erp && variantId ? await listDealQuoteVariants(erp, dealId) : null;
 			const variant = variantState?.variants.find((row) => row.id === variantId);
 			const variantItems = variant?.items ?? null;
-			const variantName = variant?.name ?? '';
 			if (erp && variantId && !variantItems) throw new Error('вариант КП не найден');
 			type KpRawRow = { productId: number; name: string; type: number; qty: number; price: number; stage?: string };
 			let raw: KpRawRow[] = [];
@@ -1185,7 +1181,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					type: r.isService ? 7 : 1,
 					qty: r.qty,
 					price: r.priceListRate * (1 - r.discountPercent / 100),
-					stage: `Вариант КП: ${variantName}`,
 				}));
 			} else if (erp) {
 				const [plan, stages] = await Promise.all([
@@ -1229,7 +1224,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					number: dealId, date: String(deal?.['DATE_CREATE'] ?? ''), title: String(deal?.['TITLE'] ?? ''),
 					client: { name: clientName, phone: clientPhone },
 					manager: { name: mgrName, phone: mgrPhone },
-					goods, works, sumGoods, sumWorks, total: sumGoods + sumWorks, ...(variantName ? { variantName } : {}),
+					goods, works, sumGoods, sumWorks, total: sumGoods + sumWorks,
 				},
 			};
 		} catch (err) {
