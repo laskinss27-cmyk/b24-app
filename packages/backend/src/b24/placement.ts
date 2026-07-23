@@ -463,20 +463,39 @@ export async function ensureTransferRequestsEntity(client: B24Client): Promise<{
  */
 export const REPAIRS_MENU_TITLE = 'Ремонты';
 export const REPAIRS_URI_PLACEMENT = 'REST_APP_URI';
+/** REST_APP_URI обслуживает не только ремонты, но и ссылки на заявки/перемещения. */
+export const APP_URI_TITLE = 'Умный дом';
 
 export async function bindRepairsUriPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/repairs`;
+	let renamed = false;
 	try {
+		try {
+			const bindings = await opts.client.call<Array<{ placement?: string; handler?: string; title?: string }>>('placement.get', {});
+			const current = Array.isArray(bindings)
+				? bindings.find((binding) => binding.placement === REPAIRS_URI_PLACEMENT && binding.handler === handlerUrl)
+				: undefined;
+			if (current?.title === APP_URI_TITLE) return { status: 'already-bound' };
+			if (current?.title) {
+				await opts.client.call('placement.unbind', {
+					PLACEMENT: REPAIRS_URI_PLACEMENT,
+					HANDLER: handlerUrl,
+				});
+				renamed = true;
+			}
+		} catch {
+			// Для обычного пользователя сверка может быть закрыта; безопасно пробуем идемпотентный bind ниже.
+		}
 		await opts.client.call('placement.bind', {
 			PLACEMENT: REPAIRS_URI_PLACEMENT,
 			HANDLER: handlerUrl,
-			TITLE: REPAIRS_MENU_TITLE,
+			TITLE: APP_URI_TITLE,
 			LANG_ALL: {
-				ru: { TITLE: REPAIRS_MENU_TITLE },
-				en: { TITLE: 'Repairs' },
+				ru: { TITLE: APP_URI_TITLE },
+				en: { TITLE: 'Smart Home' },
 			},
 		});
-		return { status: 'bound' };
+		return { status: renamed ? 'renamed' : 'bound' };
 	} catch (err) {
 		if (err instanceof B24ApiError) {
 			const message = `${err.code} ${err.description ?? ''}`;
