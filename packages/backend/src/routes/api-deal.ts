@@ -439,12 +439,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const me = await client.call<{ ID?: unknown }>('user.current', {});
 			if (!['1', '1858'].includes(String(me?.['ID'] ?? ''))) return reply.code(403).send({ ok: false, error: 'настройка доступна администратору' });
 			const field = await ensureDealFulfillmentField(client);
-			const result = await backfillDealFulfillmentSince(client, erp, from);
 			const currentDeal = Number.isInteger(dealId) && dealId > 0
 				? await syncDealFulfillmentStatus(client, erp, dealId)
 				: null;
-			app.log.info({ from, dealId: currentDeal ? dealId : undefined, field, currentDeal, ...result }, '[deal-fulfillment] setup completed');
-			return { ok: true, field, currentDeal, ...result };
+			void backfillDealFulfillmentSince(client, erp, from)
+				.then((result) => app.log.info({ from, ...result }, '[deal-fulfillment] background backfill completed'))
+				.catch((err) => app.log.error({ from }, `[deal-fulfillment] background backfill failed — ${errInfo(err)}`));
+			app.log.info({ from, dealId: currentDeal ? dealId : undefined, field, currentDeal }, '[deal-fulfillment] setup scheduled');
+			return { ok: true, field, currentDeal, backfillScheduled: true, checked: 0, changed: 0, failed: 0 };
 		} catch (err) {
 			app.log.error({}, `[deal-fulfillment] setup failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });

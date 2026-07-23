@@ -93,18 +93,23 @@ export async function backfillDealFulfillmentSince(
 			select: ['ID', 'DATE_CREATE', 'TITLE', DEAL_FULFILLMENT_FIELD],
 			start,
 		});
-		for (const deal of deals) {
-			const dealId = Number(deal['ID']);
-			if (!Number.isInteger(dealId) || dealId <= 0) continue;
-			checked++;
-			try {
-				const result = await syncDealFulfillmentStatus(client, erp, dealId);
-				if (result.changed) changed++;
-				onDeal?.({ dealId, ...result });
-			} catch (error) {
-				failed++;
-				onDeal?.({ dealId, error: error instanceof Error ? error.message : String(error) });
-			}
+		// Пять сделок параллельно: быстрее последовательного обхода, но без шторма
+		// запросов к ERPNext и Б24 (B24Client дополнительно держит лимит 8 RPS).
+		for (let offset = 0; offset < deals.length; offset += 5) {
+			const chunk = deals.slice(offset, offset + 5);
+			await Promise.all(chunk.map(async (deal) => {
+				const dealId = Number(deal['ID']);
+				if (!Number.isInteger(dealId) || dealId <= 0) return;
+				checked++;
+				try {
+					const result = await syncDealFulfillmentStatus(client, erp, dealId);
+					if (result.changed) changed++;
+					onDeal?.({ dealId, ...result });
+				} catch (error) {
+					failed++;
+					onDeal?.({ dealId, error: error instanceof Error ? error.message : String(error) });
+				}
+			}));
 		}
 		if (deals.length < 50) break;
 	}
