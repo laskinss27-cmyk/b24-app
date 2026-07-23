@@ -1525,6 +1525,8 @@ export interface CoreRealizationItem {
 	productId: number;
 	itemName: string;
 	qty: number;
+	/** Строка состава сделки: base или stage:<id>. */
+	segmentId?: string;
 	/** Цена продажи за единицу, зафиксированная в документе реализации. */
 	rate: number;
 	/** Склад списания — название склада Б24 (наш UI оперирует ими). */
@@ -1559,7 +1561,7 @@ export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRea
 export interface RealizeCoreGroup {
 	/** Название склада Б24. Для отдельной группы услуг пусто: склад им не нужен. */
 	storeTitle: string;
-	lines: Array<{ productId: number; qty: number; rate: number; isService?: boolean }>;
+	lines: Array<{ productId: number; qty: number; rate: number; segmentId: string; isService?: boolean }>;
 }
 
 /** Создать черновики реализации: товары — по складам, услуги могут входить в товарную группу без склада на строке. */

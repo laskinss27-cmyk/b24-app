@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
@@ -513,29 +513,36 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				});
 				// Тип строки определяем на сервере, а не доверяем флагу клиента: товар нельзя
 				// выдать за услугу, чтобы обойти склад и проверку остатка.
-				const [dealPlan, catalogServiceIds] = await Promise.all([
+				const [dealPlan, dealStages, catalogServiceIds] = await Promise.all([
 					listDealPlan(erp, dealId).catch(() => []),
+					listDealStages(erp, dealId).catch(() => []),
 					fetchServiceProductIds(client, requestedProductIds),
 				]);
 				const serviceIds = new Set([
 					...dealPlan.filter((item) => item.isService).map((item) => item.productId),
 					...catalogServiceIds,
 				]);
+				const validStageSegments = new Set(dealStages.flatMap((stage) =>
+					stage.items.map((item) => `${item.productId}\u0000stage:${stage.id}`)));
 				const parsedGroups = groups.map((g) => {
 					const gg = g as { storeTitle?: unknown; lines?: unknown };
 					const storeTitle = String(gg.storeTitle ?? '').trim();
 					const lines = (Array.isArray(gg.lines) ? gg.lines : [])
-						.map((l) => l as { productId?: unknown; qty?: unknown; rate?: unknown })
+						.map((l) => l as { productId?: unknown; qty?: unknown; rate?: unknown; segmentId?: unknown })
 						.map((l) => {
 							const productId = Number(l.productId);
 							const isService = serviceIds.has(productId);
-							return { productId, qty: Number(l.qty), rate: Number(l.rate) || 0, ...(storeTitle ? { storeTitle } : {}), isService };
+							const segmentId = String(l.segmentId ?? 'base').trim() || 'base';
+							return { productId, qty: Number(l.qty), rate: Number(l.rate) || 0, segmentId, ...(storeTitle ? { storeTitle } : {}), isService };
 						})
 						.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 					return { storeTitle, lines };
 				}).filter((group) => group.lines.length);
 				for (const group of parsedGroups) for (const line of group.lines) {
 					if (!line.isService && !group.storeTitle) throw new Error(`для товара #${line.productId} не выбран склад реализации`);
+					if (line.segmentId !== 'base' && !validStageSegments.has(`${line.productId}\u0000${line.segmentId}`)) {
+						throw new Error(`этап реализации для позиции #${line.productId} не найден`);
+					}
 				}
 				await ensureTransfersEntity(client);
 				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
@@ -580,28 +587,15 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					.map((l) => ({ productId: Number(l.productId), qty: Number(l.qty), storeTitle: String(l.store ?? '').trim() }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0 && l.storeTitle);
 				if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций возврата' });
-				const { names } = await createClientReturns(erp, { dealId, ...(note ? { note } : {}), lines });
+				const { names, returned } = await createClientReturns(erp, { dealId, ...(note ? { note } : {}), lines });
 				// Возвращённый товар больше не должен снова появляться в сделке как неотгруженный.
-				// Уменьшаем план на фактически возвращённое количество; полный возврат удаляет строку.
-				const returnedByProduct = new Map<number, number>();
-				for (const line of lines) returnedByProduct.set(line.productId, (returnedByProduct.get(line.productId) ?? 0) + line.qty);
-				const currentPlan = await listDealPlan(erp, dealId);
-				const nextPlan = currentPlan
-					.map((item) => ({ ...item, qty: Math.max(0, item.qty - (returnedByProduct.get(item.productId) ?? 0)) }))
-					.filter((item) => item.qty > 0.000001);
+				// Уменьшаем именно основную строку или конкретный этап, из которого был возврат.
 				const today = new Date().toISOString().slice(0, 10);
-				const savedPlan = await upsertDealPlan(erp, dealId, nextPlan.map((item) => ({
-					productId: item.productId,
-					itemName: item.itemName,
-					qty: item.qty,
-					priceListRate: item.priceListRate,
-					discountPercent: item.discountPercent,
-					isService: item.isService,
-				})), today);
-				const total = Math.round(savedPlan.lines.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
+				const savedPlan = await reduceDealPlanForReturns(erp, dealId, returned, today);
+				const total = await calculateDealPlanTotal(erp, dealId);
 				await setDealB24Service(client, dealId, total);
 				await syncDealTechnicalFields(client, erp, dealId);
-				app.log.info({ dealId, returns: names.length, planLines: nextPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
+				app.log.info({ dealId, returns: names.length, planLines: savedPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
 				return { ok: true, returns: names };
 			}
 			if (action === 'submit') {
@@ -708,6 +702,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				// ПОКРЫВАЛО: состав сделки → ПЛАН в ядре (Sales Order), а Б24 несёт ОДНУ свёрнутую
 				// услугу «Выезд инженера». Новые товары мёржим в план по productId (кол-во суммируем).
 				const byId = new Map<number, DealPlanDraftLine>();
+				const targetStageId = String(b.stageId ?? '').trim();
+				const addingToStage = Boolean(targetStageId) || b.stage === true;
 				const currentPlan = await listDealPlan(erp, dealId);
 				const initialLines = currentPlan.length
 					? currentPlan.map((p) => ({ productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent, isService: p.isService }))
@@ -715,15 +711,19 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				for (const p of initialLines) byId.set(p.productId, p);
 				for (const it of priced) {
 					const prev = byId.get(it.productId);
-					// Новый товар добавляется БЕЗ скидки (база = цена из пикера). Существующий — копим кол-во, цену обновляем, скидку сохраняем.
-					if (prev) { prev.qty += it.quantity; prev.priceListRate = it.price; prev.isService = prev.isService || it.isService; }
+					// Новый товар добавляется БЕЗ скидки. У существующего копим количество;
+					// добавление в этап не должно менять цену основной строки этого товара.
+					if (prev) {
+						prev.qty += it.quantity;
+						if (!addingToStage) prev.priceListRate = it.price;
+						prev.isService = prev.isService || it.isService;
+					}
 					else byId.set(it.productId, { productId: it.productId, qty: it.quantity, priceListRate: it.price, discountPercent: 0, isService: it.isService, ...(it.name ? { itemName: it.name } : {}) });
 				}
 				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
 				const savedPlan = await upsertDealPlan(erp, dealId, lines, today);
 				const stageItems = priced.map((item) => ({ productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, price: item.price, discountPercent: 0, isService: item.isService }));
-				const targetStageId = String(b.stageId ?? '').trim();
 				if (targetStageId) {
 					await appendDealStageItems(erp, dealId, targetStageId, stageItems);
 				} else if (b.stage === true) {
@@ -740,7 +740,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 						items: stageItems,
 					});
 				}
-				const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
+				const total = await calculateDealPlanTotal(erp, dealId);
 				await setDealB24Service(client, dealId, total);
 				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, planLines: savedPlan.lines.length, total }, '[api/deal/add-products] core plan + B24 service');
@@ -827,9 +827,15 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
 			const all = rows ?? [];
 			let found = false;
+			let productId = 0;
+			let previousFinalPrice = 0;
 			const setRows = all.map((r) => {
 				const isTarget = Number(r['ID']) === rowId;
-				if (isTarget) found = true;
+				if (isTarget) {
+					found = true;
+					productId = Number(r['PRODUCT_ID'] ?? 0);
+					previousFinalPrice = Number(r['PRICE'] ?? 0);
+				}
 				return {
 					PRODUCT_ID: Number(r['PRODUCT_ID'] ?? 0),
 					PRODUCT_NAME: String(r['PRODUCT_NAME'] ?? ''),
@@ -844,7 +850,21 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				};
 			});
 			if (!found) return reply.code(404).send({ ok: false, error: 'строка не найдена' });
-			await client.call('crm.deal.productrows.set', { id: dealId, rows: setRows });
+			const erp = ErpClient.fromEnv();
+			const priceChanged = Number.isInteger(productId) && productId > 0 && Math.abs(finalPrice - previousFinalPrice) >= 0.005;
+			let realizationPriceSynced = false;
+			if (erp && priceChanged) {
+				await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: 'base', rate: finalPrice }]);
+				realizationPriceSynced = true;
+			}
+			try {
+				await client.call('crm.deal.productrows.set', { id: dealId, rows: setRows });
+			} catch (error) {
+				if (erp && realizationPriceSynced) {
+					await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: 'base', rate: previousFinalPrice }]);
+				}
+				throw error;
+			}
 			app.log.info({ dealId, rowId, newQty, basePrice, rate, finalPrice }, '[api/deal/update-product] ok');
 			return { ok: true };
 		} catch (err) {
@@ -1073,8 +1093,24 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 		try {
 			await assertDealQuoteVariantSelected(erp, dealId);
-			const lines = await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
-			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
+			const previousStage = (await listDealStages(erp, dealId)).find((stage) => stage.id === stageId);
+			const previous = previousStage?.items.find((line) => line.productId === productId);
+			if (!previous) throw new Error('позиция этапа не найдена');
+			const previousFinalPrice = Math.round(previous.price * (1 - (previous.discountPercent ?? 0) / 100) * 100) / 100;
+			const nextFinalPrice = Math.round(price * (1 - discountPercent / 100) * 100) / 100;
+			const priceChanged = Math.abs(nextFinalPrice - previousFinalPrice) >= 0.005;
+			if (priceChanged) {
+				await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: `stage:${stageId}`, rate: nextFinalPrice }]);
+			}
+			try {
+				await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
+			} catch (error) {
+				if (priceChanged) {
+					await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: `stage:${stageId}`, rate: previousFinalPrice }]);
+				}
+				throw error;
+			}
+			const total = await calculateDealPlanTotal(erp, dealId);
 			await setDealB24Service(client, dealId, total);
 			await syncDealTechnicalFields(client, erp, dealId);
 			return { ok: true, total };
@@ -1098,8 +1134,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 		try {
 			await assertDealQuoteVariantSelected(erp, dealId);
-			const lines = await removeDealStageItem(erp, dealId, stageId, productId);
-			const total = Math.round(lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
+			await removeDealStageItem(erp, dealId, stageId, productId);
+			const total = await calculateDealPlanTotal(erp, dealId);
 			await setDealB24Service(client, dealId, total);
 			await syncDealTechnicalFields(client, erp, dealId);
 			return { ok: true, total };
@@ -1133,7 +1169,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const total = Math.round(variantItems.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 				return { ok: true, total, lines: variantItems.length };
 			}
-			if (!lines.length && !(await listDealPlan(erp, dealId)).length) {
+			const previousPlan = await listDealPlan(erp, dealId);
+			if (!lines.length && !previousPlan.length) {
 				const legacyLines = await listLegacyB24DealLines(client, dealId);
 				if (legacyLines.length) {
 					return reply.code(409).send({ ok: false, error: 'нельзя очистить старую сделку до переноса её состава в ядро' });
@@ -1141,8 +1178,30 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			}
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const today = new Date().toISOString().slice(0, 10);
-			const savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
-			const total = Math.round(savedPlan.lines.reduce((a, l) => a + l.priceListRate * (1 - l.discountPercent / 100) * l.qty, 0) * 100) / 100;
+			const previousByProduct = new Map(previousPlan.map((line) => [line.productId, line.rate]));
+			const changedPrices: Array<{ productId: number; segmentId: string; rate: number }> = [];
+			for (const line of lines) {
+				const previousRate = previousByProduct.get(line.productId);
+				const nextRate = Math.round(line.priceListRate * (1 - line.discountPercent / 100) * 100) / 100;
+				if (previousRate !== undefined && Math.abs(nextRate - previousRate) >= 0.005) {
+					changedPrices.push({ productId: line.productId, segmentId: 'base', rate: nextRate });
+				}
+			}
+			if (changedPrices.length) await syncDealRealizationPrices(erp, dealId, changedPrices);
+			let savedPlan: Awaited<ReturnType<typeof upsertDealPlan>>;
+			try {
+				savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
+			} catch (error) {
+				if (changedPrices.length) {
+					const rollbackPrices = changedPrices.flatMap(({ productId }) => {
+						const previousRate = previousByProduct.get(productId);
+						return previousRate === undefined ? [] : [{ productId, segmentId: 'base', rate: previousRate }];
+					});
+					await syncDealRealizationPrices(erp, dealId, rollbackPrices);
+				}
+				throw error;
+			}
+			const total = await calculateDealPlanTotal(erp, dealId);
 			await setDealB24Service(client, dealId, total);
 			await syncDealTechnicalFields(client, erp, dealId);
 			app.log.info({ dealId, lines: savedPlan.lines.length, total }, '[api/deal/plan-set] ok');

@@ -1,6 +1,6 @@
 import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
-import { listDealPlan, type PlanItem } from './erp/operations.js';
+import { calculateDealPlanTotal, type PlanItem } from './erp/operations.js';
 
 export const DEAL_SERVICE_SUM_FIELD = 'UF_CRM_SERVICE_SUM';
 export const DEAL_SERVICE_SUM_FIELD_XML_ID = 'B24_APP_DEAL_SERVICE_SUM';
@@ -25,11 +25,10 @@ export async function syncDealServiceSum(
 	erp: ErpClient,
 	dealId: number,
 ): Promise<{ value: number; changed: boolean }> {
-	const [plan, deal] = await Promise.all([
-		listDealPlan(erp, dealId),
+	const [value, deal] = await Promise.all([
+		calculateDealPlanTotal(erp, dealId, true),
 		client.call<Record<string, unknown>>('crm.deal.get', { id: dealId }),
 	]);
-	const value = calculateDealServiceSum(plan);
 	if (parseMoneyAmount(deal[DEAL_SERVICE_SUM_FIELD]) === value) {
 		return { value, changed: false };
 	}
