@@ -351,7 +351,7 @@ function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realization
 		if (quantity <= 0.000001) continue;
 		segments.push({
 			stage: variantName ? `Вариант КП: ${variantName}` : 'Основная сделка',
-			type: item.isService ? 'Услуга' : 'Товар',
+			type: item.isService ? 'Работа' : 'Товар',
 			productId: item.productId,
 			name: item.itemName || `#${item.productId}`,
 			quantity,
@@ -366,7 +366,7 @@ function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realization
 				if (item.qty <= 0.000001) continue;
 				segments.push({
 					stage: stage.name?.trim() || `Этап ${stageIndex + 1}`,
-					type: item.isService ? 'Услуга' : 'Товар',
+					type: item.isService ? 'Работа' : 'Товар',
 					productId: item.productId,
 					name: item.itemName || `#${item.productId}`,
 					quantity: item.qty,
@@ -1198,7 +1198,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				raw = dealExportRows(plan, stages, []).map((r) => ({
 					productId: r.productId,
 					name: r.name,
-					type: r.type === 'Услуга' ? 7 : 1,
+					type: r.type === 'Работа' ? 7 : 1,
 					qty: r.quantity,
 					price: r.priceListRate * (1 - r.discountPercent / 100),
 					stage: r.stage,

@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 
 export interface DealExportRow {
 	stage: string;
-	type: 'Товар' | 'Услуга';
+	type: 'Товар' | 'Работа';
 	productId: number;
 	name: string;
 	quantity: number;
@@ -27,6 +27,10 @@ const safeText = (value: string, max = 500): string => value.replace(/[\u0000-\u
 
 export function createDealExportWorkbook(input: DealExportInput): ExcelJS.Workbook {
 	if (!input.rows.length) throw new Error('в сделке нет позиций для экспорта');
+	const rows = [
+		...input.rows.filter((row) => row.type === 'Товар'),
+		...input.rows.filter((row) => row.type === 'Работа'),
+	];
 
 	const workbook = new ExcelJS.Workbook();
 	workbook.creator = 'Умный дом';
@@ -45,8 +49,8 @@ export function createDealExportWorkbook(input: DealExportInput): ExcelJS.Workbo
 			margins: { left: 0.25, right: 0.25, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 },
 		},
 	});
-	sheet.views = [{ state: 'frozen', ySplit: 6, showGridLines: false }];
-	sheet.pageSetup.printTitlesRow = '6:6';
+	sheet.views = [{ state: 'frozen', ySplit: 4, showGridLines: false }];
+	sheet.pageSetup.printTitlesRow = '4:4';
 	sheet.headerFooter.oddFooter = 'Страница &P из &N';
 
 	sheet.columns = [
@@ -82,27 +86,13 @@ export function createDealExportWorkbook(input: DealExportInput): ExcelJS.Workbo
 	meta.alignment = { vertical: 'middle', horizontal: 'left' };
 	sheet.getRow(2).height = 23;
 
-	const firstDataRow = 7;
-	const lastDataRow = firstDataRow + input.rows.length - 1;
-	const goodsTotal = roundMoney(input.rows.filter((row) => row.type === 'Товар').reduce((sum, row) => sum + lineAmount(row), 0));
-	const servicesTotal = roundMoney(input.rows.filter((row) => row.type === 'Услуга').reduce((sum, row) => sum + lineAmount(row), 0));
-	const summary = [
-		{ labelCell: 'A4', valueCell: 'B4', label: 'Товары', formula: `SUMIF(C${firstDataRow}:C${lastDataRow},"Товар",K${firstDataRow}:K${lastDataRow})`, result: goodsTotal },
-		{ labelCell: 'D4', valueCell: 'E4', label: 'Услуги', formula: `SUMIF(C${firstDataRow}:C${lastDataRow},"Услуга",K${firstDataRow}:K${lastDataRow})`, result: servicesTotal },
-		{ labelCell: 'G4', valueCell: 'H4', label: 'Итого', formula: `SUM(K${firstDataRow}:K${lastDataRow})`, result: roundMoney(goodsTotal + servicesTotal) },
-	];
-	for (const item of summary) {
-		const labelCell = sheet.getCell(item.labelCell);
-		labelCell.value = item.label;
-		labelCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF52657A' } };
-		const valueCell = sheet.getCell(item.valueCell);
-		valueCell.value = { formula: item.formula, result: item.result };
-		valueCell.numFmt = '#,##0.00 [$₽-ru-RU]';
-		valueCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FF12345B' } };
-	}
+	const firstDataRow = 5;
+	const lastDataRow = firstDataRow + rows.length - 1;
+	const goodsTotal = roundMoney(rows.filter((row) => row.type === 'Товар').reduce((sum, row) => sum + lineAmount(row), 0));
+	const worksTotal = roundMoney(rows.filter((row) => row.type === 'Работа').reduce((sum, row) => sum + lineAmount(row), 0));
 
 	const headers = ['№', 'Этап', 'Тип', 'Код', 'Наименование', 'Количество', 'Ед.', 'Цена до скидки', 'Скидка, %', 'Цена', 'Сумма', 'Реализовано', 'Осталось', 'Склад(ы) реализации'];
-	const headerRow = sheet.getRow(6);
+	const headerRow = sheet.getRow(4);
 	headerRow.values = headers;
 	headerRow.height = 32;
 	headerRow.eachCell((cell) => {
@@ -112,7 +102,7 @@ export function createDealExportWorkbook(input: DealExportInput): ExcelJS.Workbo
 		cell.border = { bottom: { style: 'thin', color: { argb: 'FF173E57' } } };
 	});
 
-	input.rows.forEach((item, index) => {
+	rows.forEach((item, index) => {
 		const rowNumber = firstDataRow + index;
 		const rate = roundMoney(item.priceListRate * (1 - item.discountPercent / 100));
 		const amount = roundMoney(rate * item.quantity);
@@ -139,26 +129,45 @@ export function createDealExportWorkbook(input: DealExportInput): ExcelJS.Workbo
 			cell.font = { name: 'Arial', size: 10, color: { argb: 'FF1D2A38' } };
 			cell.alignment = { vertical: 'middle', horizontal: [1, 3, 4, 6, 7, 9, 12, 13].includes(column) ? 'center' : column >= 8 && column <= 11 ? 'right' : 'left', wrapText: column === 5 || column === 14 };
 			cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index % 2 === 0 ? 'FFF7FAFC' : 'FFFFFFFF' } };
-			cell.border = { bottom: { style: 'hair', color: { argb: 'FFD9E2EA' } } };
+			cell.border = {
+				...(index > 0 && rows[index - 1]?.type !== item.type ? { top: { style: 'medium' as const, color: { argb: 'FF246B8E' } } } : {}),
+				bottom: { style: 'hair', color: { argb: 'FFD9E2EA' } },
+			};
 		});
 		for (const column of [8, 10, 11]) row.getCell(column).numFmt = '#,##0.00 [$₽-ru-RU]';
 		row.getCell(9).numFmt = '0.0%';
 	});
 
-	const totalRowNumber = lastDataRow + 1;
-	const totalRow = sheet.getRow(totalRowNumber);
-	sheet.mergeCells(`E${totalRowNumber}:J${totalRowNumber}`);
-	totalRow.getCell(5).value = 'ИТОГО';
-	totalRow.getCell(11).value = { formula: `SUM(K${firstDataRow}:K${lastDataRow})`, result: roundMoney(goodsTotal + servicesTotal) };
-	totalRow.height = 28;
-	for (const cell of [totalRow.getCell(5), totalRow.getCell(11)]) {
-		cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF12345B' } };
-		cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5F1F7' } };
-		cell.border = { top: { style: 'medium', color: { argb: 'FF246B8E' } } };
-	}
-	totalRow.getCell(11).numFmt = '#,##0.00 [$₽-ru-RU]';
+	const summaryRows = [
+		{ label: 'ТОВАРЫ', formula: `SUMIF(C${firstDataRow}:C${lastDataRow},"Товар",K${firstDataRow}:K${lastDataRow})`, result: goodsTotal, total: false },
+		{ label: 'РАБОТЫ', formula: `SUMIF(C${firstDataRow}:C${lastDataRow},"Работа",K${firstDataRow}:K${lastDataRow})`, result: worksTotal, total: false },
+		{ label: 'ИТОГО', formula: `SUM(K${firstDataRow}:K${lastDataRow})`, result: roundMoney(goodsTotal + worksTotal), total: true },
+	];
+	summaryRows.forEach((summary, index) => {
+		const rowNumber = lastDataRow + index + 1;
+		const row = sheet.getRow(rowNumber);
+		sheet.mergeCells(`E${rowNumber}:J${rowNumber}`);
+		row.getCell(5).value = summary.label;
+		row.getCell(11).value = { formula: summary.formula, result: summary.result };
+		row.height = summary.total ? 30 : 25;
+		for (const cell of [row.getCell(5), row.getCell(11)]) {
+			cell.font = { name: 'Arial', size: summary.total ? 12 : 11, bold: true, color: { argb: 'FF12345B' } };
+			cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: summary.total ? 'FFD7EAF3' : 'FFF1F7FA' } };
+			cell.border = { top: { style: summary.total ? 'medium' : 'thin', color: { argb: 'FF246B8E' } } };
+		}
+		row.getCell(11).numFmt = '#,##0.00 [$₽-ru-RU]';
+	});
+	const totalRowNumber = lastDataRow + summaryRows.length;
 
-	sheet.autoFilter = { from: { row: 6, column: 1 }, to: { row: lastDataRow, column: 14 } };
+	for (let rowNumber = lastDataRow + 1; rowNumber <= totalRowNumber; rowNumber += 1) {
+		const row = sheet.getRow(rowNumber);
+		for (let column = 5; column <= 11; column += 1) {
+			const cell = row.getCell(column);
+			if (!cell.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowNumber === totalRowNumber ? 'FFD7EAF3' : 'FFF1F7FA' } };
+		}
+	}
+
+	sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: lastDataRow, column: 14 } };
 	sheet.pageSetup.printArea = `A1:N${totalRowNumber}`;
 	return workbook;
 }
