@@ -9,6 +9,7 @@ import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
 import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
+import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -1189,7 +1190,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	});
 
 	// Данные для КП (коммерческого предложения) из сделки: клиент, менеджер, товары/работы,
-	// артикулы, итоги. Фото товаров добавятся позже (read из ядра Item.image). Документ собирает фронт.
+	// артикулы, фото из товарной базы Б24 и итоги. Документ собирает фронт.
 	app.post('/api/deal/kp', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
 		const client = clientFrom(b);
@@ -1261,10 +1262,30 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					}))
 					.filter((r) => r.productId !== VYEZD_PRODUCT_ID);
 			}
+			const catalogInfo = await enrichCatalogProducts(
+				client,
+				raw.filter((row) => row.type !== 7).map((row) => row.productId),
+			).catch((err) => {
+				app.log.warn({ dealId }, `[api/deal/kp] catalog images failed — ${errInfo(err)}`);
+				return new Map();
+			});
 			const rows = raw
 				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price), ...(r.stage ? { stage: r.stage } : {}) }))
 				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
-				.map((r) => ({ productId: r.productId, name: r.name, article: articleOf(r.name), qty: r.qty, price: r.price, sum: r.price * r.qty, isWork: r.type === 7, ...(r.stage ? { stage: r.stage } : {}) }));
+				.map((r) => {
+					const info = catalogInfo.get(r.productId);
+					return {
+						productId: r.productId,
+						name: r.name,
+						article: info?.article || info?.model || articleOf(r.name),
+						qty: r.qty,
+						price: r.price,
+						sum: r.price * r.qty,
+						isWork: r.type === 7,
+						...(r.stage && r.stage !== 'Основная сделка' ? { stage: r.stage } : {}),
+						...(info?.photoPath ? { photoPath: info.photoPath } : {}),
+					};
+				});
 			const goods = rows.filter((r) => !r.isWork);
 			const works = rows.filter((r) => r.isWork);
 			const sumGoods = goods.reduce((a, r) => a + r.sum, 0);

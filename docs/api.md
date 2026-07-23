@@ -30,6 +30,7 @@
 | `POST /api/deal/add-product` | `dealId, productId, quantity, price?` | одна строка (легаси одиночного флоу) |
 | `POST /api/deal/variant-selection-cancel` | `dealId` | отменяет выбор клиента до начала складских операций и сохраняет текущий рабочий состав в ранее выбранном варианте КП |
 | `POST /api/deal/fulfillment-setup` | `from` | административно создаёт служебное поле «Все позиции реализованы» и пересчитывает сделки с указанной даты |
+| `POST /api/deal/kp` | `dealId, variantId?` | возвращает состав печатного КП, включая фото товаров из Базы, без названия варианта/«Основная сделка» и реквизитов юридического лица |
 | `POST /api/deal/export-xlsx` | `dealId, variantId?` | формирует Excel-снимок сделки или варианта КП без внутреннего названия варианта: товары идут перед работами, внизу расположены раздельные суммы и общий итог |
 | `POST /api/deal/shipped` | `dealId` | состояние сделки: `rows` (строки серверным клиентом), `shipped` (rowId→отгружено), `reserves` (rowId→склады из резервов черновиков), `shipments` (партии с раскладкой `items`), `supply` (заявки снабжения), `orderId` |
 | `POST /api/deal/realize` | `dealId, items[{rowId,productId,quantity,rowQuantity,price,name}]` | черновик-партия реализации (цикл см. features.md); ответ `{orderId, orderReused, shipmentId, accountNumber, dupRemoved}`; при ошибке `{ok:false, error, created{...}}` — артефакты для ручной зачистки |

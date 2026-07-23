@@ -332,7 +332,7 @@ async function fetchProductsFull(client: B24Client, ids: number[], prefix: strin
  * простой товар — бренд/модель/фото со своего; оффер «с предложениями» — бренд/модель
  * базовую берём с родителя, артикул/вариацию (property360) и фото-галерею (property104) — со своего.
  */
-async function enrichProducts(client: B24Client, ids: number[]): Promise<Map<number, Omit<StockLine, 'productId' | 'book'>>> {
+export async function enrichProducts(client: B24Client, ids: number[]): Promise<Map<number, Omit<StockLine, 'productId' | 'book'>>> {
 	const info = new Map<number, Omit<StockLine, 'productId' | 'book'>>();
 	const uniq = [...new Set(ids.filter((x) => x > 0))];
 	if (!uniq.length) return info;

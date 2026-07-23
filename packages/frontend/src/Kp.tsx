@@ -1,14 +1,13 @@
 import { Fragment, useEffect, useState } from 'react';
-import { fetchDealKp, withTimeout, type KpData, type KpRow } from './b24.js';
+import { fetchDealKp, photoFullUrl, withTimeout, type KpData, type KpRow } from './b24.js';
 import { REPAIR_LOGO } from './repair-logo.js';
 
 /**
  * КП (коммерческое предложение) из сделки — печатный документ под бренд (красный #ED2024 + белый).
- * Данные из /api/deal/kp (клиент/менеджер/товары/работы/итоги). Фото товаров пока заглушка-рамка
- * (подключим из ядра Item.image). Печать через window.print + @media print.
+ * Данные из /api/deal/kp (клиент/менеджер/товары/работы/фото/итоги).
+ * Печать через window.print + @media print.
  */
 
-const COMPANY = { name: 'ИП Поляков Д. Ю.', phone: '+7 812 963-02-32', site: 'dom-automation.ru' };
 const money = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽`;
 function ruDate(s: string): string {
 	if (!s) return '';
@@ -44,6 +43,22 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 		withTimeout(fetchDealKp(dealId, variantId), 30000, 'deal/kp').then(setKp).catch((e: unknown) => setErr(String(e instanceof Error ? e.message : e)));
 	}, [dealId, mock, variantId]);
 
+	const printKp = async (): Promise<void> => {
+		const pending = [...document.querySelectorAll<HTMLImageElement>('.kp-doc img')]
+			.filter((image) => !image.complete)
+			.map((image) => new Promise<void>((resolve) => {
+				image.addEventListener('load', () => resolve(), { once: true });
+				image.addEventListener('error', () => resolve(), { once: true });
+			}));
+		if (pending.length) {
+			await Promise.race([
+				Promise.all(pending),
+				new Promise<void>((resolve) => window.setTimeout(resolve, 3000)),
+			]);
+		}
+		window.print();
+	};
+
 	// Единая сетка колонок для таблиц товаров и работ — чтобы цифры (кол-во/цена/сумма) стояли в один столбец.
 	const renderCols = (): JSX.Element => (
 		<colgroup>
@@ -54,15 +69,18 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 			<col style={{ width: '104px' }} />
 		</colgroup>
 	);
-	const goodsRow = (r: KpRow, i: number): JSX.Element => (
-		<tr key={`g${i}`} className={i % 2 ? 'kp-zebra' : ''}>
-			<td className="kp-photo-cell">{r.photo ? <img src={r.photo} alt="" className="kp-photo" /> : <div className="kp-photo kp-photo-empty" />}</td>
-			<td>{r.name}{r.article && <div className="kp-article">{r.article}</div>}</td>
-			<td className="kp-num">{r.qty}</td>
-			<td className="kp-num">{money(r.price)}</td>
-			<td className="kp-num">{money(r.sum)}</td>
-		</tr>
-	);
+	const goodsRow = (r: KpRow, i: number): JSX.Element => {
+		const photo = r.photoPath ? photoFullUrl(r.photoPath) : null;
+		return (
+			<tr key={`g${i}`} className={i % 2 ? 'kp-zebra' : ''}>
+				<td className="kp-photo-cell">{photo ? <img src={photo} alt="" className="kp-photo" /> : <div className="kp-photo kp-photo-empty" />}</td>
+				<td>{r.name}{r.article && <div className="kp-article">{r.article}</div>}</td>
+				<td className="kp-num">{r.qty}</td>
+				<td className="kp-num">{money(r.price)}</td>
+				<td className="kp-num">{money(r.sum)}</td>
+			</tr>
+		);
+	};
 	const workRow = (r: KpRow, i: number): JSX.Element => (
 		<tr key={`w${i}`} className={i % 2 ? 'kp-zebra' : ''}>
 			<td colSpan={2}>{r.name}</td>
@@ -72,12 +90,13 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 		</tr>
 	);
 	const allCompositionRows = kp ? [...kp.goods, ...kp.works] : [];
-	const namedStages = [...new Set(allCompositionRows.map((row) => row.stage?.trim()).filter((name): name is string => Boolean(name)))];
+	const stageName = (row: KpRow): string => row.stage?.trim() === 'Основная сделка' ? '' : (row.stage?.trim() ?? '');
+	const namedStages = [...new Set(allCompositionRows.map(stageName).filter(Boolean))];
 	const compositionGroups = kp
 		? (namedStages.length
 			? [
-				...(allCompositionRows.some((row) => !row.stage?.trim()) ? [{ key: '__base', name: 'Основная сделка', goods: kp.goods.filter((row) => !row.stage?.trim()), works: kp.works.filter((row) => !row.stage?.trim()) }] : []),
-				...namedStages.map((name) => ({ key: `stage:${name}`, name, goods: kp.goods.filter((row) => row.stage === name), works: kp.works.filter((row) => row.stage === name) })),
+				...(allCompositionRows.some((row) => !stageName(row)) ? [{ key: '__base', name: '', goods: kp.goods.filter((row) => !stageName(row)), works: kp.works.filter((row) => !stageName(row)) }] : []),
+				...namedStages.map((name) => ({ key: `stage:${name}`, name, goods: kp.goods.filter((row) => stageName(row) === name), works: kp.works.filter((row) => stageName(row) === name) })),
 			]
 			: [{ key: '__all', name: '', goods: kp.goods, works: kp.works }])
 		: [];
@@ -86,8 +105,7 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 		<div className="kp-wrap">
 			<div className="blank-toolbar no-print">
 				<button className="btn-secondary" onClick={onBack}>← Назад</button>
-				{kp && <button className="btn-primary" onClick={() => window.print()}>🖨 Печать</button>}
-				<span className="muted small">фото подключим из ядра — сейчас рамка-заглушка</span>
+				{kp && <button className="btn-primary" onClick={() => void printKp()}>🖨 Печать</button>}
 			</div>
 
 			{err && <p className="error">⛔ {err}</p>}
@@ -97,7 +115,6 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 				<div className="kp-doc">
 					<div className="kp-head">
 						<img className="kp-logo" src={REPAIR_LOGO} alt="Умный дом" />
-						<div className="kp-req">{COMPANY.name}<br />{COMPANY.phone}<br />{COMPANY.site}</div>
 					</div>
 
 					<div className="kp-title">Коммерческое предложение № {kp.number}</div>

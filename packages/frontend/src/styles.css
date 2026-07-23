@@ -2705,9 +2705,8 @@ html, body, #root { height: 100%; }
 /* ── КП (коммерческое предложение) — бренд #ED2024 ─────────────── */
 .kp-wrap { max-width: 900px; margin: 0 auto; padding: 20px 24px 40px; }
 .kp-doc { max-width: 720px; margin: 0 auto; background: #fff; color: #1a1a1a; border: 1px solid #ececec; box-shadow: 0 1px 10px rgba(0,0,0,.07); border-radius: 6px; overflow: hidden; }
-.kp-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 22px 28px 14px; border-bottom: 3px solid #ED2024; }
+.kp-head { display: flex; align-items: flex-start; padding: 22px 28px 14px; border-bottom: 3px solid #ED2024; }
 .kp-logo { height: 46px; width: auto; }
-.kp-req { text-align: right; font-size: 11.5px; color: #374151; line-height: 1.7; }
 .kp-title { font-size: 18px; font-weight: 500; padding: 18px 28px 2px; }
 .kp-meta { font-size: 12px; color: #6b7280; padding: 0 28px; }
 .kp-client { font-size: 13px; padding: 10px 28px 0; }

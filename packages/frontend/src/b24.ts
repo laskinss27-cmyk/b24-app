@@ -1621,8 +1621,8 @@ export interface KpRow {
 	isWork: boolean;
 	/** Свободное название этапа сделки. Нет у старого Б24-фолбэка. */
 	stage?: string;
-	/** data-URL фото (подключим из ядра позже); пока пусто → рамка-заглушка. */
-	photo?: string;
+	/** Путь или URL изображения из товарной базы Б24. */
+	photoPath?: string;
 }
 export interface KpData {
 	number: number;
