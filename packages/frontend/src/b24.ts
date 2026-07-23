@@ -1507,6 +1507,71 @@ export async function submitStockDoc(kind: 'receipt' | 'issue', name: string): P
 }
 
 /** Создать перемещение вручную из окна (без сделки) → документ «Запрошено». */
+export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff' | 'receipt';
+
+export interface MarketplaceOperationRow {
+	name: string;
+	title: string;
+	operation: MarketplaceOperationKind;
+	marketplace: string;
+	date: string;
+	storeTitle: string;
+	submitted: boolean;
+	total: number;
+	itemCount: number;
+	quantity: number;
+}
+
+export interface MarketplaceFormData {
+	marketplaces: string[];
+	stores: string[];
+	missingStores: string[];
+	canCreate: boolean;
+}
+
+export async function fetchMarketplaceFormData(): Promise<MarketplaceFormData> {
+	const res = await fetch('/api/marketplaces/form-data', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth() }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<MarketplaceFormData>;
+	if (!json.ok) throw new Error(json.error ?? 'Не удалось загрузить настройки маркетплейсов');
+	return {
+		marketplaces: json.marketplaces ?? [],
+		stores: json.stores ?? [],
+		missingStores: json.missingStores ?? [],
+		canCreate: Boolean(json.canCreate),
+	};
+}
+
+export async function fetchMarketplaceOperations(period: { from?: string; to?: string } = {}): Promise<MarketplaceOperationRow[]> {
+	const res = await fetch('/api/marketplaces/list', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...period }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: MarketplaceOperationRow[] };
+	if (!json.ok) throw new Error(json.error ?? 'Не удалось загрузить операции маркетплейсов');
+	return json.rows ?? [];
+}
+
+export async function createMarketplaceSale(input: {
+	marketplace: string;
+	storeTitle: string;
+	postingDate: string;
+	lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>;
+}): Promise<{ name: string; title: string }> {
+	const res = await fetch('/api/marketplaces/sale', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; name?: string; title?: string };
+	if (!json.ok || !json.name || !json.title) throw new Error(json.error ?? 'Не удалось провести реализацию маркетплейса');
+	return { name: json.name, title: json.title };
+}
+
 export async function createManualTransfer(input: { fromStore: string; toStore: string; note?: string; lines: TransferLineDto[] }): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/create-manual', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },

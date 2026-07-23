@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ErpClient } from './client.js';
-import { REALIZATION_SEGMENT_FIELD, syncDealRealizationPrices } from './operations.js';
+import {
+	MARKETPLACE_NAME_FIELD,
+	MARKETPLACE_OPERATION_FIELD,
+	MARKETPLACE_TITLE_FIELD,
+	REALIZATION_SEGMENT_FIELD,
+	createMarketplaceSale,
+	listMarketplaceOperations,
+	marketplaceSaleTitle,
+	syncDealRealizationPrices,
+} from './operations.js';
 
 type Doc = Record<string, unknown> & {
 	name: string;
@@ -28,6 +37,7 @@ class FakeErp {
 	}
 
 	async list(doctype: string): Promise<Array<Record<string, unknown>>> {
+		if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
 		if (doctype === 'Sales Order') return this.salesOrder ? [{ name: String(this.salesOrder['name']) }] : [];
 		if (doctype !== 'Delivery Note') return [];
 		return this.active().map((document) => ({
@@ -39,7 +49,8 @@ class FakeErp {
 	}
 
 	async get(doctype: string, name: string): Promise<Doc | Record<string, unknown> | null> {
-		if (doctype === 'Custom Field' || doctype === 'Customer' || doctype === 'Supplier') return { name };
+		if (doctype === 'Custom Field' || doctype === 'Customer' || doctype === 'Supplier'
+			|| doctype === 'Item' || doctype === 'UOM' || doctype === 'Item Group') return { name };
 		if (doctype === 'Sales Order') return this.salesOrder ? structuredClone(this.salesOrder) : null;
 		if (doctype !== 'Delivery Note') return null;
 		const document = this.documents.get(name);
@@ -211,4 +222,35 @@ test('legacy realization rows are assigned to base and stages in deal order befo
 	assert.equal(base.items[0]?.['rate'], 100);
 	assert.equal(stage.items[0]?.['rate'], 125);
 	assert.equal(stage.items[0]?.[REALIZATION_SEGMENT_FIELD], 'stage:stage-1');
+});
+
+test('marketplace realization gets a human title, warehouse marker and is submitted without a deal link', async () => {
+	const erp = new FakeErp([]);
+	assert.equal(marketplaceSaleTitle('2026-07-23', 'Озон'), '23.07.26_Озон');
+
+	const result = await createMarketplaceSale(erp.asClient(), {
+		marketplace: 'Озон',
+		storeTitle: 'Маркетплейс',
+		postingDate: '2026-07-23',
+		lines: [{ productId: 101, itemName: 'Product 101', qty: 2, rate: 1500 }],
+	});
+	assert.equal(result.title, '23.07.26_Озон');
+
+	const created = erp.active()[0];
+	assert.ok(created);
+	assert.equal(created.docstatus, 1);
+	assert.equal(created[MARKETPLACE_OPERATION_FIELD], 'sale');
+	assert.equal(created[MARKETPLACE_NAME_FIELD], 'Озон');
+	assert.equal(created[MARKETPLACE_TITLE_FIELD], '23.07.26_Озон');
+	assert.equal(created['b24_deal_id'], undefined);
+	assert.equal(created.items[0]?.['warehouse'], 'Маркетплейс - TEST');
+	assert.equal(created.items[0]?.['qty'], 2);
+	assert.equal(created.items[0]?.['rate'], 1500);
+
+	const journal = await listMarketplaceOperations(erp.asClient());
+	assert.equal(journal.length, 1);
+	assert.equal(journal[0]?.title, '23.07.26_Озон');
+	assert.equal(journal[0]?.operation, 'sale');
+	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
+	assert.equal(journal[0]?.quantity, 2);
 });

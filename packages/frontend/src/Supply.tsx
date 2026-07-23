@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
+import { Marketplaces } from './Marketplaces.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, type StockMovementKind } from './StockLedger.js';
 import {
 	cancelTransfer,
@@ -126,7 +127,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 ];
 
 type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
-type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | StockMovementKind | 'ledger';
+type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 
 interface DecisionState {
@@ -1333,7 +1334,7 @@ export function Supply(): JSX.Element {
 	const [creationErrors, setCreationErrors] = useState<Record<string, string>>({});
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
 	const [stockForm, setStockForm] = useState<Awaited<ReturnType<typeof fetchStockFormData>> | null>(ctx.__mock
 		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: DEFAULT_SUPPLIERS, canCreate: true, isSupply: true }
@@ -1661,6 +1662,7 @@ export function Supply(): JSX.Element {
 				<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
 				<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
 				<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
+				<button className={view === 'marketplaces' ? 'active' : ''} type="button" onClick={() => setView('marketplaces')}>Маркетплейсы</button>
 				<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
 				<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
 				<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
@@ -1668,11 +1670,13 @@ export function Supply(): JSX.Element {
 				<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>
-			<main className={`supply-proto-main${view === 'stocks' ? ' supply-proto-main-wide' : ''}`}>
+			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' ? ' supply-proto-main-wide' : ''}`}>
 				<header className="supply-proto-top">
 					<div>
 						<h1>Снабжение</h1>
-						<p>{view === 'stocks'
+						<p>{view === 'marketplaces'
+							? 'Продажи, комплекты и возвраты товаров на маркетплейсах.'
+							: view === 'stocks'
 							? 'Каталог товаров и актуальные остатки по складам.'
 							: view === 'ledger'
 							? 'История прихода, перемещения, реализации и инвентаризации по выбранному товару.'
@@ -1708,6 +1712,7 @@ export function Supply(): JSX.Element {
 					<div className="supply-proto-card supply-stock-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} supplyMode /></div>
 				</>}
 				{view === 'stocks' && <div className="supply-products-view"><ProductBase readOnly allowCreateProduct /></div>}
+				{view === 'marketplaces' && <Marketplaces />}
 				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card supply-stock-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
 				{view === 'ledger' && <div className="supply-proto-card supply-stock-card"><LedgerTab /></div>}
 			</main>

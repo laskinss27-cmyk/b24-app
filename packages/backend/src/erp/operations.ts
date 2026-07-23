@@ -14,6 +14,9 @@ import { ErpClient } from './client.js';
 const DEAL_FIELD = 'b24_deal_id';
 export const REALIZATION_BASE_SEGMENT = 'base';
 export const REALIZATION_SEGMENT_FIELD = 'b24_deal_segment';
+export const MARKETPLACE_OPERATION_FIELD = 'b24_marketplace_operation';
+export const MARKETPLACE_NAME_FIELD = 'b24_marketplace';
+export const MARKETPLACE_TITLE_FIELD = 'b24_marketplace_title';
 /** Документы, которым нужно поле сделки. */
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
@@ -37,6 +40,7 @@ export interface ErpContext {
 
 let ctxCache: ErpContext | null = null;
 let setupDone = false;
+let marketplaceFieldsDone = false;
 
 /** Компания (не Demo) + аббревиатура. Кэш на процесс. */
 export async function erpContext(erp: ErpClient): Promise<ErpContext> {
@@ -67,6 +71,31 @@ export async function ensureErpSetup(erp: ErpClient): Promise<void> {
 		await erp.create('Supplier', { supplier_name: TECH_SUPPLIER, supplier_type: 'Company' });
 	}
 	setupDone = true;
+}
+
+/** Technical markers keep marketplace documents separate from deal realizations. */
+async function ensureMarketplaceFields(erp: ErpClient): Promise<void> {
+	if (marketplaceFieldsDone) return;
+	const fields = [
+		{ fieldname: MARKETPLACE_OPERATION_FIELD, label: 'Marketplace operation' },
+		{ fieldname: MARKETPLACE_NAME_FIELD, label: 'Marketplace' },
+		{ fieldname: MARKETPLACE_TITLE_FIELD, label: 'Marketplace title' },
+	];
+	for (const field of fields) {
+		const name = `Delivery Note-${field.fieldname}`;
+		if (!(await erp.get('Custom Field', name))) {
+			await erp.create('Custom Field', {
+				dt: 'Delivery Note',
+				fieldname: field.fieldname,
+				label: field.label,
+				fieldtype: 'Data',
+				insert_after: 'posting_time',
+				in_standard_filter: 1,
+				in_list_view: 1,
+			});
+		}
+	}
+	marketplaceFieldsDone = true;
 }
 
 /** Единица измерения по умолчанию (как в миграции каталога). */
@@ -904,6 +933,126 @@ export async function createRealizationDraft(
 
 export async function submitRealization(erp: ErpClient, name: string): Promise<void> {
 	await erp.submit('Delivery Note', name);
+}
+
+export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff' | 'receipt';
+
+export interface MarketplaceOperation {
+	name: string;
+	title: string;
+	operation: MarketplaceOperationKind;
+	marketplace: string;
+	date: string;
+	storeTitle: string;
+	submitted: boolean;
+	total: number;
+	itemCount: number;
+	quantity: number;
+}
+
+export function marketplaceSaleTitle(postingDate: string, marketplace: string): string {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(postingDate);
+	if (!match) throw new Error('некорректная дата реализации');
+	return `${match[3]}.${match[2]}.${match[1]!.slice(2)}_${marketplace.trim()}`;
+}
+
+/** Marketplace sale is an independent submitted Delivery Note without a deal link. */
+export async function createMarketplaceSale(
+	erp: ErpClient,
+	args: {
+		marketplace: string;
+		storeTitle: string;
+		postingDate: string;
+		lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>;
+	},
+): Promise<{ name: string; title: string }> {
+	const marketplace = args.marketplace.trim();
+	const storeTitle = args.storeTitle.trim();
+	if (!marketplace) throw new Error('не выбран маркетплейс');
+	if (!storeTitle) throw new Error('не выбран склад списания');
+	if (!args.lines.length) throw new Error('в реализации нет товаров');
+	if (args.lines.some((line) =>
+		!Number.isInteger(line.productId) || line.productId <= 0 || !(line.qty > 0) || line.rate < 0)) {
+		throw new Error('в реализации есть некорректная строка');
+	}
+
+	const ctx = await erpContext(erp);
+	await ensureErpSetup(erp);
+	await ensureMarketplaceFields(erp);
+	const title = marketplaceSaleTitle(args.postingDate, marketplace);
+	for (const line of args.lines) {
+		await ensureCoreItem(erp, { productId: line.productId, name: line.itemName || `#${line.productId}` });
+	}
+	const doc = await erp.create('Delivery Note', {
+		company: ctx.company,
+		customer: TECH_CUSTOMER,
+		set_posting_time: 1,
+		posting_date: args.postingDate,
+		[MARKETPLACE_OPERATION_FIELD]: 'sale',
+		[MARKETPLACE_NAME_FIELD]: marketplace,
+		[MARKETPLACE_TITLE_FIELD]: title,
+		items: args.lines.map((line) => ({
+			item_code: String(line.productId),
+			qty: line.qty,
+			warehouse: erpWarehouse(ctx, storeTitle),
+			rate: line.rate,
+			price_list_rate: line.rate,
+		})),
+	});
+	const name = String(doc['name'] ?? '');
+	if (!name) throw new Error('ядро не вернуло номер реализации');
+	await erp.submit('Delivery Note', name);
+	return { name, title };
+}
+
+/** All marketplace operations are tagged and therefore never mixed with ordinary deal documents. */
+export async function listMarketplaceOperations(
+	erp: ErpClient,
+	opts: { from?: string; to?: string; limit?: number } = {},
+): Promise<MarketplaceOperation[]> {
+	const ctx = await erpContext(erp);
+	await ensureMarketplaceFields(erp);
+	const filters: unknown[] = [
+		['docstatus', '!=', 2],
+		[MARKETPLACE_OPERATION_FIELD, '!=', ''],
+	];
+	if (opts.from) filters.push(['posting_date', '>=', opts.from]);
+	if (opts.to) filters.push(['posting_date', '<=', opts.to]);
+	const heads = await erp.list('Delivery Note', [
+		'name',
+		'posting_date',
+		'docstatus',
+		'grand_total',
+		MARKETPLACE_OPERATION_FIELD,
+		MARKETPLACE_NAME_FIELD,
+		MARKETPLACE_TITLE_FIELD,
+	], filters, opts.limit ?? 200, 'posting_date desc, creation desc');
+	const rows: MarketplaceOperation[] = [];
+	for (const head of heads) {
+		const name = String(head['name'] ?? '');
+		if (!name) continue;
+		const doc = await erp.get<Record<string, unknown>>('Delivery Note', name);
+		if (!doc) continue;
+		const items = Array.isArray(doc['items']) ? doc['items'] as Array<Record<string, unknown>> : [];
+		const operation = String(doc[MARKETPLACE_OPERATION_FIELD] ?? head[MARKETPLACE_OPERATION_FIELD] ?? '') as MarketplaceOperationKind;
+		if (!['sale', 'bundle', 'return', 'writeoff', 'receipt'].includes(operation)) continue;
+		const marketplace = String(doc[MARKETPLACE_NAME_FIELD] ?? head[MARKETPLACE_NAME_FIELD] ?? '');
+		const date = String(doc['posting_date'] ?? head['posting_date'] ?? '');
+		const firstWarehouse = String(items.find((item) => item['warehouse'])?.['warehouse'] ?? '');
+		rows.push({
+			name,
+			title: String(doc[MARKETPLACE_TITLE_FIELD] ?? head[MARKETPLACE_TITLE_FIELD] ?? '') || `${date}_${marketplace}`,
+			operation,
+			marketplace,
+			date,
+			storeTitle: firstWarehouse ? b24StoreTitle(ctx, firstWarehouse) : '',
+			submitted: Number(doc['docstatus'] ?? head['docstatus'] ?? 0) === 1,
+			total: Number(doc['grand_total'] ?? head['grand_total'] ?? 0),
+			itemCount: items.length,
+			quantity: items.reduce((sum, item) => sum + Math.abs(Number(item['qty'] ?? 0)), 0),
+		});
+	}
+	return rows;
 }
 
 /**

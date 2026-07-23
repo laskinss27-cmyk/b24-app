@@ -49,7 +49,7 @@ export async function canManageStock(client: B24Client): Promise<boolean> {
 	return (await stockAccess(client)).canManage;
 }
 
-async function validateFreeStock(
+export async function validateFreeStock(
 	client: B24Client,
 	erp: ErpClient,
 	lines: Array<{ productId: number; qty: number; fromStore: string }>,
