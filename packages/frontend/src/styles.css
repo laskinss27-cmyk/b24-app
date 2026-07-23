@@ -1615,6 +1615,11 @@ td.col-deal { background: #f4fcf7; }
 	color: #1a56db;
 	font-weight: 600;
 }
+.disc-table .disc-comment {
+	min-width: 180px;
+	color: #4b5563;
+	white-space: normal;
+}
 
 /* ── Экран подсчёта: строки товаров (mobile-first) ────────────────────────── */
 .photo-toggle {
@@ -1710,6 +1715,25 @@ td.col-deal { background: #f4fcf7; }
 	border-radius: 4px;
 	padding: 0 6px;
 }
+.count-comment {
+	box-sizing: border-box;
+	width: min(100%, 560px);
+	margin-top: 7px;
+	padding: 6px 8px;
+	border: 1px dashed #cbd5e1;
+	border-radius: 6px;
+	background: #fbfcfe;
+	color: #374151;
+	font-size: 12px;
+}
+.count-comment:focus {
+	border-style: solid;
+	border-color: #1a56db;
+	outline: 2px solid rgba(26, 86, 219, .12);
+}
+.count-comment::placeholder {
+	color: #9ca3af;
+}
 .count-nums {
 	display: flex;
 	align-items: center;
@@ -1785,6 +1809,13 @@ td.col-deal { background: #f4fcf7; }
 		width: 80px;
 		height: 26px;
 		border: 1px solid #000;
+		background: none;
+	}
+	.count-comment {
+		width: 100%;
+		border: 0;
+		border-bottom: 1px solid #777;
+		border-radius: 0;
 		background: none;
 	}
 }

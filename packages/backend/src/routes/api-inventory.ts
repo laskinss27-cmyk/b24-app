@@ -287,6 +287,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			userId?: string;
 			userName?: string;
 			draft?: Record<string, number>;
+			comments?: Record<string, unknown>;
 			facts?: Record<string, number>;
 			result?: unknown;
 		};
@@ -316,6 +317,13 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			const status = String(pt['status'] ?? 'idle');
 			const now = new Date().toISOString();
 			const meId = String(b.userId ?? '');
+			const comments = b.comments && typeof b.comments === 'object'
+				? Object.fromEntries(Object.entries(b.comments)
+					.filter(([productId, value]) => /^\d+$/.test(productId) && Number(productId) > 0 && typeof value === 'string')
+					.slice(0, 2000)
+					.map(([productId, value]) => [productId, String(value).trim().slice(0, 500)])
+					.filter(([, value]) => Boolean(value)))
+				: null;
 
 			if (b.action === 'claim') {
 				if (status === 'submitted') return reply.code(200).send({ ok: false, error: 'точка уже отправлена' });
@@ -328,6 +336,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				pt['startedAt'] = now;
 			} else if (b.action === 'saveDraft') {
 				pt['draft'] = b.draft ?? {};
+				if (comments) pt['comments'] = comments;
 				if (status === 'idle') {
 					pt['status'] = 'in_progress';
 					if (!pt['responsibleId']) {
@@ -343,6 +352,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				pt['result'] = b.result ?? null;
 				// факты раунда сохраняем (draft) — нужны, чтобы предзаполнить 2-й раунд (акт)
 				if (b.facts && typeof b.facts === 'object') pt['draft'] = b.facts;
+				if (comments) pt['comments'] = comments;
 				if (!pt['responsibleId']) {
 					pt['responsibleId'] = meId;
 					pt['responsibleName'] = String(b.userName ?? '');

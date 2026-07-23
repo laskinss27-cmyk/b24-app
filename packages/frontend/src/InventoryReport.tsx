@@ -27,6 +27,8 @@ interface InventoryCountProps {
 	me: { id: string; name: string };
 	/** Промежуточный подсчёт, если менеджер возвращается к черновику. */
 	initialDraft?: Record<number, number> | undefined;
+	/** Сохранённые комментарии по позициям. */
+	initialComments?: Record<number, string> | undefined;
 	/** Режим: обычный подсчёт или сверка акта разногласий (предзаполнено, другой заголовок). */
 	mode?: 'count' | 'act' | undefined;
 	/** Режим акта: показываем ТОЛЬКО эти расхождения 1-го раунда (с опознанием). */
@@ -40,7 +42,7 @@ interface InventoryCountProps {
 	/** Мобильный режим (/m): остатки грузим серверно (нет BX24 SDK), без «Добавить товар» и без «к точкам». */
 	mobile?: boolean | undefined;
 	onBack: () => void;
-	onSubmitted: (result: InvResult, facts: Record<number, number>) => void;
+	onSubmitted: (result: InvResult, facts: Record<number, number>, comments: Record<number, string>) => void;
 }
 
 // dev-мок: дубли TS-AD различаются артикулом — показать, что строка их разводит
@@ -60,7 +62,7 @@ const MOCK_STOCK: Record<number, InvLine[]> = {
 };
 
 export function InventoryCount(props: InventoryCountProps): JSX.Element {
-	const { inventoryId, storeId, storeName, me, initialDraft, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
+	const { inventoryId, storeId, storeName, me, initialDraft, initialComments, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
 
 	const [items, setItems] = useState<InvLine[] | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -70,6 +72,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 	const [counts, setCounts] = useState<Record<number, string>>(() => {
 		const o: Record<number, string> = {};
 		if (initialDraft) for (const [k, v] of Object.entries(initialDraft)) o[Number(k)] = String(v);
+		return o;
+	});
+	const [comments, setComments] = useState<Record<number, string>>(() => {
+		const o: Record<number, string> = {};
+		if (initialComments) for (const [k, v] of Object.entries(initialComments)) o[Number(k)] = String(v);
 		return o;
 	});
 	const [saving, setSaving] = useState(false);
@@ -100,9 +107,13 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				setAdded([]);
 				// Восстановить вручную добавленные позиции из черновика: их productId есть в черновике,
 				// но нет в текущих остатках (их там и не будет — учёт 0). Иначе при возврате к черновику терялись бы.
-				if (mode !== 'act' && initialDraft) {
+				if (mode !== 'act' && (initialDraft || initialComments)) {
 					const have = new Set(rows.map((r) => r.productId));
-					const orphanIds = Object.keys(initialDraft).map(Number).filter((id) => id > 0 && !have.has(id));
+					const rememberedIds = new Set([
+						...Object.keys(initialDraft ?? {}).map(Number),
+						...Object.keys(initialComments ?? {}).map(Number),
+					]);
+					const orphanIds = [...rememberedIds].filter((id) => id > 0 && !have.has(id));
 					if (orphanIds.length) {
 						void Promise.all(orphanIds.map((id) => buildAddedLine(id).catch(() => null))).then((ls) => {
 							if (alive) setAdded(ls.filter((x): x is InvLine => x != null));
@@ -171,6 +182,15 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		return o;
 	};
 
+	const commentsObj = (): Record<number, string> => {
+		const o: Record<number, string> = {};
+		for (const [productId, value] of Object.entries(comments)) {
+			const text = value.trim();
+			if (text) o[Number(productId)] = text.slice(0, 500);
+		}
+		return o;
+	};
+
 	async function onSave(): Promise<void> {
 		setActionErr(null);
 		if (mock) {
@@ -179,7 +199,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		}
 		setSaving(true);
 		try {
-			await saveDraftPoint(inventoryId, storeId, me.id, draftObj());
+			await saveDraftPoint(inventoryId, storeId, me.id, draftObj(), commentsObj());
 			setDone('draft');
 		} catch (e: unknown) {
 			setActionErr(String(e instanceof Error ? e.message : e));
@@ -197,23 +217,31 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		};
 		const lines: InvResult['lines'] = list
 			.filter((i) => factOf(i) !== i.book)
-			.map((i) => ({ productId: i.productId, name: i.name, book: i.book, fact: factOf(i), diff: factOf(i) - i.book }));
+			.map((i) => ({
+				productId: i.productId,
+				name: i.name,
+				book: i.book,
+				fact: factOf(i),
+				diff: factOf(i) - i.book,
+				...(comments[i.productId]?.trim() ? { comment: comments[i.productId]!.trim().slice(0, 500) } : {}),
+			}));
 		// режим акта → слияние в финал: total и совпавшие берём из 1-го раунда, расхождения = оставшиеся после сверки
 		const result: InvResult =
 			mode === 'act'
 				? { total: total1 ?? list.length, counted: (total1 ?? list.length) - lines.length, discrepancies: lines.length, lines }
 				: { counted, total: list.length, discrepancies: lines.length, lines };
 		const facts = draftObj(); // все факты раунда — чтобы предзаполнить 2-й раунд (акт)
+		const savedComments = commentsObj();
 		if (mock) {
 			setDone('sent');
-			setTimeout(() => onSubmitted(result, facts), 700);
+			setTimeout(() => onSubmitted(result, facts, savedComments), 700);
 			return;
 		}
 		setSaving(true);
 		try {
-			await submitPoint(inventoryId, storeId, me.id, me.name, result, facts);
+			await submitPoint(inventoryId, storeId, me.id, me.name, result, facts, savedComments);
 			setDone('sent');
-			setTimeout(() => onSubmitted(result, facts), 700);
+			setTimeout(() => onSubmitted(result, facts, savedComments), 700);
 		} catch (e: unknown) {
 			setActionErr(String(e instanceof Error ? e.message : e));
 		} finally {
@@ -303,6 +331,14 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 												{i.manufacturer && <span className="mf">{i.manufacturer}</span>}
 												{i.article && <span className="art">{i.article}</span>}
 											</div>
+											<input
+												type="text"
+												className="count-comment"
+												maxLength={500}
+												placeholder="Комментарий: не найден, повреждён, мыши съели…"
+												value={comments[i.productId] ?? ''}
+												onChange={(event) => setComments((current) => ({ ...current, [i.productId]: event.target.value }))}
+											/>
 										</div>
 										<div className="count-nums">
 											<span className="book">учёт {i.book}</span>

@@ -77,6 +77,7 @@ export function MobileCount(): JSX.Element {
 			sectionIds={sectionIds}
 			me={me}
 			initialDraft={point.draft}
+			initialComments={point.comments}
 			mobile
 			onBack={() => {
 				/* на мобиле возврата к списку точек нет — точка задана QR */

@@ -51,6 +51,7 @@ interface Counting {
 	storeId: number;
 	storeName: string;
 	draft?: Record<number, number> | undefined;
+	comments?: Record<number, string> | undefined;
 	/** Охват (#13): разделы инвентаризации — прокидываем в подсчёт. */
 	sectionIds?: number[] | undefined;
 	/** 'act' — второй раунд (сверка акта разногласий), иначе обычный подсчёт. */
@@ -234,7 +235,7 @@ export function InventoryHome(): JSX.Element {
 				return;
 			}
 		}
-		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, draft: p.draft, sectionIds: inv.sectionIds });
+		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, draft: p.draft, comments: p.comments, sectionIds: inv.sectionIds });
 	}
 
 	function continuePoint(inv: Inventory, p: InvPoint, mode?: 'count' | 'act'): void {
@@ -244,6 +245,7 @@ export function InventoryHome(): JSX.Element {
 			storeId: p.storeId,
 			storeName: p.storeName,
 			draft: p.draft,
+			comments: p.comments,
 			sectionIds: inv.sectionIds,
 			mode,
 			actLines: mode === 'act' ? p.result?.lines : undefined,
@@ -387,6 +389,7 @@ export function InventoryHome(): JSX.Element {
 				sectionIds={counting.sectionIds}
 				me={me}
 				initialDraft={counting.draft}
+				initialComments={counting.comments}
 				mode={counting.mode}
 				actLines={counting.actLines}
 				total1={counting.total1}
@@ -395,7 +398,7 @@ export function InventoryHome(): JSX.Element {
 					setCounting(null);
 					void reload();
 				}}
-				onSubmitted={(result, facts) => {
+				onSubmitted={(result, facts, comments) => {
 					if (ctx.__mock) {
 						markPoint(counting.inventoryId, counting.storeId, {
 							status: counting.mode === 'act' ? 'reconciled' : 'submitted',
@@ -404,6 +407,7 @@ export function InventoryHome(): JSX.Element {
 							responsibleName: me.name,
 							result,
 							draft: facts,
+							comments,
 						});
 					} else {
 						void reload();
@@ -798,6 +802,7 @@ function DiscDetail({ result }: { result: InvResult }): JSX.Element {
 							<th className="num">Учёт</th>
 							<th className="num">Факт</th>
 							<th className="num">Разница</th>
+							<th>Комментарий</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -807,6 +812,7 @@ function DiscDetail({ result }: { result: InvResult }): JSX.Element {
 								<td className="num">{l.book}</td>
 								<td className="num">{l.fact}</td>
 								<td className={`num ${l.diff < 0 ? 'short' : 'over'}`}>{l.diff > 0 ? `+${l.diff}` : l.diff}</td>
+								<td className="disc-comment">{l.comment || '—'}</td>
 							</tr>
 						))}
 					</tbody>

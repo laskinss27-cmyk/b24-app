@@ -2218,6 +2218,8 @@ export interface InvResultLine {
 	book: number;
 	fact: number;
 	diff: number;
+	/** Пояснение проверяющего к конкретной позиции. */
+	comment?: string;
 }
 export interface InvResult {
 	counted: number;
@@ -2240,6 +2242,8 @@ export interface InvPoint {
 	result?: InvResult;
 	/** Промежуточный подсчёт (productId → факт), чтобы можно было вернуться позже. */
 	draft?: Record<number, number>;
+	/** Комментарии проверяющего по позициям (productId → текст). */
+	comments?: Record<number, string>;
 	/** Документ ЯДРА (Stock Reconciliation в ERPNext) по 1С-модели «Записать → Провести». */
 	erpDoc?: ErpInvDoc;
 	/** Б24-зеркала (черновики D/S) — создаются при проведении ядра или старой кнопкой. */
@@ -2310,8 +2314,14 @@ export async function claimPoint(inventoryId: string, storeId: number, userId: s
 	await postInventoryUpdate({ inventoryId, storeId, action: 'claim', userId, userName });
 }
 /** Сохранить промежуточный подсчёт (черновик факта). */
-export async function saveDraftPoint(inventoryId: string, storeId: number, userId: string, draft: Record<number, number>): Promise<void> {
-	await postInventoryUpdate({ inventoryId, storeId, action: 'saveDraft', userId, draft });
+export async function saveDraftPoint(
+	inventoryId: string,
+	storeId: number,
+	userId: string,
+	draft: Record<number, number>,
+	comments: Record<number, string>,
+): Promise<void> {
+	await postInventoryUpdate({ inventoryId, storeId, action: 'saveDraft', userId, draft, comments });
 }
 /** «Отправить» — результат точки (статус «отправлено», либо «сверено» если был акт) + факты раунда. */
 export async function submitPoint(
@@ -2321,8 +2331,9 @@ export async function submitPoint(
 	userName: string,
 	result: InvResult,
 	facts: Record<number, number>,
+	comments: Record<number, string>,
 ): Promise<void> {
-	await postInventoryUpdate({ inventoryId, storeId, action: 'submit', userId, userName, result, facts });
+	await postInventoryUpdate({ inventoryId, storeId, action: 'submit', userId, userName, result, facts, comments });
 }
 
 /** «Сформировать акт разногласий» (инициатор) — точка уходит менеджеру на сверку. */
