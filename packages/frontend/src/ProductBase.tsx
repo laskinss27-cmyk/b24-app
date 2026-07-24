@@ -41,6 +41,9 @@ const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 function shortStore(title: string): string {
 	return title.replace(/^Максидом\s*/i, '').replace(/^ул\.\s*/i, '').replace(/,?\s*секция\s*/i, ' с.').trim() || title;
 }
+function normalizeStoreTitle(title: string): string {
+	return title.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
+}
 function fmt(n: number | null | undefined): string {
 	return n == null ? '—' : n.toLocaleString('ru-RU');
 }
@@ -309,6 +312,8 @@ export interface ProductPicker {
 	title?: string | undefined;
 	kindFilter?: 'goods' | 'services';
 	onlyStockDefault?: boolean;
+	/** Ограничивает складской подбор указанными складами и скрывает товары, которых на них нет. */
+	allowedStoreTitles?: string[];
 	/** Для складских операций, где критичны только что созданные товары и актуальные остатки. */
 	forceRefreshOnMount?: boolean;
 }
@@ -389,18 +394,34 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		});
 	}, [ctx, forceInitialRefresh]);
 
+	const allowedStoreTitles = useMemo(
+		() => picker?.allowedStoreTitles?.map(normalizeStoreTitle) ?? [],
+		[picker?.allowedStoreTitles],
+	);
+	const visibleStores = useMemo(
+		() => allowedStoreTitles.length
+			? stores.filter((item) => allowedStoreTitles.includes(normalizeStoreTitle(item.title)))
+			: stores,
+		[stores, allowedStoreTitles],
+	);
+	const visibleStoreIds = useMemo(() => new Set(visibleStores.map((item) => item.id)), [visibleStores]);
 	const isAll = store === ALL;
 	const sid = isAll ? null : Number(store);
 	const indexedRows = useMemo<IndexedRow[]>(() => rows
 		.filter((d) => d.id !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)
+		.filter((d) =>
+			!allowedStoreTitles.length
+			|| d.isService
+			|| Object.entries(d.stockByStore).some(([storeId, qty]) =>
+				visibleStoreIds.has(Number(storeId)) && qty > 0))
 		.map((d) => ({
 			d,
 			search: `${d.id} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''}`.toLowerCase(),
 			stockEntries: Object.entries(d.stockByStore)
 				.map(([s, n]) => ({ id: Number(s), qty: n }))
-				.filter((o) => o.qty > 0)
+				.filter((o) => o.qty > 0 && (!allowedStoreTitles.length || visibleStoreIds.has(o.id)))
 				.sort((a, b) => b.qty - a.qty),
-		})), [rows]);
+		})), [rows, allowedStoreTitles, visibleStoreIds]);
 	const sections = useMemo(() => {
 		const byId = new Map<number, string>();
 		for (const row of rows) {
@@ -419,10 +440,14 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		if (words.length) {
 			list = list.filter((r) => words.every((w) => r.search.includes(w)));
 		}
+		const allStoresQty = (row: BaseRow): number =>
+			allowedStoreTitles.length
+				? visibleStores.reduce((sum, item) => sum + Number(row.stockByStore[item.id] ?? 0), 0)
+				: row.total;
 		if (onlyStock && kind !== 'services') {
-			list = list.filter((r) => (isAll ? r.d.total : (r.d.stockByStore[sid as number] ?? 0)) > 0 || r.d.isService);
+			list = list.filter((r) => (isAll ? allStoresQty(r.d) : (r.d.stockByStore[sid as number] ?? 0)) > 0 || r.d.isService);
 		}
-		const withQty = list.map((r) => ({ d: r.d, qty: isAll ? r.d.total : (r.d.stockByStore[sid as number] ?? 0), others: r.stockEntries }));
+		const withQty = list.map((r) => ({ d: r.d, qty: isAll ? allStoresQty(r.d) : (r.d.stockByStore[sid as number] ?? 0), others: r.stockEntries }));
 		const val = (r: { d: BaseRow; qty: number }): string | number => {
 			switch (sortKey) {
 				case 'id': return r.d.id;
@@ -443,7 +468,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			return String(x).localeCompare(String(y), 'ru') * sortDir;
 		});
 		return withQty;
-	}, [indexedRows, deferredQ, onlyStock, kind, section, isAll, sid, sortKey, sortDir]);
+	}, [indexedRows, deferredQ, onlyStock, kind, section, isAll, sid, sortKey, sortDir, allowedStoreTitles, visibleStores]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
@@ -567,7 +592,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		const items: ProductPickItem[] = cartList.map((c) => {
 			const stocks = Object.fromEntries(
 				Object.entries(c.row.stockByStore)
-					.map(([storeId, qty]) => [stores.find((store) => store.id === Number(storeId))?.title ?? '', qty] as const)
+					.map(([storeId, qty]) => [visibleStores.find((store) => store.id === Number(storeId))?.title ?? '', qty] as const)
 					.filter(([storeTitle]) => Boolean(storeTitle)),
 			);
 			return { productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0, purchasePrice: c.row.purchase ?? 0, isService: c.row.isService, stocks };
@@ -584,7 +609,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		}
 	}
 
-	const storeName = (id: number): string => shortStore(stores.find((s) => s.id === id)?.title ?? `#${id}`);
+	const storeName = (id: number): string => shortStore(visibleStores.find((s) => s.id === id)?.title ?? `#${id}`);
 	const sumPurchase = useMemo(() => view.reduce((s, r) => s + r.qty * (r.d.purchase ?? 0), 0), [view]);
 
 	function toggleSort(k: SortKey): void {
@@ -633,7 +658,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				<label className="tb-field">Склад
 					<select value={store} onChange={(e) => setStore(e.target.value)}>
 						<option value={ALL}>Все склады</option>
-						{stores.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+						{visibleStores.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
 					</select>
 				</label>
 				<label className="tb-field">Раздел

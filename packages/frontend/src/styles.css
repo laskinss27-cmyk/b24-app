@@ -6390,6 +6390,22 @@ body.deal-placement-body #root {
 	background: transparent;
 }
 
+.marketplace-return-lines {
+	margin: 0;
+}
+
+.marketplace-return-lines input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	accent-color: #185fa5;
+}
+
+.marketplace-return-lines input[type="number"]:disabled {
+	background: #f0f3f7;
+	color: #9aa5b4;
+}
+
 .marketplace-return-empty {
 	padding: 13px 14px;
 	border: 1px solid #f0d79f;

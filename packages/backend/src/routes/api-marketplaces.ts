@@ -3,11 +3,11 @@ import { B24ApiError, B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	createMarketplaceBundle,
-	createMarketplaceReturn,
+	createMarketplaceReturnBatch,
 	createMarketplaceSale,
 	listActiveStoreTitles,
 	listMarketplaceOperations,
-	listMarketplaceReturnOptions,
+	listMarketplaceReturnSales,
 } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { invalidateCatalogCache } from './api-catalog.js';
@@ -117,12 +117,8 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
-		const productId = Number(body['productId']);
-		if (!Number.isInteger(productId) || productId <= 0) {
-			return reply.code(400).send({ ok: false, error: 'не выбран товар для возврата' });
-		}
 		try {
-			return { ok: true, options: await listMarketplaceReturnOptions(erp, productId) };
+			return { ok: true, sales: await listMarketplaceReturnSales(erp) };
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/return-options] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
@@ -198,15 +194,19 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				return reply.code(403).send({ ok: false, error: 'проводить возвраты может только снабжение' });
 			}
 			const saleName = String(body['saleName'] ?? '').trim();
-			const productId = Number(body['productId']);
-			const qty = Number(body['qty']);
+			const lines = (Array.isArray(body['lines']) ? body['lines'] as Array<Record<string, unknown>> : [])
+				.map((line) => ({
+					productId: Number(line['productId']),
+					qty: Number(line['qty']),
+				}))
+				.filter((line) =>
+					Number.isInteger(line.productId)
+					&& line.productId > 0
+					&& line.qty > 0);
 			const storeTitle = String(body['storeTitle'] ?? '').trim();
 			const postingDate = String(body['postingDate'] ?? '').trim();
 			if (!saleName) return reply.code(400).send({ ok: false, error: 'не выбрана исходная реализация' });
-			if (!Number.isInteger(productId) || productId <= 0) {
-				return reply.code(400).send({ ok: false, error: 'не выбран товар для возврата' });
-			}
-			if (!(qty > 0)) return reply.code(400).send({ ok: false, error: 'количество возврата должно быть больше нуля' });
+			if (!lines.length) return reply.code(400).send({ ok: false, error: 'не выбраны товары для возврата' });
 			if (!DATE_RE.test(postingDate)) {
 				return reply.code(400).send({ ok: false, error: 'неверная дата возврата' });
 			}
@@ -217,21 +217,20 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			if (!resolvedStore) {
 				return reply.code(400).send({ ok: false, error: 'вернуть товар можно только на склад Shelly или Маркетплейс' });
 			}
-			const result = await createMarketplaceReturn(erp, {
+			const result = await createMarketplaceReturnBatch(erp, {
 				saleName,
-				productId,
-				qty,
+				lines,
 				storeTitle: resolvedStore,
 				postingDate,
 			});
 			app.log.info({
 				name: result.name,
 				saleName,
-				productId,
-				qty,
+				itemCount: result.itemCount,
+				quantity: result.quantity,
 				storeTitle: resolvedStore,
 			}, '[api/marketplaces/return] submitted');
-			return { ok: true, ...result, qty, storeTitle: resolvedStore };
+			return { ok: true, ...result, storeTitle: resolvedStore };
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/return] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });

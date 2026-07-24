@@ -6,11 +6,11 @@ import {
 	createMarketplaceSale,
 	fetchMarketplaceFormData,
 	fetchMarketplaceOperations,
-	fetchMarketplaceReturnOptions,
+	fetchMarketplaceReturnSales,
 	type MarketplaceFormData,
 	type MarketplaceOperationKind,
 	type MarketplaceOperationRow,
-	type MarketplaceReturnOption,
+	type MarketplaceReturnSale,
 } from './b24.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 
@@ -154,6 +154,7 @@ function MarketplaceSaleModal({
 					title: 'Товары для реализации на маркетплейсе',
 					kindFilter: 'goods',
 					onlyStockDefault: true,
+					allowedStoreTitles: form.stores,
 					forceRefreshOnMount: true,
 					onCancel: () => setPicking(false),
 					onDone: async (items) => { addPicked(items); setPicking(false); },
@@ -280,6 +281,7 @@ function MarketplaceBundleModal({
 					title: 'Товар для формирования комплекта',
 					kindFilter: 'goods',
 					onlyStockDefault: true,
+					allowedStoreTitles: form.stores,
 					forceRefreshOnMount: true,
 					onCancel: () => setPicking(false),
 					onDone: async (items) => {
@@ -341,55 +343,77 @@ function MarketplaceReturnModal({
 	onClose: () => void;
 	onDone: (row: MarketplaceOperationRow) => void;
 }): JSX.Element {
-	const [product, setProduct] = useState<ProductPickItem | null>(null);
-	const [options, setOptions] = useState<MarketplaceReturnOption[]>([]);
+	const [sales, setSales] = useState<MarketplaceReturnSale[]>([]);
 	const [saleName, setSaleName] = useState('');
 	const [storeTitle, setStoreTitle] = useState(form.stores.includes('Маркетплейс') ? 'Маркетплейс' : (form.stores[0] ?? ''));
 	const [postingDate, setPostingDate] = useState(localDate);
-	const [qty, setQty] = useState(1);
-	const [picking, setPicking] = useState(false);
-	const [loadingOptions, setLoadingOptions] = useState(false);
+	const [checked, setChecked] = useState<Record<number, boolean>>({});
+	const [quantities, setQuantities] = useState<Record<number, number>>({});
+	const [loadingSales, setLoadingSales] = useState(true);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
-	const selectedSale = options.find((option) => option.saleName === saleName) ?? null;
+	const selectedSale = sales.find((sale) => sale.saleName === saleName) ?? null;
+	const selectedLines = selectedSale?.items
+		.filter((item) => checked[item.productId])
+		.map((item) => ({ productId: item.productId, qty: Number(quantities[item.productId] ?? 0) })) ?? [];
 
-	const selectProduct = async (item: ProductPickItem): Promise<void> => {
-		setProduct(item);
-		setOptions([]);
-		setSaleName('');
-		setQty(1);
-		setError('');
-		setLoadingOptions(true);
-		try {
-			const next = mock
-				? [{
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			setLoadingSales(true);
+			setError('');
+			try {
+				const next: MarketplaceReturnSale[] = mock
+					? [{
 					saleName: 'MAT-DN-DEMO-1',
 					saleTitle: '23.07.26_Озон',
 					marketplace: 'Озон',
 					saleDate: '2026-07-23',
-					productId: item.productId,
-					itemName: item.name,
-					soldQty: 3,
-					returnedQty: 0,
-					availableQty: 3,
+					items: [
+						{ productId: 9900101, itemName: 'Комплект датчики 3 шт', soldQty: 2, returnedQty: 0, availableQty: 2 },
+						{ productId: 101, itemName: 'Датчик движения', soldQty: 4, returnedQty: 1, availableQty: 3 },
+					],
 				}]
-				: await fetchMarketplaceReturnOptions(item.productId);
-			setOptions(next);
-			setSaleName(next[0]?.saleName ?? '');
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setLoadingOptions(false);
+					: await fetchMarketplaceReturnSales();
+				if (cancelled) return;
+				setSales(next);
+				setSaleName(next[0]?.saleName ?? '');
+			} catch (err) {
+				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				if (!cancelled) setLoadingSales(false);
+			}
+		})();
+		return () => { cancelled = true; };
+	}, [mock]);
+
+	const chooseSale = (nextSaleName: string): void => {
+		setSaleName(nextSaleName);
+		setChecked({});
+		setQuantities({});
+		setError('');
+	};
+
+	const toggleItem = (productId: number, availableQty: number, value: boolean): void => {
+		setChecked((current) => ({ ...current, [productId]: value }));
+		if (value) {
+			setQuantities((current) => ({
+				...current,
+				[productId]: current[productId] ?? Math.min(1, availableQty),
+			}));
 		}
 	};
 
 	const submit = async (): Promise<void> => {
 		setError('');
-		if (!product) return setError('Выберите товар.');
 		if (!selectedSale) return setError('Выберите реализацию, из которой возвращается товар.');
 		if (!storeTitle) return setError('Выберите склад возврата.');
-		if (!(qty > 0)) return setError('Количество возврата должно быть больше нуля.');
-		if (qty > selectedSale.availableQty) return setError(`Доступно для возврата ${selectedSale.availableQty} шт.`);
+		if (!selectedLines.length) return setError('Отметьте товары для возврата.');
+		for (const line of selectedLines) {
+			const item = selectedSale.items.find((row) => row.productId === line.productId);
+			if (!item || !(line.qty > 0)) return setError('Количество возврата должно быть больше нуля.');
+			if (line.qty > item.availableQty) return setError(`Для «${item.itemName}» доступно ${item.availableQty} шт.`);
+		}
 		setBusy(true);
 		try {
 			const result = mock
@@ -397,16 +421,14 @@ function MarketplaceReturnModal({
 					name: `MAT-DN-RETURN-DEMO-${Date.now()}`,
 					title: `${postingDate.slice(8, 10)}.${postingDate.slice(5, 7)}.${postingDate.slice(2, 4)}_Возврат_${selectedSale.marketplace}`,
 					marketplace: selectedSale.marketplace,
-					itemName: product.name,
-					rate: 0,
 					total: 0,
-					qty,
+					quantity: selectedLines.reduce((sum, line) => sum + line.qty, 0),
+					itemCount: selectedLines.length,
 					storeTitle,
 				}
 				: await createMarketplaceReturn({
 					saleName: selectedSale.saleName,
-					productId: product.productId,
-					qty,
+					lines: selectedLines,
 					storeTitle,
 					postingDate,
 				});
@@ -419,8 +441,8 @@ function MarketplaceReturnModal({
 				storeTitle: result.storeTitle,
 				submitted: true,
 				total: result.total,
-				itemCount: 1,
-				quantity: result.qty,
+				itemCount: result.itemCount,
+				quantity: result.quantity,
 			});
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -428,25 +450,6 @@ function MarketplaceReturnModal({
 			setBusy(false);
 		}
 	};
-
-	if (picking) {
-		return (
-			<div className="marketplace-picker">
-				<ProductBase picker={{
-					title: 'Товар, который вернул покупатель',
-					kindFilter: 'goods',
-					onlyStockDefault: false,
-					forceRefreshOnMount: true,
-					onCancel: () => setPicking(false),
-					onDone: async (items) => {
-						const picked = items.find((item) => !item.isService);
-						setPicking(false);
-						if (picked) await selectProduct(picked);
-					},
-				}} />
-			</div>
-		);
-	}
 
 	return (
 		<div className="marketplace-modal-backdrop">
@@ -456,39 +459,46 @@ function MarketplaceReturnModal({
 					<button type="button" className="marketplace-close" onClick={onClose} aria-label="Закрыть">×</button>
 				</header>
 				<div className="marketplace-return-body">
-					<div className="marketplace-bundle-source">
-						<div>
-							<span>Возвращаемый товар</span>
-							{product ? <><b>{product.name}</b><small>#{product.productId}</small></> : <b>Товар не выбран</b>}
-						</div>
-						<button type="button" onClick={() => setPicking(true)}>{product ? 'Заменить' : 'Выбрать товар'}</button>
-					</div>
-
 					<label className="marketplace-return-sale">
 						Реализация
-						<select value={saleName} disabled={!options.length || loadingOptions} onChange={(event) => { setSaleName(event.target.value); setQty(1); }}>
-							<option value="">{loadingOptions ? 'Ищу реализации…' : 'Выберите реализацию'}</option>
-							{options.map((option) => <option key={option.saleName} value={option.saleName}>
-								{option.saleTitle} · доступно {option.availableQty} из {option.soldQty}
+						<select value={saleName} disabled={!sales.length || loadingSales} onChange={(event) => chooseSale(event.target.value)}>
+							<option value="">{loadingSales ? 'Загружаю реализации…' : 'Выберите реализацию'}</option>
+							{sales.map((sale) => <option key={sale.saleName} value={sale.saleName}>
+								{sale.saleTitle} · {sale.items.length} поз.
 							</option>)}
 						</select>
 					</label>
 
-					{product && !loadingOptions && options.length === 0
-						? <div className="marketplace-return-empty">В реализациях маркетплейсов этого товара нет либо всё количество уже возвращено.</div>
+					{!loadingSales && sales.length === 0
+						? <div className="marketplace-return-empty">Нет реализаций маркетплейсов с товарами, доступными для возврата.</div>
 						: null}
 
 					{selectedSale
 						? <div className="marketplace-return-summary">
 							<div><span>Маркетплейс</span><b>{selectedSale.marketplace}</b></div>
-							<div><span>Продано</span><b>{selectedSale.soldQty} шт.</b></div>
-							<div><span>Уже возвращено</span><b>{selectedSale.returnedQty} шт.</b></div>
-							<div><span>Можно вернуть</span><b>{selectedSale.availableQty} шт.</b></div>
+							<div><span>Дата</span><b>{selectedSale.saleDate}</b></div>
+							<div><span>Позиций</span><b>{selectedSale.items.length}</b></div>
+							<div><span>Выбрано</span><b>{selectedLines.length}</b></div>
+						</div>
+						: null}
+
+					{selectedSale
+						? <div className="marketplace-lines marketplace-return-lines">
+							<table>
+								<thead><tr><th>Вернуть</th><th>Товар</th><th>Продано</th><th>Уже возвращено</th><th>Можно вернуть</th><th>Количество</th></tr></thead>
+								<tbody>{selectedSale.items.map((item) => <tr key={item.productId}>
+									<td><input type="checkbox" checked={Boolean(checked[item.productId])} onChange={(event) => toggleItem(item.productId, item.availableQty, event.target.checked)} /></td>
+									<td><b>{item.itemName}</b><small>#{item.productId}</small></td>
+									<td>{item.soldQty}</td>
+									<td>{item.returnedQty}</td>
+									<td>{item.availableQty}</td>
+									<td><input type="number" min="0.001" max={item.availableQty} step="any" disabled={!checked[item.productId]} value={quantities[item.productId] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.productId]: Number(event.target.value) }))} /></td>
+								</tr>)}</tbody>
+							</table>
 						</div>
 						: null}
 
 					<div className="marketplace-sale-fields">
-						<label>Количество<input type="number" min="0.001" max={selectedSale?.availableQty} step="any" value={qty} onChange={(event) => setQty(Number(event.target.value))} /></label>
 						<label>Склад возврата<select value={storeTitle} onChange={(event) => setStoreTitle(event.target.value)}><option value="">Выберите склад</option>{form.stores.map((name) => <option key={name}>{name}</option>)}</select></label>
 						<label>Дата возврата<input type="date" value={postingDate} onChange={(event) => setPostingDate(event.target.value)} /></label>
 					</div>
@@ -497,7 +507,7 @@ function MarketplaceReturnModal({
 				{error && <div className="marketplace-error">{error}</div>}
 				<footer>
 					<button type="button" onClick={onClose}>Отмена</button>
-					<button type="button" className="primary" disabled={busy || loadingOptions || !selectedSale || !form.canCreate} onClick={() => void submit()}>{busy ? 'Провожу…' : 'Провести возврат'}</button>
+					<button type="button" className="primary" disabled={busy || loadingSales || !selectedSale || !selectedLines.length || !form.canCreate} onClick={() => void submit()}>{busy ? 'Провожу…' : `Провести возврат${selectedLines.length ? ` (${selectedLines.length})` : ''}`}</button>
 				</footer>
 			</section>
 		</div>

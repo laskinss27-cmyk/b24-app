@@ -1490,16 +1490,20 @@ export interface MarketplaceFormData {
 	canCreate: boolean;
 }
 
-export interface MarketplaceReturnOption {
-	saleName: string;
-	saleTitle: string;
-	marketplace: string;
-	saleDate: string;
+export interface MarketplaceReturnSaleItem {
 	productId: number;
 	itemName: string;
 	soldQty: number;
 	returnedQty: number;
 	availableQty: number;
+}
+
+export interface MarketplaceReturnSale {
+	saleName: string;
+	saleTitle: string;
+	marketplace: string;
+	saleDate: string;
+	items: MarketplaceReturnSaleItem[];
 }
 
 export async function fetchMarketplaceFormData(): Promise<MarketplaceFormData> {
@@ -1545,31 +1549,29 @@ export async function createMarketplaceSale(input: {
 	return { name: json.name, title: json.title };
 }
 
-export async function fetchMarketplaceReturnOptions(productId: number): Promise<MarketplaceReturnOption[]> {
+export async function fetchMarketplaceReturnSales(): Promise<MarketplaceReturnSale[]> {
 	const res = await fetch('/api/marketplaces/return-options', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), productId }),
+		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; options?: MarketplaceReturnOption[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; sales?: MarketplaceReturnSale[] };
 	if (!json.ok) throw new Error(json.error ?? 'Не удалось найти реализации для возврата');
-	return json.options ?? [];
+	return json.sales ?? [];
 }
 
 export async function createMarketplaceReturn(input: {
 	saleName: string;
-	productId: number;
-	qty: number;
+	lines: Array<{ productId: number; qty: number }>;
 	storeTitle: string;
 	postingDate: string;
 }): Promise<{
 	name: string;
 	title: string;
 	marketplace: string;
-	itemName: string;
-	rate: number;
 	total: number;
-	qty: number;
+	quantity: number;
+	itemCount: number;
 	storeTitle: string;
 }> {
 	const res = await fetch('/api/marketplaces/return', {
@@ -1583,23 +1585,21 @@ export async function createMarketplaceReturn(input: {
 		name?: string;
 		title?: string;
 		marketplace?: string;
-		itemName?: string;
-		rate?: number;
 		total?: number;
-		qty?: number;
+		quantity?: number;
+		itemCount?: number;
 		storeTitle?: string;
 	};
-	if (!json.ok || !json.name || !json.title || !json.marketplace || !json.itemName || !json.storeTitle) {
+	if (!json.ok || !json.name || !json.title || !json.marketplace || !json.storeTitle) {
 		throw new Error(json.error ?? 'Не удалось провести возврат');
 	}
 	return {
 		name: json.name,
 		title: json.title,
 		marketplace: json.marketplace,
-		itemName: json.itemName,
-		rate: Number(json.rate ?? 0),
 		total: Number(json.total ?? 0),
-		qty: Number(json.qty ?? 0),
+		quantity: Number(json.quantity ?? 0),
+		itemCount: Number(json.itemCount ?? 0),
 		storeTitle: json.storeTitle,
 	};
 }

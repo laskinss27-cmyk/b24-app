@@ -1017,6 +1017,22 @@ export interface MarketplaceReturnOption {
 	availableQty: number;
 }
 
+export interface MarketplaceReturnSaleItem {
+	productId: number;
+	itemName: string;
+	soldQty: number;
+	returnedQty: number;
+	availableQty: number;
+}
+
+export interface MarketplaceReturnSale {
+	saleName: string;
+	saleTitle: string;
+	marketplace: string;
+	saleDate: string;
+	items: MarketplaceReturnSaleItem[];
+}
+
 export function marketplaceSaleTitle(postingDate: string, marketplace: string): string {
 	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(postingDate);
 	if (!match) throw new Error('некорректная дата реализации');
@@ -1191,50 +1207,89 @@ export async function listMarketplaceReturnOptions(
 		.sort((left, right) => `${right.saleDate}:${right.saleName}`.localeCompare(`${left.saleDate}:${left.saleName}`));
 }
 
-/** Return one sold marketplace product against the selected original Delivery Note. */
-export async function createMarketplaceReturn(
+/** Submitted marketplace sales and their still-returnable composition. */
+export async function listMarketplaceReturnSales(erp: ErpClient): Promise<MarketplaceReturnSale[]> {
+	const sales = new Map<string, MarketplaceReturnSale & { itemMap: Map<number, MarketplaceReturnSaleItem> }>();
+	for (const source of await marketplaceReturnSources(erp)) {
+		const sale = sales.get(source.saleName) ?? {
+			saleName: source.saleName,
+			saleTitle: source.saleTitle,
+			marketplace: source.marketplace,
+			saleDate: source.saleDate,
+			items: [],
+			itemMap: new Map<number, MarketplaceReturnSaleItem>(),
+		};
+		const item = sale.itemMap.get(source.productId) ?? {
+			productId: source.productId,
+			itemName: source.itemName,
+			soldQty: 0,
+			returnedQty: 0,
+			availableQty: 0,
+		};
+		item.soldQty += source.soldQty;
+		item.availableQty += source.remainingQty;
+		item.returnedQty = item.soldQty - item.availableQty;
+		sale.itemMap.set(source.productId, item);
+		sales.set(source.saleName, sale);
+	}
+	return [...sales.values()]
+		.map(({ itemMap, ...sale }) => ({
+			...sale,
+			items: [...itemMap.values()].filter((item) => item.availableQty > 0.000001),
+		}))
+		.filter((sale) => sale.items.length > 0)
+		.sort((left, right) => `${right.saleDate}:${right.saleName}`.localeCompare(`${left.saleDate}:${left.saleName}`));
+}
+
+/** Return several selected products against one marketplace Delivery Note. */
+export async function createMarketplaceReturnBatch(
 	erp: ErpClient,
 	args: {
 		saleName: string;
-		productId: number;
-		qty: number;
+		lines: Array<{ productId: number; qty: number }>;
 		storeTitle: string;
 		postingDate: string;
 	},
-): Promise<{ name: string; title: string; marketplace: string; itemName: string; rate: number; total: number }> {
+): Promise<{ name: string; title: string; marketplace: string; total: number; quantity: number; itemCount: number }> {
 	const saleName = args.saleName.trim();
 	const storeTitle = args.storeTitle.trim();
 	if (!saleName) throw new Error('не выбрана исходная реализация');
-	if (!Number.isInteger(args.productId) || args.productId <= 0) throw new Error('неверный товар для возврата');
-	if (!(args.qty > 0)) throw new Error('количество возврата должно быть больше нуля');
+	if (!args.lines.length) throw new Error('не выбраны товары для возврата');
+	if (args.lines.some((line) =>
+		!Number.isInteger(line.productId) || line.productId <= 0 || !(line.qty > 0))) {
+		throw new Error('в возврате есть некорректная строка');
+	}
+	if (new Set(args.lines.map((line) => line.productId)).size !== args.lines.length) {
+		throw new Error('товар в возврате указан несколько раз');
+	}
 	if (!storeTitle) throw new Error('не выбран склад возврата');
 	const dateTitle = marketplaceSaleTitle(args.postingDate, 'Возврат');
-	const sources = (await marketplaceReturnSources(erp))
-		.filter((source) =>
-			source.saleName === saleName
-			&& source.productId === args.productId
-			&& source.remainingQty > 0.000001);
-	if (!sources.length) throw new Error('в выбранной реализации товар уже полностью возвращён или не найден');
-	const availableQty = sources.reduce((sum, source) => sum + source.remainingQty, 0);
-	if (args.qty > availableQty + 0.000001) {
-		throw new Error(`доступно для возврата ${availableQty}, запрошено ${args.qty}`);
-	}
+	const saleSources = (await marketplaceReturnSources(erp))
+		.filter((source) => source.saleName === saleName && source.remainingQty > 0.000001);
+	if (!saleSources.length) throw new Error('выбранная реализация уже полностью возвращена или не найдена');
 
-	let qtyLeft = args.qty;
-	const lines: Array<{ qty: number; source: MarketplaceReturnSource }> = [];
-	for (const source of sources) {
-		const qty = Math.min(source.remainingQty, qtyLeft);
-		if (qty > 0.000001) lines.push({ qty, source });
-		qtyLeft -= qty;
-		if (qtyLeft <= 0.000001) break;
+	const returnLines: Array<{ qty: number; source: MarketplaceReturnSource }> = [];
+	for (const requested of args.lines) {
+		const sources = saleSources.filter((source) => source.productId === requested.productId);
+		const availableQty = sources.reduce((sum, source) => sum + source.remainingQty, 0);
+		if (requested.qty > availableQty + 0.000001) {
+			throw new Error(`для товара #${requested.productId} доступно для возврата ${availableQty}, запрошено ${requested.qty}`);
+		}
+		let qtyLeft = requested.qty;
+		for (const source of sources) {
+			const qty = Math.min(source.remainingQty, qtyLeft);
+			if (qty > 0.000001) returnLines.push({ qty, source });
+			qtyLeft -= qty;
+			if (qtyLeft <= 0.000001) break;
+		}
 	}
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMarketplaceFields(erp);
-	const marketplace = sources[0]!.marketplace;
-	const itemName = sources[0]!.itemName;
+	const marketplace = saleSources[0]!.marketplace;
 	const title = `${dateTitle}_${marketplace}`;
-	const total = lines.reduce((sum, line) => sum + line.qty * line.source.rate, 0);
+	const total = returnLines.reduce((sum, line) => sum + line.qty * line.source.rate, 0);
+	const quantity = args.lines.reduce((sum, line) => sum + line.qty, 0);
 	const document = await erp.create('Delivery Note', {
 		company: ctx.company,
 		customer: TECH_CUSTOMER,
@@ -1245,7 +1300,7 @@ export async function createMarketplaceReturn(
 		[MARKETPLACE_OPERATION_FIELD]: 'return',
 		[MARKETPLACE_NAME_FIELD]: marketplace,
 		[MARKETPLACE_TITLE_FIELD]: title,
-		items: lines.map(({ qty, source }) => ({
+		items: returnLines.map(({ qty, source }) => ({
 			item_code: String(source.productId),
 			qty: -Math.abs(qty),
 			warehouse: erpWarehouse(ctx, storeTitle),
@@ -1262,7 +1317,38 @@ export async function createMarketplaceReturn(
 		await erp.delete('Delivery Note', name).catch(() => undefined);
 		throw error;
 	}
-	return { name, title, marketplace, itemName, rate: total / args.qty, total: -total };
+	return { name, title, marketplace, total: -total, quantity, itemCount: args.lines.length };
+}
+
+/** Backward-compatible single-line marketplace return. */
+export async function createMarketplaceReturn(
+	erp: ErpClient,
+	args: {
+		saleName: string;
+		productId: number;
+		qty: number;
+		storeTitle: string;
+		postingDate: string;
+	},
+): Promise<{ name: string; title: string; marketplace: string; itemName: string; rate: number; total: number }> {
+	const source = (await marketplaceReturnSources(erp)).find((item) =>
+		item.saleName === args.saleName.trim()
+		&& item.productId === args.productId
+		&& item.remainingQty > 0.000001);
+	const result = await createMarketplaceReturnBatch(erp, {
+		saleName: args.saleName,
+		lines: [{ productId: args.productId, qty: args.qty }],
+		storeTitle: args.storeTitle,
+		postingDate: args.postingDate,
+	});
+	return {
+		name: result.name,
+		title: result.title,
+		marketplace: result.marketplace,
+		itemName: source?.itemName ?? `#${args.productId}`,
+		rate: args.qty > 0 ? Math.abs(result.total) / args.qty : 0,
+		total: result.total,
+	};
 }
 
 /** Convert several units of one item into a stock item representing a marketplace bundle. */

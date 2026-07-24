@@ -10,9 +10,11 @@ import {
 	REALIZATION_SEGMENT_FIELD,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
+	createMarketplaceReturnBatch,
 	createMarketplaceSale,
 	listMarketplaceOperations,
 	listMarketplaceReturnOptions,
+	listMarketplaceReturnSales,
 	marketplaceSaleTitle,
 	syncDealRealizationPrices,
 } from './operations.js';
@@ -372,4 +374,43 @@ test('marketplace return is linked to its sale and cannot exceed the quantity le
 	assert.equal(journal[0]?.operation, 'return');
 	assert.equal(journal[0]?.storeTitle, 'Shelly');
 	assert.equal(journal[0]?.quantity, 2);
+});
+
+test('marketplace return starts from a sale and returns several selected sold-out items together', async () => {
+	const erp = new FakeErp([]);
+	const sale = await createMarketplaceSale(erp.asClient(), {
+		marketplace: 'Wildberries',
+		storeTitle: 'Маркетплейс',
+		postingDate: '2026-07-23',
+		lines: [
+			{ productId: 301, itemName: 'Комплект датчиков 3 шт', qty: 2, rate: 3900 },
+			{ productId: 302, itemName: 'Комплект камер 2 шт', qty: 2, rate: 8000 },
+		],
+	});
+
+	const sales = await listMarketplaceReturnSales(erp.asClient());
+	assert.equal(sales.length, 1);
+	assert.equal(sales[0]?.saleName, sale.name);
+	assert.deepEqual(sales[0]?.items.map((item) => [item.productId, item.availableQty]), [[301, 2], [302, 2]]);
+
+	const returned = await createMarketplaceReturnBatch(erp.asClient(), {
+		saleName: sale.name,
+		lines: [
+			{ productId: 301, qty: 2 },
+			{ productId: 302, qty: 1 },
+		],
+		storeTitle: 'Shelly',
+		postingDate: '2026-07-24',
+	});
+	assert.equal(returned.itemCount, 2);
+	assert.equal(returned.quantity, 3);
+	assert.equal(returned.total, -15800);
+
+	const returnDocument = erp.active().find((document) => document.name === returned.name);
+	assert.ok(returnDocument);
+	assert.deepEqual(returnDocument.items.map((row) => [row['item_code'], row['qty']]), [['301', -2], ['302', -1]]);
+
+	const remaining = await listMarketplaceReturnSales(erp.asClient());
+	assert.equal(remaining.length, 1);
+	assert.deepEqual(remaining[0]?.items.map((item) => [item.productId, item.availableQty]), [[302, 1]]);
 });
