@@ -1834,6 +1834,83 @@ export async function downloadDealXlsx(dealId: number, variantId?: string): Prom
 	}
 }
 
+export interface ContractPartyInfo {
+	id: number;
+	entityTypeId: 3 | 4;
+	title: string;
+	kind: 'company' | 'ip' | 'person';
+	fullName: string;
+	shortName: string;
+	director: string;
+	email: string;
+	missing: string[];
+}
+
+export interface DealContractContext {
+	dealId: number;
+	dealTitle: string;
+	ownCompanies: ContractPartyInfo[];
+	selectedCompanyId: number | null;
+	customer: ContractPartyInfo | null;
+	objectType: string;
+	objectAddress: string;
+	contractNumber: string;
+	contractDate: string;
+	vatRate: 5 | 22;
+}
+
+export async function fetchDealContractContext(dealId: number): Promise<DealContractContext> {
+	const res = await fetch('/api/contracts/context', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok?: boolean; error?: string; context?: DealContractContext };
+	if (!json.ok || !json.context) throw new Error(json.error ?? 'не удалось подготовить договор');
+	return json.context;
+}
+
+export async function downloadDealContract(input: {
+	dealId: number;
+	companyId: number;
+	vatRate: 5 | 22;
+	contractDate: string;
+	contractNumber?: string;
+	objectType: string;
+	objectAddress: string;
+}): Promise<string> {
+	const res = await fetch('/api/contracts/generate', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const contentType = res.headers.get('content-type') ?? '';
+	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
+		let message = `не удалось сформировать договор (HTTP ${res.status})`;
+		try {
+			const json = (await res.json()) as { error?: string };
+			if (json.error) message = json.error;
+		} catch { /* сервер вернул не-JSON ошибку */ }
+		throw new Error(message);
+	}
+	const blob = await res.blob();
+	const disposition = res.headers.get('content-disposition') ?? '';
+	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? `contract-${input.dealId}.docx`;
+	const contractNumber = res.headers.get('x-contract-number') ?? '';
+	const url = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+	return contractNumber;
+}
+
 /** Открыть карточку сделки в Б24 (слайдером). */
 export function openDeal(dealId: number): void {
 	const path = `/crm/deal/details/${dealId}/`;

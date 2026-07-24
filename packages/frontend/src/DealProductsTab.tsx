@@ -26,6 +26,8 @@ import {
 	selectDealQuoteVariant,
 	cancelDealQuoteVariantSelection,
 	downloadDealXlsx,
+	fetchDealContractContext,
+	downloadDealContract,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	setupDealFulfillment,
@@ -45,6 +47,7 @@ import {
 	type DealQuoteVariants,
 	type RealizeCoreGroup,
 	type DealShippedInfo,
+	type DealContractContext,
 	type SupplyCard,
 	type TransferDoc,
 } from './b24.js';
@@ -680,6 +683,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const [stageError, setStageError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 	const [exportBusy, setExportBusy] = useState(false);
+	const [showContract, setShowContract] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	const exportXlsx = async (): Promise<void> => {
 		if (dealId == null || exportBusy) return;
@@ -1392,6 +1396,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
 				<button className="btn-secondary" onClick={() => onKp()}>КП</button>
+				{workingMode && <button className="btn-secondary" disabled={dealId == null || dev} onClick={() => setShowContract(true)}>Договор</button>}
 				<button className="btn-secondary" disabled={dealId == null || exportBusy} onClick={() => void exportXlsx()}>{exportBusy ? 'Формируем…' : 'Скачать Excel'}</button>
 				{(proposalEditable || canSwitchVariant || viewingSelected) && activeVariant && (
 					<button
@@ -1645,6 +1650,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				/>
 			)}
 
+			{workingMode && showContract && dealId != null && (
+				<ContractModal
+					dealId={dealId}
+					onClose={() => setShowContract(false)}
+					onDone={(message) => {
+						setShowContract(false);
+						setNotice({ kind: 'ok', text: message });
+					}}
+				/>
+			)}
+
 			{variantDialog && (
 				<div className="deal-supply-order-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !variantBusy) setVariantDialog(null); }}>
 					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'rename' ? 'Название варианта' : variantDialog.kind === 'copy' ? 'Копировать вариант' : 'Добавить вариант'}>
@@ -1670,6 +1686,102 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				</div>
 			)}
 
+		</div>
+	);
+}
+
+function ContractModal({ dealId, onClose, onDone }: {
+	dealId: number;
+	onClose: () => void;
+	onDone: (message: string) => void;
+}): JSX.Element {
+	const [context, setContext] = useState<DealContractContext | null>(null);
+	const [companyId, setCompanyId] = useState(0);
+	const [vatRate, setVatRate] = useState<5 | 22>(5);
+	const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0, 10));
+	const [contractNumber, setContractNumber] = useState('');
+	const [objectType, setObjectType] = useState('');
+	const [objectAddress, setObjectAddress] = useState('');
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let alive = true;
+		fetchDealContractContext(dealId).then((data) => {
+			if (!alive) return;
+			setContext(data);
+			setCompanyId(data.selectedCompanyId ?? data.ownCompanies[0]?.id ?? 0);
+			setVatRate(data.vatRate);
+			setContractDate(data.contractDate || new Date().toISOString().slice(0, 10));
+			setContractNumber(data.contractNumber);
+			setObjectType(data.objectType);
+			setObjectAddress(data.objectAddress);
+		}).catch((reason) => {
+			if (alive) setError(String(reason instanceof Error ? reason.message : reason));
+		});
+		return () => { alive = false; };
+	}, [dealId]);
+
+	const company = context?.ownCompanies.find((item) => item.id === companyId) ?? null;
+	const blockers = [
+		...(company?.missing.map((field) => `Наша компания: ${field}`) ?? []),
+		...(context?.customer?.missing.map((field) => `Клиент: ${field}`) ?? []),
+		...(!context?.customer && context ? ['В сделке не указан клиент'] : []),
+		...(!objectType.trim() && context ? ['Не указан тип объекта'] : []),
+		...(!objectAddress.trim() && context ? ['Не указан адрес объекта'] : []),
+	];
+
+	const generate = async (): Promise<void> => {
+		if (!context || !company || blockers.length || busy) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const number = await downloadDealContract({
+				dealId,
+				companyId,
+				vatRate,
+				contractDate,
+				...(contractNumber.trim() ? { contractNumber: contractNumber.trim() } : {}),
+				objectType: objectType.trim(),
+				objectAddress: objectAddress.trim(),
+			});
+			onDone(`✅ Договор${number ? ` № ${number}` : ''} сформирован и скачан.`);
+		} catch (reason) {
+			setError(String(reason instanceof Error ? reason.message : reason));
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<div style={splitOv} onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+			<div style={{ ...splitCard, maxWidth: 700 }}>
+				<h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Сформировать договор</h2>
+				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 14 }}>Сделка #{dealId}. Проверьте стороны, ставку НДС и данные объекта.</div>
+				{!context && !error && <p style={{ color: '#7a8699' }}>Загружаю реквизиты из Битрикс24…</p>}
+				{context && <>
+					<div className="deal-contract-grid">
+						<label><span>Наша компания</span><select value={companyId} disabled={busy || Boolean(context.contractNumber)} onChange={(event) => setCompanyId(Number(event.target.value))}>
+							{context.ownCompanies.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+						</select></label>
+						<label><span>Заказчик</span><input value={context.customer?.title ?? 'Не указан'} readOnly /></label>
+						<label><span>НДС</span><select value={vatRate} disabled={busy} onChange={(event) => setVatRate(Number(event.target.value) === 22 ? 22 : 5)}>
+							<option value={5}>НДС 5%</option>
+							<option value={22}>НДС 22%</option>
+						</select></label>
+						<label><span>Дата договора</span><input type="date" value={contractDate} disabled={busy} onChange={(event) => setContractDate(event.target.value)} /></label>
+						<label><span>Номер договора</span><input value={contractNumber} disabled={busy || Boolean(context.contractNumber)} placeholder="автоматически" onChange={(event) => setContractNumber(event.target.value.replace(/[^\d]/g, ''))} /></label>
+						<label><span>Тип объекта</span><input value={objectType} disabled={busy} placeholder="Квартира" onChange={(event) => setObjectType(event.target.value)} /></label>
+						<label className="wide"><span>Адрес объекта</span><input value={objectAddress} disabled={busy} onChange={(event) => setObjectAddress(event.target.value)} /></label>
+					</div>
+					{blockers.length > 0 && <div className="deal-contract-blockers"><b>Договор пока сформировать нельзя:</b>{blockers.map((item) => <span key={item}>• {item}</span>)}</div>}
+				</>}
+				{error && <p style={{ color: '#c0392b', fontSize: 13 }}>⛔ {error}</p>}
+				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+					<button onClick={onClose} style={splitGhost} disabled={busy}>Отмена</button>
+					<button className="btn-primary" disabled={!context || !company || blockers.length > 0 || busy} onClick={() => void generate()}>{busy ? 'Формирую…' : 'Скачать Word'}</button>
+				</div>
+			</div>
 		</div>
 	);
 }
