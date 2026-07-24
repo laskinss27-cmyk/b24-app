@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, listActiveStoreTitles, coreStoreId, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
@@ -154,21 +154,22 @@ const normName = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/
 async function resolveDealSourceStoreId(client: B24Client, deal: Record<string, unknown> | null): Promise<number | null> {
 	const sourceId = String(deal?.['SOURCE_ID'] ?? '').trim();
 	if (!sourceId) return null;
+	const erp = ErpClient.fromEnv();
+	if (!erp) return null;
 	try {
-		const [statuses, stores] = await Promise.all([
+		const [statuses, storeTitles] = await Promise.all([
 			client.call<Array<Record<string, unknown>>>('crm.status.list', { filter: { ENTITY_ID: 'SOURCE' }, order: { SORT: 'ASC' } }),
-			client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] }),
+			listActiveStoreTitles(erp),
 		]);
 		const sourceName = String((statuses ?? []).find((s) => String(s['STATUS_ID']) === sourceId)?.['NAME'] ?? sourceId);
 		const sourceNorm = normName(sourceName);
-		const storeRows = stores?.stores ?? [];
-		const exact = storeRows.find((s) => normName(String(s['title'] ?? '')) === sourceNorm);
-		if (exact) return Number(exact['id'] ?? 0) || null;
-		const partial = storeRows.find((s) => {
-			const title = normName(String(s['title'] ?? ''));
-			return title.includes(sourceNorm) || sourceNorm.includes(title);
+		const exact = storeTitles.find((title) => normName(title) === sourceNorm);
+		if (exact) return coreStoreId(exact);
+		const partial = storeTitles.find((title) => {
+			const normalizedTitle = normName(title);
+			return normalizedTitle.includes(sourceNorm) || sourceNorm.includes(normalizedTitle);
 		});
-		return partial ? Number(partial['id'] ?? 0) || null : null;
+		return partial ? coreStoreId(partial) : null;
 	} catch {
 		return null;
 	}
@@ -285,7 +286,6 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 	const payPaid = (ord?.order?.payments ?? []).filter((p) => p['paid'] === 'Y').reduce((a, p) => a + Number(p['sum'] ?? 0), 0);
 	info.payment = kassaPayment ?? { total: payTotal, paid: payPaid };
 	const basketIdToRow = new Map<number, number>();
-	const storeTally = new Map<number, number>(); // склад резерва → сколько строк (для склада-источника сделки)
 	for (const b of ord?.order?.basketItems ?? []) {
 		const m = /^crm_pr_(\d+)$/.exec(String(b['xmlId'] ?? ''));
 		if (!m) continue;
@@ -297,10 +297,7 @@ async function loadDealOrderInfo(client: B24Client, dealId: number): Promise<Dea
 		const stores = [...new Set(((b['reservations'] as Array<Record<string, unknown>>) ?? [])
 			.map((r) => Number(r['storeId'] ?? 0)).filter((s) => s > 0))];
 		if (stores.length) info.reserves.set(rowId, stores);
-		for (const s of stores) storeTally.set(s, (storeTally.get(s) ?? 0) + 1);
 	}
-	// Склад-источник сделки = самый частый склад в резервах (на него дефолтим «Склад реализации»).
-	info.sourceStoreId = [...storeTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? info.sourceStoreId;
 
 	const sh = await client.call<{ shipments?: Array<Record<string, unknown>> }>('sale.shipment.list', {
 		filter: { orderId, system: 'N' }, select: ['id', 'accountNumber', 'deducted'],

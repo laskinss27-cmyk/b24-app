@@ -17,8 +17,8 @@
  * Плоский «sellable» каталог = (iblock 24 КРОМЕ родителей type 3) + (все офферы 26).
  * Родители (type 3) в плоском списке не показываем — их представляют офферы.
  *
- * Остаток цепляем из catalog.storeproduct.list (БЕЗ фильтра amount>0 — нужны и нули,
- * чтобы галка «только остаток>0» на фронте реально фильтровала). Розница = BASE (group 2).
+ * Остатки здесь намеренно не загружаются: их единственный источник — складское ядро.
+ * Розница = BASE (group 2).
  */
 import { B24Client, type BatchCall } from './client.js';
 
@@ -155,27 +155,6 @@ async function fetchSectionNames(client: B24Client): Promise<Map<number, string>
 	return map;
 }
 
-/** Остатки по складам: productId → { storeId: amount } (включая нули — для фильтра «только>0»). */
-async function fetchStock(client: B24Client): Promise<Map<number, Record<number, number>>> {
-	const sp = await fetchAllPaged(
-		client,
-		'catalog.storeproduct.list',
-		{ select: ['productId', 'storeId', 'amount'], order: { id: 'ASC' } },
-		(r) => (r as { storeProducts?: Array<Record<string, unknown>> })?.storeProducts ?? [],
-	);
-	const map = new Map<number, Record<number, number>>();
-	for (const r of sp) {
-		const pid = Number(r['productId']);
-		if (pid <= 0) continue;
-		const storeId = Number(r['storeId']);
-		const amount = Number(r['amount'] ?? 0);
-		const e = map.get(pid) ?? {};
-		e[storeId] = (e[storeId] ?? 0) + amount;
-		map.set(pid, e);
-	}
-	return map;
-}
-
 /** Розница (BASE) пачками. price.list — list-метод (≤50 строк за вызов), поэтому массив id
  *  режем по 50: один товар = одна BASE-цена → ровно влезает в страницу. */
 async function fetchPrices(client: B24Client, ids: number[]): Promise<Map<number, number | null>> {
@@ -202,17 +181,11 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 	const main = await fetchAllProducts(client, MAIN_IBLOCK, SELECT_MAIN);
 	const offers = await fetchAllProducts(client, OFFER_IBLOCK, SELECT_OFFER);
 	const sections = await fetchSectionNames(client);
-	const stock = await fetchStock(client);
 
 	// карта основных товаров (для бренда/модели/раздела/фото родителя у офферов)
 	const mainById = new Map<number, Record<string, unknown>>();
 	for (const p of main) mainById.set(Number(p['id']), p);
 
-	const stockOf = (id: number): { stockByStore: Record<number, number>; total: number } => {
-		const stockByStore = stock.get(id) ?? {};
-		const total = Object.values(stockByStore).reduce((s, n) => s + n, 0);
-		return { stockByStore, total };
-	};
 	const sectionName = (sid: number | undefined): string | undefined => (sid ? sections.get(sid) : undefined);
 
 	const rows: BaseRow[] = [];
@@ -223,7 +196,6 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 		const id = Number(p['id']);
 		if (id === B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID) continue;
 		const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
-		const { stockByStore, total } = stockOf(id);
 		rows.push({
 			id,
 			iblockId: MAIN_IBLOCK,
@@ -237,8 +209,8 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			retail: null,
 			purchase: numOrNull(p['purchasingPrice']),
 			photoPath: pictureUrl(p['detailPicture']) ?? pictureUrl(p['previewPicture']),
-			total,
-			stockByStore,
+			total: 0,
+			stockByStore: {},
 		});
 	}
 
@@ -249,7 +221,6 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 		const pid = parentIdOf(o);
 		const par = pid ? mainById.get(pid) : undefined;
 		const sid = (Number(o['iblockSectionId'] ?? 0) || undefined) ?? (par ? Number(par['iblockSectionId'] ?? 0) || undefined : undefined);
-		const { stockByStore, total } = stockOf(id);
 		rows.push({
 			id,
 			iblockId: OFFER_IBLOCK,
@@ -263,8 +234,8 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			retail: null,
 			purchase: numOrNull(o['purchasingPrice']) ?? (par ? numOrNull(par['purchasingPrice']) : null),
 			photoPath: pictureUrl(o['detailPicture']) ?? pictureUrl(o['previewPicture']) ?? (par ? pictureUrl(par['detailPicture']) : undefined),
-			total,
-			stockByStore,
+			total: 0,
+			stockByStore: {},
 		});
 	}
 
@@ -371,20 +342,8 @@ export async function enrichProducts(client: B24Client, ids: number[]): Promise<
  * инвентаризации: пусто = весь склад; иначе только эти разделы (id 0 = «Без раздела»).
  */
 export async function fetchStoreStock(client: B24Client, storeId: number, sectionIds?: number[]): Promise<StockLine[]> {
-	const sp = await fetchAllPaged(
-		client,
-		'catalog.storeproduct.list',
-		{ filter: { storeId }, select: ['productId', 'amount'], order: { id: 'ASC' } },
-		(r) => (r as { storeProducts?: Array<Record<string, unknown>> })?.storeProducts ?? [],
-	);
-	const rows = sp
-		.map((r) => ({ productId: Number(r['productId']), amount: Number(r['amount'] ?? 0) }))
-		.filter((r) => r.productId > 0 && r.amount > 0);
-	const info = await enrichProducts(client, rows.map((r) => r.productId));
-	const lines: StockLine[] = rows.map((r) => ({ productId: r.productId, book: r.amount, ...(info.get(r.productId) ?? { name: `#${r.productId}` }) }));
-	if (sectionIds && sectionIds.length) {
-		const set = new Set(sectionIds);
-		return lines.filter((l) => (l.sectionId != null && set.has(l.sectionId)) || (l.sectionId == null && set.has(0)));
-	}
-	return lines;
+	void client;
+	void storeId;
+	void sectionIds;
+	throw new Error('остатки склада доступны только через складское ядро');
 }

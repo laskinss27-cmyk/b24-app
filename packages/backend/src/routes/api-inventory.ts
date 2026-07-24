@@ -1,15 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
-import { fetchStoreStock } from '../b24/catalog.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
+	coreStoreId,
 	createInventoryRecoDraft,
 	deleteInventoryRecoDraft,
 	fetchErpItemNames,
 	fetchErpStoreStock,
 	fetchErpStoreStockFull,
+	listActiveStoreTitles,
+	searchErpItems,
 	submitInventoryReco,
 	type InventoryRecoLine,
 } from '../erp/operations.js';
@@ -130,41 +132,32 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 	// Остатки склада для мобильного подсчёта (на телефоне нет BX24 SDK — собираем серверно).
 	// Только ЧТЕНИЕ, токен юзера в теле (фронт getAuth или мобильный контекст) — права Б24 соблюдаются.
 	app.post('/api/inventory/stock', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { storeId?: number; sectionIds?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { storeId?: number; storeName?: unknown; sectionIds?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		if (b.storeId == null) return reply.code(400).send({ ok: false, error: 'storeId required' });
-		const sectionIds = Array.isArray(b.sectionIds) ? b.sectionIds.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : undefined;
 		// Учёт ИЗ ЯДРА (имя/модель/артикул/бренд/фото/остаток) — целиком, без кусков от Б24.
-		// Ядро не подключено/ошибка → мягкий фолбэк на Б24 (fetchStoreStock). Разделы охвата ядро
-		// не различает (item_group единый) → ядро-путь отдаёт весь склад; sectionIds — только в Б24-фолбэке.
+		// При недоступности ядра возвращаем ошибку: подмены складскими данными Б24 больше нет.
 		const erp = ErpClient.fromEnv();
-		if (erp) {
-			try {
-				const storeRes = await client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', { select: ['id', 'title'] });
-				const storeTitle = String((storeRes?.stores ?? []).find((s) => Number(s['id']) === Number(b.storeId))?.['title'] ?? '');
-				if (storeTitle) {
-					const core = await fetchErpStoreStockFull(erp, storeTitle);
-					const lines = core.map((l) => ({
-						productId: l.productId,
-						name: l.name,
-						book: l.book,
-						article: l.article || undefined,
-						model: (l.article || l.model) || undefined,
-						manufacturer: l.brand || undefined,
-						sectionName: l.section || undefined,
-						photoPath: l.image ? `/api/inventory/erp-image?p=${encodeURIComponent(l.image)}` : undefined,
-					}));
-					app.log.info({ storeId: b.storeId, count: lines.length, source: 'core' }, '[api/inventory/stock] ok');
-					return { ok: true, lines };
-				}
-			} catch (e) {
-				app.log.warn({ storeId: b.storeId }, `[api/inventory/stock] ядро недоступно — Б24 фолбэк: ${errInfo(e)}`);
-			}
-		}
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
-			const lines = await fetchStoreStock(client, Number(b.storeId), sectionIds);
-			app.log.info({ storeId: b.storeId, count: lines.length, source: 'b24' }, '[api/inventory/stock] ok');
+			const storeTitles = await listActiveStoreTitles(erp);
+			const requestedTitle = String(b.storeName ?? '').trim().toLocaleLowerCase('ru-RU');
+			const storeTitle = storeTitles.find((title) => coreStoreId(title) === Number(b.storeId))
+				?? storeTitles.find((title) => title.toLocaleLowerCase('ru-RU') === requestedTitle);
+			if (!storeTitle) return reply.code(400).send({ ok: false, error: 'склад ядра не найден' });
+			const core = await fetchErpStoreStockFull(erp, storeTitle);
+			const lines = core.map((l) => ({
+					productId: l.productId,
+					name: l.name,
+					book: l.book,
+					article: l.article || undefined,
+					model: (l.article || l.model) || undefined,
+					manufacturer: l.brand || undefined,
+					sectionName: l.section || undefined,
+					photoPath: l.image ? `/api/inventory/erp-image?p=${encodeURIComponent(l.image)}` : undefined,
+				}));
+			app.log.info({ storeId: b.storeId, count: lines.length, source: 'core' }, '[api/inventory/stock] ok');
 			return { ok: true, lines };
 		} catch (err) {
 			app.log.error({ storeId: b.storeId }, `[api/inventory/stock] failed — ${errInfo(err)}`);
@@ -198,21 +191,11 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			if (!sClient) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 			const sq = String(sb.q ?? '').trim();
 			if (sq.length < 2) return { ok: true, products: [] as Array<{ id: number; name: string }> };
+			const erp = ErpClient.fromEnv();
+			if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 			try {
-				const byName = new Map<string, { id: number; name: string }>();
-				for (const iblockId of [24, 26]) {
-					const res = await sClient.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', {
-						filter: { iblockId, '%name': sq },
-						select: ['id', 'iblockId', 'name'], // iblockId ОБЯЗАТЕЛЕН в select у catalog.product.list (иначе ошибка)
-						order: { id: 'ASC' },
-					});
-					for (const p of res?.products ?? []) {
-						const name = String(p['name'] ?? '');
-						const id = Number(p['id']);
-						if (name && id > 0 && !byName.has(name)) byName.set(name, { id, name });
-					}
-				}
-				const products = [...byName.values()].slice(0, 30);
+				const products = (await searchErpItems(erp, sq, 30))
+					.map((item) => ({ id: item.productId, name: item.name }));
 				app.log.info({ count: products.length }, '[api/inventory/search-products] ok');
 				return { ok: true, products };
 			} catch (err) {

@@ -98,8 +98,8 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				: mock
 					? Promise.resolve(MOCK_STOCK[storeId] ?? [])
 					: mobile
-						? fetchStoreStock(storeId, sectionIds)
-						: fetchStoreStock(storeId, sectionIds); // десктоп тоже → наш backend (остатки из ЯДРА, фолбэк Б24)
+						? fetchStoreStock(storeId, sectionIds, storeName)
+						: fetchStoreStock(storeId, sectionIds, storeName); // десктоп тоже → наш backend, остатки только из ядра
 		load
 			.then((rows) => {
 				if (!alive) return;

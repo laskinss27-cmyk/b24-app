@@ -139,15 +139,14 @@ export async function fetchProductRows(dealId: number): Promise<DealProductRow[]
 }
 
 export async function fetchStores(): Promise<StoreInfo[]> {
-	const res = await call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', {
-		select: ['id', 'title', 'active'],
-		order: { id: 'ASC' },
+	const res = await fetch('/api/catalog/stores', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(bx24Auth()),
 	});
-	return (res?.stores ?? []).map((s) => ({
-		id: Number(s['id']),
-		title: String(s['title'] ?? `Склад #${s['id']}`),
-		active: s['active'] === 'Y',
-	}));
+	const json = (await res.json()) as { ok?: boolean; error?: string; stores?: StoreInfo[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось получить склады ядра');
+	return json.stores ?? [];
 }
 
 /** Коэффициент прибыли работ из app.option (default 0.5). */
@@ -167,30 +166,10 @@ export async function fetchProfitCoef(): Promise<number> {
  * и нативную закупочную цену. Работы (type=7) сюда не передаём — у них нет склада.
  */
 export async function fetchStockAndPurchasing(productIds: number[]): Promise<Record<number, ProductEnrichment>> {
-	const out: Record<number, ProductEnrichment> = {};
-	const ids = productIds.filter((id) => id > 0).slice(0, 24); // ≤24 товаров = ≤48 операций в батче (лимит 50)
-	if (!ids.length) return out;
-
-	const calls: Record<string, [string, Record<string, unknown>]> = {};
-	for (const pid of ids) {
-		calls[`stock_${pid}`] = ['catalog.storeproduct.list', { filter: { productId: pid }, select: ['storeId', 'amount'] }];
-		calls[`prod_${pid}`] = ['catalog.product.get', { id: pid }];
-	}
-	const res = await callBatch(calls);
-
-	for (const pid of ids) {
-		const stockRes = res[`stock_${pid}`] as { storeProducts?: Array<Record<string, unknown>> } | null;
-		const prodRes = res[`prod_${pid}`] as { product?: Record<string, unknown> } | null;
-		const stocks = (stockRes?.storeProducts ?? [])
-			.map((s) => ({ storeId: Number(s['storeId']), amount: Number(s['amount'] ?? 0) }))
-			.filter((s) => s.amount > 0);
-		const pp = prodRes?.product?.['purchasingPrice'];
-		out[pid] = { stocks, purchasingPrice: pp == null || pp === '' ? null : Number(pp) };
-	}
-	return out;
+	return fetchStockPreferCore(productIds);
 }
 
-/** Кэш «название склада Б24 → storeId» (склады ядра отдаются по имени). */
+/** Кэш «название склада ядра → стабильный ID интерфейса». */
 let _storeTitleToId: Map<string, number> | null = null;
 async function storeTitleToId(): Promise<Map<string, number>> {
 	if (_storeTitleToId) return _storeTitleToId;
@@ -200,9 +179,8 @@ async function storeTitleToId(): Promise<Map<string, number>> {
 }
 
 /**
- * Остатки+закупка ПРЕДПОЧТИТЕЛЬНО из ЯДРА (ERPNext, /api/catalog/erp-stocks): один запрос мимо стен Б24.
- * Ядро = зеркало остатков Б24 (сверка-в-ноль) → данные те же. Склады ядра приходят ПО ИМЕНИ → маппим в storeId.
- * МЯГКИЙ ФОЛБЭК: ядро не подключено (coreOff)/упало/сеть → честно падаем на Б24 (fetchStockAndPurchasing).
+ * Остатки и закупка только из ЯДРА (ERPNext, /api/catalog/erp-stocks).
+ * Склады ядра приходят по имени и маппятся в стабильный ID интерфейса.
  */
 export async function fetchStockPreferCore(productIds: number[]): Promise<Record<number, ProductEnrichment>> {
 	const ids = productIds.filter((id) => id > 0);
@@ -213,7 +191,7 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ ...bx24Auth(), productIds: ids }),
-			signal: AbortSignal.timeout(5000),
+			signal: AbortSignal.timeout(15000),
 		});
 		const j = (await res.json()) as { ok?: boolean; byProduct?: Record<string, { stocks: Record<string, number>; purchasing: number }> };
 		if (j?.ok && j.byProduct) {
@@ -222,13 +200,13 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
 			for (const [pid, v] of Object.entries(j.byProduct)) {
 				const stocks = Object.entries(v.stocks ?? {})
 					.map(([title, amount]) => ({ storeId: t2id.get(title) ?? 0, amount: Number(amount) }))
-					.filter((s) => s.storeId > 0 && s.amount > 0);
+					.filter((s) => s.storeId !== 0 && s.amount > 0);
 				out[Number(pid)] = { stocks, purchasingPrice: v.purchasing > 0 ? v.purchasing : null };
 			}
 			return out;
 		}
-	} catch { /* ядро недоступно — мягкий фолбэк ниже */ }
-	return fetchStockAndPurchasing(ids);
+	} catch { /* ниже возвращается явная ошибка ядра */ }
+	throw new Error('не удалось получить остатки ядра');
 }
 
 /** Руководящие учётки: отчёты и действия, которые не относятся к рядовой работе менеджера. */
@@ -438,25 +416,7 @@ async function enrichProducts(ids: number[]): Promise<Map<number, Omit<InvLine, 
 }
 
 export async function fetchStoreInventory(storeId: number, sectionIds?: number[]): Promise<InvLine[]> {
-	// ВСЕ позиции склада (постранично по total — BX24 отдаёт по 50 за раз)
-	const sp = await callPaged<Record<string, unknown>>(
-		'catalog.storeproduct.list',
-		{ filter: { storeId }, select: ['productId', 'amount'] },
-		(d) => (d as { storeProducts?: Array<Record<string, unknown>> })?.storeProducts ?? [],
-	);
-	// Только позиции с положительным учётным остатком: нулевые/пустые в пересчёт не берём
-	// (их физическое наличие добирается отдельной фичей «Добавить товар»).
-	const rows = sp.map((r) => ({ productId: Number(r['productId']), amount: Number(r['amount'] ?? 0) })).filter((r) => r.productId > 0 && r.amount > 0);
-	const info = await enrichProducts(rows.map((r) => r.productId));
-	const lines = rows.map((r) => ({ productId: r.productId, book: r.amount, ...(info.get(r.productId) ?? { name: `#${r.productId}` }) }));
-	// Охват (#13): если заданы разделы — оставляем только товары этих разделов; пусто = весь склад.
-	// id 0 = синтетический «Без раздела»: пропускаем позиции без распознанного раздела (sid=0 в каталоге),
-	// иначе при выборе разделов безраздельные товары молча выпадали бы из пересчёта.
-	if (sectionIds && sectionIds.length) {
-		const set = new Set(sectionIds);
-		return lines.filter((l) => (l.sectionId != null && set.has(l.sectionId)) || (l.sectionId == null && set.has(0)));
-	}
-	return lines;
+	return fetchStoreStock(storeId, sectionIds);
 }
 
 /**
@@ -464,11 +424,11 @@ export async function fetchStoreInventory(storeId: number, sectionIds?: number[]
  * собираем серверно (зеркало fetchStoreInventory на бэке). Авторизация — токен из
  * мобильного контекста (bx24Auth() сам возьмёт его из __B24_CONTEXT__).
  */
-export async function fetchStoreStock(storeId: number, sectionIds?: number[]): Promise<InvLine[]> {
+export async function fetchStoreStock(storeId: number, sectionIds?: number[], storeName?: string): Promise<InvLine[]> {
 	const res = await fetch('/api/inventory/stock', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), storeId, sectionIds: sectionIds ?? [] }),
+		body: JSON.stringify({ ...bx24Auth(), storeId, storeName, sectionIds: sectionIds ?? [] }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; lines?: InvLine[] };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить остатки склада');
@@ -496,14 +456,13 @@ export async function searchProducts(query: string): Promise<{ id: number; name:
 
 /** Строка для добавленного вручную товара (учётный остаток 0 — физически есть, в системе нет). */
 export async function buildAddedLine(productId: number): Promise<InvLine> {
-	const info = await enrichProducts([productId]);
-	return { productId, book: 0, ...(info.get(productId) ?? { name: `#${productId}` }) };
+	const exact = (await searchProducts(String(productId))).find((item) => item.id === productId);
+	return { productId, book: 0, name: exact?.name ?? `#${productId}` };
 }
 
 /** Строки акта: ТОЛЬКО расхождения 1-го раунда (учёт из line) + опознание по productId. */
 export async function fetchActLines(lines: InvResult['lines']): Promise<InvLine[]> {
-	const info = await enrichProducts(lines.map((l) => l.productId));
-	return lines.map((l) => ({ productId: l.productId, book: l.book, ...(info.get(l.productId) ?? { name: l.name }) }));
+	return lines.map((line) => ({ productId: line.productId, book: line.book, name: line.name }));
 }
 
 /**

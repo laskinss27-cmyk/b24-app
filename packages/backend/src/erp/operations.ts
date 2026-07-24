@@ -277,6 +277,41 @@ export interface CoreCatalogPrices {
 	purchase?: number;
 }
 
+export interface CoreCatalogItem {
+	productId: number;
+	name: string;
+	isService: boolean;
+	article: string;
+	model: string;
+	manufacturer: string;
+	section: string;
+	image: string;
+}
+
+/** Полный товарный справочник ядра. Складские экраны не должны зависеть от наличия строки в каталоге Б24. */
+export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
+	const rows = await erp.list('Item', [
+		'name', 'item_name', 'is_stock_item',
+		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'image',
+	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
+	const out: CoreCatalogItem[] = [];
+	for (const row of rows) {
+		const productId = Number(row['name']);
+		if (!Number.isInteger(productId) || productId <= 0) continue;
+		out.push({
+			productId,
+			name: String(row['item_name'] ?? '').trim() || `#${productId}`,
+			isService: Number(row['is_stock_item'] ?? 1) === 0,
+			article: String(row['b24_article'] ?? '').trim(),
+			model: String(row['b24_model'] ?? '').trim(),
+			manufacturer: String(row['b24_brand'] ?? '').trim(),
+			section: String(row['b24_section'] ?? '').trim(),
+			image: String(row['image'] ?? '').trim(),
+		});
+	}
+	return out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
 /** Справочные цены каталога ядра. Они не меняют складскую valuation_rate. */
 export async function fetchCoreCatalogPrices(erp: ErpClient): Promise<Map<number, CoreCatalogPrices>> {
 	const rows = await erp.list('Item Price', ['item_code', 'price_list', 'price_list_rate'], [
@@ -3153,5 +3188,15 @@ export async function listActiveStoreTitles(erp: ErpClient): Promise<string[]> {
 		.map((w) => b24StoreTitle(ctx, String(w['name'] ?? '')))
 		.filter((t) => t && !sys.has(t))
 		.sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+/** Стабильный числовой ID склада ядра для старых компонентов интерфейса, ожидающих number. */
+export function coreStoreId(title: string): number {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < title.length; i++) {
+		hash ^= title.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return -((hash >>> 0) + 1);
 }
 

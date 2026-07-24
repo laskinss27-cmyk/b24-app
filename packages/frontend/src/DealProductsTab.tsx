@@ -166,7 +166,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
 	const [bxRows, stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants] = await Promise.all([
 		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
-		withTimeout(fetchStores(), 20000, 'catalog.store.list').catch(() => [] as StoreInfo[]),
+		withTimeout(fetchStores(), 20000, 'core stores').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
 		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, sourceStoreId: null, supply: [], rows: null })),

@@ -4,7 +4,8 @@ import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	ensureCoreItem, fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing,
-	fetchCoreCatalogPrices, listActiveStoreTitles, updateCoreCatalogPrices,
+	fetchCoreCatalogItems, fetchCoreCatalogPrices, listActiveStoreTitles,
+	coreStoreId, updateCoreCatalogPrices,
 } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 
@@ -37,7 +38,6 @@ interface CatalogStore {
 }
 interface CacheEntry {
 	data: ProductBaseData;
-	stores: CatalogStore[];
 	expires: number;
 }
 const baseCache = new Map<string, CacheEntry>();
@@ -74,6 +74,54 @@ function normalized(value: unknown): string {
 
 function normalizedStoreTitle(value: unknown): string {
 	return cleanText(value).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
+}
+
+function coreSectionId(title: string): number {
+	return Math.abs(coreStoreId(`section:${title}`));
+}
+
+async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): Promise<{ data: ProductBaseData; stores: CatalogStore[] }> {
+	const [items, stocks, prices, storeTitles] = await Promise.all([
+		fetchCoreCatalogItems(erp),
+		fetchErpStocks(erp),
+		fetchCoreCatalogPrices(erp),
+		listActiveStoreTitles(erp),
+	]);
+	const stores = storeTitles.map((title) => ({ id: coreStoreId(title), title, active: true }));
+	const storeIdByTitle = new Map(stores.map((store) => [normalizedStoreTitle(store.title), store.id]));
+	const metadataById = new Map(metadata.rows.map((row) => [row.id, row]));
+	const rows = items.map((item) => {
+		const known = metadataById.get(item.productId);
+		const stockByStore: Record<number, number> = {};
+		for (const [title, qty] of Object.entries(stocks.get(item.productId) ?? {})) {
+			const storeId = storeIdByTitle.get(normalizedStoreTitle(title));
+			if (storeId != null) stockByStore[storeId] = (stockByStore[storeId] ?? 0) + qty;
+		}
+		const corePrices = prices.get(item.productId);
+		const sectionName = item.section || known?.sectionName;
+		const photoPath = item.image
+			? `/api/inventory/erp-image?p=${encodeURIComponent(item.image)}`
+			: known?.photoPath;
+		return {
+			id: item.productId,
+			iblockId: known?.iblockId ?? 24,
+			name: item.name || known?.name || `#${item.productId}`,
+			isService: item.isService,
+			article: item.article || known?.article,
+			model: item.model || known?.model,
+			manufacturer: item.manufacturer || known?.manufacturer,
+			sectionId: known?.sectionId ?? (sectionName ? coreSectionId(sectionName) : undefined),
+			sectionName,
+			retail: corePrices?.retail ?? known?.retail ?? null,
+			purchase: corePrices?.purchase ?? known?.purchase ?? null,
+			photoPath,
+			total: Object.values(stockByStore).reduce((sum, qty) => sum + qty, 0),
+			stockByStore,
+		};
+	});
+	rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+	stores.sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+	return { data: { rows, generatedAt: new Date().toISOString() }, stores };
 }
 
 async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
@@ -189,6 +237,24 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
 
+	app.post('/api/catalog/stores', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
+		try {
+			const titles = await listActiveStoreTitles(erp);
+			return {
+				ok: true,
+				stores: titles.map((title) => ({ id: coreStoreId(title), title, active: true })),
+			};
+		} catch (error) {
+			app.log.error(`[api/catalog/stores] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
 	app.post('/api/catalog/browse', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody;
 		const client = clientFrom(body);
@@ -198,73 +264,24 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		const now = Date.now();
 		const hit = baseCache.get(cacheKey);
-		if (!body.force && hit && hit.expires > now) {
-			app.log.info({ rows: hit.data.rows.length, cached: true }, '[api/catalog/browse] cache hit');
-			return { ok: true, rows: hit.data.rows, stores: hit.stores, generatedAt: hit.data.generatedAt, cached: true, canEditPrices };
-		}
-
 		const t0 = Date.now();
 		try {
-			const [data, storeRes] = await Promise.all([
-				buildProductBase(client),
-				client.call<{ stores?: Array<Record<string, unknown>> }>('catalog.store.list', {
-					select: ['id', 'title', 'active'],
-					order: { id: 'ASC' },
-				}),
-			]);
-			const stores: CatalogStore[] = (storeRes?.stores ?? [])
-				.map((store) => ({
-					id: Number(store['id']),
-					title: String(store['title'] ?? '').trim(),
-					active: store['active'] === 'Y',
-				}))
-				.filter((store) => Number.isInteger(store.id) && store.id > 0 && store.title && store.active);
-			// Остатки из ЯДРА (как во вкладке сделки): подменяем Б24-остатки ядерными, если ядро подключено.
-			// Склады, живущие только в ядре (например Shelly и Маркетплейс), получают служебные
-			// отрицательные ID: они нужны лишь фронту для фильтра и обратно уходят по названию.
-			// Ядро недоступно/ошибка → молча оставляем остатки Б24 (мягкий фолбэк). Радиус — только «База» (канарейка).
-			let stockSource = 'b24';
 			const erp = ErpClient.fromEnv();
-			if (erp) {
+			if (!erp) throw new Error('ядро склада не подключено (ERPNEXT_URL)');
+			const cached = !body.force && Boolean(hit && hit.expires > now);
+			let metadata = cached && hit ? hit.data : null;
+			if (!metadata) {
 				try {
-					const [coreStocks, corePrices, coreStoreTitles] = await Promise.all([
-						fetchErpStocks(erp),
-						fetchCoreCatalogPrices(erp),
-						listActiveStoreTitles(erp),
-					]);
-					const titleToId = new Map(stores.map((store) => [normalizedStoreTitle(store.title), store.id]));
-					let virtualStoreId = -1;
-					for (const title of coreStoreTitles) {
-						const key = normalizedStoreTitle(title);
-						if (titleToId.has(key)) continue;
-						stores.push({ id: virtualStoreId, title, active: true });
-						titleToId.set(key, virtualStoreId);
-						virtualStoreId -= 1;
-					}
-					for (const r of data.rows) {
-						const byTitle = coreStocks.get(r.id);
-						const byStore: Record<number, number> = {};
-						if (byTitle) {
-							for (const [title, qty] of Object.entries(byTitle)) {
-								const sid = titleToId.get(normalizedStoreTitle(title));
-								if (sid != null) byStore[sid] = (byStore[sid] ?? 0) + qty;
-							}
-						}
-						r.stockByStore = byStore;
-						r.total = Object.values(byStore).reduce((a, b) => a + b, 0);
-						const prices = corePrices.get(r.id);
-						if (prices?.retail !== undefined) r.retail = prices.retail;
-						if (prices?.purchase !== undefined) r.purchase = prices.purchase;
-					}
-					stockSource = 'core';
-				} catch (e) {
-					app.log.warn({}, `[api/catalog/browse] ядро недоступно — остатки из Б24 (фолбэк): ${errInfo(e)}`);
+					metadata = await buildProductBase(client);
+				} catch (error) {
+					app.log.warn(`[api/catalog/browse] метаданные каталога Б24 недоступны: ${errInfo(error)}`);
+					metadata = { rows: [], generatedAt: new Date().toISOString() };
 				}
+				baseCache.set(cacheKey, { data: metadata, expires: now + CACHE_TTL_MS });
 			}
-			stores.sort((a, b) => a.title.localeCompare(b.title, 'ru'));
-			baseCache.set(cacheKey, { data, stores, expires: now + CACHE_TTL_MS });
-			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached: false, stock: stockSource }, '[api/catalog/browse] ok');
-			return { ok: true, rows: data.rows, stores, generatedAt: data.generatedAt, cached: false, canEditPrices };
+			const { data, stores } = await buildCoreProductBase(erp, metadata);
+			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source: 'core' }, '[api/catalog/browse] ok');
+			return { ok: true, rows: data.rows, stores, generatedAt: data.generatedAt, cached, canEditPrices };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -380,8 +397,8 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 
 	// Остатки из ЯДРА (ERPNext) — payoff выноса склада: один запрос Bin вместо BX24 catalog.storeproduct.
 	// Ядро = зеркало остатков Б24 (сверка-в-ноль), поэтому подмена прозрачна; закупка — из valuation_rate.
-	// Гейт env ERPNEXT_URL: ядро не подключено → coreOff, фронт мягко падает на Б24 (fetchStockAndPurchasing).
-	// Склады отдаём ПО ИМЕНИ — фронт маппит в storeId по списку складов Б24.
+	// Гейт env ERPNEXT_URL: ядро не подключено → явная ошибка, без складского фолбэка Б24.
+	// Склады отдаём по имени и маппим в стабильные ID интерфейса из справочника ядра.
 	app.post('/api/catalog/erp-stocks', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & { productIds?: unknown };
 		if (!body.domain || normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) {

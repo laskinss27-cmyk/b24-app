@@ -187,7 +187,7 @@ export function InventoryHome(): JSX.Element {
 					const init = isPortalAdmin() || initiators.includes(uid);
 				setIsInitiator(init);
 
-				const sts = await withTimeout(fetchStores(), 15000, 'catalog.store.list');
+				const sts = await withTimeout(fetchStores(), 15000, 'core stores');
 				const usrs = init ? await withTimeout(fetchUsers(), 15000, 'user.get').catch(() => [] as SimpleUser[]) : [];
 				const secs = init ? await withTimeout(fetchSections(), 15000, 'catalog.section.list').catch(() => [] as { id: number; name: string }[]) : [];
 				setMe(meUser);
