@@ -291,6 +291,10 @@ export interface CoreCatalogItem {
 	image: string;
 }
 
+function isTechnicalCoreDescription(value: unknown): boolean {
+	return /^Б24\s+productId=\d+\b(?:\s*\([^)]*\))?\.?$/iu.test(String(value ?? '').trim());
+}
+
 /** Полный товарный справочник ядра. Складские экраны не должны зависеть от наличия строки в каталоге Б24. */
 export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
 	const rows = await erp.list('Item', [
@@ -309,7 +313,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 			model: String(row['b24_model'] ?? '').trim(),
 			manufacturer: String(row['b24_brand'] ?? '').trim(),
 			section: String(row['b24_section'] ?? '').trim(),
-			description: /^Б24 productId=\d+$/.test(String(row['description'] ?? '').trim())
+			description: isTechnicalCoreDescription(row['description'])
 				? ''
 				: String(row['description'] ?? '').trim(),
 			image: String(row['image'] ?? '').trim(),
