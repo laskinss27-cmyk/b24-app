@@ -853,7 +853,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
 				{(pickMode || allowCreateProduct || canEditPrices) && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
-				{!pickMode && canEditPrices && (
+				{!pickMode && (canEditPrices || canQuickSale) && (
 					<button className="btn-secondary" type="button" onClick={() => void exportComparison()} disabled={exportingComparison}>
 						{exportingComparison ? 'Готовлю сверку…' : 'Сверка с Битрикс'}
 					</button>

@@ -48,6 +48,7 @@ export function invalidateCatalogCache(domain: string): void {
 }
 
 const SUPPLY_DEPARTMENT_ID = 10;
+const CATALOG_COMPARISON_USER_IDS = new Set([1858, 986, 1]);
 
 interface CatalogCandidate {
 	id: number;
@@ -137,6 +138,11 @@ async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
 	const isKonstantinLaskin = normalized(me?.NAME) === normalized('Константин')
 		&& normalized(me?.LAST_NAME) === normalized('Ласкин');
 	return departments.includes(SUPPLY_DEPARTMENT_ID) || isKonstantinLaskin;
+}
+
+async function canExportCatalogComparison(client: B24Client): Promise<boolean> {
+	const me = await client.call<{ ID?: string | number }>('user.current', {}).catch(() => null);
+	return CATALOG_COMPARISON_USER_IDS.has(Number(me?.ID)) || canEditCatalogPrices(client);
 }
 
 function productTitle(productType: string, manufacturer: string, model: string): string {
@@ -299,8 +305,8 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody;
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!(await canEditCatalogPrices(client))) {
-			return reply.code(403).send({ ok: false, error: 'сверка каталога доступна снабжению и Константину Ласкину' });
+		if (!(await canExportCatalogComparison(client))) {
+			return reply.code(403).send({ ok: false, error: 'сверка каталога недоступна для текущего пользователя' });
 		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
