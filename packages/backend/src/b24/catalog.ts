@@ -37,9 +37,9 @@ const ENGINEER_VISIT_SERVICE_NAME = 'Выезд инженера';
 const RETAIL_PRICE_GROUP = 2;
 
 /** select для основного iblock (24). Несуществующие на iblock поля Битрикс молча игнорирует. */
-const SELECT_MAIN = ['id', 'iblockId', 'name', 'type', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice', 'detailPicture', 'previewPicture'];
+const SELECT_MAIN = ['id', 'iblockId', 'name', 'type', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice', 'quantity', 'detailText', 'previewText', 'detailPicture', 'previewPicture'];
 /** select для офферов (26): + parentId и property360 (артикул). */
-const SELECT_OFFER = ['id', 'iblockId', 'name', 'type', 'parentId', 'property360', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice', 'detailPicture', 'previewPicture'];
+const SELECT_OFFER = ['id', 'iblockId', 'name', 'type', 'parentId', 'property360', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice', 'quantity', 'detailText', 'previewText', 'detailPicture', 'previewPicture'];
 
 export interface BaseRow {
 	id: number;
@@ -102,6 +102,23 @@ function galleryUrl(v: unknown): string | undefined {
 }
 function numOrNull(v: unknown): number | null {
 	return v == null || v === '' ? null : Number(v);
+}
+function descriptionVal(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value !== 'string' || !value.trim()) continue;
+		const text = value
+			.replace(/<br\s*\/?>/giu, '\n')
+			.replace(/<\/p>/giu, '\n')
+			.replace(/<[^>]+>/gu, '')
+			.replace(/&nbsp;/giu, ' ')
+			.replace(/&amp;/giu, '&')
+			.replace(/&lt;/giu, '<')
+			.replace(/&gt;/giu, '>')
+			.replace(/\r\n/g, '\n')
+			.trim();
+		if (text) return text;
+	}
+	return undefined;
 }
 
 // ── батч-помощники ──────────────────────────────────────────────────────────────
@@ -207,10 +224,11 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			manufacturer: propVal(p['property334']),
 			sectionId: sid,
 			sectionName: sectionName(sid),
+			description: descriptionVal(p['detailText'], p['previewText']),
 			retail: null,
 			purchase: numOrNull(p['purchasingPrice']),
 			photoPath: pictureUrl(p['detailPicture']) ?? pictureUrl(p['previewPicture']),
-			total: 0,
+			total: numOrNull(p['quantity']) ?? 0,
 			stockByStore: {},
 		});
 	}
@@ -232,10 +250,11 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 			manufacturer: propVal(o['property334']) ?? (par ? propVal(par['property334']) : undefined),
 			sectionId: sid,
 			sectionName: sectionName(sid),
+			description: descriptionVal(o['detailText'], o['previewText'], par?.['detailText'], par?.['previewText']),
 			retail: null,
 			purchase: numOrNull(o['purchasingPrice']) ?? (par ? numOrNull(par['purchasingPrice']) : null),
 			photoPath: pictureUrl(o['detailPicture']) ?? pictureUrl(o['previewPicture']) ?? (par ? pictureUrl(par['detailPicture']) : undefined),
-			total: 0,
+			total: numOrNull(o['quantity']) ?? 0,
 			stockByStore: {},
 		});
 	}

@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
+	downloadCatalogComparison,
 	createCatalogProduct,
 	updateCatalogProduct,
 	updateCatalogPrices,
@@ -475,6 +476,8 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [meta, setMeta] = useState<{ generatedAt: string; cached: boolean } | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
+	const [exportingComparison, setExportingComparison] = useState(false);
+	const [comparisonError, setComparisonError] = useState('');
 	const [uid, setUid] = useState('');
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
@@ -703,6 +706,18 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		if (!pickMode) setCardRow(row);
 	}
 
+	async function exportComparison(): Promise<void> {
+		setComparisonError('');
+		setExportingComparison(true);
+		try {
+			await withTimeout(downloadCatalogComparison(), 120000, 'catalog/export-comparison');
+		} catch (error) {
+			setComparisonError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setExportingComparison(false);
+		}
+	}
+
 	async function saveCatalogPrices(retail: number, purchase: number): Promise<void> {
 		if (!priceRow) return;
 		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase);
@@ -838,9 +853,15 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
 				{(pickMode || allowCreateProduct || canEditPrices) && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
+				{!pickMode && canEditPrices && (
+					<button className="btn-secondary" type="button" onClick={() => void exportComparison()} disabled={exportingComparison}>
+						{exportingComparison ? 'Готовлю сверку…' : 'Сверка с Битрикс'}
+					</button>
+				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && !readOnly && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
+			{comparisonError && <p className="cart-err">{comparisonError}</p>}
 
 			<div className="base-tablewrap">
 				<table className={`base-table${isAll ? ' hide-store' : ''}`}>

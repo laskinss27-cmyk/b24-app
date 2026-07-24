@@ -7,6 +7,7 @@ import {
 	fetchCoreCatalogItems, fetchCoreCatalogPrices, listActiveStoreTitles,
 	coreStoreId, updateCoreCatalogPrices,
 } from '../erp/operations.js';
+import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
 import { normalizeDomain } from '../security.js';
 
 /**
@@ -291,6 +292,50 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/catalog/export-comparison', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (!(await canEditCatalogPrices(client))) {
+			return reply.code(403).send({ ok: false, error: 'сверка каталога доступна снабжению и Константину Ласкину' });
+		}
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
+		const startedAt = Date.now();
+		try {
+			const metadata = await buildProductBase(client);
+			const [coreRows, coreStocks] = await Promise.all([
+				fetchCoreCatalogItems(erp),
+				fetchErpStocks(erp),
+			]);
+			const createdAt = new Date();
+			const workbook = createCatalogComparisonWorkbook({
+				b24Rows: metadata.rows,
+				coreRows,
+				coreStocks,
+				createdAt,
+			});
+			const xlsx = await workbook.xlsx.writeBuffer();
+			const date = createdAt.toISOString().slice(0, 10);
+			baseCache.set(normalizeDomain(body.domain ?? ''), {
+				data: metadata,
+				expires: Date.now() + CACHE_TTL_MS,
+			});
+			app.log.info({
+				b24Rows: metadata.rows.length,
+				coreRows: coreRows.length,
+				ms: Date.now() - startedAt,
+			}, '[api/catalog/export-comparison] ok');
+			return reply
+				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+				.header('Content-Disposition', `attachment; filename="catalog-comparison-${date}.xlsx"`)
+				.send(Buffer.from(xlsx));
+		} catch (error) {
+			app.log.error({ ms: Date.now() - startedAt }, `[api/catalog/export-comparison] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});
 

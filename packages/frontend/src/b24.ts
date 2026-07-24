@@ -540,6 +540,38 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 	return { rows: json.rows ?? [], stores: json.stores ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached), canEditPrices: Boolean(json.canEditPrices) };
 }
 
+/** Скачать безопасную Excel-сверку каталога Битрикс и ядра по productId. */
+export async function downloadCatalogComparison(): Promise<void> {
+	const res = await fetch('/api/catalog/export-comparison', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(bx24Auth()),
+	});
+	const contentType = res.headers.get('content-type') ?? '';
+	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+		let message = `не удалось сформировать сверку (HTTP ${res.status})`;
+		try {
+			const json = (await res.json()) as { error?: string };
+			if (json.error) message = json.error;
+		} catch { /* сервер вернул не-JSON ошибку */ }
+		throw new Error(message);
+	}
+	const blob = await res.blob();
+	const disposition = res.headers.get('content-disposition') ?? '';
+	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? 'catalog-comparison.xlsx';
+	const url = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+}
+
 export async function updateCatalogPrices(productId: number, retail: number, purchase: number): Promise<{ retail: number; purchase: number }> {
 	const res = await fetch('/api/catalog/update-prices', {
 		method: 'POST',
