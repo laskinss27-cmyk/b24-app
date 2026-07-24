@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import JSZip from 'jszip';
-import { buildContractDocx, type ContractParty } from './deal-contract.js';
+import { buildContractDocx, contractLinesFromB24ProductRows, type ContractParty } from './deal-contract.js';
 
 const company: ContractParty = {
 	id: 578,
@@ -75,4 +75,17 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 	assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/);
 	assert.match(xml, /Забоева Григория Анатольевича/);
 	assert.doesNotMatch(xml, /именуемый\(ая\)/);
+});
+
+test('contractLinesFromB24ProductRows uses visible deal rows and skips the collapsed cover service', () => {
+	const lines = contractLinesFromB24ProductRows([
+		{ PRODUCT_ID: 20082, PRODUCT_NAME: 'Панель BAS-IP', PRICE: 16980, QUANTITY: 1, TYPE: 4 },
+		{ PRODUCT_ID: 7816, PRODUCT_NAME: 'Монитор', PRICE: 14390, QUANTITY: 2, TYPE: 4 },
+		{ PRODUCT_ID: 9814, PRODUCT_NAME: 'Отгрузка подтверждена на сумму', PRICE: 45760, QUANTITY: 1, TYPE: 7 },
+		{ PRODUCT_ID: 14812, PRODUCT_NAME: 'Нулевая строка', PRICE: 2150, QUANTITY: 0, TYPE: 1 },
+	]);
+	assert.deepEqual(lines, [
+		{ name: 'Панель BAS-IP', price: 16980, quantity: 1, total: 16980 },
+		{ name: 'Монитор', price: 14390, quantity: 2, total: 28780 },
+	]);
 });

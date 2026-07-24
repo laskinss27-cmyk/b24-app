@@ -10,6 +10,8 @@ const CONTRACT_NUMBER_FIELD = 'UF_CRM_CONTRACT_NUMBER';
 const CONTRACT_COMPANY_FIELD = 'UF_CRM_CONTRACT_COMPANY';
 const CONTRACT_VAT_FIELD = 'UF_CRM_CONTRACT_VAT';
 const CONTRACT_DATE_FIELD = 'UF_CRM_1761564808007';
+const B24_COLLAPSE_PRODUCT_ID = 9814;
+const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
 const CONTRACT_FIELD_SPECS = [
 	{ fieldName: CONTRACT_NUMBER_FIELD, name: 'CONTRACT_NUMBER', xmlId: 'B24_APP_CONTRACT_NUMBER', label: 'Номер договора' },
 	{ fieldName: CONTRACT_COMPANY_FIELD, name: 'CONTRACT_COMPANY', xmlId: 'B24_APP_CONTRACT_COMPANY', label: 'Юрлицо договора' },
@@ -57,7 +59,7 @@ export interface ContractGenerateInput {
 	objectAddress: string;
 }
 
-interface ContractLine {
+export interface ContractLine {
 	name: string;
 	price: number;
 	quantity: number;
@@ -458,6 +460,36 @@ function linesFromPlan(plan: PlanItem[]): ContractLine[] {
 		});
 }
 
+export function contractLinesFromB24ProductRows(rows: Array<Record<string, unknown>>): ContractLine[] {
+	return rows.flatMap((row): ContractLine[] => {
+		const productId = Number(row['PRODUCT_ID'] ?? row['productId'] ?? 0);
+		const name = clean(row['PRODUCT_NAME'] ?? row['productName']);
+		const quantity = Number(row['QUANTITY'] ?? row['quantity'] ?? 0);
+		const price = Number(row['PRICE'] ?? row['price'] ?? 0);
+		if (
+			productId === B24_COLLAPSE_PRODUCT_ID
+			|| name === B24_COLLAPSE_SERVICE_NAME
+			|| !Number.isFinite(quantity)
+			|| quantity <= 0
+			|| !Number.isFinite(price)
+			|| price < 0
+		) return [];
+		return [{
+			name: name || (productId > 0 ? `#${productId}` : 'Позиция сделки'),
+			price: Math.round(price * 100) / 100,
+			quantity,
+			total: Math.round(price * quantity * 100) / 100,
+		}];
+	});
+}
+
+async function loadContractLines(client: B24Client, erp: ErpClient, dealId: number): Promise<ContractLine[]> {
+	const planLines = linesFromPlan(await listDealPlan(erp, dealId));
+	if (planLines.length) return planLines;
+	const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+	return contractLinesFromB24ProductRows(rows ?? []);
+}
+
 export async function generateDealContract(
 	client: B24Client,
 	dealId: number,
@@ -473,7 +505,7 @@ export async function generateDealContract(
 	if (!input.objectAddress.trim()) throw new Error('не указан адрес объекта');
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
-	const lines = linesFromPlan(await listDealPlan(erp, dealId));
+	const lines = await loadContractLines(client, erp, dealId);
 	if (!lines.length) throw new Error('в сделке нет товаров или работ для сметы');
 	const contractNumber = await allocateContractNumber(client, dealId, company.id, clean(input.contractNumber));
 	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
