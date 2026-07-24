@@ -131,18 +131,20 @@ export async function ensureCoreItem(erp: ErpClient, args: {
 	article?: string;
 	brand?: string;
 	section?: string;
+	description?: string;
 }): Promise<void> {
 	const code = String(args.productId);
 	const existing = await erp.get<Record<string, unknown>>('Item', code);
 	if (existing) {
 		const patch: Record<string, unknown> = {};
-		const hasStructuredMeta = args.model !== undefined || args.article !== undefined || args.brand !== undefined || args.section !== undefined;
+		const hasStructuredMeta = args.model !== undefined || args.article !== undefined || args.brand !== undefined || args.section !== undefined || args.description !== undefined;
 		if (args.isService && Number(existing['is_stock_item'] ?? 1) !== 0) patch['is_stock_item'] = 0;
 		if (hasStructuredMeta && args.name && String(existing['item_name'] ?? '') !== args.name) patch['item_name'] = args.name.slice(0, 140);
 		if (args.model !== undefined) patch['b24_model'] = args.model;
 		if (args.article !== undefined) patch['b24_article'] = args.article;
 		if (args.brand !== undefined) patch['b24_brand'] = args.brand;
 		if (args.section !== undefined) patch['b24_section'] = args.section;
+		if (args.description !== undefined) patch['description'] = args.description;
 		if (Object.keys(patch).length) await erp.update('Item', code, patch);
 		return;
 	}
@@ -155,7 +157,7 @@ export async function ensureCoreItem(erp: ErpClient, args: {
 		item_group: ITEM_GROUP,
 		stock_uom: UOM,
 		is_stock_item: isService ? 0 : 1,
-		description: `Б24 productId=${args.productId}`,
+		description: args.description?.trim() || `Б24 productId=${args.productId}`,
 		b24_model: args.model ?? '',
 		b24_article: args.article ?? '',
 		b24_brand: args.brand ?? '',
@@ -285,6 +287,7 @@ export interface CoreCatalogItem {
 	model: string;
 	manufacturer: string;
 	section: string;
+	description: string;
 	image: string;
 }
 
@@ -292,7 +295,7 @@ export interface CoreCatalogItem {
 export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
 	const rows = await erp.list('Item', [
 		'name', 'item_name', 'is_stock_item',
-		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'image',
+		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'description', 'image',
 	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
 	const out: CoreCatalogItem[] = [];
 	for (const row of rows) {
@@ -306,6 +309,9 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 			model: String(row['b24_model'] ?? '').trim(),
 			manufacturer: String(row['b24_brand'] ?? '').trim(),
 			section: String(row['b24_section'] ?? '').trim(),
+			description: /^Б24 productId=\d+$/.test(String(row['description'] ?? '').trim())
+				? ''
+				: String(row['description'] ?? '').trim(),
 			image: String(row['image'] ?? '').trim(),
 		});
 	}

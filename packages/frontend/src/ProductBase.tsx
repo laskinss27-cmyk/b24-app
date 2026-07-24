@@ -3,9 +3,9 @@ import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
 	createCatalogProduct,
+	updateCatalogProduct,
 	updateCatalogPrices,
 	fetchCurrentUserId,
-	openProductCard,
 	createQuickSale,
 	openDeal,
 	photoFullUrl,
@@ -13,6 +13,7 @@ import {
 	withRetry,
 	QUICKSALE_USER_IDS,
 	type BaseRow,
+	type CatalogProductUpdateInput,
 	type CatalogProductCandidate,
 	type StoreInfo,
 } from './b24.js';
@@ -140,6 +141,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const [model, setModel] = useState(initialQuery.trim());
 	const [sectionId, setSectionId] = useState('');
 	const [retailText, setRetailText] = useState('');
+	const [description, setDescription] = useState('');
 	const [reviewed, setReviewed] = useState(false);
 	const [serverCandidates, setServerCandidates] = useState<CatalogProductCandidate[] | null>(null);
 	const [duplicateBlocked, setDuplicateBlocked] = useState(false);
@@ -192,6 +194,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 				model: model.trim(),
 				sectionId: section.id,
 				sectionName: section.name,
+				description: description.trim(),
 				retail,
 				...(candidates.length && reviewed ? { similarReviewed: true } : {}),
 			});
@@ -224,6 +227,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 					<label>Раздел<select value={sectionId} onChange={(event) => { setSectionId(event.target.value); resetReview(); }}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
 					<label>Цена продажи, ₽<input inputMode="decimal" value={retailText} placeholder="0" onChange={(event) => setRetailText(event.target.value.replace(',', '.'))} /></label>
 					<div className="new-product-name"><span>Название</span><b>{preview || '—'}</b></div>
+					<label className="wide">Описание и характеристики<textarea rows={5} maxLength={10000} value={description} placeholder="Назначение, комплектация, совместимость, размеры, технические особенности…" onChange={(event) => setDescription(event.target.value)} /></label>
 				</div>
 
 				{candidates.length > 0 && (
@@ -295,6 +299,148 @@ function CatalogPriceModal({ row, onSave, onClose }: {
 	);
 }
 
+function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }: {
+	row: BaseRow;
+	stores: StoreInfo[];
+	sections: Array<{ id: number; name: string }>;
+	canEdit: boolean;
+	onSave: (input: CatalogProductUpdateInput) => Promise<void>;
+	onClose: () => void;
+}): JSX.Element {
+	const [editing, setEditing] = useState(false);
+	const [name, setName] = useState(row.name);
+	const [manufacturer, setManufacturer] = useState(row.manufacturer ?? '');
+	const [model, setModel] = useState(row.model ?? '');
+	const [article, setArticle] = useState(row.article ?? '');
+	const [description, setDescription] = useState(row.description ?? '');
+	const [sectionId, setSectionId] = useState(String(row.sectionId ?? ''));
+	const [retail, setRetail] = useState(String(row.retail ?? 0));
+	const [purchase, setPurchase] = useState(String(row.purchase ?? 0));
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+	const photo = row.photoPath ? photoFullUrl(row.photoPath) : null;
+	const stockRows = stores
+		.map((store) => ({ ...store, qty: Number(row.stockByStore[store.id] ?? 0) }))
+		.sort((a, b) => b.qty - a.qty || a.title.localeCompare(b.title, 'ru'));
+
+	const reset = (): void => {
+		setName(row.name);
+		setManufacturer(row.manufacturer ?? '');
+		setModel(row.model ?? '');
+		setArticle(row.article ?? '');
+		setDescription(row.description ?? '');
+		setSectionId(String(row.sectionId ?? ''));
+		setRetail(String(row.retail ?? 0));
+		setPurchase(String(row.purchase ?? 0));
+		setError('');
+		setEditing(false);
+	};
+	const save = async (): Promise<void> => {
+		const section = sections.find((item) => item.id === Number(sectionId));
+		const retailValue = retail.trim() === '' ? NaN : Number(retail.replace(',', '.'));
+		const purchaseValue = purchase.trim() === '' ? NaN : Number(purchase.replace(',', '.'));
+		if (name.trim().length < 3) { setError('Название должно быть не короче трёх символов.'); return; }
+		if (!section) { setError('Выбери раздел каталога.'); return; }
+		if (!Number.isFinite(retailValue) || retailValue < 0 || !Number.isFinite(purchaseValue) || purchaseValue < 0) {
+			setError('Обе цены должны быть 0 или больше.');
+			return;
+		}
+		setBusy(true);
+		setError('');
+		try {
+			await onSave({
+				productId: row.id,
+				iblockId: row.iblockId,
+				name: name.trim(),
+				isService: row.isService,
+				article: article.trim(),
+				model: model.trim(),
+				manufacturer: manufacturer.trim(),
+				sectionId: section.id,
+				sectionName: section.name,
+				description: description.trim(),
+				retail: retailValue,
+				purchase: purchaseValue,
+			});
+			setEditing(false);
+		} catch (reason) {
+			setError(String(reason instanceof Error ? reason.message : reason));
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<div className="catalog-product-overlay" onClick={onClose}>
+			<div className="catalog-product-card" onClick={(event) => event.stopPropagation()}>
+				<div className="catalog-product-card-head">
+					<div>
+						<span>{row.isService ? 'Услуга' : 'Товар'} · ID {row.id}</span>
+						<h2>{row.name}</h2>
+					</div>
+					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
+				</div>
+				<div className="catalog-product-card-body">
+					<aside className="catalog-product-visual">
+						{photo
+							? <img src={photo} alt={row.name} onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+							: <div className="catalog-product-no-photo">Фото пока нет</div>}
+						<div className="catalog-product-totals">
+							<div><span>Розница</span><b>{fmt(row.retail)} ₽</b></div>
+							<div><span>Закупка</span><b>{fmt(row.purchase ?? 0)} ₽</b></div>
+							{!row.isService && <div><span>Всего на складах</span><b>{fmt(row.total)} шт.</b></div>}
+						</div>
+					</aside>
+					<main className="catalog-product-content">
+						<section>
+							<h3>Основная информация</h3>
+							{editing ? (
+								<div className="catalog-product-form">
+									<label className="wide">Название<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label>
+									<label>Производитель<input value={manufacturer} onChange={(event) => setManufacturer(event.target.value)} /></label>
+									<label>Модель<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
+									<label>Артикул<input value={article} onChange={(event) => setArticle(event.target.value)} /></label>
+									<label>Раздел<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} onChange={(event) => setRetail(event.target.value)} /></label>
+									<label>Закупочная цена, ₽<input inputMode="decimal" value={purchase} onChange={(event) => setPurchase(event.target.value)} /></label>
+									<label className="wide">Описание и характеристики<textarea rows={8} maxLength={10000} value={description} placeholder="Назначение, комплектация, совместимость, размеры, технические особенности…" onChange={(event) => setDescription(event.target.value)} /></label>
+								</div>
+							) : (
+								<dl className="catalog-product-info">
+									<div><dt>Производитель</dt><dd>{row.manufacturer || '—'}</dd></div>
+									<div><dt>Модель</dt><dd>{row.model || '—'}</dd></div>
+									<div><dt>Артикул</dt><dd>{row.article || '—'}</dd></div>
+									<div><dt>Раздел</dt><dd>{row.sectionName || '—'}</dd></div>
+								</dl>
+							)}
+						</section>
+						{!editing && <section>
+							<h3>Описание и характеристики</h3>
+							<div className={`catalog-product-description${row.description ? '' : ' empty'}`}>{row.description || 'Описание пока не заполнено.'}</div>
+						</section>}
+						{!row.isService && <section>
+							<h3>Остатки по складам</h3>
+							<div className="catalog-product-stocks">
+								{stockRows.map((store) => <div key={store.id}><span>{store.title}</span><b className={store.qty > 0 ? '' : 'zero'}>{fmt(store.qty)} шт.</b></div>)}
+							</div>
+						</section>}
+						{error && <div className="new-product-error">{error}</div>}
+					</main>
+				</div>
+				<div className="catalog-product-actions">
+					{editing ? <>
+						<button type="button" className="btn-secondary" disabled={busy} onClick={reset}>Отмена</button>
+						<button type="button" className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить товар'}</button>
+					</> : <>
+						<button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button>
+						{canEdit && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
+					</>}
+				</div>
+			</div>
+		</div>
+	);
+}
+
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
 export interface ProductPickItem {
 	productId: number;
@@ -332,6 +478,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [uid, setUid] = useState('');
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
+	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
 	// Корзина быстрой продажи: productId → количество.
 	const [cart, setCart] = useState<Map<number, number>>(() => new Map());
 	const [showCart, setShowCart] = useState(false);
@@ -553,6 +700,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		setOnlyStock(false);
 		setQ(row.name);
 		setShowNewProduct(false);
+		if (!pickMode) setCardRow(row);
 	}
 
 	async function saveCatalogPrices(retail: number, purchase: number): Promise<void> {
@@ -560,6 +708,15 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase);
 		setRows((current) => current.map((row) => row.id === priceRow.id ? { ...row, ...saved } : row));
 		setPriceRow(null);
+	}
+
+	async function saveCatalogProduct(input: CatalogProductUpdateInput): Promise<void> {
+		const saved = ctx.__mock ? input : await updateCatalogProduct(input);
+		setRows((current) => current.map((row) => {
+			if (row.id !== input.productId) return row;
+			return { ...row, ...saved };
+		}));
+		setCardRow((current) => current?.id === input.productId ? { ...current, ...saved } : current);
 	}
 
 	async function createSale(): Promise<void> {
@@ -680,7 +837,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
-				{(pickMode || allowCreateProduct) && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
+				{(pickMode || allowCreateProduct || canEditPrices) && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && !readOnly && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
@@ -707,7 +864,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 						{view.length ? view.map(({ d, qty, others }) => {
 							const photo = d.photoPath ? photoFullUrl(d.photoPath) : null;
 							return (
-								<tr key={d.id} onClick={() => d.id !== CORE_ENGINEER_VISIT_SERVICE_ID && openProductCard(d.iblockId, d.id)} title={d.id === CORE_ENGINEER_VISIT_SERVICE_ID ? undefined : 'Открыть карточку товара'}>
+								<tr key={d.id} onClick={() => d.id !== CORE_ENGINEER_VISIT_SERVICE_ID && setCardRow(d)} title={d.id === CORE_ENGINEER_VISIT_SERVICE_ID ? undefined : 'Открыть нашу карточку товара'}>
 									<td className="num idcol">{d.id}</td>
 									<td className="ph-col">
 										{photo
@@ -780,9 +937,11 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					</div>
 				)}
 
-			{(pickMode || allowCreateProduct) && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
+			{(pickMode || allowCreateProduct || canEditPrices) && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
 
 			{priceRow && <CatalogPriceModal row={priceRow} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
+
+			{cardRow && <CatalogProductCard key={cardRow.id} row={cardRow} stores={visibleStores} sections={sections} canEdit={canEditPrices && !pickMode} onSave={saveCatalogProduct} onClose={() => setCardRow(null)} />}
 
 			{showPriceTags && <PriceTagsModal items={priceTagItems} onClose={() => setShowPriceTags(false)} />}
 

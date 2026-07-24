@@ -58,6 +58,7 @@ interface CatalogCandidate {
 	manufacturer?: string;
 	sectionId?: number;
 	sectionName?: string;
+	description?: string;
 	retail: number | null;
 	purchase: number | null;
 	total: number;
@@ -66,6 +67,10 @@ interface CatalogCandidate {
 
 function cleanText(value: unknown): string {
 	return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function cleanMultiline(value: unknown): string {
+	return String(value ?? '').replace(/\r\n/g, '\n').trim().slice(0, 10_000);
 }
 
 function normalized(value: unknown): string {
@@ -112,6 +117,7 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 			manufacturer: item.manufacturer || known?.manufacturer,
 			sectionId: known?.sectionId ?? (sectionName ? coreSectionId(sectionName) : undefined),
 			sectionName,
+			description: item.description || known?.description,
 			retail: corePrices?.retail ?? known?.retail ?? null,
 			purchase: corePrices?.purchase ?? known?.purchase ?? null,
 			photoPath,
@@ -314,6 +320,81 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		}
 	});
 
+	app.post('/api/catalog/update-product', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (!(await canEditCatalogPrices(client))) {
+			return reply.code(403).send({ ok: false, error: 'редактирование товаров доступно снабжению и Константину Ласкину' });
+		}
+		const productId = Number(body['productId']);
+		const iblockId = Number(body['iblockId']);
+		const name = cleanText(body['name']);
+		const manufacturer = cleanText(body['manufacturer']);
+		const model = cleanText(body['model']);
+		const article = cleanText(body['article']);
+		const sectionId = Number(body['sectionId']);
+		const sectionName = cleanText(body['sectionName']);
+		const description = cleanMultiline(body['description']);
+		const retail = Number(body['retail']);
+		const purchase = Number(body['purchase']);
+		const isService = body['isService'] === true;
+		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
+		if (iblockId !== 24 && iblockId !== 26) return reply.code(400).send({ ok: false, error: 'неверный каталог товара' });
+		if (name.length < 3) return reply.code(400).send({ ok: false, error: 'название товара должно быть не короче трёх символов' });
+		if (!Number.isInteger(sectionId) || sectionId <= 0 || !sectionName) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
+		if (!Number.isFinite(retail) || retail < 0) return reply.code(400).send({ ok: false, error: 'розничная цена должна быть 0 или больше' });
+		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		try {
+			const fields: Record<string, unknown> = {
+				name,
+				iblockSectionId: sectionId,
+			};
+			if (iblockId === 24) {
+				fields['property334'] = manufacturer;
+				fields['property330'] = model || article;
+			} else {
+				fields['property360'] = article || model;
+			}
+			await client.call('catalog.product.update', { id: productId, fields });
+			await ensureCoreItem(erp, {
+				productId,
+				name,
+				isService,
+				model,
+				article,
+				brand: manufacturer,
+				section: sectionName,
+				description,
+			});
+			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
+			baseCache.delete(normalizeDomain(body.domain ?? ''));
+			app.log.info({ productId, iblockId }, '[api/catalog/update-product] ok');
+			return {
+				ok: true,
+				product: {
+					id: productId,
+					iblockId,
+					name,
+					isService,
+					article,
+					model,
+					manufacturer,
+					sectionId,
+					sectionName,
+					description,
+					retail,
+					purchase,
+				},
+			};
+		} catch (error) {
+			app.log.error({ productId, iblockId }, `[api/catalog/update-product] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
 	app.post('/api/catalog/create-product', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(body);
@@ -326,6 +407,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const model = cleanText(body['model']);
 		const sectionId = Number(body['sectionId']);
 		const sectionNameInput = cleanText(body['sectionName']);
+		const description = cleanMultiline(body['description']);
 		const retail = Number(body['retail']);
 		const similarReviewed = body['similarReviewed'] === true;
 		if (productType.length < 3) return reply.code(400).send({ ok: false, error: 'укажи вид товара' });
@@ -364,7 +446,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					});
 					productId = Number(created?.element?.id ?? 0) || 0;
 					if (!productId) throw new Error('catalog.product.add не вернул id');
-					await ensureCoreItem(erp, { productId, name, model, article: model, brand: manufacturer, section: sectionName });
+					await ensureCoreItem(erp, { productId, name, model, article: model, brand: manufacturer, section: sectionName, description });
 					await updateCoreCatalogPrices(erp, { productId, retail, purchase: 0 });
 				} catch (error) {
 					if (productId) await client.call('catalog.product.delete', { id: productId }).catch(() => undefined);
@@ -381,6 +463,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					manufacturer,
 					sectionId,
 					sectionName,
+					description,
 					retail,
 					purchase: null,
 					total: 0,

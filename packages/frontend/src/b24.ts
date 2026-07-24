@@ -504,6 +504,7 @@ export interface BaseRow {
 	manufacturer?: string | undefined;
 	sectionId?: number | undefined;
 	sectionName?: string | undefined;
+	description?: string | undefined;
 	retail: number | null;
 	purchase: number | null;
 	photoPath?: string | undefined;
@@ -550,12 +551,39 @@ export async function updateCatalogPrices(productId: number, retail: number, pur
 	return { retail: Number(json.retail ?? retail), purchase: Number(json.purchase ?? purchase) };
 }
 
+export interface CatalogProductUpdateInput {
+	productId: number;
+	iblockId: number;
+	name: string;
+	isService: boolean;
+	article: string;
+	model: string;
+	manufacturer: string;
+	sectionId: number;
+	sectionName: string;
+	description: string;
+	retail: number;
+	purchase: number;
+}
+
+export async function updateCatalogProduct(input: CatalogProductUpdateInput): Promise<Partial<BaseRow>> {
+	const res = await fetch('/api/catalog/update-product', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; product?: Partial<BaseRow> };
+	if (!json.ok || !json.product) throw new Error(json.error ?? 'не удалось сохранить товар');
+	return json.product;
+}
+
 export interface NewCatalogProductInput {
 	productType: string;
 	manufacturer: string;
 	model: string;
 	sectionId: number;
 	sectionName: string;
+	description: string;
 	retail: number;
 	similarReviewed?: boolean;
 }

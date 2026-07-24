@@ -52,6 +52,7 @@ export interface BaseRow {
 	manufacturer?: string | undefined;
 	sectionId?: number | undefined;
 	sectionName?: string | undefined;
+	description?: string | undefined;
 	retail: number | null;
 	purchase: number | null;
 	photoPath?: string | undefined;
