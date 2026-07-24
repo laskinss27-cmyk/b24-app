@@ -76,6 +76,12 @@ const firstEmail = (value: unknown): string => {
 	return clean((rows[0] as Record<string, unknown> | undefined)?.['VALUE']);
 };
 
+export function contractObjectAddress(value: unknown): string {
+	return clean(value)
+		.replace(/\|\s*-?\d+(?:[.,]\d+)?\s*;\s*-?\d+(?:[.,]\d+)?(?:\|.*)?$/, '')
+		.trim();
+}
+
 function shortPersonName(fullName: string): string {
 	const parts = titleCase(fullName).split(/\s+/).filter(Boolean);
 	if (!parts.length) return '';
@@ -223,7 +229,7 @@ export async function getContractContext(client: B24Client, dealId: number): Pro
 		selectedCompanyId,
 		customer,
 		objectType: clean(deal['UF_CRM_1750227509']) || clean(deal['UF_CRM_1779357673658']) || 'Квартира',
-		objectAddress: clean(deal['UF_CRM_1750227483']),
+		objectAddress: contractObjectAddress(deal['UF_CRM_1750227483']),
 		contractNumber: clean(deal[CONTRACT_NUMBER_FIELD]),
 		contractDate: clean(deal[CONTRACT_DATE_FIELD]).slice(0, 10),
 		vatRate: Number(deal[CONTRACT_VAT_FIELD]) === 22 ? 22 : 5,
@@ -502,7 +508,8 @@ export async function generateDealContract(
 	if (!context.customer) throw new Error('в сделке не указан клиент');
 	if (context.customer.missing.length) throw new Error(`у клиента не заполнено: ${context.customer.missing.join(', ')}`);
 	if (!input.objectType.trim()) throw new Error('не указан тип объекта');
-	if (!input.objectAddress.trim()) throw new Error('не указан адрес объекта');
+	const objectAddress = contractObjectAddress(input.objectAddress);
+	if (!objectAddress) throw new Error('не указан адрес объекта');
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
 	const lines = await loadContractLines(client, erp, dealId);
@@ -517,7 +524,7 @@ export async function generateDealContract(
 		company,
 		customer: context.customer,
 		objectType: input.objectType.trim(),
-		objectAddress: input.objectAddress.trim(),
+		objectAddress,
 		vatRate: input.vatRate,
 		lines,
 	});

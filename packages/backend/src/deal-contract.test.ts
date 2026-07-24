@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import JSZip from 'jszip';
-import { buildContractDocx, contractLinesFromB24ProductRows, type ContractParty } from './deal-contract.js';
+import { buildContractDocx, contractLinesFromB24ProductRows, contractObjectAddress, type ContractParty } from './deal-contract.js';
 
 const company: ContractParty = {
 	id: 578,
@@ -88,4 +88,12 @@ test('contractLinesFromB24ProductRows uses visible deal rows and skips the colla
 		{ name: 'Панель BAS-IP', price: 16980, quantity: 1, total: 16980 },
 		{ name: 'Монитор', price: 14390, quantity: 2, total: 28780 },
 	]);
+});
+
+test('contractObjectAddress removes Bitrix map coordinates and object id', () => {
+	assert.equal(
+		contractObjectAddress('Санкт-Петербург, Россия|59.938732;30.316229|4626'),
+		'Санкт-Петербург, Россия',
+	);
+	assert.equal(contractObjectAddress('г. Санкт-Петербург, Невский пр., 1'), 'г. Санкт-Петербург, Невский пр., 1');
 });
