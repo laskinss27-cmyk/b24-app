@@ -42,17 +42,18 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-// productId услуги «Выезд инженера» в Б24-каталоге. Б24-карточка несёт ОДНУ эту строку на сумму
+// productId служебной услуги в Б24-каталоге. Б24-карточка несёт ОДНУ эту строку на сумму
 // сделки (товарный состав живёт в ядре, Sales Order). Услуга TYPE 7 — склад не трогает, сделка
 // закрывается без проводки по складу.
 const VYEZD_PRODUCT_ID = 9814;
+const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
-/** Поставить в Б24-сделку ОДНУ строку «Выезд инженера» на сумму total (или очистить, если total<=0). */
+/** Поставить в Б24-сделку одну служебную строку на сумму total (или очистить, если total<=0). */
 async function setDealB24Service(client: B24Client, dealId: number, total: number): Promise<void> {
 	await client.call('crm.deal.productrows.set', {
 		id: dealId,
-		rows: total > 0 ? [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: 'Выезд инженера', PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }] : [],
+		rows: total > 0 ? [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME, PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }] : [],
 	});
 }
 
@@ -693,7 +694,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				}
 				await assertDealQuoteVariantSelected(erp, dealId);
 				// ПОКРЫВАЛО: состав сделки → ПЛАН в ядре (Sales Order), а Б24 несёт ОДНУ свёрнутую
-				// услугу «Выезд инженера». Новые товары мёржим в план по productId (кол-во суммируем).
+				// служебную строку с общей суммой. Новые товары мёржим в план по productId (кол-во суммируем).
 				const byId = new Map<number, DealPlanDraftLine>();
 				const targetStageId = String(b.stageId ?? '').trim();
 				const addingToStage = Boolean(targetStageId) || b.stage === true;
@@ -866,7 +867,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// СВЕРНУТЬ сделку в одну услугу «Выезд инженера» вручную (на случай старых сделок; при добавлении
+	// СВЕРНУТЬ сделку в одну служебную услугу вручную (на случай старых сделок; при добавлении
 	// товара через /add-products сворачивание уже идёт автоматически). productId 9814 — VYEZD_PRODUCT_ID.
 	app.post('/api/deal/collapse-service', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
@@ -880,13 +881,13 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			// Сумма сделки = Σ PRICE×QUANTITY текущих строк (PRICE = итог за ед. после скидки).
 			const total = Math.round(all.reduce((a, r) => a + Number(r['PRICE'] ?? 0) * Number(r['QUANTITY'] ?? 0), 0) * 100) / 100;
 			if (total <= 0) return reply.code(400).send({ ok: false, error: 'в сделке нет суммы для сворачивания' });
-			// Уже свёрнута? (одна строка-услуга «Выезд инженера») — не трогаем, идемпотентно.
+			// Уже свёрнута в одну служебную строку? Не трогаем, идемпотентно.
 			if (all.length === 1 && Number(all[0]?.['PRODUCT_ID']) === VYEZD_PRODUCT_ID) {
 				return { ok: true, total, already: true };
 			}
 			await client.call('crm.deal.productrows.set', {
 				id: dealId,
-				rows: [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: 'Выезд инженера', PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }],
+				rows: [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME, PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }],
 			});
 			app.log.info({ dealId, total, was: all.length }, '[api/deal/collapse-service] ok');
 			return { ok: true, total, replaced: all.length };
@@ -1148,7 +1149,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	});
 
 	// ПЕРЕЗАПИСАТЬ состав плана сделки целиком (из вкладки: правка кол-ва/цены, удаление строк) →
-	// затем пересчитать «Выезд инженера» в Б24. items=[] → план пуст и Б24-строки очищаются.
+	// затем пересчитать служебную строку с общей суммой в Б24. items=[] → план пуст и Б24-строки очищаются.
 	app.post('/api/deal/plan-set', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; variantId?: unknown };
 		const client = clientFrom(b);
@@ -1292,7 +1293,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				return m && m[1] && /\d/.test(m[1]) ? m[1] : '';
 			};
 			// КП должно смотреть на НАШ состав сделки из ядра (Sales Order), а не на нативные строки Б24:
-			// в Б24 мы специально держим одну служебную строку «Выезд инженера» на всю сумму.
+			// в Б24 мы специально держим одну служебную строку на всю сумму.
 			const erp = ErpClient.fromEnv();
 			let source: 'core' | 'b24-fallback' = 'core';
 			const variantId = String(b.variantId ?? '').trim();

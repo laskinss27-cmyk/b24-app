@@ -214,7 +214,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	}));
 	// Старые/ручные сделки могут содержать реальные товары только в строках Б24, без Sales Order
 	// в ядре. Не прячем их: показываем как товарные строки, пока пользователь не перенесёт/правит
-	// состав через наше окно. Служебная услуга «Выезд инженера» сюда не попадёт: это TYPE 7.
+	// состав через наше окно. Служебная свёртка суммы Б24 сюда не попадёт: это TYPE 7.
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
 	const b24OnlyGoods = enriched.filter((r) => !isWorkRow(r.type) && r.productId > 0 && !planIdsSet.has(r.productId));
 	const visibleProductIds = new Set([...planIdsSet, ...b24OnlyGoods.map((row) => row.productId)]);
@@ -609,7 +609,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			} else if (isPlanRow(r)) {
 				if (data.stages.length) throw new Error('Для изменения цены выберите «Вид по этапам» и измените нужную строку.');
 				// Товар плана: пишем НОВЫЙ состав в ядро (база p + скидка d% — скидка сохраняется, цену вернуть можно)
-				// + пересчёт «Выезд инженера» в Б24.
+				// + пересчёт служебной строки с общей суммой в Б24.
 				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
 			} else {
 				await updateDealProduct(dealId, Number(r.id), q, p, d);
@@ -784,7 +784,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				});
 				await setDealPlan(dealId, next);
 			} else if (isPlanRow(r)) {
-				// Товар плана: убираем из состава ядра + пересчёт «Выезд инженера» в Б24.
+				// Товар плана: убираем из состава ядра + пересчёт служебной строки с общей суммой в Б24.
 				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId));
 			} else {
 				await removeDealProduct(dealId, Number(r.id));
@@ -891,7 +891,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const planWorks = data.planRows.filter((r) => isWorkRow(r.type));
 	const works = rows.filter((r) => isWorkRow(r.type));
 	const planWorkIds = new Set(planWorks.map((row) => row.productId));
-	// «Выезд инженера» (productId 9814) — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
+	// ProductId 9814 — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
 	// У старых сделок оказанную услугу Б24 удалить запрещает: если она уже перенесена в план ядра,
 	// оставляем строку Б24 на месте, но второй раз во вкладке не рисуем.
 	const legacyWorks = works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID && !planWorkIds.has(r.productId));
