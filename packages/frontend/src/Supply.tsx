@@ -1322,6 +1322,7 @@ export function Supply(): JSX.Element {
 	const [suppliers, setSuppliers] = useState<string[]>(DEFAULT_SUPPLIERS);
 	const [loading, setLoading] = useState(!ctx.__mock);
 	const [view, setView] = useState<ViewKey>(requestId > 0 ? 'incoming' : 'orders');
+	const [reportsOpen, setReportsOpen] = useState(false);
 	const [sort, setSort] = useState<SortKey>('dateDesc');
 	const [expanded, setExpanded] = useState('');
 	const [decisions, setDecisions] = useState<DecisionMap>({});
@@ -1657,17 +1658,40 @@ export function Supply(): JSX.Element {
 		<div className="supply-proto-shell">
 			<aside className="supply-proto-rail">
 				<div className="supply-proto-brand"><span>С</span><div><b>Снаб</b><small>рабочий сценарий</small></div></div>
-				<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
-				<button className={view === 'incoming' ? 'active' : ''} type="button" onClick={() => setView('incoming')}>Входящие заявки ТТ</button>
-				<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
-				<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
-				<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
-				<button className={view === 'marketplaces' ? 'active' : ''} type="button" onClick={() => setView('marketplaces')}>Маркетплейсы</button>
-				<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
-				<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
-				<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
-				<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
-				<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
+				<nav className="supply-proto-nav" aria-label="Разделы снабжения">
+					<div className="supply-proto-nav-group">
+						<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
+						<button className={view === 'incoming' ? 'active' : ''} type="button" onClick={() => setView('incoming')}>Входящие заявки ТТ</button>
+						<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
+						<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
+					</div>
+					<div className="supply-proto-nav-group">
+						<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
+						<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
+						<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
+						<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
+					</div>
+					<div className="supply-proto-nav-group">
+						<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
+						<button
+							className={`supply-proto-nav-parent${view === 'ledger' ? ' active' : ''}`}
+							type="button"
+							aria-expanded={reportsOpen}
+							aria-controls="supply-reports-menu"
+							onClick={() => setReportsOpen((current) => !current)}
+						>
+							<span>Отчёты</span><span aria-hidden="true">{reportsOpen ? '⌃' : '⌄'}</span>
+						</button>
+						{reportsOpen && (
+							<div id="supply-reports-menu" className="supply-proto-subnav">
+								<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
+							</div>
+						)}
+					</div>
+					<div className="supply-proto-nav-group">
+						<button className={view === 'marketplaces' ? 'active' : ''} type="button" onClick={() => setView('marketplaces')}>Маркетплейсы</button>
+					</div>
+				</nav>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>
 			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' ? ' supply-proto-main-wide' : ''}`}>

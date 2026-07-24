@@ -4271,6 +4271,23 @@ body.deal-placement-body #root {
 	font-size: 12px;
 }
 
+.supply-proto-nav {
+	display: grid;
+	gap: 0;
+}
+
+.supply-proto-nav-group {
+	display: grid;
+	gap: 4px;
+	padding: 10px 0;
+	border-top: 1px solid #e3e8ef;
+}
+
+.supply-proto-nav-group:first-child {
+	padding-top: 0;
+	border-top: 0;
+}
+
 .supply-proto-rail button {
 	text-align: left;
 	border: 0;
@@ -4286,6 +4303,23 @@ body.deal-placement-body #root {
 	background: #eef3fb;
 	color: #185fa5;
 	font-weight: 700;
+}
+
+.supply-proto-nav-parent {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.supply-proto-subnav {
+	display: grid;
+	gap: 4px;
+	padding-left: 12px;
+}
+
+.supply-proto-subnav button {
+	font-size: 13px;
 }
 
 .supply-proto-source {
