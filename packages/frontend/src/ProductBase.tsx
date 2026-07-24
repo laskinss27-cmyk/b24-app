@@ -17,7 +17,6 @@ import {
 	type StoreInfo,
 } from './b24.js';
 import { SalesReport } from './SalesReport.js';
-import { Realizations } from './Realizations.js';
 import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
 
 /**
@@ -31,7 +30,7 @@ import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
  */
 
 type Gate = 'checking' | 'ready' | 'error';
-type Mode = 'loading' | 'base' | 'report' | 'realizations';
+type Mode = 'loading' | 'base' | 'report';
 
 const ALL = 'all';
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
@@ -624,9 +623,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}
-	if (mode === 'realizations') {
-		return <Realizations onBack={() => setMode('base')} />;
-	}
 	if (mode === 'loading') {
 		return (
 			<div className="base">
@@ -641,15 +637,13 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			<header>
 				<div className="base-head-row">
 					<h1>{pickMode ? (picker?.title ?? 'Добавить товар в сделку') : 'База товаров'}</h1>
-					{pickMode
-						? (
-							<div className="picker-head-actions">
-								<span className="pick-count">Выбрано: <b>{cart.size}</b></span>
-								<button className="btn-secondary" onClick={() => picker?.onCancel()}>← Отмена</button>
-								<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
-							</div>
-						)
-						: !readOnly && <button className="btn-primary" onClick={() => setMode('realizations')} title="Реализации со связанными сделками">📄 Реализации</button>}
+					{pickMode && (
+						<div className="picker-head-actions">
+							<span className="pick-count">Выбрано: <b>{cart.size}</b></span>
+							<button className="btn-secondary" onClick={() => picker?.onCancel()}>← Отмена</button>
+							<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
+						</div>
+					)}
 				</div>
 				<p className="subtitle">{pickMode ? 'Отметьте товары и количество, затем нажмите «Готово».' : `Найти товар, посмотреть остатки и цены.${ctx.__mock ? ' · dev-мок' : ''}`}</p>
 			</header>
