@@ -122,7 +122,7 @@ function comparisonValues(item: ComparisonRow): Array<string | number | null> {
 		item.b24Article, item.coreArticle, item.nextArticle,
 		item.b24Description, item.coreDescription, item.nextDescription,
 		item.notes, item.comment,
-	];
+	].map((value) => value === '' ? null : value);
 }
 
 export function createCatalogComparisonWorkbook(input: CatalogComparisonInput): ExcelJS.Workbook {
