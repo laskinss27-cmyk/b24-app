@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<!-- saved from url=(0031)http://localhost:5184/flow.html -->
 <html lang="ru"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <title>Схема: Битрикс ↔ Склад</title>
@@ -50,8 +49,8 @@
 </head>
 <body>
 <div class="wrap">
-	<h1>Как это устроено: Битрикс — лицо, Склад — мозг</h1>
-	<div class="sub">Менеджер сидит в одном окне (Битрикс). Тяжёлую складскую работу делает наш склад — незаметно.</div>
+	<h1>Как это устроено: Битрикс24 — рабочее окно, ERPNext — складское ядро</h1>
+	<div class="sub">Сотрудник работает внутри Битрикс24, а складские документы и остатки ведутся в ERPNext.</div>
 
 	<div class="manager">
 		<div class="big">👤 Менеджер</div>
@@ -70,19 +69,19 @@
 			</div>
 			<div class="panels">
 				<b>Наши окна внутри Битрикса:</b><br>
-				Товары/Остатки · Реализации · Продажа — выглядят как часть Битрикса, а данные тянут из склада.
+				Товары сделки · База товаров · Снаб · Складской учёт · Ремонты.
 			</div>
 		</div>
 
 		<!-- стрелки -->
 		<div class="arrows">
-			<div class="arr to"><span class="dir">Битрикс → Склад</span><br>«Покажи остаток по складам»<br>«Продали — спиши товар с точки»</div>
-			<div class="arr from"><span class="dir">Склад → Битрикс</span><br>«Вот ЖИВОЙ остаток» (в окно)<br>«Вот документ-зеркало: Реализация / Касса»</div>
+			<div class="arr to"><span class="dir">Наш интерфейс → ERPNext</span><br>«Покажи остаток»<br>«Создай и проведи складской документ»</div>
+			<div class="arr from"><span class="dir">ERPNext → Наш интерфейс</span><br>«Вот актуальный остаток»<br>«Вот номер и состояние документа»</div>
 		</div>
 
 		<!-- Склад -->
 		<div class="box wh">
-			<h2>НАШ СКЛАД</h2>
+			<h2>ERPNext</h2>
 			<div class="role">Мозг + точные остатки</div>
 			<div class="owns">
 				<b>Хозяин этих данных:</b>

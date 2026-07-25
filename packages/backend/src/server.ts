@@ -14,7 +14,7 @@ try {
 	process.exit(1);
 }
 
-// Graceful shutdown — Y.Cloud Containers шлёт SIGTERM при scale-down
+// Корректно завершаем запросы при остановке или замене Docker-контейнера.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 	process.on(signal, async () => {
 		app.log.info({ signal }, 'shutting down');

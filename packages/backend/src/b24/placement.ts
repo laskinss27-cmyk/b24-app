@@ -225,9 +225,8 @@ export async function unbindCatalogExternalPlacement(opts: BindDealTabOptions): 
 }
 
 /**
- * СВЕРКА ПРИВЯЗОК (one-shot per container). Лечит дубли пунктов приложения после смены URL
- * приложения (флип Яндекс→спейр оставил старые хендлеры на yandexcloud-URL рядом с новыми на
- * regru → «две Товары», «две b24-app» в сделке). placement.list отдаёт только КОДЫ типов, не
+ * СВЕРКА ПРИВЯЗОК (one-shot per container). Лечит дубли пунктов приложения после смены
+ * публичного URL: старые хендлеры могут остаться рядом с актуальными. placement.list отдаёт только КОДЫ типов, не
  * привязки, поэтому различить по URL нельзя — снимаем ВСЕ хендлеры точки (placement.unbind с
  * одним PLACEMENT убирает все) и СРАЗУ привязываем только актуальные (текущий publicBaseUrl).
  *

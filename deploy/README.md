@@ -1,14 +1,20 @@
-# deploy/ — инфраструктура развёртывания (корп-VPS)
+# Развёртывание
 
-Файлы, нужные, чтобы поднять систему с нуля. Полная процедура — в [../docs/runbook.md](../docs/runbook.md).
+В этой папке находятся проверяемые примеры конфигурации рабочего VPS.
 
-| Файл | Куда на VPS | Что это |
+| Файл | Рабочее расположение | Назначение |
 |---|---|---|
-| `pwd.yml` | `/root/erpnext/pwd.yml` | docker compose ядра ERPNext (проект `erpnext`, сеть `erpnext_frappe_network`) |
-| `nginx-b24.conf` | `/etc/nginx/sites-available/b24` | публичная дверь nginx :443 → backend `127.0.0.1:3000` |
-| `backend.env.example` | → `/root/erpnext/backend.env` | env приложения (заполнить значениями, НЕ коммитить реальные) |
-| `sync.env.example` | → `/root/sync/.env` | env синка/бэкапа (заполнить значениями) |
+| `pwd.yml` | `/root/erpnext/pwd.yml` | стек ERPNext, MariaDB, Redis и workers |
+| `nginx-b24.conf` | `/etc/nginx/sites-available/b24` | HTTPS-вход и проксирование на backend |
+| `backend.env.example` | образец для `/root/erpnext/backend.env` | переменные приложения |
+| `sync.env.example` | образец для `/root/sync/.env` | доступ служебных скриптов к ERPNext и Битрикс24 |
 
-Скрипты синка/бэкапа/статуса — в [../scripts/](../scripts/): `sync.sh`, `core-backup.sh`, `core-backup-disk.ts`, `sos-status.sh`.
+Backend собирается из корневого [Dockerfile](../Dockerfile) и подключается к Docker-сети `erpnext_frappe_network`. Рабочий контейнер слушает порт `8080` внутри контейнера и опубликован только на `127.0.0.1:3000`.
 
-Backend собирается из корневого `Dockerfile`. Данные ядра восстанавливаются из бэкапа (см. runbook раздел B).
+Полная процедура:
+
+- первичная установка и подключение к Битрикс24 — [docs/runbook.md](../docs/runbook.md);
+- схема сети — [docs/network.md](../docs/network.md);
+- действия при аварии — [docs/SOS.md](../docs/SOS.md).
+
+Реальные `.env`, ключи, токены, дампы базы и сертификаты в Git не добавляются.

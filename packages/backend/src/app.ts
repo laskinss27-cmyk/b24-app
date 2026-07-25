@@ -54,7 +54,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 		logger: {
 			level: config.nodeEnv === 'production' ? 'info' : 'debug',
 			// Подстраховка: даже если что-то залогируем вместе с телом запроса —
-			// OAuth-токены не утекут в логи Y.Cloud.
+			// OAuth-токены не утекут в рабочие логи.
 			redact: {
 				paths: [
 					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'client_secret',

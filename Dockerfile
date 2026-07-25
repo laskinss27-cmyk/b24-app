@@ -19,8 +19,7 @@ RUN npm -w @b24-app/frontend run build \
 
 # ── Рантайм-настройки
 ENV NODE_ENV=production
-# Y.Cloud Serverless Containers по дефолту стучатся на 8080 — Fastify тоже должен слушать его.
-# Если меняешь — синхронно меняй и --port в `yc serverless container revision deploy`.
+# Backend слушает 8080 внутри контейнера. На VPS порт опубликован только на 127.0.0.1:3000.
 ENV PORT=8080
 ENV HOST=0.0.0.0
 EXPOSE 8080

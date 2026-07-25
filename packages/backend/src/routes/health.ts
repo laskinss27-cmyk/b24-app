@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 
 /**
- * GET /health — sanity-check. Используем для проверки что Y.Cloud
- * задеплоил, что приложение поднимается, что конфиг прочитался.
+ * GET /health — проверка, что приложение поднялось и прочитало конфигурацию.
  */
 export function registerHealthRoute(app: FastifyInstance): void {
 	app.get('/health', async () => {

@@ -3,7 +3,7 @@
 #  БД    : КАЖДЫЙ запуск (database.sql.gz) — все 729 таблиц = ВСЕ документы и проводки.
 #          → локально /root/core-backups (14 копий) + Б24 Диск (независимый офсайт от гибели VPS).
 #  ФАЙЛЫ : раз в неделю (вс) или флаг --with-files (files.tar + private-files.tar, фото/вложения ~236M).
-#          → локально (4 копии). Офсайта нет: фото восстановимы из Б24 синком.
+#          → локально (4 копии). Офсайта файлов нет: при необходимости фото повторно импортируются из Б24.
 # Восстановление: docs/restore — bench --site frontend restore <db.sql.gz> \
 #                 [--with-public-files <files.tar>] [--with-private-files <private-files.tar>]
 export PATH=/usr/local/bin:/usr/bin:/bin

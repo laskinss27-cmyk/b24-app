@@ -207,7 +207,7 @@ export async function fetchErpStocks(erp: ErpClient): Promise<Map<number, Record
 }
 
 /** Остатки ТОЛЬКО запрошенных товаров: productId → { '<title склада Б24>': qty }. Фильтр item_code in —
- *  мизерный ответ (vs весь Bin), критично через мост: полный каталог не лезет в 60с-бюджет контейнера. */
+ *  компактный ответ вместо чтения всего Bin: полный каталог избыточен для точечной проверки. */
 export async function fetchErpStocksFor(erp: ErpClient, productIds: number[]): Promise<Map<number, Record<string, number>>> {
 	const ctx = await erpContext(erp);
 	const out = new Map<number, Record<string, number>>();

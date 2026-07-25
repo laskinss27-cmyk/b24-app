@@ -678,7 +678,7 @@ function ErpDocModal(props: {
 		if (doc.status !== 'submitted' && !window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки, в Б24 будут созданы ЧЕРНОВИКИ-зеркала (их проводишь сам).`)) return;
 		setBusy(true); setErr(null);
 		try {
-			// проведение в ядре + зеркала идут через мост и могут быть небыстрыми; serverless-кап 60с
+			// Проведение и связанные записи могут быть небыстрыми, поэтому оставляем явный прогресс.
 			const r = await withTimeout(submitErpDoc(props.invId, props.storeId, props.userId), 55000, 'erp-doc-submit');
 			setDoc(r.doc);
 			setMirrors(r.docs);

@@ -18,8 +18,8 @@ import { normalizeDomain } from '../security.js';
  * Домен сверяем с порталом (allowlist), как в api-inventory.
  *
  * КЭШ: сборка тяжёлая (~20с), поэтому держим её в памяти процесса с TTL. Повторные
- * открытия отдаются мгновенно. Кэш per-instance (serverless stateless — на каждый
- * контейнер свой), что для нашего трафика ок. force=true — принудительная пересборка.
+ * открытия отдаются мгновенно. Кэш хранится в памяти конкретного контейнера;
+ * force=true запускает принудительную пересборку.
  */
 interface AuthBody {
 	domain?: string;
@@ -544,7 +544,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, coreOff: true, error: 'ядро не подключено (ERPNEXT_URL)' });
 		try {
-			// ТОЛЬКО запрошенные товары (item_code in) — полный Bin через мост не лезет в 60с (выстрадано 2026-06-15).
+			// Запрашиваем только нужные item_code: полный Bin избыточен и заметно замедляет ответ.
 			const [stocks, purchasing] = await Promise.all([
 				fetchErpStocksFor(erp, ids),
 				fetchErpPurchasing(erp, ids),

@@ -1,189 +1,185 @@
-# 📕 Runbook — развернуть, восстановить, обновить
+# Runbook
 
-Пошаговые процедуры для ответственного (без контекста авторов). Аварийные «что-то лежит» — в [SOS.md](SOS.md).
-Как всё связано — в [network.md](network.md).
+Рабочие процедуры подключения, обновления и восстановления. Для быстрой аварийной диагностики см. [SOS.md](SOS.md).
 
-Всё живёт на **одном VPS** (`201.51.12.57`, Ubuntu 22.04). Источник кода/конфигов — **GitHub**
-(`github.com/laskinss27-cmyk/b24-app`). Источник данных — **бэкап** (на VPS `/root/core-backups` + Б24-Диск).
-Личные компьютеры в процедурах НЕ используются.
+## Проверенные адреса и пути
 
----
+| Назначение | Значение |
+|---|---|
+| VPS | `root@201.51.12.57` |
+| публичный URL | `https://201.51.12.57.sslip.io` |
+| репозиторий на VPS | `/root/b24-app-git` |
+| ERPNext Compose | `/root/erpnext/pwd.yml` |
+| env backend | `/root/erpnext/backend.env` |
+| служебные скрипты | `/root/sync` |
+| локальные бэкапы | `/root/core-backups` |
+| nginx | `/etc/nginx/sites-available/b24` |
 
-## Доступ и секреты
+Доступ выполняется по SSH-ключу. Пароли, API-ключи, OAuth-секреты и вебхуки в команды, логи и Git не копируются.
 
-- **Вход на VPS:** `ssh root@201.51.12.57` по ssh-ключу (завести заранее у ответственного; пароль не используем).
-- **Секреты НЕ в git.** Это `/root/erpnext/backend.env` и `/root/sync/.env` на VPS. При развёртывании с нуля
-  их заполняют вручную (список ключей — внизу, «Переменные окружения»). Значения берутся из Б24 (OAuth-данные
-  приложения) и ядра (API-токен).
+## Проверка перед деплоем
 
----
-
-## Локальная сборка / проверка (на машине разработчика)
-
-```powershell
-cd D:\Projects\b24-app
-npm run typecheck   # все workspaces
-npm run build       # backend tsc + frontend vite → packages/frontend/dist
-```
-Backend раздаёт собранный фронт; в проде всё пакуется в docker-образ из `Dockerfile`.
-
----
-
-## A. Развернуть с нуля (новый/чистый VPS)
-
-Предусловия: Ubuntu 22.04, root, интернет.
+В чистом состоянии исходников:
 
 ```bash
-# 1. базовый софт
-apt-get update && apt-get install -y docker.io docker-compose-plugin git nginx certbot python3-certbot-nginx
-systemctl enable --now docker
-
-# 2. код из GitHub
-git clone https://github.com/laskinss27-cmyk/b24-app.git /root/b24-app
-cd /root/b24-app
-
-# 3. ЯДРО ERPNext: разложить compose и поднять стек
-mkdir -p /root/erpnext
-cp deploy/pwd.yml /root/erpnext/pwd.yml
-cd /root/erpnext && docker compose -p erpnext -f pwd.yml up -d
-#    дождаться healthy:  docker ps   (erpnext-db-1 → healthy)
+npm ci
+npm run typecheck
+npm -w @b24-app/backend test
+npm run build
 ```
-Затем **восстановить данные ядра из бэкапа** — раздел B. (Совсем новая установка без бэкапа: `create-site`
-в исходном compose создаёт пустой site, но у нас всегда есть бэкап → идём через restore.)
+
+Незакоммиченные пользовательские файлы не включаются в коммит и образ случайно.
+
+## Деплой backend
+
+Вместо тега `COMMIT` используется короткий hash уже отправленного коммита из `main`.
 
 ```bash
-# 4. BACKEND: собрать образ из исходников и запустить
-cd /root/b24-app && docker build -t b24-app:latest .
-#    создать /root/erpnext/backend.env (см. «Переменные окружения») и заполнить
-docker run -d --name b24-backend --network erpnext_frappe_network \
-  -p 127.0.0.1:3000:8080 --env-file /root/erpnext/backend.env \
-  --restart unless-stopped b24-app:latest
+cd /root/b24-app-git
+git fetch origin
+git checkout main
+git pull --ff-only origin main
 
-# 5. ДВЕРЬ: nginx + сертификат
-cp deploy/nginx-b24.conf /etc/nginx/sites-available/b24
-ln -sf /etc/nginx/sites-available/b24 /etc/nginx/sites-enabled/b24
-rm -f /etc/nginx/sites-enabled/default
-ufw allow 22/tcp; ufw allow 80/tcp; ufw allow 443/tcp; ufw --force enable
-nginx -t && systemctl reload nginx
-certbot --nginx -d 201.51.12.57.sslip.io --non-interactive --agree-tos -m <email> --redirect
+COMMIT=$(git rev-parse --short HEAD)
+docker build -t b24-app:$COMMIT .
 
-# 6. СИНК + БЭКАП
-mkdir -p /root/sync && cp scripts/sync.sh scripts/core-backup.sh scripts/core-backup-disk.ts /root/sync/
-#    создать /root/sync/.env (см. ниже); в /root/sync выполнить: npm install
-( crontab -l 2>/dev/null | grep -vE "sync.sh|core-backup.sh";
-  echo "7 * * * * /root/sync/sync.sh";
-  echo "0 12 * * * /usr/bin/bash /root/sync/core-backup.sh" ) | crontab -
+docker stop b24-backend
+docker rename b24-backend b24-backend-prev-before-$COMMIT
 
-# 7. команда status
-cp /root/b24-app/scripts/sos-status.sh /usr/local/bin/status && chmod +x /usr/local/bin/status
+docker run -d \
+  --name b24-backend \
+  --network erpnext_frappe_network \
+  -p 127.0.0.1:3000:8080 \
+  --env-file /root/erpnext/backend.env \
+  --restart unless-stopped \
+  b24-app:$COMMIT
 
-# 8. проверка
-status
-curl -I https://201.51.12.57.sslip.io/health        # → 200
+curl --fail http://127.0.0.1:3000/health
+curl --fail https://201.51.12.57.sslip.io/health
 ```
 
-**9. Привязать приложение в Б24** (если сервер/домен новый): в карточке локального приложения Б24 указать
-обработчик `https://201.51.12.57.sslip.io/app/handler` и установку `https://201.51.12.57.sslip.io/install`,
-сохранить, переустановить — backend сам перепривяжет placement'ы. После смены домена на портале — **Ctrl+Shift+R**
-(иначе кеш Б24 даёт «Ошибка при показе приложения»).
-
-> Другой домен (свой, не sslip.io): поменять `server_name` в nginx-конфиге, `-d` у certbot,
-> `PUBLIC_BASE_URL` в `backend.env` и URL в карточке Б24.
-
----
-
-## B. Восстановление данных ядра из бэкапа
-
-Бэкапы: локально `/root/core-backups/` (БД — 14 копий, файлы — 4) и на **Б24-Диске** (дамп БД).
-Состав: `<stamp>-frontend-database.sql.gz` (+ при недельном: `-files.tar`, `-private-files.tar`).
+Предыдущий контейнер остаётся остановленным для отката. После проверки нужно убедиться, что новый контейнер имеет статус `Up` и использует ожидаемый образ:
 
 ```bash
-ls -1t /root/core-backups/*-database.sql.gz | head      # выбрать свежий
-STAMP=20260626_040326-frontend                          # подставить нужный
-
-docker cp /root/core-backups/${STAMP}-database.sql.gz   erpnext-backend-1:/tmp/
-docker cp /root/core-backups/${STAMP}-files.tar         erpnext-backend-1:/tmp/ 2>/dev/null
-docker cp /root/core-backups/${STAMP}-private-files.tar erpnext-backend-1:/tmp/ 2>/dev/null
-
-# restore ПЕРЕЗАПИШЕТ текущую БД ядра — делать осознанно, сверить дату дампа!
-docker exec erpnext-backend-1 bench --site frontend restore /tmp/${STAMP}-database.sql.gz \
-  --with-public-files /tmp/${STAMP}-files.tar \
-  --with-private-files /tmp/${STAMP}-private-files.tar \
-  --db-root-username root --db-root-password admin
-#    (без файлов — убрать строки --with-*)
-
-# сверка: данные на месте
-docker exec erpnext-db-1 mariadb -uroot -padmin -N _4ff8fdf982a62c5c \
-  -e 'SELECT (SELECT COUNT(*) FROM `tabStock Ledger Entry`) sle, (SELECT COUNT(*) FROM `tabDelivery Note`) dn'
+docker ps --filter name=b24-backend
+docker inspect --format '{{.Config.Image}}' b24-backend
 ```
-> Дамп только на Б24-Диске? Скачать из приложения «Диск» в Б24 в `/root/core-backups/` и далее по шагам.
 
----
+## Откат backend
 
-## C. Деплой / откат backend
-
-Backend собирается из исходников.
+Сначала определить сохранённое имя:
 
 ```bash
-# ДЕПЛОЙ:
-cd /root/b24-app && git pull && docker build -t b24-app:latest .
-docker rm -f b24-backend
-docker run -d --name b24-backend --network erpnext_frappe_network -p 127.0.0.1:3000:8080 \
-  --env-file /root/erpnext/backend.env --restart unless-stopped b24-app:latest
-status
-
-# ОТКАТ (вернуться на рабочий коммит):
-cd /root/b24-app && git log --oneline -10        # найти заведомо рабочий коммит
-git checkout <коммит> && docker build -t b24-app:latest . && docker rm -f b24-backend && \
-docker run -d --name b24-backend --network erpnext_frappe_network -p 127.0.0.1:3000:8080 \
-  --env-file /root/erpnext/backend.env --restart unless-stopped b24-app:latest
+docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' | grep b24-backend
 ```
-> `ERPNEXT_URL=http://frontend:8080` и сеть `erpnext_frappe_network` — одинаковы на любой машине, не менять.
 
----
+Затем остановить неудачную версию и вернуть сохранённый контейнер:
 
-## Переменные окружения (заполнить при развёртывании; значения НЕ в git)
+```bash
+docker stop b24-backend
+docker rename b24-backend b24-backend-failed-COMMIT
+docker rename b24-backend-prev-before-COMMIT b24-backend
+docker start b24-backend
 
-**`/root/erpnext/backend.env`** (приложение):
+curl --fail http://127.0.0.1:3000/health
+curl --fail https://201.51.12.57.sslip.io/health
 ```
+
+Не удалять сохранённый контейнер, пока причина сбоя не установлена.
+
+## Подключение локального приложения Битрикс24
+
+В настройках локального серверного приложения портала указываются:
+
+- обработчик приложения: `https://201.51.12.57.sslip.io/app/handler`;
+- обработчик установки: `https://201.51.12.57.sslip.io/install`;
+- обработчик удаления: `https://201.51.12.57.sslip.io/uninstall`, если поле доступно;
+- OAuth client ID и secret должны совпадать с `/root/erpnext/backend.env`.
+
+Права приложения должны покрывать используемые CRM, placement, задачи, пользователей, каталог, хранилища и Диск. Не расширять права без необходимости.
+
+После сохранения настроек приложение устанавливает администратор портала. Установка привязывает вкладку сделки и пункты меню. Если названия или обработчики placement изменились, приложение должен один раз открыть администратор: backend выполнит сверку привязок. После изменения URL полезно выполнить полное обновление страницы Битрикс24.
+
+## Переменные backend
+
+Эталон структуры — [deploy/backend.env.example](../deploy/backend.env.example). Основные обязательные значения:
+
+```dotenv
 NODE_ENV=production
-PORT=8080
 HOST=0.0.0.0
+PORT=8080
 PORTAL_DOMAIN=umniydom.bitrix24.ru
 PUBLIC_BASE_URL=https://201.51.12.57.sslip.io
-APP_SECTION_URL=https://umniydom.bitrix24.ru/devops/placement/502/
-INVENTORY_NOTIFY=off
-APP_CLIENT_ID=<из карточки приложения Б24>
-APP_CLIENT_SECRET=<из карточки приложения Б24>
+APP_CLIENT_ID=...
+APP_CLIENT_SECRET=...
 ERPNEXT_URL=http://frontend:8080
-ERPNEXT_TOKEN=token <api_key>:<api_secret>      # отдельный пользователь ядра (аудит)
+ERPNEXT_TOKEN=token ...
 ```
-**`/root/sync/.env`** (синк/бэкап):
+
+`APP_SECTION_URL`, `SUPPLY_SECTION_URL` и `REPAIRS_SECTION_URL` необязательны. Не сохранять неподтверждённые числовые placement-ID.
+
+После изменения env контейнер нужно пересоздать: простой `docker restart` не перечитывает `--env-file`.
+
+## ERPNext
+
+Рабочий Compose-проект:
+
+```bash
+cd /root/erpnext
+docker compose -p erpnext -f pwd.yml ps
+docker compose -p erpnext -f pwd.yml up -d
 ```
-DEV_WEBHOOK=https://umniydom.bitrix24.ru/rest/<user>/<token>/
-ERPNEXT_URL=http://localhost:8080
-ERPNEXT_TOKEN=token <api_key>:<api_secret>
+
+Операции `down -v`, удаление Docker volumes и очистка volumes запрещены: они уничтожают данные ядра.
+
+## Резервное копирование
+
+В root crontab настроено:
+
+```cron
+0 12 * * * /usr/bin/bash /root/sync/core-backup.sh
 ```
-> Токен ядра: в ERPNext User → API Access → Generate Keys (под отдельным пользователем — для аудита).
 
----
+Это 15:00 по Москве при UTC-времени сервера. Каждый день создаётся дамп БД; по воскресеньям добавляются публичные и приватные файлы. Локальная ротация: 14 дампов БД и 4 комплекта файлов. Дамп БД также отправляется на Диск Битрикс24.
 
-## Диагностика
+Проверка:
 
-- **Быстрый осмотр**: команда `status` на VPS (см. [SOS.md](SOS.md)) — ядро/backend/дверь/сертификат/контейнеры/синк разом.
-- **Логи приложения**: `docker logs --tail 50 b24-backend` (пишущие роуты логируют шаги). Ядро: `docker logs --tail 50 erpnext-backend-1`.
-- **«Вкладка пустая» / «таймаут»** — флап фронтового BX24 (см. b24-rest-grabli.md); данные должны идти через `/api/*`, не через BX24.
-- **«Ошибка при показе приложения»** после смены настроек — кеш Б24, лечится Ctrl+Shift+R (см. SOS.md п.7).
-- **Канарейка**: новое видят только `BETA_USER_IDS` — «у менеджера не появилось» это норма, а не баг.
+```bash
+tail -100 /root/sync/core-backup.log
+ls -lhtr /root/core-backups | tail
+```
 
----
+`sync.sh` сохранён как миграционный инструмент, но в рабочем crontab отсутствует и автоматически не запускается.
 
-## Правила проекта (не нарушать)
+## Восстановление ERPNext
 
-1. Не писать код без обсуждения и явного «добро».
-2. **Не удалять сущности портала** (сделки/контакты/заказы/документы) — зачистка тестов за владельцем;
-   единственное исключение — авто-дубль от `sale.order.add` с гардом.
-3. Write-тесты — только на тестовых сделках, с отчётом о созданных ID.
-4. Прод-деплой — по слову владельца.
-5. Меняешь поведение — правишь `docs/` в том же коммите.
-6. Никогда: `docker compose down -v`, `docker volume rm`, `docker system prune --volumes` (сносят данные ядра).
+Восстановление перезаписывает рабочую БД. Перед началом:
+
+1. остановить пользовательские операции;
+2. записать выбранный timestamp бэкапа;
+3. сделать дополнительный свежий бэкап;
+4. проверить наличие дампа и, при необходимости, архивов файлов;
+5. подтвердить процедуру с ответственным.
+
+Базовая команда выполняется внутри `erpnext-backend-1`:
+
+```bash
+bench --site frontend restore /path/to/database.sql.gz \
+  --with-public-files /path/to/files.tar \
+  --with-private-files /path/to/private-files.tar \
+  --db-root-username root \
+  --db-root-password 'ACTUAL_PASSWORD'
+```
+
+Актуальный пароль берётся из рабочей конфигурации сервера, не из документации. После восстановления проверяются `ping`, количество Item, последние складские документы и оба health-check приложения.
+
+## Первичное развёртывание нового VPS
+
+Новую площадку поднимают только из:
+
+- `main` репозитория;
+- файлов `deploy/`;
+- свежего проверенного бэкапа ERPNext;
+- отдельно переданных env и ключей.
+
+Порядок: Docker и Compose → ERPNext → восстановление данных → backend → nginx и TLS → health-check → подключение Битрикс24 → тестовая сделка. Конкретные версии образов фиксируются в [deploy/pwd.yml](../deploy/pwd.yml); перед развёртыванием их не обновляют одновременно с переносом.

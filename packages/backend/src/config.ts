@@ -8,7 +8,7 @@ const ConfigSchema = z.object({
 	host: z.string().default('0.0.0.0'),
 	portalDomain: z.string().min(1).default('umniydom.bitrix24.ru'),
 	/** Публичный URL нашего приложения. Используется в placement.bind как handler URL. */
-	publicBaseUrl: z.string().url().default('https://bba0fouaqgab742ohki8.containers.yandexcloud.net'),
+	publicBaseUrl: z.string().url().default('https://201.51.12.57.sslip.io'),
 	/** URL раздела «Инвентаризация» в портале — для ссылки в задаче-оповещении (заполнит Сергей). */
 	appSectionUrl: z.string().default(''),
 	/** Гейт оповещения: off — соисполнителей не добавляем (мьют на обкатке); on — шлём выбранным в UI. */
