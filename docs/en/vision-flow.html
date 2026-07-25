@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Architecture: Bitrix24 ↔ Inventory</title>
+<style>
+	* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+	body { background: #eef1f5; color: #1f2733; padding: 28px; }
+	.wrap { max-width: 1150px; margin: 0 auto; }
+	h1 { font-size: 23px; margin-bottom: 4px; }
+	.sub { color: #7a8694; font-size: 14px; margin-bottom: 22px; }
+	.lang { margin-bottom: 14px; font-size: 13px; }
+	.lang a { color: #1c5fc4; text-decoration: none; }
+
+	.manager {
+		text-align: center; margin: 0 auto 6px; max-width: 560px;
+		background: #fff; border: 2px solid #d7dde5; border-radius: 14px; padding: 14px 18px;
+	}
+	.manager .big { font-size: 18px; font-weight: 700; }
+	.manager .small { color: #6b7785; font-size: 13.5px; margin-top: 3px; }
+	.downarrow { text-align: center; font-size: 26px; color: #9aa6b4; margin: 4px 0; }
+
+	.row { display: flex; gap: 20px; align-items: stretch; }
+	.box { flex: 1; border-radius: 16px; padding: 18px 18px 16px; border: 2px solid; }
+	.bx { background: #eaf2fe; border-color: #9cc2f7; }
+	.wh { background: #e7f7ee; border-color: #95dcb4; }
+	.box h2 { font-size: 18px; margin-bottom: 2px; }
+	.box .role { font-size: 12.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; opacity: .7; margin-bottom: 12px; }
+	.bx h2, .bx .role { color: #1c5fc4; }
+	.wh h2, .wh .role { color: #169458; }
+	.owns { font-size: 13px; line-height: 1.7; }
+	.owns b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .3px; opacity: .6; margin-bottom: 4px; font-weight: 700; }
+	.chip { display: inline-block; background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: 7px; padding: 3px 9px; margin: 0 4px 5px 0; font-size: 12.5px; }
+	.panels { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(0,0,0,.18); font-size: 12.5px; }
+	.panels b { font-size: 12px; text-transform: uppercase; opacity: .6; }
+
+	.arrows { flex: 0 0 270px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+	.arr { background: #fff; border: 1px solid #d7dde5; border-radius: 10px; padding: 8px 10px; font-size: 12.8px; line-height: 1.4; }
+	.arr .dir { font-weight: 700; font-size: 13px; }
+	.to { border-left: 4px solid #4a90e2; }
+	.to .dir { color: #1c5fc4; }
+	.from { border-left: 4px solid #2bb673; }
+	.from .dir { color: #169458; }
+
+	.note { margin-top: 22px; background: #fff7e6; border: 1px solid #f5d98a; border-radius: 12px; padding: 14px 18px; font-size: 14px; line-height: 1.6; }
+	.note b { color: #b8860b; }
+	.legend { margin-top: 14px; font-size: 12.5px; color: #6b7785; display: flex; gap: 18px; flex-wrap: wrap; }
+	.legend span::before { content: "■ "; }
+	.lb::before { color: #4a90e2; } .lw::before { color: #2bb673; }
+
+	@media (max-width: 850px) {
+		.row { flex-direction: column; }
+		.arrows { flex-basis: auto; }
+	}
+</style>
+</head>
+<body>
+<div class="wrap">
+	<div class="lang"><strong>English</strong> · <a href="../vision-flow.html">Русский</a></div>
+	<h1>How it works: Bitrix24 is the workspace, ERPNext is the inventory core</h1>
+	<div class="sub">Employees work inside Bitrix24 while ERPNext maintains inventory documents and stock levels.</div>
+
+	<div class="manager">
+		<div class="big">👤 Employee</div>
+		<div class="small">Works only in Bitrix24: the same processes in one workspace. The underlying implementation remains invisible.</div>
+	</div>
+	<div class="downarrow">▼</div>
+
+	<div class="row">
+		<div class="box bx">
+			<h2>BITRIX24</h2>
+			<div class="role">Workspace + CRM</div>
+			<div class="owns">
+				<b>Source of truth for:</b>
+				<span class="chip">Deals</span><span class="chip">Leads</span><span class="chip">Customers</span><span class="chip">Payments</span><span class="chip">Installation tasks</span>
+			</div>
+			<div class="panels">
+				<b>Our screens inside Bitrix24:</b><br>
+				Deal products · Product catalogue · Procurement · Inventory management · Repairs.
+			</div>
+		</div>
+
+		<div class="arrows">
+			<div class="arr to"><span class="dir">Our interface → ERPNext</span><br>“Show current stock”<br>“Create and submit an inventory document”</div>
+			<div class="arr from"><span class="dir">ERPNext → Our interface</span><br>“Here is current stock”<br>“Here is the document number and status”</div>
+		</div>
+
+		<div class="box wh">
+			<h2>ERPNext</h2>
+			<div class="role">Inventory logic + exact stock</div>
+			<div class="owns">
+				<b>Source of truth for:</b>
+				<span class="chip">Stock by warehouse</span><span class="chip">Receipts</span><span class="chip">Transfers</span><span class="chip">Write-offs</span><span class="chip">Sales</span><span class="chip">Cost</span>
+			</div>
+			<div class="panels">
+				<b>Accuracy lives here:</b><br>
+				one stock value, transaction-backed, with no divergence between systems.
+			</div>
+		</div>
+	</div>
+
+	<div class="note">
+		<b>Why there is no “synchronisation hell”:</b> stock is <b>one value</b> and it lives <b>only in the inventory system</b>. Bitrix24 does not copy it; it <b>queries and displays it live</b>. The systems exchange <b>commands and events</b> (“write off”, “receive”), not two separate stock values that must later be reconciled. Every data type has one owner.
+	</div>
+
+	<div class="legend">
+		<span class="lb">blue — data owned by Bitrix24</span>
+		<span class="lw">green — data owned by the inventory core</span>
+	</div>
+</div>
+</body></html>
