@@ -67,4 +67,4 @@ This model is not implemented yet. Until the core is extended, these terms canno
 
 ## Backups
 
-Data lives in ERPNext Docker volumes and is backed up daily by `/root/sync/core-backup.sh`. Database dumps have local retention and an external copy on Bitrix24 Drive. Recovery details are in [runbook.md](runbook.md).
+Data lives in ERPNext Docker volumes and is backed up daily by a server-side script whose production path and schedule are held in private configuration. Database dumps have local retention and an external copy on Bitrix24 Drive. Recovery details are in [runbook.md](runbook.md).

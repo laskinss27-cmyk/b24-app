@@ -2,7 +2,7 @@
 
 [Русская версия](../b24-rest-grabli.md)
 
-Everything below was verified with live calls against the `umniydom.bitrix24.ru` SaaS portal. We have no database or portal-source access; integration uses REST only. Dates show when each finding was verified. **The main meta-pitfall: the `methods` list is incomplete. A method's existence can only be confirmed by calling it** (a validation error means it exists; `ERROR_METHOD_NOT_FOUND` means it does not).
+Everything below was verified with live calls against the production Bitrix24 SaaS portal. We have no database or portal-source access; integration uses REST only. Dates show when each finding was verified. **The main meta-pitfall: the `methods` list is incomplete. A method's existence can only be confirmed by calling it** (a validation error means it exists; `ERROR_METHOD_NOT_FOUND` means it does not).
 
 ## Wall 1 (SOLVED 2026-06-11): order ↔ deal relation
 

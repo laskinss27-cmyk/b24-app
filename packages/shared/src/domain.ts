@@ -36,7 +36,7 @@ export interface DealTotals {
 export interface DealTabContext {
 	dealId: number;
 	userId: number;
-	domain: string;         // например umniydom.bitrix24.ru
+	domain: string;         // например portal.example.bitrix24.ru
 }
 
 /** Настройка приложения, хранится в app.option.*. */

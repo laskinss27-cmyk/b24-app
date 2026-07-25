@@ -12,7 +12,7 @@ import { verifyBitrixRequest } from '../security.js';
  * POST /install — Б24 шлёт POST при установке приложения.
  *
  * Что приходит в form-body:
- *   DOMAIN          — домен портала (например umniydom.bitrix24.ru)
+ *   DOMAIN          — домен портала (например portal.example.bitrix24.ru)
  *   AUTH_ID         — OAuth access_token (валиден 1 час)
  *   REFRESH_ID      — refresh_token (для обновления токена через 1 час)
  *   AUTH_EXPIRES    — TTL access_token в секундах

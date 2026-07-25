@@ -2,14 +2,14 @@
 
 [English](README.en.md) · **Русский**
 
-В этой папке находятся проверяемые примеры конфигурации рабочего VPS.
+В этой папке находятся обезличенные проверяемые примеры конфигурации VPS. Рабочие адреса, пути и секреты задаются вне репозитория.
 
 | Файл | Рабочее расположение | Назначение |
 |---|---|---|
-| `pwd.yml` | `/root/erpnext/pwd.yml` | стек ERPNext, MariaDB, Redis и workers |
-| `nginx-b24.conf` | `/etc/nginx/sites-available/b24` | HTTPS-вход и проксирование на backend |
-| `backend.env.example` | образец для `/root/erpnext/backend.env` | переменные приложения |
-| `sync.env.example` | образец для `/root/sync/.env` | доступ служебных скриптов к ERPNext и Битрикс24 |
+| `pwd.yml` | `/srv/erpnext/pwd.yml` | стек ERPNext, MariaDB, Redis и workers |
+| `nginx-b24.conf` | `/etc/nginx/sites-available/b24-app` | HTTPS-вход и проксирование на backend |
+| `backend.env.example` | образец для закрытого env-файла | переменные приложения |
+| `sync.env.example` | образец для закрытого env-файла | доступ служебных скриптов к ERPNext и Битрикс24 |
 
 Backend собирается из корневого [Dockerfile](../Dockerfile) и подключается к Docker-сети `erpnext_frappe_network`. Рабочий контейнер слушает порт `8080` внутри контейнера и опубликован только на `127.0.0.1:3000`.
 

@@ -13,13 +13,13 @@ status
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 curl --fail http://127.0.0.1:3000/health
 curl --fail http://127.0.0.1:8080/api/method/ping
-curl --fail https://201.51.12.57.sslip.io/health
+curl --fail https://app.example.com/health
 ```
 
 If the `status` command is missing, install the current copy:
 
 ```bash
-cp /root/b24-app-git/scripts/sos-status.sh /usr/local/bin/status
+cp /srv/b24-app/scripts/sos-status.sh /usr/local/bin/status
 chmod +x /usr/local/bin/status
 ```
 
@@ -53,7 +53,7 @@ Reload nginx only after `nginx -t` succeeds.
 
 ```bash
 curl --fail http://127.0.0.1:8080/api/method/ping
-cd /root/erpnext
+cd /srv/erpnext
 docker compose -p erpnext -f pwd.yml ps
 docker logs --tail 150 erpnext-backend-1
 docker logs --tail 100 erpnext-db-1
@@ -71,7 +71,7 @@ Do not run `down -v`, `volume rm`, or any volume cleanup.
 
 Check:
 
-1. whether `https://201.51.12.57.sslip.io/health` opens;
+1. whether the production `PUBLIC_BASE_URL/health` opens;
 2. whether another one of our sections works for the same user;
 3. whether the user has Bitrix24 permission for the relevant CRM entity;
 4. whether the error persists after a full page reload;
@@ -100,8 +100,8 @@ Before retrying, verify whether the document was already created in ERPNext or B
 ## 7. Backup failed
 
 ```bash
-tail -200 /root/sync/core-backup.log
-ls -lhtr /root/core-backups | tail
+tail -200 /srv/b24-service/core-backup.log
+ls -lhtr /srv/b24-backups | tail
 docker exec erpnext-backend-1 bench --site frontend backup
 ```
 
@@ -111,7 +111,7 @@ A successful manual dump does not replace verification of the Bitrix24 Drive upl
 
 ```bash
 systemctl is-active docker nginx
-cd /root/erpnext
+cd /srv/erpnext
 docker compose -p erpnext -f pwd.yml up -d
 docker start b24-backend
 status

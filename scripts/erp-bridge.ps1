@@ -1,8 +1,8 @@
-﻿# Мост ядра: обратный ssh-туннель ноутбук -> VPS 194.226.97.154 (домашний этап выноса склада).
+﻿# Исторический мост ядра: обратный ssh-туннель переходного стенда.
 # Туннель: VPS 127.0.0.1:8081 -> localhost:8080 (ERPNext в докере). ПЕРЕД туннелем на VPS стоит nginx-буфер:
 # слушает 0.0.0.0:18080 -> proxy_pass 127.0.0.1:8081. Зачем: undici (fetch из Y.Cloud) виснет на успешном
 # ответе frappe через реверс-туннель (ждёт конец потока без Content-Length); nginx дочитывает ответ как curl
-# и отдаёт проду чистый Content-Length + Connection: close. Прод ходит на http://194.226.97.154:18080 (= nginx, env не менялся).
+# и отдавал переходному стенду чистый Content-Length + Connection: close.
 # Конфиг nginx: /etc/nginx/conf.d/erp-core.conf на VPS.
 # Вечный цикл: ssh умер (сеть/сон ноутбука) -> ждём 15с -> поднимаем заново.
 # Автозагрузка: задача планировщика b24-erp-bridge (ONLOGON). Лог: scripts\bridge.log (хвост 500 строк).
@@ -23,7 +23,7 @@ while ($true) {
 		-o StrictHostKeyChecking=accept-new `
 		-o ServerAliveInterval=30 -o ServerAliveCountMax=3 `
 		-o ExitOnForwardFailure=yes -o ConnectTimeout=15 `
-		-R '127.0.0.1:8081:localhost:8080' root@194.226.97.154 2>&1 |
+		-R '127.0.0.1:8081:localhost:8080' "root@$env:LEGACY_VPS_HOST" 2>&1 |
 		ForEach-Object { Add-Content $log "[$(Stamp)] ssh: $_" }
 	Add-Content $log "[$(Stamp)] туннель упал — перезапуск через 15с"
 	Start-Sleep -Seconds 15

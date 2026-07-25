@@ -13,7 +13,7 @@ The `scripts/` directory contains production tools, migrations, and API research
 | `core-backup-disk.ts` | uploads the database dump to Bitrix24 Drive |
 | `smoke-security.ts` | checks basic security headers |
 
-Production copies of the backup scripts live in `/root/sync`. Compare them with the repository before changing either copy.
+The production backup-script path is managed in private server configuration. Compare the server copy with the repository before changing either one.
 
 ## Migrations
 

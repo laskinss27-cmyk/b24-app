@@ -32,14 +32,13 @@ These files preserve the reasoning behind individual decisions. They do not repl
 
 ## Key facts
 
-- Production: `https://201.51.12.57.sslip.io`.
+- The production address is managed outside the repository.
 - Backend: container `b24-backend`, host-local port `127.0.0.1:3000`.
-- ERPNext: Docker Compose stack in `/root/erpnext`, host-local port `127.0.0.1:8080`.
-- Server checkout: `/root/b24-app-git`.
-- Secrets: `/root/erpnext/backend.env` and `/root/sync/.env`; neither is stored in Git.
+- ERPNext: private Docker Compose stack, host-local port `127.0.0.1:8080`.
+- Code, configuration, and secrets use environment-specific production paths; secrets are not stored in Git.
 - ERPNext is the source of truth for warehouse stock and documents.
 - Bitrix24 is the source of truth for CRM entities.
-- The inventory-core backup runs daily at 15:00 Moscow time.
+- The inventory-core backup follows a private production schedule.
 
 ## Documentation currency
 

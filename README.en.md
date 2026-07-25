@@ -2,7 +2,7 @@
 
 **English** · [Русский](README.md)
 
-An internal application for the `umniydom.bitrix24.ru` portal. It adds custom workspaces to Bitrix24 for deals, the product catalogue, procurement, warehouse operations, stocktaking, repairs, marketplaces, reports, and contracts.
+An internal application for a corporate Bitrix24 portal. It adds custom workspaces for deals, the product catalogue, procurement, warehouse operations, stocktaking, repairs, marketplaces, reports, and contracts.
 
 The current documentation starts at [docs/en/README.md](docs/en/README.md). Deployment, Bitrix24 integration, and rollback procedures are described in [docs/en/runbook.md](docs/en/runbook.md).
 
@@ -12,8 +12,8 @@ The current documentation starts at [docs/en/README.md](docs/en/README.md). Depl
 - ERPNext acts as the private inventory core: catalogue, prices, warehouses, stock levels, and inventory documents.
 - A Node.js backend connects Bitrix24 to ERPNext and serves the frontend.
 - The React application is embedded into Bitrix24 through the placement API.
-- Production runs on a single corporate VPS at `201.51.12.57`.
-- Public entry point: `https://201.51.12.57.sslip.io`.
+- Production runs on a dedicated corporate VPS.
+- Production addresses, paths, and secrets are managed outside the repository.
 - ERPNext and the backend are not exposed directly to the Internet; nginx or another container on the same network accesses them.
 
 See [docs/en/architecture.md](docs/en/architecture.md) and [docs/en/network.md](docs/en/network.md) for details.

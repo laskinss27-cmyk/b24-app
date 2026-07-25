@@ -2,7 +2,7 @@
 
 [Русская версия](../api.md)
 
-Public base URL: `https://201.51.12.57.sslip.io`. Most `/api/*` routes are called only by the frontend embedded in Bitrix24 and receive the current-user context.
+Example public base URL: `https://app.example.com`. The production value is managed outside the repository. Most `/api/*` routes are called only by the frontend embedded in Bitrix24 and receive the current-user context.
 
 ## Service and OAuth routes
 

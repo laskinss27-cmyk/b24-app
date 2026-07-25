@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 #  B24-APP — «ГЛАЗА»: одна команда показывает состояние всей системы по-русски.
-#  Запуск на VPS (201.51.12.57): просто `status`  (установлен в /usr/local/bin/status)
+#  Запуск на VPS: просто `status` (установлен в /usr/local/bin/status)
 #  Только ЧТЕНИЕ — ничего не меняет, запускать можно сколько угодно раз.
 #  Что чинить при ⛔ — см. docs/SOS.md.
 # ─────────────────────────────────────────────────────────────────────────────
 set -o pipefail
 ENV=/root/sync/.env
-DOMAIN=201.51.12.57.sslip.io
+DOMAIN="${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME is required}"
 CERT=/etc/letsencrypt/live/$DOMAIN/cert.pem
 ok=0; bad=0
 green() { printf '  \033[32m✅ %s\033[0m\n' "$1"; ok=$((ok+1)); }

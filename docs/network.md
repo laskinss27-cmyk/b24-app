@@ -2,7 +2,7 @@
 
 ## Рабочий узел
 
-Весь прикладной контур находится на VPS `201.51.12.57` под Ubuntu 22.04.
+Весь прикладной контур находится на выделенном корпоративном VPS под Ubuntu 22.04. Конкретный адрес хранится вне репозитория.
 
 | Сервис | Где слушает | Доступ |
 |---|---|---|
@@ -16,25 +16,25 @@
 
 ## Потоки запросов
 
-1. Битрикс24 открывает `https://201.51.12.57.sslip.io/placement/...`.
+1. Битрикс24 открывает `https://app.example.com/placement/...` (пример адреса).
 2. nginx завершает TLS и передаёт запрос на `127.0.0.1:3000`.
 3. backend отдаёт React или выполняет `/api/*`.
-4. Для CRM-данных backend обращается к `umniydom.bitrix24.ru`.
+4. Для CRM-данных backend обращается к настроенному корпоративному порталу Битрикс24.
 5. Для складских данных backend обращается к `frontend:8080` внутри Docker-сети.
 
 ERPNext не должен публиковаться в интернет. Порт `8080` на хосте нужен для локальной диагностики и серверных скриптов.
 
 ## DNS и TLS
 
-- Публичное имя: `201.51.12.57.sslip.io`.
-- Конфигурация nginx: `/etc/nginx/sites-available/b24`.
-- Сертификат: `/etc/letsencrypt/live/201.51.12.57.sslip.io/`.
+- Публичное имя задаётся через `PUBLIC_BASE_URL`; в примерах используется `app.example.com`.
+- Конфигурация nginx: `/etc/nginx/sites-available/b24-app` (пример).
+- Сертификат: `/etc/letsencrypt/live/app.example.com/` (пример).
 - Продление выполняет `certbot.timer`.
 
 При смене домена одновременно обновляются:
 
 1. `server_name` и пути сертификата в nginx;
-2. `PUBLIC_BASE_URL` в `/root/erpnext/backend.env`;
+2. `PUBLIC_BASE_URL` в закрытом env-файле backend;
 3. обработчик и URL установки в локальном приложении Битрикс24;
 4. placement-привязки через повторное открытие приложения администратором.
 
@@ -44,7 +44,7 @@ ERPNext не должен публиковаться в интернет. Пор
 docker logs --tail 100 b24-backend
 docker logs --tail 100 erpnext-backend-1
 journalctl -u nginx --since "30 minutes ago"
-tail -100 /root/sync/core-backup.log
+tail -100 /srv/b24-service/core-backup.log
 ```
 
 Диагностика по слоям приведена в [SOS.md](SOS.md).

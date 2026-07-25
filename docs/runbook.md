@@ -2,18 +2,20 @@
 
 Рабочие процедуры подключения, обновления и восстановления. Для быстрой аварийной диагностики см. [SOS.md](SOS.md).
 
-## Проверенные адреса и пути
+## Адреса и пути
+
+Ниже используются обезличенные примеры. Рабочие адреса, пути и расписания хранятся в закрытой конфигурации окружения.
 
 | Назначение | Значение |
 |---|---|
-| VPS | `root@201.51.12.57` |
-| публичный URL | `https://201.51.12.57.sslip.io` |
-| репозиторий на VPS | `/root/b24-app-git` |
-| ERPNext Compose | `/root/erpnext/pwd.yml` |
-| env backend | `/root/erpnext/backend.env` |
-| служебные скрипты | `/root/sync` |
-| локальные бэкапы | `/root/core-backups` |
-| nginx | `/etc/nginx/sites-available/b24` |
+| VPS | `root@<APP_HOST>` |
+| публичный URL | `https://app.example.com` |
+| репозиторий на VPS | `/srv/b24-app` |
+| ERPNext Compose | `/srv/erpnext/pwd.yml` |
+| env backend | `/srv/b24-config/backend.env` |
+| служебные скрипты | `/srv/b24-service` |
+| локальные бэкапы | `/srv/b24-backups` |
+| nginx | `/etc/nginx/sites-available/b24-app` |
 
 Доступ выполняется по SSH-ключу. Пароли, API-ключи, OAuth-секреты и вебхуки в команды, логи и Git не копируются.
 
@@ -35,7 +37,7 @@ npm run build
 Вместо тега `COMMIT` используется короткий hash уже отправленного коммита из `main`.
 
 ```bash
-cd /root/b24-app-git
+cd /srv/b24-app
 git fetch origin
 git checkout main
 git pull --ff-only origin main
@@ -50,12 +52,12 @@ docker run -d \
   --name b24-backend \
   --network erpnext_frappe_network \
   -p 127.0.0.1:3000:8080 \
-  --env-file /root/erpnext/backend.env \
+  --env-file /srv/b24-config/backend.env \
   --restart unless-stopped \
   b24-app:$COMMIT
 
 curl --fail http://127.0.0.1:3000/health
-curl --fail https://201.51.12.57.sslip.io/health
+curl --fail https://app.example.com/health
 ```
 
 Предыдущий контейнер остаётся остановленным для отката. После проверки нужно убедиться, что новый контейнер имеет статус `Up` и использует ожидаемый образ:
@@ -82,7 +84,7 @@ docker rename b24-backend-prev-before-COMMIT b24-backend
 docker start b24-backend
 
 curl --fail http://127.0.0.1:3000/health
-curl --fail https://201.51.12.57.sslip.io/health
+curl --fail https://app.example.com/health
 ```
 
 Не удалять сохранённый контейнер, пока причина сбоя не установлена.
@@ -91,10 +93,10 @@ curl --fail https://201.51.12.57.sslip.io/health
 
 В настройках локального серверного приложения портала указываются:
 
-- обработчик приложения: `https://201.51.12.57.sslip.io/app/handler`;
-- обработчик установки: `https://201.51.12.57.sslip.io/install`;
-- обработчик удаления: `https://201.51.12.57.sslip.io/uninstall`, если поле доступно;
-- OAuth client ID и secret должны совпадать с `/root/erpnext/backend.env`.
+- обработчик приложения: `https://app.example.com/app/handler`;
+- обработчик установки: `https://app.example.com/install`;
+- обработчик удаления: `https://app.example.com/uninstall`, если поле доступно;
+- OAuth client ID и secret должны совпадать с закрытым env-файлом backend.
 
 Права приложения должны покрывать используемые CRM, placement, задачи, пользователей, каталог, хранилища и Диск. Не расширять права без необходимости.
 
@@ -108,8 +110,8 @@ curl --fail https://201.51.12.57.sslip.io/health
 NODE_ENV=production
 HOST=0.0.0.0
 PORT=8080
-PORTAL_DOMAIN=umniydom.bitrix24.ru
-PUBLIC_BASE_URL=https://201.51.12.57.sslip.io
+PORTAL_DOMAIN=portal.example.bitrix24.ru
+PUBLIC_BASE_URL=https://app.example.com
 APP_CLIENT_ID=...
 APP_CLIENT_SECRET=...
 ERPNEXT_URL=http://frontend:8080
@@ -125,7 +127,7 @@ ERPNEXT_TOKEN=token ...
 Рабочий Compose-проект:
 
 ```bash
-cd /root/erpnext
+cd /srv/erpnext
 docker compose -p erpnext -f pwd.yml ps
 docker compose -p erpnext -f pwd.yml up -d
 ```
@@ -134,19 +136,13 @@ docker compose -p erpnext -f pwd.yml up -d
 
 ## Резервное копирование
 
-В root crontab настроено:
-
-```cron
-0 12 * * * /usr/bin/bash /root/sync/core-backup.sh
-```
-
-Это 15:00 по Москве при UTC-времени сервера. Каждый день создаётся дамп БД; по воскресеньям добавляются публичные и приватные файлы. Локальная ротация: 14 дампов БД и 4 комплекта файлов. Дамп БД также отправляется на Диск Битрикс24.
+В рабочем crontab настроен запуск `/srv/b24-service/core-backup.sh`. Точное расписание хранится вне репозитория. Каждый день создаётся дамп БД; периодически добавляются публичные и приватные файлы. Политика ротации и внешнего хранения задаётся закрытой конфигурацией.
 
 Проверка:
 
 ```bash
-tail -100 /root/sync/core-backup.log
-ls -lhtr /root/core-backups | tail
+tail -100 /srv/b24-service/core-backup.log
+ls -lhtr /srv/b24-backups | tail
 ```
 
 `sync.sh` сохранён как миграционный инструмент, но в рабочем crontab отсутствует и автоматически не запускается.

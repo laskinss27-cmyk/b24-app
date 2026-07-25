@@ -21,7 +21,7 @@ export interface B24WebhookAuth {
 
 export interface B24OAuthAuth {
 	kind: 'oauth';
-	domain: string; // umniydom.bitrix24.ru
+	domain: string; // portal.example.bitrix24.ru
 	accessToken: string;
 }
 

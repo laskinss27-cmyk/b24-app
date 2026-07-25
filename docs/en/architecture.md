@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`b24-app` is a server-side application and a unified React interface embedded into the `umniydom.bitrix24.ru` portal. Employees remain inside Bitrix24 while warehouse operations are executed through ERPNext.
+`b24-app` is a server-side application and a unified React interface embedded into a corporate Bitrix24 portal. Employees remain inside Bitrix24 while warehouse operations are executed through ERPNext.
 
 ## Components
 
@@ -12,7 +12,7 @@
 Employee browser
         │ Bitrix24 iframe
         ▼
-https://201.51.12.57.sslip.io
+https://app.example.com
         │
       nginx
         │ 127.0.0.1:3000

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Heartbeat ядра ERPNext — ЖИВЁТ НА VPS (194.226.97.154), не на ноутбуке.
+# Исторический heartbeat переходного стенда. Для запуска все адреса и доступы
+# передаются только через переменные окружения.
 # Простукивает ядро через обратный тоннель (localhost:18080 -> ноутбук:8080) и шлёт
 # Сергею уведомление в Б24 при СМЕНЕ статуса (доступно <-> недоступно). Цель — узнавать
 # о падении сразу, даже когда ноутбук выключен (тогда тоннель мёртв, VPS это видит).
@@ -8,11 +9,11 @@
 #   scp/cat -> /root/b24-heartbeat.sh ; chmod +x ; cron: */5 * * * * /root/b24-heartbeat.sh
 # Дебаунс: тревога DOWN только после 2 подряд неудач (~10 мин) — не дёргаем на моргание тоннеля.
 
-WH="https://umniydom.bitrix24.ru/rest/1858/vy2p3f18422jnukg"
-USER_ID=1858
-PROBE="http://localhost:18080/api/method/ping"
-STATE_FILE=/root/b24-heartbeat.state   # формат: "ALERTED FAILS" напр. "UP 0"
-LOG=/root/b24-heartbeat.log
+WH="${B24_HEARTBEAT_WEBHOOK:?B24_HEARTBEAT_WEBHOOK is required}"
+USER_ID="${B24_HEARTBEAT_USER_ID:?B24_HEARTBEAT_USER_ID is required}"
+PROBE="${ERP_HEARTBEAT_PROBE_URL:-http://127.0.0.1:18080/api/method/ping}"
+STATE_FILE="${B24_HEARTBEAT_STATE_FILE:-/var/lib/b24-heartbeat/state}"   # формат: "ALERTED FAILS" напр. "UP 0"
+LOG="${B24_HEARTBEAT_LOG_FILE:-/var/log/b24-heartbeat.log}"
 DOWN_STRIKES=2                          # сколько подряд неудач до тревоги
 
 now() { date '+%Y-%m-%d %H:%M:%S'; }

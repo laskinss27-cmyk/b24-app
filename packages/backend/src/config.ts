@@ -6,9 +6,9 @@ import { z } from 'zod';
 const ConfigSchema = z.object({
 	port: z.coerce.number().int().positive().default(3000),
 	host: z.string().default('0.0.0.0'),
-	portalDomain: z.string().min(1).default('umniydom.bitrix24.ru'),
+	portalDomain: z.string().min(1).default('portal.example.bitrix24.ru'),
 	/** Публичный URL нашего приложения. Используется в placement.bind как handler URL. */
-	publicBaseUrl: z.string().url().default('https://201.51.12.57.sslip.io'),
+	publicBaseUrl: z.string().url().default('https://app.example.com'),
 	/** URL раздела «Инвентаризация» в портале — для ссылки в задаче-оповещении (заполнит Сергей). */
 	appSectionUrl: z.string().default(''),
 	/** Гейт оповещения: off — соисполнителей не добавляем (мьют на обкатке); on — шлём выбранным в UI. */

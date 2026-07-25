@@ -11,13 +11,13 @@ status
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 curl --fail http://127.0.0.1:3000/health
 curl --fail http://127.0.0.1:8080/api/method/ping
-curl --fail https://201.51.12.57.sslip.io/health
+curl --fail https://app.example.com/health
 ```
 
 Если команда `status` отсутствует, установить актуальную копию:
 
 ```bash
-cp /root/b24-app-git/scripts/sos-status.sh /usr/local/bin/status
+cp /srv/b24-app/scripts/sos-status.sh /usr/local/bin/status
 chmod +x /usr/local/bin/status
 ```
 
@@ -51,7 +51,7 @@ systemctl status certbot.timer --no-pager
 
 ```bash
 curl --fail http://127.0.0.1:8080/api/method/ping
-cd /root/erpnext
+cd /srv/erpnext
 docker compose -p erpnext -f pwd.yml ps
 docker logs --tail 150 erpnext-backend-1
 docker logs --tail 100 erpnext-db-1
@@ -69,7 +69,7 @@ docker compose -p erpnext -f pwd.yml up -d
 
 Проверить:
 
-1. открывается ли `https://201.51.12.57.sslip.io/health`;
+1. открывается ли рабочий `PUBLIC_BASE_URL/health`;
 2. работает ли другой наш раздел у того же пользователя;
 3. есть ли у пользователя права Битрикс24 на соответствующую CRM-сущность;
 4. повторяется ли ошибка после полного обновления страницы;
@@ -98,8 +98,8 @@ docker logs --since "20 minutes ago" b24-backend
 ## 7. Бэкап не прошёл
 
 ```bash
-tail -200 /root/sync/core-backup.log
-ls -lhtr /root/core-backups | tail
+tail -200 /srv/b24-service/core-backup.log
+ls -lhtr /srv/b24-backups | tail
 docker exec erpnext-backend-1 bench --site frontend backup
 ```
 
@@ -109,7 +109,7 @@ docker exec erpnext-backend-1 bench --site frontend backup
 
 ```bash
 systemctl is-active docker nginx
-cd /root/erpnext
+cd /srv/erpnext
 docker compose -p erpnext -f pwd.yml up -d
 docker start b24-backend
 status

@@ -25,7 +25,7 @@
 const TOKEN_ENDPOINT = 'https://oauth.bitrix.info/oauth/token/';
 
 export interface AuthorizeUrlParams {
-	/** Домен портала, напр. umniydom.bitrix24.ru */
+	/** Домен портала, напр. portal.example.bitrix24.ru */
 	domain: string;
 	/** client_id локального приложения (local.xxx). */
 	clientId: string;
