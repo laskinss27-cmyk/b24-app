@@ -1,12 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import {
-	ACCESS_PERMISSIONS,
-	ACCESS_PROFILES,
-	emptyAccessControlDraft,
-	type AccessControlDraft,
-	type AccessPermissionId,
-	type AccessProfileId,
-	type EmployeeAccessDraft,
+import type {
+	AccessControlDraft,
+	AccessPermissionId,
+	AccessProfileId,
+	EmployeeAccessDraft,
 } from '@b24-app/shared';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
@@ -23,8 +20,29 @@ interface CurrentManager {
 
 const ACCESS_DRAFT_OPTION = 'ud_access_control_draft_v1';
 const ACCESS_MANAGER_IDS = new Set(['1', '986', '1858']);
-const PERMISSION_IDS = new Set<AccessPermissionId>(ACCESS_PERMISSIONS.map((item) => item.id));
-const PROFILE_IDS = new Set<AccessProfileId>(ACCESS_PROFILES.map((item) => item.id));
+const PERMISSION_IDS = new Set<AccessPermissionId>([
+	'catalog.view', 'catalog.create', 'catalog.edit_card', 'catalog.edit_prices',
+	'deals.view', 'deals.edit_products', 'deals.reserve',
+	'stock.view', 'stock.create_documents', 'stock.post_documents',
+	'transfers.create_request', 'transfers.create', 'transfers.collect', 'transfers.receive', 'transfers.post', 'transfers.delete',
+	'supply.view', 'supply.manage_requests', 'supply.manage_purchases', 'supply.delete_documents',
+	'repairs.view', 'repairs.edit', 'repairs.edit_prices', 'repairs.change_status', 'repairs.delete',
+	'reports.sales', 'reports.realizations', 'admin.manage_access',
+]);
+const PROFILE_IDS = new Set<AccessProfileId>(['legacy', 'manager', 'supply', 'service', 'leadership']);
+
+function emptyAccessControlDraft(): AccessControlDraft {
+	return {
+		version: 1,
+		revision: 0,
+		policyMode: 'draft',
+		employees: {},
+		updatedAt: null,
+		updatedById: null,
+		updatedByName: null,
+		audit: [],
+	};
+}
 
 function clientFrom(app: FastifyInstance, body: AuthBody): B24Client | null {
 	const domain = String(body.domain ?? '');
