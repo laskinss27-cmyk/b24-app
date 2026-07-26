@@ -9,7 +9,7 @@ import {
 } from '../erp/operations.js';
 import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
 import { normalizeDomain } from '../security.js';
-import { canonicalProductId } from '@b24-app/shared';
+import { canonicalProductId } from '../product-aliases.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
