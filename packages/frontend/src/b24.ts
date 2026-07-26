@@ -505,6 +505,8 @@ export interface BaseRow {
 	manufacturer?: string | undefined;
 	sectionId?: number | undefined;
 	sectionName?: string | undefined;
+	/** Состояние товарной карточки, которое показывается отдельно от чистого названия. */
+	status?: string | undefined;
 	description?: string | undefined;
 	retail: number | null;
 	purchase: number | null;

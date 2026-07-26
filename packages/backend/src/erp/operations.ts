@@ -287,6 +287,7 @@ export interface CoreCatalogItem {
 	model: string;
 	manufacturer: string;
 	section: string;
+	status: string;
 	description: string;
 	image: string;
 }
@@ -299,7 +300,7 @@ function isTechnicalCoreDescription(value: unknown): boolean {
 export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
 	const rows = await erp.list('Item', [
 		'name', 'item_name', 'is_stock_item',
-		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'description', 'image',
+		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status', 'description', 'image',
 	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
 	const out: CoreCatalogItem[] = [];
 	for (const row of rows) {
@@ -313,6 +314,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 			model: String(row['b24_model'] ?? '').trim(),
 			manufacturer: String(row['b24_brand'] ?? '').trim(),
 			section: String(row['b24_section'] ?? '').trim(),
+			status: String(row['b24_product_status'] ?? '').trim(),
 			description: isTechnicalCoreDescription(row['description'])
 				? ''
 				: String(row['description'] ?? '').trim(),

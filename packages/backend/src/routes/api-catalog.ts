@@ -61,6 +61,7 @@ interface CatalogCandidate {
 	manufacturer?: string;
 	sectionId?: number;
 	sectionName?: string;
+	status?: string;
 	description?: string;
 	retail: number | null;
 	purchase: number | null;
@@ -120,6 +121,7 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 			manufacturer: item.manufacturer || known?.manufacturer,
 			sectionId: known?.sectionId ?? (sectionName ? coreSectionId(sectionName) : undefined),
 			sectionName,
+			status: item.status || known?.status,
 			description: item.description || known?.description,
 			retail: corePrices?.retail ?? known?.retail ?? null,
 			purchase: corePrices?.purchase ?? known?.purchase ?? null,

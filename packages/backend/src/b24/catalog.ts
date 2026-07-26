@@ -52,6 +52,8 @@ export interface BaseRow {
 	manufacturer?: string | undefined;
 	sectionId?: number | undefined;
 	sectionName?: string | undefined;
+	/** Статус/состояние карточки, вынесенное из названия: Сток, Уценка, После ремонта и т. п. */
+	status?: string | undefined;
 	description?: string | undefined;
 	retail: number | null;
 	purchase: number | null;

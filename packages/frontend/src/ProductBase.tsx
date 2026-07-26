@@ -64,7 +64,7 @@ const MOCK_STORES: StoreInfo[] = [
 	{ id: 22, title: 'Максидом ул. Фаворского 12', active: true },
 ];
 const MOCK_ROWS: BaseRow[] = [
-	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false, article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionId: 101, sectionName: 'Видеонаблюдение', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
+	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false, article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionId: 101, sectionName: 'Видеонаблюдение', status: 'Уценка, После ремонта', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
 	{ id: 1810, iblockId: 24, name: 'Трубка аудиодомофона УКП-12', isService: false, article: 'УКП-12', model: 'УКП-12', manufacturer: '', sectionId: 102, sectionName: 'Домофоны', retail: 780, purchase: null, total: 8, stockByStore: { 8: 4, 22: 4 } },
 	{ id: 1811, iblockId: 24, name: 'Трубка аудиодомофона УКП-12м', isService: false, article: 'УКП-12м', model: 'УКП-12м', manufacturer: 'Vizit', sectionId: 102, sectionName: 'Домофоны', retail: 820, purchase: 782, total: 9, stockByStore: { 8: 5, 10: 4 } },
 	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', isService: false, article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionId: 103, sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
@@ -73,6 +73,10 @@ const MOCK_ROWS: BaseRow[] = [
 
 type SortKey = 'id' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
 type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number; qty: number }> };
+
+function productStatuses(status: string | undefined): string[] {
+	return String(status ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+}
 
 /**
  * Поле ввода количества с локальным состоянием: можно очистить и вписать своё, не теряя
@@ -381,6 +385,7 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 					<div>
 						<span>{row.isService ? 'Услуга' : 'Товар'} · ID {row.id}</span>
 						<h2>{row.name}</h2>
+						{row.status && <div className="catalog-product-statuses">{productStatuses(row.status).map((status) => <b key={status} className="catalog-product-status">{status}</b>)}</div>}
 					</div>
 					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
 				</div>
@@ -591,7 +596,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				visibleStoreIds.has(Number(storeId)) && qty > 0))
 		.map((d) => ({
 			d,
-			search: `${d.id} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''}`.toLowerCase(),
+			search: `${d.id} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''} ${d.status ?? ''}`.toLowerCase(),
 			stockEntries: Object.entries(d.stockByStore)
 				.map(([s, n]) => ({ id: Number(s), qty: n }))
 				.filter((o) => o.qty > 0 && (!allowedStoreTitles.length || visibleStoreIds.has(o.id)))
@@ -921,7 +926,10 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 											? <img className="ph" src={photo} loading="lazy" alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
 											: <div className="no-ph">▦</div>}
 									</td>
-									<td className="nm">{d.name}</td>
+									<td className="nm">
+										<div>{d.name}</div>
+										{d.status && <div className="catalog-row-statuses">{productStatuses(d.status).map((status) => <span key={status} className="catalog-product-status">{status}</span>)}</div>}
+									</td>
 									<td>{d.article || d.model ? <span className="art">{d.article ?? d.model}</span> : <span className="muted">—</span>}</td>
 									<td>{d.manufacturer ? <span className="brand">{d.manufacturer}</span> : <span className="muted">—</span>}</td>
 									<td className="muted">{d.sectionName ?? '—'}</td>

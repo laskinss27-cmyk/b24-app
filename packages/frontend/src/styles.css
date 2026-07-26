@@ -1401,6 +1401,32 @@ h2.inv-h2 {
 	font-size: 21px;
 	line-height: 1.35;
 }
+.catalog-product-statuses,
+.catalog-row-statuses {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+.catalog-product-statuses {
+	margin-top: 9px;
+}
+.catalog-product-status,
+.catalog-product-card-head .catalog-product-status {
+	display: inline-flex;
+	align-items: center;
+	width: fit-content;
+	margin: 0;
+	padding: 2px 7px;
+	border: 1px solid #f1c66f;
+	border-radius: 999px;
+	background: #fff4d6;
+	color: #7a4b00;
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1.35;
+	letter-spacing: 0;
+	text-transform: none;
+}
 .catalog-product-card-head .icon-close {
 	flex: 0 0 36px;
 	width: 36px;
@@ -2304,6 +2330,9 @@ html, body, #root { height: 100%; }
 }
 .base-table .nm {
 	font-weight: 550;
+}
+.catalog-row-statuses {
+	margin-top: 5px;
 }
 .base-table .art {
 	font-size: 12px;
