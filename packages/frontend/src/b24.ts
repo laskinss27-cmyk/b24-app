@@ -7,7 +7,7 @@
  */
 
 import type { BX24Sdk } from './b24-context.js';
-import { canonicalProductId } from '@b24-app/shared';
+import { canonicalProductId, type AccessControlDraft } from '@b24-app/shared';
 
 function getBx24(): BX24Sdk {
 	const bx = window.BX24;
@@ -2306,6 +2306,41 @@ export async function getInitiators(): Promise<string[]> {
 }
 export async function setInitiators(ids: string[]): Promise<void> {
 	await call('app.option.set', { options: { inv_initiators: JSON.stringify([...new Set(ids)]) } });
+}
+
+// ── Скрытый черновик будущих прав сотрудников ────────────────────────────────
+
+export interface AccessEmployee {
+	id: string;
+	name: string;
+	position: string;
+	departments: number[];
+}
+
+async function accessControlRequest<T>(path: 'load' | 'users' | 'save', extra: Record<string, unknown> = {}): Promise<T> {
+	const response = await fetch(`/api/access-control/${path}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...extra }),
+	});
+	const json = await response.json() as { ok?: boolean; error?: string };
+	if (!response.ok || !json.ok) throw new Error(json.error ?? 'не удалось выполнить запрос прав');
+	return json as T;
+}
+
+export async function fetchAccessControlDraft(): Promise<AccessControlDraft> {
+	const result = await accessControlRequest<{ ok: true; draft: AccessControlDraft }>('load');
+	return result.draft;
+}
+
+export async function fetchAccessEmployees(): Promise<AccessEmployee[]> {
+	const result = await accessControlRequest<{ ok: true; users: AccessEmployee[] }>('users');
+	return result.users;
+}
+
+export async function saveAccessControlDraft(draft: AccessControlDraft): Promise<AccessControlDraft> {
+	const result = await accessControlRequest<{ ok: true; draft: AccessControlDraft }>('save', { draft });
+	return result.draft;
 }
 
 export type InvPointStatus = 'idle' | 'in_progress' | 'submitted' | 'act' | 'reconciled';

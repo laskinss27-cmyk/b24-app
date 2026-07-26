@@ -10,9 +10,11 @@ import {
 	createQuickSale,
 	openDeal,
 	photoFullUrl,
+	isPortalAdmin,
 	withTimeout,
 	withRetry,
 	QUICKSALE_USER_IDS,
+	MANAGEMENT_USER_IDS,
 	type BaseRow,
 	type CatalogProductUpdateInput,
 	type CatalogProductCandidate,
@@ -20,6 +22,7 @@ import {
 } from './b24.js';
 import { SalesReport } from './SalesReport.js';
 import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
+import { AccessControl } from './AccessControl.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -468,6 +471,9 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const pickMode = !!picker;
 	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
+	const [accessOpen, setAccessOpen] = useState(() =>
+		Boolean(getContext().__mock && new URLSearchParams(window.location.search).has('access')),
+	);
 	const [forceInitialRefresh] = useState(Boolean(picker?.forceRefreshOnMount));
 	const [gate, setGate] = useState<Gate>('checking');
 	const [errMsg, setErrMsg] = useState<string>('');
@@ -542,6 +548,26 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			});
 		});
 	}, [ctx, forceInitialRefresh]);
+
+	// Временный скрытый вход для руководства: Ctrl+Alt+Shift+P в окне «Товары».
+	// В интерфейсе кнопки нет; сама панель дополнительно проверяет руководящую учётку.
+	useEffect(() => {
+		if (pickMode) return;
+		const onKeyDown = (event: KeyboardEvent): void => {
+			if (
+				event.ctrlKey
+				&& event.altKey
+				&& event.shiftKey
+				&& event.code === 'KeyP'
+				&& (ctx.__mock || MANAGEMENT_USER_IDS.includes(uid) || isPortalAdmin())
+			) {
+				event.preventDefault();
+				setAccessOpen(true);
+			}
+		};
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	}, [ctx.__mock, pickMode, uid]);
 
 	const allowedStoreTitles = useMemo(
 		() => picker?.allowedStoreTitles?.map(normalizeStoreTitle) ?? [],
@@ -792,6 +818,9 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	// ── рендер ──────────────────────────────────────────────────────────────────
 	if (gate === 'checking') return <div className="base"><header><h1>База товаров</h1></header><p className="base-load">Загрузка…</p></div>;
 	if (gate === 'error') return <div className="base"><header><h1>База товаров</h1></header><p className="error">⛔ {errMsg}</p></div>;
+	if (accessOpen) {
+		return <AccessControl currentUserId={uid} mock={Boolean(ctx.__mock)} onClose={() => setAccessOpen(false)} />;
+	}
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}
