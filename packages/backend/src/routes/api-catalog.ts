@@ -9,6 +9,7 @@ import {
 } from '../erp/operations.js';
 import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
 import { normalizeDomain } from '../security.js';
+import { canonicalProductId } from '@b24-app/shared';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -538,9 +539,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		if (!body.domain || normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) {
 			return reply.code(403).send({ ok: false, error: 'bad domain' });
 		}
-		const ids = (Array.isArray(body.productIds) ? body.productIds : [])
+		const requestedIds = (Array.isArray(body.productIds) ? body.productIds : [])
 			.map(Number).filter((n) => Number.isInteger(n) && n > 0);
-		if (!ids.length) return { ok: true, byProduct: {} };
+		if (!requestedIds.length) return { ok: true, byProduct: {} };
+		const ids = [...new Set(requestedIds.map(canonicalProductId))];
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, coreOff: true, error: 'ядро не подключено (ERPNEXT_URL)' });
 		try {
@@ -551,7 +553,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			]);
 			// Возвращаем КАЖДЫЙ запрошенный товар (даже с нулём — чтобы не потерять закупку у бесстоковых).
 			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number }> = {};
-			for (const pid of ids) byProduct[pid] = { stocks: stocks.get(pid) ?? {}, purchasing: purchasing.get(pid) ?? 0 };
+			for (const requestedId of requestedIds) {
+				const pid = canonicalProductId(requestedId);
+				byProduct[requestedId] = { stocks: stocks.get(pid) ?? {}, purchasing: purchasing.get(pid) ?? 0 };
+			}
 			app.log.info({ products: Object.keys(byProduct).length }, '[api/catalog/erp-stocks] ok');
 			return { ok: true, byProduct };
 		} catch (err) {

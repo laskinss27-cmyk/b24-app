@@ -149,7 +149,7 @@ async function fetchAllProducts(client: B24Client, iblockId: number, select: str
 	return fetchAllPaged(
 		client,
 		'catalog.product.list',
-		{ select, filter: { iblockId }, order: { id: 'ASC' } },
+		{ select, filter: { iblockId, active: 'Y' }, order: { id: 'ASC' } },
 		(r) => (r as { products?: Array<Record<string, unknown>> })?.products ?? [],
 	);
 }

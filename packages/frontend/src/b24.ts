@@ -7,6 +7,7 @@
  */
 
 import type { BX24Sdk } from './b24-context.js';
+import { canonicalProductId } from '@b24-app/shared';
 
 function getBx24(): BX24Sdk {
 	const bx = window.BX24;
@@ -128,7 +129,7 @@ export async function fetchProductRows(dealId: number): Promise<DealProductRow[]
 	const raw = await call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
 	return (raw ?? []).map((r) => ({
 		id: String(r['ID']),
-		productId: Number(r['PRODUCT_ID'] ?? 0),
+		productId: canonicalProductId(Number(r['PRODUCT_ID'] ?? 0)),
 		name: String(r['PRODUCT_NAME'] ?? ''),
 		type: Number(r['TYPE'] ?? 0),
 		price: Number(r['PRICE'] ?? 0),
