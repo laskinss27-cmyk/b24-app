@@ -65,6 +65,7 @@ export function AccessControl({
 	const [users, setUsers] = useState<AccessEmployee[]>([]);
 	const [selectedId, setSelectedId] = useState('');
 	const [search, setSearch] = useState('');
+	const [permissionSearch, setPermissionSearch] = useState('');
 	const [group, setGroup] = useState('Все');
 	const [busy, setBusy] = useState(false);
 	const [dirty, setDirty] = useState(false);
@@ -99,10 +100,20 @@ export function AccessControl({
 			return words.every((word) => haystack.includes(word));
 		});
 	}, [search, users]);
-	const shownPermissions = useMemo(
-		() => group === 'Все' ? ACCESS_PERMISSIONS : ACCESS_PERMISSIONS.filter((item) => item.group === group),
-		[group],
-	);
+	const shownPermissions = useMemo(() => {
+		const query = permissionSearch.trim().toLocaleLowerCase('ru-RU');
+		return ACCESS_PERMISSIONS.filter((item) => {
+			if (group !== 'Все' && item.group !== group) return false;
+			if (!query) return true;
+			return `${item.label} ${item.group} ${item.id}`.toLocaleLowerCase('ru-RU').includes(query);
+		});
+	}, [group, permissionSearch]);
+	const permissionCounts = useMemo(() => Object.fromEntries(
+		groups.map((item) => [
+			item,
+			item === 'Все' ? ACCESS_PERMISSIONS.length : ACCESS_PERMISSIONS.filter((permission) => permission.group === item).length,
+		]),
+	), [groups]);
 	const selected = users.find((user) => user.id === selectedId) ?? null;
 	const employee = draft && selected ? employeeOrDefault(draft, selected.id) : null;
 	const configuredCount = draft ? Object.keys(draft.employees).length : 0;
@@ -264,9 +275,21 @@ export function AccessControl({
 
 								<nav className="access-groups" aria-label="Разделы прав">
 									{groups.map((item) => (
-										<button key={item} type="button" className={group === item ? 'active' : ''} onClick={() => setGroup(item)}>{item}</button>
+										<button key={item} type="button" className={group === item ? 'active' : ''} onClick={() => setGroup(item)}>
+											{item}<span>{permissionCounts[item]}</span>
+										</button>
 									))}
 								</nav>
+
+								<div className="access-permission-tools">
+									<input
+										type="search"
+										value={permissionSearch}
+										placeholder="Найти право или действие"
+										onChange={(event) => setPermissionSearch(event.target.value)}
+									/>
+									<span>Показано {shownPermissions.length} из {ACCESS_PERMISSIONS.length}</span>
+								</div>
 
 								<div className="access-permissions">
 									{shownPermissions.map((permission) => {
@@ -275,7 +298,7 @@ export function AccessControl({
 										return (
 											<div className="access-permission-row" key={permission.id}>
 												<div>
-													<b>{permission.label}{permission.dangerous && <span className="access-risk">важное действие</span>}</b>
+													<b>{permission.label}{'dangerous' in permission && permission.dangerous && <span className="access-risk">важное действие</span>}</b>
 													<small>
 														{explicit === 'inherit'
 															? `Итог по профилю: ${decisionLabel(effective)}`
@@ -299,6 +322,9 @@ export function AccessControl({
 											</div>
 										);
 									})}
+									{shownPermissions.length === 0 && (
+										<div className="access-permissions-empty">По этому запросу права не найдены.</div>
+									)}
 								</div>
 
 								<label className="access-note">

@@ -20,16 +20,8 @@ interface CurrentManager {
 
 const ACCESS_DRAFT_OPTION = 'ud_access_control_draft_v1';
 const ACCESS_MANAGER_IDS = new Set(['1', '986', '1858']);
-const PERMISSION_IDS = new Set<AccessPermissionId>([
-	'catalog.view', 'catalog.create', 'catalog.edit_card', 'catalog.edit_prices',
-	'deals.view', 'deals.edit_products', 'deals.reserve',
-	'stock.view', 'stock.create_documents', 'stock.post_documents',
-	'transfers.create_request', 'transfers.create', 'transfers.collect', 'transfers.receive', 'transfers.post', 'transfers.delete',
-	'supply.view', 'supply.manage_requests', 'supply.manage_purchases', 'supply.delete_documents',
-	'repairs.view', 'repairs.edit', 'repairs.edit_prices', 'repairs.change_status', 'repairs.delete',
-	'reports.sales', 'reports.realizations', 'admin.manage_access',
-]);
 const PROFILE_IDS = new Set<AccessProfileId>(['legacy', 'manager', 'supply', 'service', 'leadership']);
+const SAFE_PERMISSION_ID = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 
 function emptyAccessControlDraft(): AccessControlDraft {
 	return {
@@ -75,7 +67,10 @@ function sanitizeEmployee(value: unknown): EmployeeAccessDraft {
 		: {};
 	const overrides: EmployeeAccessDraft['overrides'] = {};
 	for (const [permissionId, decision] of Object.entries(inputOverrides)) {
-		if (PERMISSION_IDS.has(permissionId as AccessPermissionId) && (decision === 'allow' || decision === 'deny')) {
+		// Черновик не применяется рабочими API. Ограничиваем формат ключа, но не дублируем
+		// здесь весь каталог прав: новые пункты интерфейса должны безопасно сохраняться
+		// без runtime-импорта shared-пакета.
+		if (permissionId.length <= 80 && SAFE_PERMISSION_ID.test(permissionId) && (decision === 'allow' || decision === 'deny')) {
 			overrides[permissionId as AccessPermissionId] = decision;
 		}
 	}

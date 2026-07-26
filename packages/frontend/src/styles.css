@@ -7019,12 +7019,25 @@ body.deal-placement-body #root {
 
 .access-groups button {
 	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 	padding: 7px 11px;
 	border: 1px solid #d6deea;
 	border-radius: 999px;
 	background: #fff;
 	color: #536176;
 	cursor: pointer;
+}
+
+.access-groups button span {
+	min-width: 20px;
+	padding: 1px 5px;
+	border-radius: 999px;
+	background: #eef2f7;
+	color: #6a7688;
+	font-size: 11px;
+	text-align: center;
 }
 
 .access-groups button.active {
@@ -7034,10 +7047,43 @@ body.deal-placement-body #root {
 	font-weight: 700;
 }
 
+.access-groups button.active span {
+	background: #d7eaff;
+	color: #185fa5;
+}
+
+.access-permission-tools {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 10px;
+}
+
+.access-permission-tools input {
+	width: min(390px, 100%);
+	height: 38px;
+	padding: 0 11px;
+	border: 1px solid #d6deea;
+	border-radius: 8px;
+}
+
+.access-permission-tools span {
+	flex: 0 0 auto;
+	color: #7c8798;
+	font-size: 12px;
+}
+
 .access-permissions {
 	border: 1px solid #e0e6ef;
 	border-radius: 10px;
 	overflow: hidden;
+}
+
+.access-permissions-empty {
+	padding: 28px 16px;
+	color: #7c8798;
+	text-align: center;
 }
 
 .access-permission-row {

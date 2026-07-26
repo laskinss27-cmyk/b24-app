@@ -1,80 +1,124 @@
 /**
  * Черновая модель будущих прав приложения.
  *
- * ВАЖНО: пока policyMode всегда `draft`. Эти настройки сохраняются и показываются
+ * ВАЖНО: policyMode пока всегда `draft`. Эти настройки сохраняются и показываются
  * руководству, но не участвуют в проверках рабочих API — действующие права остаются
  * ровно такими, какими были до появления окна.
  */
 export type AccessDecision = 'inherit' | 'allow' | 'deny';
 
-export type AccessPermissionId =
-	| 'catalog.view'
-	| 'catalog.create'
-	| 'catalog.edit_card'
-	| 'catalog.edit_prices'
-	| 'deals.view'
-	| 'deals.edit_products'
-	| 'deals.reserve'
-	| 'stock.view'
-	| 'stock.create_documents'
-	| 'stock.post_documents'
-	| 'transfers.create_request'
-	| 'transfers.create'
-	| 'transfers.collect'
-	| 'transfers.receive'
-	| 'transfers.post'
-	| 'transfers.delete'
-	| 'supply.view'
-	| 'supply.manage_requests'
-	| 'supply.manage_purchases'
-	| 'supply.delete_documents'
-	| 'repairs.view'
-	| 'repairs.edit'
-	| 'repairs.edit_prices'
-	| 'repairs.change_status'
-	| 'repairs.delete'
-	| 'reports.sales'
-	| 'reports.realizations'
-	| 'admin.manage_access';
-
 export interface AccessPermissionDefinition {
-	id: AccessPermissionId;
+	id: string;
 	group: string;
 	label: string;
 	dangerous?: boolean;
 }
 
-export const ACCESS_PERMISSIONS: readonly AccessPermissionDefinition[] = [
-	{ id: 'catalog.view', group: 'Каталог', label: 'Просматривать каталог' },
+export const ACCESS_PERMISSIONS = [
+	{ id: 'catalog.view', group: 'Каталог', label: 'Открывать каталог' },
+	{ id: 'catalog.search', group: 'Каталог', label: 'Искать и фильтровать товары' },
+	{ id: 'catalog.view_purchase_prices', group: 'Каталог', label: 'Видеть закупочные цены' },
+	{ id: 'catalog.view_all_stores', group: 'Каталог', label: 'Видеть остатки всех складов' },
 	{ id: 'catalog.create', group: 'Каталог', label: 'Создавать товары', dangerous: true },
 	{ id: 'catalog.edit_card', group: 'Каталог', label: 'Редактировать карточки товаров', dangerous: true },
-	{ id: 'catalog.edit_prices', group: 'Каталог', label: 'Изменять цены', dangerous: true },
-	{ id: 'deals.view', group: 'Сделки', label: 'Просматривать состав сделок' },
-	{ id: 'deals.edit_products', group: 'Сделки', label: 'Изменять состав сделок', dangerous: true },
-	{ id: 'deals.reserve', group: 'Сделки', label: 'Создавать и менять резервы', dangerous: true },
-	{ id: 'stock.view', group: 'Склад', label: 'Просматривать складской учёт' },
-	{ id: 'stock.create_documents', group: 'Склад', label: 'Создавать складские документы', dangerous: true },
-	{ id: 'stock.post_documents', group: 'Склад', label: 'Проводить складские документы', dangerous: true },
-	{ id: 'transfers.create_request', group: 'Перемещения', label: 'Создавать заявки на перемещение' },
-	{ id: 'transfers.create', group: 'Перемещения', label: 'Создавать перемещения', dangerous: true },
-	{ id: 'transfers.collect', group: 'Перемещения', label: 'Отмечать сборку' },
-	{ id: 'transfers.receive', group: 'Перемещения', label: 'Принимать перемещения' },
-	{ id: 'transfers.post', group: 'Перемещения', label: 'Проводить перемещения', dangerous: true },
-	{ id: 'transfers.delete', group: 'Перемещения', label: 'Удалять перемещения', dangerous: true },
-	{ id: 'supply.view', group: 'Снабжение', label: 'Открывать рабочее место снабжения' },
-	{ id: 'supply.manage_requests', group: 'Снабжение', label: 'Обрабатывать заявки' },
-	{ id: 'supply.manage_purchases', group: 'Снабжение', label: 'Создавать и менять закупки', dangerous: true },
-	{ id: 'supply.delete_documents', group: 'Снабжение', label: 'Удалять документы снабжения', dangerous: true },
-	{ id: 'repairs.view', group: 'Ремонты', label: 'Просматривать ремонты' },
-	{ id: 'repairs.edit', group: 'Ремонты', label: 'Редактировать ремонты' },
-	{ id: 'repairs.edit_prices', group: 'Ремонты', label: 'Изменять цены ремонта', dangerous: true },
-	{ id: 'repairs.change_status', group: 'Ремонты', label: 'Изменять статусы ремонта' },
-	{ id: 'repairs.delete', group: 'Ремонты', label: 'Удалять ремонты', dangerous: true },
-	{ id: 'reports.sales', group: 'Отчёты', label: 'Открывать отчёт по продажам' },
-	{ id: 'reports.realizations', group: 'Отчёты', label: 'Открывать реализации' },
-	{ id: 'admin.manage_access', group: 'Администрирование', label: 'Настраивать права сотрудников', dangerous: true },
-] as const;
+	{ id: 'catalog.edit_descriptions', group: 'Каталог', label: 'Редактировать описания и характеристики', dangerous: true },
+	{ id: 'catalog.edit_retail_prices', group: 'Каталог', label: 'Изменять розничные цены', dangerous: true },
+	{ id: 'catalog.edit_purchase_prices', group: 'Каталог', label: 'Изменять закупочные цены', dangerous: true },
+	{ id: 'catalog.export_comparison', group: 'Каталог', label: 'Выгружать сравнение товаров' },
+	{ id: 'catalog.print_price_tags', group: 'Каталог', label: 'Печатать ценники' },
 
+	{ id: 'deals.view', group: 'Сделки', label: 'Просматривать состав сделок' },
+	{ id: 'deals.view_purchase_prices', group: 'Сделки', label: 'Видеть закупочные цены и маржу' },
+	{ id: 'deals.add_products', group: 'Сделки', label: 'Добавлять товары в сделку', dangerous: true },
+	{ id: 'deals.edit_quantity', group: 'Сделки', label: 'Изменять количество товаров', dangerous: true },
+	{ id: 'deals.edit_prices', group: 'Сделки', label: 'Изменять цены в сделке', dangerous: true },
+	{ id: 'deals.apply_discount', group: 'Сделки', label: 'Применять скидки', dangerous: true },
+	{ id: 'deals.remove_products', group: 'Сделки', label: 'Удалять товары из сделки', dangerous: true },
+	{ id: 'deals.reserve', group: 'Сделки', label: 'Создавать и изменять резервы', dangerous: true },
+	{ id: 'deals.change_source_store', group: 'Сделки', label: 'Менять склад отгрузки', dangerous: true },
+	{ id: 'deals.create_supply_request', group: 'Сделки', label: 'Создавать заявку снабжению' },
+	{ id: 'deals.export_xlsx', group: 'Сделки', label: 'Выгружать состав сделки в Excel' },
+	{ id: 'deals.create_quote', group: 'Сделки', label: 'Формировать коммерческое предложение' },
+	{ id: 'deals.create_contract', group: 'Сделки', label: 'Формировать договор' },
+
+	{ id: 'realizations.view', group: 'Реализации', label: 'Просматривать реализации' },
+	{ id: 'realizations.create', group: 'Реализации', label: 'Создавать реализацию', dangerous: true },
+	{ id: 'realizations.edit_draft', group: 'Реализации', label: 'Редактировать черновик реализации', dangerous: true },
+	{ id: 'realizations.post', group: 'Реализации', label: 'Проводить реализацию', dangerous: true },
+	{ id: 'realizations.return', group: 'Реализации', label: 'Оформлять возврат реализации', dangerous: true },
+	{ id: 'realizations.cancel', group: 'Реализации', label: 'Отменять проведение реализации', dangerous: true },
+	{ id: 'realizations.delete', group: 'Реализации', label: 'Удалять черновик реализации', dangerous: true },
+
+	{ id: 'stock.view', group: 'Склад', label: 'Просматривать складской учёт' },
+	{ id: 'stock.view_movements', group: 'Склад', label: 'Просматривать движения товара' },
+	{ id: 'stock.view_purchase_prices', group: 'Склад', label: 'Видеть закупочные цены' },
+	{ id: 'stock.create_receipt', group: 'Склад', label: 'Создавать приход товара', dangerous: true },
+	{ id: 'stock.create_issue', group: 'Склад', label: 'Создавать списание товара', dangerous: true },
+	{ id: 'stock.edit_draft', group: 'Склад', label: 'Редактировать черновики документов', dangerous: true },
+	{ id: 'stock.post_documents', group: 'Склад', label: 'Проводить складские документы', dangerous: true },
+	{ id: 'stock.cancel_documents', group: 'Склад', label: 'Отменять складские документы', dangerous: true },
+	{ id: 'stock.create_product', group: 'Склад', label: 'Создавать товар из складского документа', dangerous: true },
+
+	{ id: 'transfers.view_own', group: 'Перемещения', label: 'Просматривать свои заявки' },
+	{ id: 'transfers.view_all', group: 'Перемещения', label: 'Просматривать все заявки и перемещения' },
+	{ id: 'transfers.create_request', group: 'Перемещения', label: 'Создавать заявку на перемещение' },
+	{ id: 'transfers.cancel_own_request', group: 'Перемещения', label: 'Отменять свою заявку' },
+	{ id: 'transfers.manage_requests', group: 'Перемещения', label: 'Обрабатывать заявки сотрудников', dangerous: true },
+	{ id: 'transfers.create', group: 'Перемещения', label: 'Создавать перемещение', dangerous: true },
+	{ id: 'transfers.edit_destination', group: 'Перемещения', label: 'Менять склад назначения', dangerous: true },
+	{ id: 'transfers.edit_quantity', group: 'Перемещения', label: 'Изменять количество товара', dangerous: true },
+	{ id: 'transfers.collect', group: 'Перемещения', label: 'Отмечать сборку' },
+	{ id: 'transfers.ship', group: 'Перемещения', label: 'Отмечать отправку', dangerous: true },
+	{ id: 'transfers.receive', group: 'Перемещения', label: 'Принимать перемещение', dangerous: true },
+	{ id: 'transfers.post', group: 'Перемещения', label: 'Проводить перемещение', dangerous: true },
+	{ id: 'transfers.resolve_shortage', group: 'Перемещения', label: 'Подтверждать недостачу или расхождение', dangerous: true },
+	{ id: 'transfers.cancel', group: 'Перемещения', label: 'Отменять перемещение', dangerous: true },
+	{ id: 'transfers.delete', group: 'Перемещения', label: 'Удалять перемещение', dangerous: true },
+
+	{ id: 'supply.view', group: 'Снабжение', label: 'Открывать рабочее место снабжения' },
+	{ id: 'supply.view_all_requests', group: 'Снабжение', label: 'Просматривать все заявки' },
+	{ id: 'supply.edit_request_note', group: 'Снабжение', label: 'Редактировать комментарий к заявке' },
+	{ id: 'supply.manage_requests', group: 'Снабжение', label: 'Обрабатывать и закрывать заявки', dangerous: true },
+	{ id: 'supply.create_purchase', group: 'Снабжение', label: 'Создавать закупку', dangerous: true },
+	{ id: 'supply.edit_purchase', group: 'Снабжение', label: 'Редактировать закупку', dangerous: true },
+	{ id: 'supply.receive_purchase', group: 'Снабжение', label: 'Принимать закупку на склад', dangerous: true },
+	{ id: 'supply.change_purchase_stage', group: 'Снабжение', label: 'Менять этап закупки', dangerous: true },
+	{ id: 'supply.create_supplier', group: 'Снабжение', label: 'Создавать поставщика', dangerous: true },
+	{ id: 'supply.delete_documents', group: 'Снабжение', label: 'Удалять документы снабжения', dangerous: true },
+
+	{ id: 'repairs.view', group: 'Ремонты', label: 'Просматривать ремонты' },
+	{ id: 'repairs.create', group: 'Ремонты', label: 'Создавать ремонт' },
+	{ id: 'repairs.edit', group: 'Ремонты', label: 'Редактировать данные ремонта', dangerous: true },
+	{ id: 'repairs.edit_internal_comment', group: 'Ремонты', label: 'Редактировать внутренний комментарий' },
+	{ id: 'repairs.edit_prices', group: 'Ремонты', label: 'Изменять цены ремонта', dangerous: true },
+	{ id: 'repairs.change_status', group: 'Ремонты', label: 'Изменять статус ремонта', dangerous: true },
+	{ id: 'repairs.request_price_approval', group: 'Ремонты', label: 'Отправлять цену на согласование' },
+	{ id: 'repairs.change_issue_store', group: 'Ремонты', label: 'Менять склад выдачи', dangerous: true },
+	{ id: 'repairs.print_acceptance', group: 'Ремонты', label: 'Печатать акт приёма' },
+	{ id: 'repairs.print_issue', group: 'Ремонты', label: 'Печатать акт выдачи' },
+	{ id: 'repairs.delete', group: 'Ремонты', label: 'Удалять ремонт', dangerous: true },
+
+	{ id: 'marketplaces.view', group: 'Маркетплейсы', label: 'Просматривать операции маркетплейсов' },
+	{ id: 'marketplaces.create_sale', group: 'Маркетплейсы', label: 'Создавать продажу маркетплейса', dangerous: true },
+	{ id: 'marketplaces.post_sale', group: 'Маркетплейсы', label: 'Проводить продажу маркетплейса', dangerous: true },
+	{ id: 'marketplaces.create_return', group: 'Маркетплейсы', label: 'Создавать возврат маркетплейса', dangerous: true },
+	{ id: 'marketplaces.post_return', group: 'Маркетплейсы', label: 'Проводить возврат маркетплейса', dangerous: true },
+	{ id: 'marketplaces.create_bundle', group: 'Маркетплейсы', label: 'Создавать комплект товара', dangerous: true },
+
+	{ id: 'reports.sales', group: 'Отчёты', label: 'Открывать отчёт по продажам' },
+	{ id: 'reports.profit', group: 'Отчёты', label: 'Видеть прибыль и маржу' },
+	{ id: 'reports.realizations', group: 'Отчёты', label: 'Открывать отчёт по реализациям' },
+	{ id: 'reports.inventory', group: 'Отчёты', label: 'Открывать отчёт по остаткам' },
+	{ id: 'reports.stock_movements', group: 'Отчёты', label: 'Открывать отчёт по движениям товара' },
+	{ id: 'reports.export', group: 'Отчёты', label: 'Выгружать отчёты' },
+
+	{ id: 'admin.manage_access', group: 'Администрирование', label: 'Настраивать права сотрудников', dangerous: true },
+	{ id: 'admin.view_access_audit', group: 'Администрирование', label: 'Просматривать историю изменения прав' },
+	{ id: 'admin.manage_profiles', group: 'Администрирование', label: 'Настраивать базовые профили прав', dangerous: true },
+	{ id: 'admin.activate_policy', group: 'Администрирование', label: 'Включать новые правила доступа', dangerous: true },
+] as const satisfies readonly AccessPermissionDefinition[];
+
+export type AccessPermissionId = (typeof ACCESS_PERMISSIONS)[number]['id'];
 export type AccessProfileId = 'legacy' | 'manager' | 'supply' | 'service' | 'leadership';
 
 export interface AccessProfileDefinition {
@@ -87,6 +131,9 @@ export interface AccessProfileDefinition {
 const allow = (...ids: AccessPermissionId[]): Partial<Record<AccessPermissionId, 'allow'>> =>
 	Object.fromEntries(ids.map((id) => [id, 'allow'])) as Partial<Record<AccessPermissionId, 'allow'>>;
 
+const permissionsIn = (...groups: string[]): AccessPermissionId[] =>
+	ACCESS_PERMISSIONS.filter((item) => groups.includes(item.group)).map((item) => item.id);
+
 export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 	{
 		id: 'legacy',
@@ -97,26 +144,42 @@ export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 	{
 		id: 'manager',
 		label: 'Менеджер',
-		description: 'Каталог, сделки, заявки на перемещение и обычная работа с ремонтами.',
-		decisions: allow('catalog.view', 'deals.view', 'deals.edit_products', 'deals.reserve', 'stock.view', 'transfers.create_request', 'repairs.view', 'repairs.edit', 'repairs.change_status'),
+		description: 'Каталог, сделки, реализации, свои заявки на перемещение и обычная работа с ремонтом.',
+		decisions: allow(
+			'catalog.view', 'catalog.search', 'catalog.view_all_stores', 'catalog.export_comparison', 'catalog.print_price_tags',
+			'deals.view', 'deals.add_products', 'deals.edit_quantity', 'deals.edit_prices', 'deals.apply_discount',
+			'deals.remove_products', 'deals.reserve', 'deals.change_source_store', 'deals.create_supply_request',
+			'deals.export_xlsx', 'deals.create_quote', 'deals.create_contract',
+			'realizations.view', 'realizations.create', 'realizations.edit_draft', 'realizations.post', 'realizations.return',
+			'stock.view', 'transfers.view_own', 'transfers.create_request', 'transfers.cancel_own_request',
+			'repairs.view', 'repairs.create', 'repairs.edit', 'repairs.change_status', 'repairs.request_price_approval',
+			'repairs.print_acceptance', 'repairs.print_issue',
+		),
 	},
 	{
 		id: 'supply',
 		label: 'Снабжение',
-		description: 'Работа с каталогом, складом, перемещениями, закупками и ремонтами.',
-		decisions: allow('catalog.view', 'catalog.create', 'catalog.edit_card', 'catalog.edit_prices', 'stock.view', 'stock.create_documents', 'stock.post_documents', 'transfers.create', 'transfers.collect', 'transfers.receive', 'transfers.post', 'supply.view', 'supply.manage_requests', 'supply.manage_purchases', 'repairs.view', 'repairs.edit', 'repairs.edit_prices', 'repairs.change_status'),
+		description: 'Полная рабочая зона каталога, склада, перемещений и закупок без административных настроек.',
+		decisions: allow(...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение')),
 	},
 	{
 		id: 'service',
 		label: 'Сервис',
-		description: 'Работа с ремонтами без доступа к закупочным и складским операциям.',
-		decisions: allow('catalog.view', 'repairs.view', 'repairs.edit', 'repairs.change_status'),
+		description: 'Каталог и работа с ремонтами без закупочных цен и складских операций.',
+		decisions: allow(
+			'catalog.view', 'catalog.search', 'catalog.view_all_stores',
+			'repairs.view', 'repairs.create', 'repairs.edit', 'repairs.edit_internal_comment',
+			'repairs.change_status', 'repairs.request_price_approval', 'repairs.change_issue_store',
+			'repairs.print_acceptance', 'repairs.print_issue',
+		),
 	},
 	{
 		id: 'leadership',
 		label: 'Руководитель',
-		description: 'Просмотр всех разделов, отчёты и управление рабочими операциями.',
-		decisions: allow(...ACCESS_PERMISSIONS.filter((item) => item.id !== 'admin.manage_access').map((item) => item.id)),
+		description: 'Все рабочие действия и отчёты. Управление правами оставлено отдельным явным разрешением.',
+		decisions: allow(...ACCESS_PERMISSIONS
+			.filter((item) => !item.id.startsWith('admin.'))
+			.map((item) => item.id)),
 	},
 ] as const;
 
