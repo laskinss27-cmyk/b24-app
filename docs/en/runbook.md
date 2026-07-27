@@ -54,6 +54,7 @@ docker run -d \
   --name b24-backend \
   --network erpnext_frappe_network \
   -p 127.0.0.1:3000:8080 \
+  -v /srv/b24-state:/app/state \
   --env-file /srv/b24-config/backend.env \
   --restart unless-stopped \
   b24-app:$COMMIT

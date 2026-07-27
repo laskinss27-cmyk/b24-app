@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import JSZip from 'jszip';
 import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
@@ -10,6 +10,10 @@ const CONTRACT_NUMBER_FIELD = 'UF_CRM_CONTRACT_NUMBER';
 const CONTRACT_COMPANY_FIELD = 'UF_CRM_CONTRACT_COMPANY';
 const CONTRACT_VAT_FIELD = 'UF_CRM_CONTRACT_VAT';
 const CONTRACT_DATE_FIELD = 'UF_CRM_1761564808007';
+const CONTRACT_SEQUENCE_PATH = process.env['CONTRACT_SEQUENCE_PATH']
+	?? (process.env['NODE_ENV'] === 'production'
+		? '/app/state/contract-sequences.json'
+		: resolve(process.cwd(), '.tmp', 'contract-sequences.json'));
 const B24_COLLAPSE_PRODUCT_ID = 9814;
 const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
 const CONTRACT_FIELD_SPECS = [
@@ -432,24 +436,58 @@ async function ensureContractFields(client: B24Client): Promise<void> {
 	}
 }
 
+let contractSequenceQueue: Promise<void> = Promise.resolve();
+
+export async function allocatePersistentContractNumber(args: {
+	path: string;
+	key: string;
+	baseline: number;
+	requested?: string;
+}): Promise<string> {
+	let release!: () => void;
+	const previous = contractSequenceQueue;
+	contractSequenceQueue = new Promise<void>((resolveQueue) => { release = resolveQueue; });
+	await previous;
+	try {
+		let state: Record<string, number> = {};
+		try {
+			state = JSON.parse(await readFile(args.path, 'utf8')) as Record<string, number>;
+		} catch (error) {
+			if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+		}
+		const current = Math.max(Number(state[args.key] ?? 0), args.baseline);
+		const requested = Number.parseInt(args.requested ?? '', 10);
+		const next = Number.isInteger(requested) && requested > current ? requested : current + 1;
+		state[args.key] = next;
+		await mkdir(dirname(args.path), { recursive: true });
+		const temporaryPath = `${args.path}.${process.pid}.tmp`;
+		await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+		await rename(temporaryPath, args.path);
+		return String(next);
+	} finally {
+		release();
+	}
+}
+
 async function allocateContractNumber(
 	client: B24Client,
 	dealId: number,
 	companyId: number,
 	requested: string,
 ): Promise<string> {
-	await ensureContractFields(client);
 	const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
 	const savedNumber = clean(deal[CONTRACT_NUMBER_FIELD]);
 	const savedCompany = Number(deal[CONTRACT_COMPANY_FIELD] ?? 0);
 	if (savedNumber && savedCompany === companyId) return savedNumber;
 	const key = `contract_seq_${companyId}`;
 	const options = await client.call<Record<string, unknown>>('app.option.get', {});
-	const current = Number(options[key] ?? (companyId === 8 ? 514 : 0));
-	const requestedNumber = Number.parseInt(requested, 10);
-	const next = Number.isInteger(requestedNumber) && requestedNumber > current ? requestedNumber : current + 1;
-	await client.call('app.option.set', { options: { [key]: String(next) } });
-	return String(next);
+	const baseline = Number(options[key] ?? (companyId === 8 ? 514 : 0));
+	return allocatePersistentContractNumber({
+		path: CONTRACT_SEQUENCE_PATH,
+		key,
+		baseline: Number.isFinite(baseline) ? baseline : 0,
+		requested,
+	});
 }
 
 function linesFromPlan(plan: PlanItem[]): ContractLine[] {

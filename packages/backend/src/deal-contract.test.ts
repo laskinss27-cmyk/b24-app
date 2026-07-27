@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import JSZip from 'jszip';
-import { buildContractDocx, contractLinesFromB24ProductRows, contractObjectAddress, type ContractParty } from './deal-contract.js';
+import {
+	allocatePersistentContractNumber,
+	buildContractDocx,
+	contractLinesFromB24ProductRows,
+	contractObjectAddress,
+	type ContractParty,
+} from './deal-contract.js';
 
 const company: ContractParty = {
 	id: 578,
@@ -96,4 +105,21 @@ test('contractObjectAddress removes Bitrix map coordinates and object id', () =>
 		'Санкт-Петербург, Россия',
 	);
 	assert.equal(contractObjectAddress('г. Санкт-Петербург, Невский пр., 1'), 'г. Санкт-Петербург, Невский пр., 1');
+});
+
+test('contract numbers persist and concurrent allocations stay unique', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'b24-contract-sequence-'));
+	const path = join(directory, 'sequences.json');
+	try {
+		const numbers = await Promise.all(Array.from({ length: 4 }, () =>
+			allocatePersistentContractNumber({ path, key: 'contract_seq_8', baseline: 514 })));
+		assert.deepEqual(numbers, ['515', '516', '517', '518']);
+		assert.equal(
+			await allocatePersistentContractNumber({ path, key: 'contract_seq_8', baseline: 514, requested: '525' }),
+			'525',
+		);
+		assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { contract_seq_8: 525 });
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
 });
