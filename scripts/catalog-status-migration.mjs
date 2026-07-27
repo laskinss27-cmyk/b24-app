@@ -17,7 +17,7 @@ const statePath = path.resolve(args.get('state') ?? '');
 const sshKey = args.get('ssh-key') ?? process.env['B24_SSH_KEY'];
 const host = args.get('host') ?? process.env['B24_SSH_HOST'];
 const container = args.get('container') ?? 'b24-backend';
-if (!['snapshot', 'apply-pilot', 'verify-pilot', 'apply-full', 'verify-full', 'rollback-pilot', 'rollback-full'].includes(mode ?? '')) {
+if (!['snapshot', 'apply-pilot', 'verify-pilot', 'apply-full', 'verify-full', 'verify-rollback-full', 'rollback-pilot', 'rollback-full'].includes(mode ?? '')) {
 	throw new Error('Unknown --mode');
 }
 if (!sourcePath || !statePath || !sshKey || !host) {
@@ -197,6 +197,14 @@ process.stdout.write(JSON.stringify({
 	if (state.snapshot.mismatches.length) throw new Error('Snapshot contains preflight mismatches');
 	const selected = scopePayload(scopeFromMode);
 	const beforeById = new Map(state.snapshot.items.map((row) => [String(row.name), row]));
+	const verifyingRollback = mode === 'verify-rollback-full';
+	const expectedSelected = verifyingRollback
+		? selected.map((row) => ({
+			...row,
+			afterName: String(beforeById.get(row.id)?.item_name ?? '').trim(),
+			status: String(beforeById.get(row.id)?.b24_product_status ?? '').trim(),
+		}))
+		: selected;
 
 	if (mode.startsWith('apply-')) {
 		const remoteScript = `${remoteHelpers}
@@ -253,7 +261,7 @@ try {
 	} else if (mode.startsWith('verify-')) {
 		const referenceSnapshot = state.snapshot.references;
 		const remoteScript = `${remoteHelpers}
-const payload = ${JSON.stringify(selected)};
+const payload = ${JSON.stringify(expectedSelected)};
 const targetSet = new Set(${JSON.stringify(payload.map((row) => row.id))});
 const identityFields = ${JSON.stringify(state.snapshot.identityFields)};
 const allTargetSet = new Set(${JSON.stringify(payload.map((row) => row.id))});
@@ -297,7 +305,7 @@ process.stdout.write(JSON.stringify({ checked: payload.length, mismatches, ident
 		const safe = result.mismatches.length === 0
 			&& result.identityHash === state.snapshot.identityHash
 			&& result.changedReferences.length === 0;
-		if (!safe) {
+		if (!safe && !verifyingRollback) {
 			const rollbackMode = scopeFromMode === 'pilot' ? 'rollback-pilot' : 'rollback-full';
 			const rollbackScript = `${remoteHelpers}
 const rows = ${JSON.stringify(selected.map((row) => beforeById.get(row.id)).filter(Boolean))};
@@ -314,7 +322,8 @@ process.stdout.write(JSON.stringify({ restored: rows.length }));
 			console.log(JSON.stringify({ mode, safe: false, ...result, automaticRollback: { mode: rollbackMode, ...rollback } }, null, 2));
 			process.exitCode = 1;
 		} else {
-			console.log(JSON.stringify({ mode, safe: true, ...result }, null, 2));
+			console.log(JSON.stringify({ mode, safe, ...result }, null, 2));
+			if (!safe) process.exitCode = 1;
 		}
 	} else {
 		const remoteScript = `${remoteHelpers}

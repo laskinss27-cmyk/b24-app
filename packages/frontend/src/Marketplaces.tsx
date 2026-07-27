@@ -33,7 +33,14 @@ const OPERATION_LABELS: Record<MarketplaceOperationKind, string> = {
 };
 
 const MOCK_FORM: MarketplaceFormData = {
-	marketplaces: ['Озон', 'Wildberries', 'Яндекс Маркет'],
+	marketplaces: [
+		'Яндекс Маркет ihome-shop',
+		'Яндекс Маркет И-ОН Шелли',
+		'Озон ihome-shop',
+		'Озон И-ОН Шелли',
+		'Озон Огнеборец',
+		'WB ihome-shop',
+	],
 	stores: ['Shelly', 'Маркетплейс'],
 	missingStores: [],
 	canCreate: true,

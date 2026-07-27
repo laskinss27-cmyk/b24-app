@@ -18,7 +18,14 @@ interface AuthBody {
 	accessToken?: string;
 }
 
-const MARKETPLACES = ['Озон', 'Wildberries', 'Яндекс Маркет'] as const;
+const MARKETPLACES = [
+	'Яндекс Маркет ihome-shop',
+	'Яндекс Маркет И-ОН Шелли',
+	'Озон ihome-shop',
+	'Озон И-ОН Шелли',
+	'Озон Огнеборец',
+	'WB ihome-shop',
+] as const;
 const MARKETPLACE_STORE_NAMES = ['Shelly', 'Маркетплейс'] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
