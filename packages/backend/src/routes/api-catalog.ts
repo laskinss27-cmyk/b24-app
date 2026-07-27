@@ -10,6 +10,13 @@ import {
 import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
 import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
+import {
+	applyCatalogContentEdits,
+	parseCatalogContent,
+	renderCatalogDescription,
+	serializeFilterAttributes,
+	type CatalogProductContent,
+} from '../catalog-content.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -63,6 +70,7 @@ interface CatalogCandidate {
 	sectionName?: string;
 	status?: string;
 	description?: string;
+	content?: CatalogProductContent;
 	retail: number | null;
 	purchase: number | null;
 	total: number;
@@ -123,6 +131,7 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 			sectionName,
 			status: item.status || known?.status,
 			description: item.description || known?.description,
+			...(item.content ? { content: item.content } : {}),
 			retail: corePrices?.retail ?? known?.retail ?? null,
 			purchase: corePrices?.purchase ?? known?.purchase ?? null,
 			photoPath,
@@ -390,6 +399,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const sectionId = Number(body['sectionId']);
 		const sectionName = cleanText(body['sectionName']);
 		const description = cleanMultiline(body['description']);
+		const status = cleanText(body['status']);
 		const retail = Number(body['retail']);
 		const purchase = Number(body['purchase']);
 		const isService = body['isService'] === true;
@@ -399,30 +409,52 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(sectionId) || sectionId <= 0 || !sectionName) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
 		if (!Number.isFinite(retail) || retail < 0) return reply.code(400).send({ ok: false, error: 'розничная цена должна быть 0 или больше' });
 		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		const allowedStatuses = new Set([
+			'После ремонта', 'Снят с производства', 'Недоступен к заказу', 'К удалению',
+			'Уценка', 'Витринный', 'Б/у', 'Распродажа', 'Повреждённый',
+			'Некондиция', 'Демо', 'Образец', 'Сток',
+		]);
+		const statuses = status.split(',').map(cleanText).filter(Boolean);
+		if (statuses.some((value) => !allowedStatuses.has(value)) || new Set(statuses).size !== statuses.length) {
+			return reply.code(400).send({ ok: false, error: 'выбран неизвестный или повторяющийся статус товара' });
+		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		let before: Record<string, unknown> | null = null;
+		let beforePrices: { retail?: number; purchase?: number } | undefined;
+		let metadataChanged = false;
 		try {
-			const fields: Record<string, unknown> = {
-				name,
-				iblockSectionId: sectionId,
-			};
-			if (iblockId === 24) {
-				fields['property334'] = manufacturer;
-				fields['property330'] = model || article;
-			} else {
-				fields['property360'] = article || model;
+			before = await erp.get<Record<string, unknown>>('Item', String(productId));
+			if (!before) return reply.code(404).send({ ok: false, error: 'товар не найден в ядре' });
+			const currentContent = parseCatalogContent(before['b24_catalog_content']);
+			if (!currentContent) {
+				return reply.code(409).send({
+					ok: false,
+					error: 'структурированное описание этой карточки ещё не подготовлено; свободное редактирование заблокировано',
+				});
 			}
-			await client.call('catalog.product.update', { id: productId, fields });
-			await ensureCoreItem(erp, {
-				productId,
-				name,
-				isService,
-				model,
-				article,
-				brand: manufacturer,
-				section: sectionName,
-				description,
+			const content = applyCatalogContentEdits(currentContent, body['summary'], body['attributeEdits']);
+			const renderedDescription = renderCatalogDescription(content);
+			if (description && description !== renderedDescription) {
+				return reply.code(400).send({ ok: false, error: 'описание должно формироваться из структурированных полей' });
+			}
+			const category = cleanText(before['b24_filter_category']);
+			beforePrices = (await fetchCoreCatalogPrices(erp)).get(productId);
+			await erp.update('Item', String(productId), {
+				item_name: name.slice(0, 140),
+				is_stock_item: isService ? 0 : 1,
+				b24_model: model,
+				b24_article: article,
+				b24_brand: manufacturer,
+				b24_section: sectionName,
+				b24_product_status: statuses.join(', '),
+				description: renderedDescription,
+				b24_catalog_content: JSON.stringify(content),
+				b24_filter_attributes: serializeFilterAttributes(content, category),
+				b24_filter_schema_version: '1',
+				b24_filter_updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
 			});
+			metadataChanged = true;
 			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
 			baseCache.delete(normalizeDomain(body.domain ?? ''));
 			app.log.info({ productId, iblockId }, '[api/catalog/update-product] ok');
@@ -438,12 +470,39 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					manufacturer,
 					sectionId,
 					sectionName,
-					description,
+					status: statuses.join(', '),
+					description: renderedDescription,
+					content,
 					retail,
 					purchase,
 				},
 			};
 		} catch (error) {
+			if (metadataChanged && before) {
+				try {
+					await erp.update('Item', String(productId), {
+						item_name: before['item_name'],
+						is_stock_item: before['is_stock_item'],
+						b24_model: before['b24_model'],
+						b24_article: before['b24_article'],
+						b24_brand: before['b24_brand'],
+						b24_section: before['b24_section'],
+						b24_product_status: before['b24_product_status'],
+						description: before['description'],
+						b24_catalog_content: before['b24_catalog_content'],
+						b24_filter_attributes: before['b24_filter_attributes'],
+						b24_filter_schema_version: before['b24_filter_schema_version'],
+						b24_filter_updated_at: before['b24_filter_updated_at'],
+					});
+					await updateCoreCatalogPrices(erp, {
+						productId,
+						retail: beforePrices?.retail ?? 0,
+						purchase: beforePrices?.purchase ?? 0,
+					});
+				} catch (rollbackError) {
+					app.log.error({ productId }, `[api/catalog/update-product] rollback failed — ${errInfo(rollbackError)}`);
+				}
+			}
 			app.log.error({ productId, iblockId }, `[api/catalog/update-product] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
@@ -501,6 +560,13 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					productId = Number(created?.element?.id ?? 0) || 0;
 					if (!productId) throw new Error('catalog.product.add не вернул id');
 					await ensureCoreItem(erp, { productId, name, model, article: model, brand: manufacturer, section: sectionName, description });
+					const content = { version: 1 as const, summary: description, attributes: [] };
+					await erp.update('Item', String(productId), {
+						b24_catalog_content: JSON.stringify(content),
+						b24_filter_attributes: serializeFilterAttributes(content, ''),
+						b24_filter_schema_version: '1',
+						b24_filter_updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+					});
 					await updateCoreCatalogPrices(erp, { productId, retail, purchase: 0 });
 				} catch (error) {
 					if (productId) await client.call('catalog.product.delete', { id: productId }).catch(() => undefined);
@@ -518,6 +584,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					sectionId,
 					sectionName,
 					description,
+					content: { version: 1, summary: description, attributes: [] },
 					retail,
 					purchase: null,
 					total: 0,

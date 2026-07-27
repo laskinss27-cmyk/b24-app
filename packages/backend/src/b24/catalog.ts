@@ -21,6 +21,7 @@
  * Розница = BASE (group 2).
  */
 import { B24Client, type BatchCall } from './client.js';
+import type { CatalogProductContent } from '../catalog-content.js';
 
 /** iblock основных товаров (простые/услуги/родители). */
 const MAIN_IBLOCK = 24;
@@ -55,6 +56,7 @@ export interface BaseRow {
 	/** Статус/состояние карточки, вынесенное из названия: Сток, Уценка, После ремонта и т. п. */
 	status?: string | undefined;
 	description?: string | undefined;
+	content?: CatalogProductContent | undefined;
 	retail: number | null;
 	purchase: number | null;
 	photoPath?: string | undefined;

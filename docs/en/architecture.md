@@ -42,10 +42,17 @@ The frontend is built into `packages/frontend/dist`; the backend serves these fi
 | custom fields and smart processes | Bitrix24 |
 | inventory catalogue, prices, warehouses, and stock levels | ERPNext |
 | receipts, sales, write-offs, transfers, and returns | ERPNext |
-| additional descriptions, images, and legacy catalogue sections | Bitrix24, when needed to enrich a product card |
+| product names, models, statuses, and structured descriptions | ERPNext |
+| images and fallback metadata from the legacy catalogue | Bitrix24 when ERPNext has no value |
 | internal state for selected processes | Bitrix24 entity storage |
 
 Stock is not regularly mirrored from Bitrix24 into ERPNext. Legacy migration scripts are not part of the production workflow.
+
+The product card edits catalogue metadata only in ERPNext. A description is stored both as
+reader-facing text and as protected structured attributes. The UI cannot rename or remove fields
+reserved for future filters; users edit their values, and the backend normalizes them again and
+rebuilds the displayed description. New free-form attributes are stored as display-only values and
+do not become filters until they are explicitly mapped to the schema.
 
 ## Application entry points
 

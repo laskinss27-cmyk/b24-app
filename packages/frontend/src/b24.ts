@@ -508,6 +508,7 @@ export interface BaseRow {
 	/** Состояние товарной карточки, которое показывается отдельно от чистого названия. */
 	status?: string | undefined;
 	description?: string | undefined;
+	content?: CatalogProductContent | undefined;
 	retail: number | null;
 	purchase: number | null;
 	photoPath?: string | undefined;
@@ -541,6 +542,30 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditPrices?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return { rows: json.rows ?? [], stores: json.stores ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached), canEditPrices: Boolean(json.canEditPrices) };
+}
+
+export type CatalogAttributeType = 'text' | 'option' | 'multi_option' | 'number' | 'range' | 'boolean';
+
+export interface CatalogContentAttribute {
+	id: string;
+	key: string;
+	label: string;
+	group: string;
+	type: CatalogAttributeType;
+	rawValue: string;
+	normalizedValue: string;
+	numberValue: number | null;
+	numberMin: number | null;
+	numberMax: number | null;
+	unit: string;
+	booleanValue: boolean | null;
+	filterable: boolean;
+}
+
+export interface CatalogProductContent {
+	version: 1;
+	summary: string;
+	attributes: CatalogContentAttribute[];
 }
 
 /** Скачать безопасную Excel-сверку каталога Битрикс и ядра по productId. */
@@ -596,7 +621,9 @@ export interface CatalogProductUpdateInput {
 	manufacturer: string;
 	sectionId: number;
 	sectionName: string;
-	description: string;
+	status: string;
+	summary: string;
+	attributeEdits: Array<{ id: string; rawValue: string; label?: string }>;
 	retail: number;
 	purchase: number;
 }

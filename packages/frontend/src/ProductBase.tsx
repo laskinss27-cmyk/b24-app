@@ -64,7 +64,21 @@ const MOCK_STORES: StoreInfo[] = [
 	{ id: 22, title: 'Максидом ул. Фаворского 12', active: true },
 ];
 const MOCK_ROWS: BaseRow[] = [
-	{ id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false, article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionId: 101, sectionName: 'Видеонаблюдение', status: 'Уценка, После ремонта', retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 } },
+	{
+		id: 1924, iblockId: 24, name: 'IP видеокамера уличная RL-IP54P 4Мп', isService: false,
+		article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionId: 101,
+		sectionName: 'Видеонаблюдение', status: 'Уценка, После ремонта',
+		description: 'Уличная IP-камера.\n\nХарактеристики:\n• Разрешение: 4 Мп\n• Степень защиты: IP67',
+		content: {
+			version: 1,
+			summary: 'Уличная IP-камера для системы видеонаблюдения.',
+			attributes: [
+				{ id: 'resolution:1', key: 'resolution', label: 'Разрешение', group: 'Видео', type: 'option', rawValue: '4 Мп', normalizedValue: '4 Мп', numberValue: null, numberMin: null, numberMax: null, unit: '', booleanValue: null, filterable: true },
+				{ id: 'protection_rating:2', key: 'protection_rating', label: 'Степень защиты', group: 'Эксплуатация', type: 'option', rawValue: 'IP67', normalizedValue: 'IP67', numberValue: null, numberMin: null, numberMax: null, unit: '', booleanValue: null, filterable: true },
+			],
+		},
+		retail: 2890, purchase: 1740, total: 18, stockByStore: { 8: 12, 10: 6 },
+	},
 	{ id: 1810, iblockId: 24, name: 'Трубка аудиодомофона УКП-12', isService: false, article: 'УКП-12', model: 'УКП-12', manufacturer: '', sectionId: 102, sectionName: 'Домофоны', retail: 780, purchase: null, total: 8, stockByStore: { 8: 4, 22: 4 } },
 	{ id: 1811, iblockId: 24, name: 'Трубка аудиодомофона УКП-12м', isService: false, article: 'УКП-12м', model: 'УКП-12м', manufacturer: 'Vizit', sectionId: 102, sectionName: 'Домофоны', retail: 820, purchase: 782, total: 9, stockByStore: { 8: 5, 10: 4 } },
 	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', isService: false, article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionId: 103, sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
@@ -77,6 +91,12 @@ type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number
 function productStatuses(status: string | undefined): string[] {
 	return String(status ?? '').split(',').map((value) => value.trim()).filter(Boolean);
 }
+
+const PRODUCT_STATUS_OPTIONS = [
+	'После ремонта', 'Снят с производства', 'Недоступен к заказу', 'К удалению',
+	'Уценка', 'Витринный', 'Б/у', 'Распродажа', 'Повреждённый',
+	'Некондиция', 'Демо', 'Образец', 'Сток',
+] as const;
 
 /**
  * Поле ввода количества с локальным состоянием: можно очистить и вписать своё, не теряя
@@ -320,7 +340,17 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 	const [manufacturer, setManufacturer] = useState(row.manufacturer ?? '');
 	const [model, setModel] = useState(row.model ?? '');
 	const [article, setArticle] = useState(row.article ?? '');
-	const [description, setDescription] = useState(row.description ?? '');
+	const [statuses, setStatuses] = useState(() => productStatuses(row.status));
+	const [summary, setSummary] = useState(row.content?.summary ?? '');
+	const [attributeEdits, setAttributeEdits] = useState(() =>
+		(row.content?.attributes ?? []).map((attribute) => ({
+			id: attribute.id,
+			label: attribute.label,
+			rawValue: attribute.rawValue,
+			filterable: attribute.filterable,
+			type: attribute.type,
+			group: attribute.group,
+		})));
 	const [sectionId, setSectionId] = useState(String(row.sectionId ?? ''));
 	const [retail, setRetail] = useState(String(row.retail ?? 0));
 	const [purchase, setPurchase] = useState(String(row.purchase ?? 0));
@@ -336,7 +366,16 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 		setManufacturer(row.manufacturer ?? '');
 		setModel(row.model ?? '');
 		setArticle(row.article ?? '');
-		setDescription(row.description ?? '');
+		setStatuses(productStatuses(row.status));
+		setSummary(row.content?.summary ?? '');
+		setAttributeEdits((row.content?.attributes ?? []).map((attribute) => ({
+			id: attribute.id,
+			label: attribute.label,
+			rawValue: attribute.rawValue,
+			filterable: attribute.filterable,
+			type: attribute.type,
+			group: attribute.group,
+		})));
 		setSectionId(String(row.sectionId ?? ''));
 		setRetail(String(row.retail ?? 0));
 		setPurchase(String(row.purchase ?? 0));
@@ -366,7 +405,9 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 				manufacturer: manufacturer.trim(),
 				sectionId: section.id,
 				sectionName: section.name,
-				description: description.trim(),
+				status: statuses.join(', '),
+				summary: summary.trim(),
+				attributeEdits: attributeEdits.map(({ id, label, rawValue }) => ({ id, label, rawValue: rawValue.trim() })),
 				retail: retailValue,
 				purchase: purchaseValue,
 			});
@@ -412,7 +453,71 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 									<label>Раздел<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
 									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} onChange={(event) => setRetail(event.target.value)} /></label>
 									<label>Закупочная цена, ₽<input inputMode="decimal" value={purchase} onChange={(event) => setPurchase(event.target.value)} /></label>
-									<label className="wide">Описание и характеристики<textarea rows={8} maxLength={10000} value={description} placeholder="Назначение, комплектация, совместимость, размеры, технические особенности…" onChange={(event) => setDescription(event.target.value)} /></label>
+									<fieldset className="wide catalog-status-editor">
+										<legend>Статус товара</legend>
+										<div>{PRODUCT_STATUS_OPTIONS.map((status) => <label key={status}>
+											<input
+												type="checkbox"
+												checked={statuses.includes(status)}
+												onChange={(event) => setStatuses((current) => event.target.checked
+													? [...current, status]
+													: current.filter((value) => value !== status))}
+											/>
+											{status}
+										</label>)}</div>
+									</fieldset>
+									<label className="wide">Краткое описание<textarea rows={5} maxLength={4000} value={summary} placeholder="Что это за товар и для чего он нужен" onChange={(event) => setSummary(event.target.value)} /></label>
+									<div className="wide catalog-attribute-editor">
+										<div className="catalog-attribute-editor-head">
+											<div>
+												<b>Характеристики</b>
+												<span>Названия и типы полей защищены. Значения автоматически подготовятся для будущих фильтров.</span>
+											</div>
+											<button type="button" className="btn-secondary" onClick={() => setAttributeEdits((current) => [...current, {
+												id: `new:${Date.now()}`,
+												label: '',
+												rawValue: '',
+												filterable: false,
+												type: 'text',
+												group: 'Дополнительно',
+											}])}>+ Добавить</button>
+										</div>
+										{attributeEdits.map((attribute, index) => (
+											<div className="catalog-attribute-edit-row" key={attribute.id}>
+												{attribute.id.startsWith('new:')
+													? <input
+														aria-label="Название новой характеристики"
+														placeholder="Название характеристики"
+														value={attribute.label}
+														onChange={(event) => setAttributeEdits((current) => current.map((item, itemIndex) =>
+															itemIndex === index ? { ...item, label: event.target.value } : item))}
+													/>
+													: <span title={attribute.filterable ? 'Поле будущего фильтра — название защищено' : attribute.group}>
+														{attribute.label}{attribute.filterable ? ' 🔒' : ''}
+													</span>}
+												{attribute.type === 'boolean'
+													? <select
+														value={attribute.rawValue}
+														onChange={(event) => setAttributeEdits((current) => current.map((item, itemIndex) =>
+															itemIndex === index ? { ...item, rawValue: event.target.value } : item))}
+													>
+														<option value="Да">Да</option>
+														<option value="Нет">Нет</option>
+													</select>
+													: <input
+														aria-label={`Значение: ${attribute.label}`}
+														value={attribute.rawValue}
+														onChange={(event) => setAttributeEdits((current) => current.map((item, itemIndex) =>
+															itemIndex === index ? { ...item, rawValue: event.target.value } : item))}
+													/>}
+												{!attribute.filterable
+													? <button type="button" className="catalog-attribute-remove" aria-label={`Удалить ${attribute.label}`} onClick={() =>
+														setAttributeEdits((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+													: <span />}
+											</div>
+										))}
+										{attributeEdits.length === 0 && <p className="muted">Характеристик пока нет. Можно добавить дополнительные поля вручную.</p>}
+									</div>
 								</div>
 							) : (
 								<dl className="catalog-product-info">
@@ -425,7 +530,15 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 						</section>
 						{!editing && <section>
 							<h3>Описание и характеристики</h3>
-							<div className={`catalog-product-description${row.description ? '' : ' empty'}`}>{row.description || 'Описание пока не заполнено.'}</div>
+							{row.content ? <div className="catalog-structured-description">
+								{row.content.summary && <p>{row.content.summary}</p>}
+								{row.content.attributes.length > 0 && <dl>{row.content.attributes.map((attribute) => (
+									<div key={attribute.id}>
+										<dt>{attribute.label}</dt>
+										<dd>{attribute.rawValue}</dd>
+									</div>
+								))}</dl>}
+							</div> : <div className={`catalog-product-description${row.description ? '' : ' empty'}`}>{row.description || 'Описание пока не заполнено.'}</div>}
 						</section>}
 						{!row.isService && <section>
 							<h3>Остатки по складам</h3>
@@ -442,7 +555,7 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 						<button type="button" className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить товар'}</button>
 					</> : <>
 						<button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button>
-						{canEdit && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
+						{canEdit && row.content && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
 					</>}
 				</div>
 			</div>

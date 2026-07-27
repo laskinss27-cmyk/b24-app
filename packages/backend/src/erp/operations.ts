@@ -10,6 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
+import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
 
 const DEAL_FIELD = 'b24_deal_id';
 export const REALIZATION_BASE_SEGMENT = 'base';
@@ -289,6 +290,7 @@ export interface CoreCatalogItem {
 	section: string;
 	status: string;
 	description: string;
+	content?: CatalogProductContent;
 	image: string;
 }
 
@@ -300,12 +302,14 @@ function isTechnicalCoreDescription(value: unknown): boolean {
 export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
 	const rows = await erp.list('Item', [
 		'name', 'item_name', 'is_stock_item',
-		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status', 'description', 'image',
+		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status',
+		'b24_catalog_content', 'description', 'image',
 	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
 	const out: CoreCatalogItem[] = [];
 	for (const row of rows) {
 		const productId = Number(row['name']);
 		if (!Number.isInteger(productId) || productId <= 0) continue;
+		const content = parseCatalogContent(row['b24_catalog_content']);
 		out.push({
 			productId,
 			name: String(row['item_name'] ?? '').trim() || `#${productId}`,
@@ -318,6 +322,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 			description: isTechnicalCoreDescription(row['description'])
 				? ''
 				: String(row['description'] ?? '').trim(),
+			...(content ? { content } : {}),
 			image: String(row['image'] ?? '').trim(),
 		});
 	}
