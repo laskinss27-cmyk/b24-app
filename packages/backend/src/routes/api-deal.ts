@@ -11,6 +11,11 @@ import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js'
 import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { backfillDealServiceSumSince, ensureDealServiceSumField, syncDealServiceSum } from '../deal-service-sum.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
+import {
+	B24_COLLAPSE_SERVICE_PRODUCT_ID,
+	normalizeLegacyB24DealRows,
+	setDealB24CollapsedService,
+} from '../deal-service.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -45,16 +50,12 @@ function errInfo(err: unknown): string {
 // productId служебной услуги в Б24-каталоге. Б24-карточка несёт ОДНУ эту строку на сумму
 // сделки (товарный состав живёт в ядре, Sales Order). Услуга TYPE 7 — склад не трогает, сделка
 // закрывается без проводки по складу.
-const VYEZD_PRODUCT_ID = 9814;
-const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
+const VYEZD_PRODUCT_ID = B24_COLLAPSE_SERVICE_PRODUCT_ID;
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
 /** Поставить в Б24-сделку одну служебную строку на сумму total (или очистить, если total<=0). */
 async function setDealB24Service(client: B24Client, dealId: number, total: number): Promise<void> {
-	await client.call('crm.deal.productrows.set', {
-		id: dealId,
-		rows: total > 0 ? [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME, PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }] : [],
-	});
+	await setDealB24CollapsedService(client, dealId, total);
 }
 
 /** Розничная цена из ядра. Старый каталог Б24 остаётся fallback для ещё не перенесённых цен. */
@@ -111,12 +112,7 @@ type DealPlanDraftLine = {
  */
 async function listLegacyB24DealLines(client: B24Client, dealId: number): Promise<DealPlanDraftLine[]> {
 	const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
-	const candidates = (rows ?? []).filter((row) => Number(row['QUANTITY'] ?? 0) > 0 && Number(row['PRODUCT_ID'] ?? 0) !== VYEZD_PRODUCT_ID);
-	const customRows = candidates.filter((row) => Number(row['PRODUCT_ID'] ?? 0) <= 0);
-	if (customRows.length) {
-		const names = customRows.map((row) => String(row['PRODUCT_NAME'] ?? '').trim()).filter(Boolean).slice(0, 3);
-		throw new Error(`в старой сделке есть позиции без карточки товара${names.length ? `: ${names.join(', ')}` : ''}; сначала оформите их как товары каталога`);
-	}
+	const candidates = normalizeLegacyB24DealRows(rows ?? []);
 	if (!candidates.length) return [];
 
 	const ids = candidates.map((row) => Number(row['PRODUCT_ID']));
@@ -885,10 +881,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			if (all.length === 1 && Number(all[0]?.['PRODUCT_ID']) === VYEZD_PRODUCT_ID) {
 				return { ok: true, total, already: true };
 			}
-			await client.call('crm.deal.productrows.set', {
-				id: dealId,
-				rows: [{ PRODUCT_ID: VYEZD_PRODUCT_ID, PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME, PRICE: total, QUANTITY: 1, MEASURE_CODE: 796 }],
-			});
+			await setDealB24Service(client, dealId, total);
 			app.log.info({ dealId, total, was: all.length }, '[api/deal/collapse-service] ok');
 			return { ok: true, total, replaced: all.length };
 		} catch (err) {

@@ -98,6 +98,8 @@ A draft does not affect stock. Stock changes only after the ERPNext document is 
 - workflow statuses;
 - internal and customer prices;
 - price-approval request;
+- a paid repair is stored in the core deal plan as the real non-stock service `19108`, while Bitrix24 shows only the deal's collapsed total service row;
+- legacy free-text `Платный ремонт` rows are safely migrated to the core service on the first deal action;
 - release warehouse;
 - print forms and files on Bitrix24 Drive;
 - search by repair number and telephone.

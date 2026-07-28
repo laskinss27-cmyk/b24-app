@@ -3,8 +3,23 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { receiveRepairUnit, renameRepairItem, moveRepairUnit, deliverRepairUnit, fetchErpStoreStockFull } from '../erp/operations.js';
+import {
+	calculateDealPlanTotal,
+	deliverRepairUnit,
+	fetchErpStoreStockFull,
+	listDealPlan,
+	moveRepairUnit,
+	receiveRepairUnit,
+	renameRepairItem,
+	upsertDealPlan,
+} from '../erp/operations.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
+import {
+	PAID_REPAIR_SERVICE_NAME,
+	WARRANTY_REPAIR_SERVICE_NAME,
+	mergeRepairServiceLine,
+	setDealB24CollapsedService,
+} from '../deal-service.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -243,12 +258,54 @@ const QUICKSALE_REPAIR_CATEGORY_ID = 6;
 const QUICKSALE_REPAIR_STAGE_ID = 'C6:NEW';
 
 interface DealSyncResult { dealId: number | null; created: boolean; noContact: boolean }
+
+async function syncRepairDealComposition(
+	client: B24Client,
+	data: RepairData,
+	dealId: number,
+	log: FastifyInstance['log'],
+): Promise<void> {
+	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
+	const erp = ErpClient.fromEnv();
+	if (!erp) throw new Error('ядро склада недоступно — состав ремонтной сделки не синхронизирован');
+
+	const currentPlan = await listDealPlan(erp, dealId);
+	const lines = mergeRepairServiceLine(
+		currentPlan.map((line) => ({
+			productId: line.productId,
+			itemName: line.itemName,
+			qty: line.qty,
+			priceListRate: line.priceListRate,
+			discountPercent: line.discountPercent,
+			isService: line.isService,
+		})),
+		data.payType,
+		price,
+	);
+
+	const today = new Date().toISOString().slice(0, 10);
+	await upsertDealPlan(erp, dealId, lines, today);
+	const total = await calculateDealPlanTotal(erp, dealId);
+	await setDealB24CollapsedService(client, dealId, total);
+	log.info({ dealId, payType: data.payType, repairPrice: price, total, lines: lines.length }, '[repairs] core deal composition synced');
+}
+
+/**
+ * Аварийный fallback: если ядро временно недоступно, не теряем введённую цену.
+ * При следующем действии legacy-импорт перенесёт эту точную строку в услугу 19108.
+ */
+async function setLegacyRepairDealRow(client: B24Client, dealId: number, payType: RepairData['payType'], price: number): Promise<void> {
+	const rowName = payType === 'paid' ? PAID_REPAIR_SERVICE_NAME : WARRANTY_REPAIR_SERVICE_NAME;
+	await client.call('crm.deal.productrows.set', {
+		id: dealId,
+		rows: [{ PRODUCT_NAME: rowName, PRICE: price, QUANTITY: 1 }],
+	});
+}
+
 async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyInstance['log']): Promise<DealSyncResult> {
 	// Сделка заводится на ЛЮБОЙ ремонт (даже гарантийный): сумма = «наша цена» у платного, 0 у гарантийного.
 	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
 	const contactId = data.client?.contactId ?? null;
-	const rowName = data.payType === 'paid' ? 'Платный ремонт' : 'Гарантийный ремонт';
-	const rows = [{ PRODUCT_NAME: rowName, PRICE: price, QUANTITY: 1 }]; // свободная строка (PRODUCT_ID:0) — каталог не трогаем; номер ремонта — в названии сделки
 	const repairKind = data.payType === 'paid' ? 'Платный ремонт' : 'Гарантийный ремонт';
 	const objectName = [`${repairKind} №${data.repairNo}`, data.client?.name, [data.device, data.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
 	if (data.dealId) {
@@ -260,11 +317,14 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 					TITLE: objectName,
 					CATEGORY_ID: QUICKSALE_REPAIR_CATEGORY_ID,
 					STAGE_ID: QUICKSALE_REPAIR_STAGE_ID,
-					OPPORTUNITY: price,
 					[DEAL_OBJECT_NAME_FIELD]: objectName,
 				},
 			});
-			await client.call('crm.deal.productrows.set', { id: data.dealId, rows });
+			try {
+				await syncRepairDealComposition(client, data, data.dealId, log);
+			} catch (err) {
+				log.error({ dealId: data.dealId }, `[repairs] синхронизация состава с ядром не удалась — ${errInfo(err)}`);
+			}
 		} catch (err) { log.warn({}, `[repairs] обновление сделки ${data.dealId} не удалось — ${errInfo(err)}`); }
 		return { dealId: data.dealId, created: false, noContact: false };
 	}
@@ -283,8 +343,13 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 		const added = await client.call<number | { id?: number }>('crm.deal.add', { fields });
 		const did = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 		if (!did) throw new Error('crm.deal.add не вернул id');
-		await client.call('crm.deal.productrows.set', { id: did, rows }).catch((e) => log.warn({}, `[repairs] productrows.set сделки ${did} — ${errInfo(e)}`));
 		data.dealId = did;
+		try {
+			await syncRepairDealComposition(client, data, did, log);
+		} catch (err) {
+			log.error({ dealId: did }, `[repairs] синхронизация состава новой сделки с ядром не удалась — ${errInfo(err)}`);
+			await setLegacyRepairDealRow(client, did, data.payType, price);
+		}
 		log.info({ dealId: did, repairNo: data.repairNo, payType: data.payType }, '[repairs] сделка по ремонту создана');
 		return { dealId: did, created: true, noContact: false };
 	} catch (err) {
