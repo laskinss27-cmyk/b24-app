@@ -17,6 +17,7 @@ import {
 	serializeFilterAttributes,
 	type CatalogProductContent,
 } from '../catalog-content.js';
+import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -406,6 +407,12 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
 		if (iblockId !== 24 && iblockId !== 26) return reply.code(400).send({ ok: false, error: 'неверный каталог товара' });
 		if (name.length < 3) return reply.code(400).send({ ok: false, error: 'название товара должно быть не короче трёх символов' });
+		if (splitCatalogProductNameStatus(name).hasInlineStatus) {
+			return reply.code(400).send({
+				ok: false,
+				error: 'статус товара нужно выбирать отдельно, а не вписывать в название',
+			});
+		}
 		if (!Number.isInteger(sectionId) || sectionId <= 0 || !sectionName) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
 		if (!Number.isFinite(retail) || retail < 0) return reply.code(400).send({ ok: false, error: 'розничная цена должна быть 0 или больше' });
 		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });

@@ -6,6 +6,7 @@ import {
 	renderCatalogDescription,
 	serializeFilterAttributes,
 } from './catalog-content.js';
+import { splitCatalogProductNameStatus } from './catalog-product-status.js';
 
 const source = {
 	version: 1,
@@ -68,5 +69,38 @@ test('filterable attributes cannot be removed', () => {
 	assert.throws(
 		() => applyCatalogContentEdits(parsed, '', [{ id: 'protection_rating:1', rawValue: 'IP67' }]),
 		/Нельзя удалить характеристику/u,
+	);
+});
+
+test('legacy stock marker is moved from the product name into status', () => {
+	assert.deepEqual(
+		splitCatalogProductNameStatus('(СТОК )Монитор AHD 7" CTV-M5702'),
+		{
+			name: 'Монитор AHD 7" CTV-M5702',
+			status: 'Сток',
+			hasInlineStatus: true,
+		},
+	);
+});
+
+test('inline statuses are canonicalized and merged with the stored status', () => {
+	assert.deepEqual(
+		splitCatalogProductNameStatus('(После Ремонта) Монитор (СТОК)', 'Уценка'),
+		{
+			name: 'Монитор',
+			status: 'Уценка, После ремонта, Сток',
+			hasInlineStatus: true,
+		},
+	);
+});
+
+test('ordinary words containing stock-like text are left unchanged', () => {
+	assert.deepEqual(
+		splitCatalogProductNameStatus('Крепление для кабеля в водостоке PPN10'),
+		{
+			name: 'Крепление для кабеля в водостоке PPN10',
+			status: '',
+			hasInlineStatus: false,
+		},
 	);
 });

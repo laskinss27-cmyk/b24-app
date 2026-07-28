@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
 import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
+import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 
 const DEAL_FIELD = 'b24_deal_id';
 export const REALIZATION_BASE_SEGMENT = 'base';
@@ -310,15 +311,19 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 		const productId = Number(row['name']);
 		if (!Number.isInteger(productId) || productId <= 0) continue;
 		const content = parseCatalogContent(row['b24_catalog_content']);
+		const normalizedIdentity = splitCatalogProductNameStatus(
+			row['item_name'],
+			row['b24_product_status'],
+		);
 		out.push({
 			productId,
-			name: String(row['item_name'] ?? '').trim() || `#${productId}`,
+			name: normalizedIdentity.name || `#${productId}`,
 			isService: Number(row['is_stock_item'] ?? 1) === 0,
 			article: String(row['b24_article'] ?? '').trim(),
 			model: String(row['b24_model'] ?? '').trim(),
 			manufacturer: String(row['b24_brand'] ?? '').trim(),
 			section: String(row['b24_section'] ?? '').trim(),
-			status: String(row['b24_product_status'] ?? '').trim(),
+			status: normalizedIdentity.status,
 			description: isTechnicalCoreDescription(row['description'])
 				? ''
 				: String(row['description'] ?? '').trim(),
