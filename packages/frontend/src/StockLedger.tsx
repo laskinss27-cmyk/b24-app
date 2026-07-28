@@ -31,7 +31,7 @@ function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | 
  *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
  */
 export type StockMovementKind = 'issue' | 'receipt' | 'delivery' | 'return';
-type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'turnover' | 'inventory';
+type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'requests', label: 'Заявки ТТ' },
 	{ key: 'transfers', label: 'Перемещения' },
@@ -40,7 +40,6 @@ const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'delivery', label: 'Реализации' },
 	{ key: 'return', label: 'Возвраты' },
 	{ key: 'ledger', label: 'Отчёт по движению товара' },
-	{ key: 'turnover', label: 'Оборачиваемость' },
 	{ key: 'inventory', label: 'Инвентаризация' },
 ];
 /** doctype ядра по типу вкладки (для раскрытия документа). */
@@ -785,7 +784,7 @@ export function StockLedger(): JSX.Element {
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>Не удалось определить права доступа. Обновите страницу.</div>;
 	const tabs = TABS;
 	return (
-		<div style={{ maxWidth: tab === 'turnover' ? 1380 : tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
+		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
 			<div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e3e8ef', marginBottom: 14, flexWrap: 'wrap' }}>
 				{tabs.map((t) => (
@@ -796,7 +795,6 @@ export function StockLedger(): JSX.Element {
 				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
 				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
 				: tab === 'ledger' ? <LedgerTab />
-				: tab === 'turnover' ? <TurnoverReportTab stores={form?.stores ?? []} mock={Boolean(ctx.__mock)} />
 				: <StockMovementsTab kind={tab} form={form} showCreate={false} />}
 		</div>
 	);
