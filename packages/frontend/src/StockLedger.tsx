@@ -7,7 +7,7 @@ import {
 	fetchCurrentUserId, withTimeout,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createSupplyTtRequest, createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
-	fetchDocDetail, fetchItemHistory, fetchTurnoverReport,
+	fetchDocDetail, fetchItemHistory, fetchTurnoverReport, downloadTurnoverReportXlsx,
 	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type CoreDocDetail, type ItemMovement, type SupplyRequestLineDto,
 	type TurnoverReportRow, type TurnoverStatus,
 } from './b24.js';
@@ -524,6 +524,8 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 	const [rows, setRows] = useState<TurnoverReportRow[]>([]);
 	const [days, setDays] = useState(90);
 	const [loading, setLoading] = useState(false);
+	const [exporting, setExporting] = useState(false);
+	const [printing, setPrinting] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
 	const [costColumns, setCostColumns] = useState<{ average: boolean; total: boolean }>(() => {
@@ -578,6 +580,40 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 		ending: filtered.filter((row) => row.status === 'ending').length,
 		noMovement: filtered.filter((row) => row.status === 'no_movement').length,
 	};
+	useEffect(() => {
+		if (!printing) return;
+		const clear = (): void => setPrinting(false);
+		let fallback = 0;
+		const frame = window.requestAnimationFrame(() => {
+			window.print();
+			fallback = window.setTimeout(clear, 1200);
+		});
+		window.addEventListener('afterprint', clear, { once: true });
+		return () => {
+			window.cancelAnimationFrame(frame);
+			window.clearTimeout(fallback);
+			window.removeEventListener('afterprint', clear);
+		};
+	}, [printing]);
+
+	const downloadExcel = async (): Promise<void> => {
+		setExporting(true); setErr(null);
+		try {
+			await downloadTurnoverReportXlsx({
+				from, to,
+				showAverageCost: costColumns.average,
+				showStockValue: costColumns.total,
+				...(store ? { store } : {}),
+				...(search.trim() ? { search: search.trim() } : {}),
+				...(status ? { status } : {}),
+				...(section ? { section } : {}),
+			});
+		} catch (e) {
+			setErr(errText(e));
+		} finally {
+			setExporting(false);
+		}
+	};
 
 	return (
 		<section>
@@ -606,6 +642,8 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 						{Object.entries(TURNOVER_STATUS).map(([key, view]) => <option key={key} value={key}>{view.label}</option>)}
 					</select>
 					<select style={inp} value={section} onChange={(e) => { setSection(e.target.value); setPage(1); }}><option value="">Все категории</option>{sections.map((name) => <option key={name}>{name}</option>)}</select>
+					<button style={btnGhost} type="button" disabled={loading || !filtered.length} onClick={() => setPrinting(true)}>🖨 Печать</button>
+					<button style={btnGhost} type="button" disabled={loading || exporting || !filtered.length} onClick={() => void downloadExcel()}>{exporting ? 'Готовлю Excel…' : '⬇ Excel'}</button>
 					<details style={{ position: 'relative' }}>
 						<summary style={{ ...btnGhost, listStyle: 'none', userSelect: 'none' }}>⚙ Колонки</summary>
 						<div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 5, minWidth: 230, padding: 10, border: '1px solid #d0d5dd', borderRadius: 8, background: '#fff', boxShadow: '0 8px 24px rgba(16,24,40,.12)' }}>
@@ -646,6 +684,50 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 					</div>
 				)}
 				{pages > 1 && <div style={{ display: 'flex', justifyContent: 'center', gap: 8, alignItems: 'center', marginTop: 12 }}><button style={btnGhost} disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>←</button><span style={{ fontSize: 13 }}>Страница {page} из {pages}</span><button style={btnGhost} disabled={page >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))}>→</button></div>}
+			</>}
+			{printing && <>
+				<style media="print">{'@page { size: A4 landscape; margin: 8mm; }'}</style>
+				<div className="turnover-print">
+					<header>
+						<div><span>Снабжение · Отчёт</span><h1>Оборачиваемость товаров</h1></div>
+						<div className="turnover-print-period"><span>Период</span><b>{from} — {to}</b><small>{store || 'Все склады'}</small></div>
+					</header>
+					<div className="turnover-print-filters">
+						<span>Позиций: <b>{filtered.length}</b></span>
+						<span>Оприходовано: <b>{qtyText(summary.received)}</b></span>
+						<span>Реализовано: <b>{qtyText(summary.sold)}</b></span>
+						{status && <span>Состояние: <b>{TURNOVER_STATUS[status].label}</b></span>}
+						{section && <span>Категория: <b>{section}</b></span>}
+						{search.trim() && <span>Поиск: <b>{search.trim()}</b></span>}
+					</div>
+					<table>
+						<thead><tr>
+							<th>№</th><th>Товар</th><th>Состояние</th><th>Начало → конец<br />средний</th>
+							<th>Приход</th><th>Реализовано<br />возврат</th><th>Списано</th><th>Оборотов</th>
+							<th>Запас,<br />дней</th><th>Остаток<br />свободно</th>
+							{costColumns.average && <th>Средняя цена<br />остатка</th>}
+							{costColumns.total && <th>Стоимость<br />остатка</th>}
+							<th>Резерв</th><th>Заказано</th>
+						</tr></thead>
+						<tbody>{filtered.map((row, index) => <tr key={row.productId}>
+							<td className="num">{index + 1}</td>
+							<td><b>{row.name}</b><small>#{row.productId}{row.article ? ` · ${row.article}` : ''}{row.brand ? ` · ${row.brand}` : ''}</small></td>
+							<td>{TURNOVER_STATUS[row.status].label}</td>
+							<td className="num">{qtyText(row.openingQty)} → {qtyText(row.closingQty)}<small>ср. {qtyText(row.averageQty)}</small></td>
+							<td className="num">{qtyText(row.receivedQty)}</td>
+							<td className="num">{qtyText(row.soldQty)}<small>возврат {qtyText(row.returnedQty)}</small></td>
+							<td className="num">{qtyText(row.writtenOffQty)}</td>
+							<td className="num">{row.turns === null ? '—' : qtyText(row.turns)}</td>
+							<td className="num">{row.daysOfStock === null ? '—' : qtyText(row.daysOfStock)}</td>
+							<td className="num">{qtyText(row.currentQty)}<small>своб. {qtyText(row.availableQty)}</small></td>
+							{costColumns.average && <td className="num">{moneyText(row.averagePurchasePrice)}</td>}
+							{costColumns.total && <td className="num">{moneyText(row.stockValue)}</td>}
+							<td className="num">{qtyText(row.reservedQty)}</td>
+							<td className="num">{qtyText(row.orderedQty)}</td>
+						</tr>)}</tbody>
+					</table>
+					<footer>Перемещения между складами не считаются расходом. Реализация указана за вычетом возвратов. Текущие остатки и стоимость — на момент формирования.</footer>
+				</div>
 			</>}
 		</section>
 	);

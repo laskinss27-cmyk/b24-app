@@ -1524,6 +1524,46 @@ export async function fetchTurnoverReport(from: string, to: string, store?: stri
 	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', days: Number(json.days ?? 0) };
 }
 
+/** Скачать Excel-версию отчёта с теми же фильтрами и видимыми ценовыми колонками. */
+export async function downloadTurnoverReportXlsx(input: {
+	from: string;
+	to: string;
+	store?: string;
+	search?: string;
+	status?: TurnoverStatus;
+	section?: string;
+	showAverageCost: boolean;
+	showStockValue: boolean;
+}): Promise<void> {
+	const res = await fetch('/api/stock/turnover-report.xlsx', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const contentType = res.headers.get('content-type') ?? '';
+	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+		let message = `не удалось сформировать Excel (HTTP ${res.status})`;
+		try {
+			const json = (await res.json()) as { error?: string };
+			if (json.error) message = json.error;
+		} catch { /* сервер вернул не-JSON ошибку */ }
+		throw new Error(message);
+	}
+	const blob = await res.blob();
+	const disposition = res.headers.get('content-disposition') ?? '';
+	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? `turnover-${input.from}-${input.to}.xlsx`;
+	const url = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+}
+
 // ── Формы создания в окне «Складской учёт» ────────────────────────────────────
 
 /** Найденный в каталоге ядра товар (пикер позиций). stocks/total — остатки по складам (для наличия в пикере). */

@@ -6217,6 +6217,104 @@ body.deal-placement-body #root {
 	min-width: 260px;
 }
 
+/* Печатная форма отчёта оборачиваемости — появляется только на время печати. */
+.turnover-print {
+	display: none;
+	color: #111;
+	font-family: Arial, sans-serif;
+	font-size: 7pt;
+}
+
+.turnover-print header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 20px;
+	padding-bottom: 8px;
+	border-bottom: 2px solid #12345b;
+}
+
+.turnover-print header span,
+.turnover-print-period span {
+	display: block;
+	margin-bottom: 3px;
+	color: #667085;
+	font-size: 7pt;
+}
+
+.turnover-print h1 {
+	margin: 0;
+	font-size: 17pt;
+}
+
+.turnover-print-period {
+	text-align: right;
+}
+
+.turnover-print-period b,
+.turnover-print-period small {
+	display: block;
+}
+
+.turnover-print-period b {
+	font-size: 10pt;
+}
+
+.turnover-print-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px 14px;
+	margin: 8px 0;
+	padding: 6px 8px;
+	background: #eef4f8;
+	border: 1px solid #cbd9e2;
+}
+
+.turnover-print table {
+	width: 100%;
+	border-collapse: collapse;
+	table-layout: auto;
+}
+
+.turnover-print th,
+.turnover-print td {
+	padding: 4px;
+	border-bottom: 1px solid #cbd5df;
+	text-align: left;
+	vertical-align: top;
+}
+
+.turnover-print th {
+	background: #246b8e;
+	color: #fff;
+	font-size: 6.5pt;
+	white-space: nowrap;
+}
+
+.turnover-print tbody tr:nth-child(even) {
+	background: #f7fafc;
+}
+
+.turnover-print td.num {
+	text-align: right;
+	white-space: nowrap;
+}
+
+.turnover-print td small {
+	display: block;
+	margin-top: 2px;
+	color: #667085;
+	font-size: 6pt;
+}
+
+.turnover-print footer {
+	margin-top: 8px;
+	padding-top: 6px;
+	border-top: 1px solid #9aa9b7;
+	color: #52657a;
+	font-size: 6.5pt;
+}
+
 .supply-order-review-actions button {
 	border-color: #cdd5e0;
 	background: #fff;
@@ -7380,10 +7478,13 @@ body.deal-placement-body #root {
 	body * { visibility: hidden; }
 	/* .inv добавлен: этот глобальный `body * {hidden}` (для Ремонтов/КП) иначе прячет
 	   и печать инвентаризации → пустые листы. Хром .inv скрыт display:none в 1-м @media print. */
-	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv *, .stock-blank, .stock-blank *, .supply-print, .supply-print * { visibility: visible; }
+	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv *, .stock-blank, .stock-blank *, .supply-print, .supply-print *, .turnover-print, .turnover-print * { visibility: visible; }
 	.stock-blank { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
 	.supply-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
+	.turnover-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
 	.supply-print-table thead { display: table-header-group; }
+	.turnover-print thead { display: table-header-group; }
+	.turnover-print tr { break-inside: avoid; page-break-inside: avoid; }
 	.supply-print-table .supplier-row, .supply-print-table .subtotal-row { break-inside: avoid; page-break-inside: avoid; }
 	.repair-blank { position: absolute; left: 0; top: 0; width: 100%; }
 	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
