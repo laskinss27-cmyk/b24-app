@@ -20,6 +20,8 @@ export interface TurnoverBalance {
 	actual: number;
 	reserved: number;
 	ordered: number;
+	stockValue: number | null;
+	valuationQty: number;
 }
 
 export interface TurnoverReportRow {
@@ -42,6 +44,8 @@ export interface TurnoverReportRow {
 	turns: number | null;
 	dailySales: number;
 	daysOfStock: number | null;
+	averagePurchasePrice: number | null;
+	stockValue: number | null;
 	lastReceiptDate: string;
 	lastSaleDate: string;
 	status: 'ending' | 'ordered' | 'normal' | 'excess' | 'no_movement' | 'no_stock';
@@ -136,6 +140,9 @@ export function buildTurnoverRow(input: BuildRowInput): TurnoverReportRow {
 	const turns = average > 0 ? sold / average : null;
 	const available = input.balance.actual - input.balance.reserved;
 	const daysOfStock = dailySales > 0 ? Math.max(0, available) / dailySales : null;
+	const averagePurchasePrice = input.balance.stockValue !== null && input.balance.valuationQty > 0
+		? input.balance.stockValue / input.balance.valuationQty
+		: null;
 
 	return {
 		productId: input.productId,
@@ -157,6 +164,8 @@ export function buildTurnoverRow(input: BuildRowInput): TurnoverReportRow {
 		turns: turns === null ? null : round(turns),
 		dailySales: round(dailySales, 3),
 		daysOfStock: daysOfStock === null ? null : round(daysOfStock),
+		averagePurchasePrice: averagePurchasePrice === null ? null : round(averagePurchasePrice),
+		stockValue: input.balance.stockValue === null ? null : round(input.balance.stockValue),
 		lastReceiptDate,
 		lastSaleDate,
 		status: statusFor(input.balance.actual, available, input.balance.ordered, sold, daysOfStock),
@@ -179,7 +188,7 @@ export async function buildTurnoverReport(
 
 	const [catalog, bins, rawLedger, orderedHeaders] = await Promise.all([
 		fetchCoreCatalogItems(erp),
-		erp.list('Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty', 'ordered_qty'], [warehouseFilter]),
+		erp.list('Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty', 'ordered_qty', 'stock_value', 'valuation_rate'], [warehouseFilter]),
 		erp.list('Stock Ledger Entry',
 			['item_code', 'posting_date', 'actual_qty', 'warehouse', 'voucher_type', 'voucher_no'],
 			[['posting_date', '>=', params.from], ['posting_date', '<=', today], ['is_cancelled', '=', 0], warehouseFilter],
@@ -187,15 +196,28 @@ export async function buildTurnoverReport(
 		erp.list('Purchase Order', ['name'], [[SUPPLY_PURCHASE_STAGE_FIELD, '=', 'ordered'], ['docstatus', '!=', 2]]),
 	]);
 
-	const balances = new Map<number, TurnoverBalance>();
+	type AggregatedBalance = TurnoverBalance & { valuationComplete: boolean };
+	const balances = new Map<number, AggregatedBalance>();
 	for (const bin of bins) {
 		const productId = Number(bin['item_code']);
 		if (!Number.isInteger(productId) || productId <= 0) continue;
-		const balance = balances.get(productId) ?? { actual: 0, reserved: 0, ordered: 0 };
-		balance.actual += Number(bin['actual_qty'] ?? 0);
+		const balance = balances.get(productId) ?? { actual: 0, reserved: 0, ordered: 0, stockValue: 0, valuationQty: 0, valuationComplete: true };
+		const qty = Number(bin['actual_qty'] ?? 0);
+		balance.actual += qty;
 		balance.reserved += Number(bin['reserved_qty'] ?? 0);
 		balance.ordered += Number(bin['ordered_qty'] ?? 0);
+		if (qty > 0) {
+			const storedValue = Number(bin['stock_value'] ?? 0);
+			const valuationRate = Number(bin['valuation_rate'] ?? 0);
+			const value = storedValue > 0 ? storedValue : valuationRate > 0 ? valuationRate * qty : null;
+			balance.valuationQty += qty;
+			if (value === null) balance.valuationComplete = false;
+			else balance.stockValue = (balance.stockValue ?? 0) + value;
+		}
 		balances.set(productId, balance);
+	}
+	for (const balance of balances.values()) {
+		if (balance.valuationQty <= 0 || !balance.valuationComplete) balance.stockValue = null;
 	}
 
 	const ledgerByProduct = new Map<number, TurnoverLedgerRow[]>();
@@ -255,7 +277,7 @@ export async function buildTurnoverReport(
 			}
 		}
 		for (const [productId, qty] of appOrdered) {
-			const balance = balances.get(productId) ?? { actual: 0, reserved: 0, ordered: 0 };
+			const balance = balances.get(productId) ?? { actual: 0, reserved: 0, ordered: 0, stockValue: null, valuationQty: 0, valuationComplete: true };
 			balance.ordered = Math.max(balance.ordered, qty);
 			balances.set(productId, balance);
 		}
@@ -269,7 +291,7 @@ export async function buildTurnoverReport(
 			article: item.article,
 			brand: item.manufacturer,
 			section: item.section,
-			balance: balances.get(item.productId) ?? { actual: 0, reserved: 0, ordered: 0 },
+			balance: balances.get(item.productId) ?? { actual: 0, reserved: 0, ordered: 0, stockValue: null, valuationQty: 0 },
 			ledger: ledgerByProduct.get(item.productId) ?? [],
 			stockEntryTypes,
 			from: params.from,

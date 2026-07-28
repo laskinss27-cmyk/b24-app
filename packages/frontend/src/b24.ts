@@ -1506,6 +1506,8 @@ export interface TurnoverReportRow {
 	turns: number | null;
 	dailySales: number;
 	daysOfStock: number | null;
+	averagePurchasePrice: number | null;
+	stockValue: number | null;
 	lastReceiptDate: string;
 	lastSaleDate: string;
 	status: TurnoverStatus;

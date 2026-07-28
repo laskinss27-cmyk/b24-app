@@ -25,7 +25,7 @@ test('оборачиваемость: продажи и возвраты счи�
 	];
 	const row = buildTurnoverRow({
 		...base,
-		balance: { actual: 12, reserved: 2, ordered: 5 },
+		balance: { actual: 12, reserved: 2, ordered: 5, stockValue: 13200, valuationQty: 12 },
 		ledger,
 		stockEntryTypes: new Map([['MOVE-1', 'Material Transfer']]),
 	});
@@ -37,16 +37,20 @@ test('оборачиваемость: продажи и возвраты счи�
 	assert.equal(row.returnedQty, 1);
 	assert.equal(row.writtenOffQty, 0);
 	assert.equal(row.availableQty, 10);
+	assert.equal(row.averagePurchasePrice, 1100);
+	assert.equal(row.stockValue, 13200);
 });
 
 test('списание показывается отдельно и не увеличивает продажи', () => {
 	const row = buildTurnoverRow({
 		...base,
-		balance: { actual: 6, reserved: 0, ordered: 0 },
+		balance: { actual: 6, reserved: 0, ordered: 0, stockValue: null, valuationQty: 6 },
 		ledger: [{ itemCode: '42', date: '2026-07-06', qty: -2, voucherType: 'Stock Entry', voucherNo: 'STE-1' }],
 		stockEntryTypes: new Map([['STE-1', 'Material Issue']]),
 	});
 	assert.equal(row.soldQty, 0);
 	assert.equal(row.writtenOffQty, 2);
 	assert.equal(row.status, 'no_movement');
+	assert.equal(row.averagePurchasePrice, null);
+	assert.equal(row.stockValue, null);
 });

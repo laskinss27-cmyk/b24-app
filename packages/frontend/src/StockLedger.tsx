@@ -502,6 +502,9 @@ const reportDate = (date: Date): string => {
 };
 
 const qtyText = (qty: number): string => qty.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+const moneyText = (value: number | null): string => value === null
+	? 'нет данных'
+	: `${value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
 
 function TurnoverStatusBadge({ status }: { status: TurnoverStatus }): JSX.Element {
 	const view = TURNOVER_STATUS[status];
@@ -523,6 +526,14 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 	const [loading, setLoading] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
+	const [costColumns, setCostColumns] = useState<{ average: boolean; total: boolean }>(() => {
+		try {
+			const saved = JSON.parse(window.localStorage.getItem('b24-turnover-cost-columns') ?? '') as { average?: unknown; total?: unknown };
+			return { average: saved.average !== false, total: saved.total !== false };
+		} catch {
+			return { average: true, total: true };
+		}
+	});
 
 	const load = async (): Promise<void> => {
 		if (!from || !to) { setErr('Выбери обе даты.'); return; }
@@ -531,9 +542,9 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 		try {
 			if (mock) {
 				setRows([
-					{ productId: 1042, name: 'IP-камера купольная 4 Мп', article: 'IPC-D42', brand: 'Tantos', section: 'Камеры', currentQty: 4, reservedQty: 3, orderedQty: 10, availableQty: 1, openingQty: 18, closingQty: 6, averageQty: 12, receivedQty: 10, soldQty: 22, returnedQty: 1, writtenOffQty: 0, turns: 1.83, dailySales: 0.244, daysOfStock: 4, lastReceiptDate: from, lastSaleDate: to, status: 'ordered' },
-					{ productId: 2050, name: 'Кабель UTP 5E, бухта', article: 'UTP-5E', brand: 'Rexant', section: 'Кабель', currentQty: 28, reservedQty: 4, orderedQty: 0, availableQty: 24, openingQty: 31, closingQty: 28, averageQty: 29.5, receivedQty: 5, soldQty: 8, returnedQty: 0, writtenOffQty: 0, turns: 0.27, dailySales: 0.089, daysOfStock: 270, lastReceiptDate: from, lastSaleDate: to, status: 'excess' },
-					{ productId: 3011, name: 'Блок питания 12В 3А', article: 'PS-12-3', brand: 'ST', section: 'Питание', currentQty: 12, reservedQty: 0, orderedQty: 0, availableQty: 12, openingQty: 12, closingQty: 12, averageQty: 12, receivedQty: 0, soldQty: 0, returnedQty: 0, writtenOffQty: 0, turns: 0, dailySales: 0, daysOfStock: null, lastReceiptDate: '', lastSaleDate: '', status: 'no_movement' },
+					{ productId: 1042, name: 'IP-камера купольная 4 Мп', article: 'IPC-D42', brand: 'Tantos', section: 'Камеры', currentQty: 4, reservedQty: 3, orderedQty: 10, availableQty: 1, openingQty: 18, closingQty: 6, averageQty: 12, receivedQty: 10, soldQty: 22, returnedQty: 1, writtenOffQty: 0, turns: 1.83, dailySales: 0.244, daysOfStock: 4, averagePurchasePrice: 4850, stockValue: 19400, lastReceiptDate: from, lastSaleDate: to, status: 'ordered' },
+					{ productId: 2050, name: 'Кабель UTP 5E, бухта', article: 'UTP-5E', brand: 'Rexant', section: 'Кабель', currentQty: 28, reservedQty: 4, orderedQty: 0, availableQty: 24, openingQty: 31, closingQty: 28, averageQty: 29.5, receivedQty: 5, soldQty: 8, returnedQty: 0, writtenOffQty: 0, turns: 0.27, dailySales: 0.089, daysOfStock: 270, averagePurchasePrice: 7200, stockValue: 201600, lastReceiptDate: from, lastSaleDate: to, status: 'excess' },
+					{ productId: 3011, name: 'Блок питания 12В 3А', article: 'PS-12-3', brand: 'ST', section: 'Питание', currentQty: 12, reservedQty: 0, orderedQty: 0, availableQty: 12, openingQty: 12, closingQty: 12, averageQty: 12, receivedQty: 0, soldQty: 0, returnedQty: 0, writtenOffQty: 0, turns: 0, dailySales: 0, daysOfStock: null, averagePurchasePrice: null, stockValue: null, lastReceiptDate: '', lastSaleDate: '', status: 'no_movement' },
 				]);
 				setDays(Math.floor((Date.parse(`${to}T00:00:00`) - Date.parse(`${from}T00:00:00`)) / 86400000) + 1);
 			} else {
@@ -546,6 +557,9 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 
 	useEffect(() => { void load(); /* первый отчёт за 90 дней */ // eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
+	useEffect(() => {
+		window.localStorage.setItem('b24-turnover-cost-columns', JSON.stringify(costColumns));
+	}, [costColumns]);
 
 	const sections = [...new Set(rows.map((row) => row.section).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
 	const query = search.trim().toLocaleLowerCase('ru');
@@ -592,6 +606,13 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 						{Object.entries(TURNOVER_STATUS).map(([key, view]) => <option key={key} value={key}>{view.label}</option>)}
 					</select>
 					<select style={inp} value={section} onChange={(e) => { setSection(e.target.value); setPage(1); }}><option value="">Все категории</option>{sections.map((name) => <option key={name}>{name}</option>)}</select>
+					<details style={{ position: 'relative' }}>
+						<summary style={{ ...btnGhost, listStyle: 'none', userSelect: 'none' }}>⚙ Колонки</summary>
+						<div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 5, minWidth: 230, padding: 10, border: '1px solid #d0d5dd', borderRadius: 8, background: '#fff', boxShadow: '0 8px 24px rgba(16,24,40,.12)' }}>
+							<label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}><input type="checkbox" checked={costColumns.average} onChange={(e) => setCostColumns((value) => ({ ...value, average: e.target.checked }))} />Средняя цена остатка</label>
+							<label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={costColumns.total} onChange={(e) => setCostColumns((value) => ({ ...value, total: e.target.checked }))} />Стоимость остатка</label>
+						</div>
+					</details>
 					<span style={{ fontSize: 12, color: '#7a8699', alignSelf: 'center' }}>Показано {shown.length} из {filtered.length}</span>
 				</div>
 				{!loading && !filtered.length ? <p className="empty">По выбранным условиям позиций нет.</p> : (
@@ -601,6 +622,8 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 								<th style={TH}>Товар</th><th style={TH}>Состояние</th><th style={TH}>Начало → конец<br />средний</th>
 								<th style={TH}>Приход</th><th style={TH}>Реализация<br />возврат</th><th style={TH}>Списано</th>
 								<th style={TH}>Оборотов</th><th style={TH}>Запас, дней</th><th style={TH}>Сегодня<br />остаток / свободно</th>
+								{costColumns.average && <th style={TH} title="Средняя текущая оценка фактически лежащего товара по данным ERPNext">Средняя цена<br />остатка</th>}
+								{costColumns.total && <th style={TH} title="Оценочная стоимость фактически лежащего товара по данным ERPNext">Стоимость<br />остатка</th>}
 								<th style={TH}>Резерв</th><th style={TH}>Заказано</th><th style={TH}>Последние движения</th>
 							</tr></thead>
 							<tbody>{shown.map((row) => <tr key={row.productId}>
@@ -613,6 +636,8 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 								<td style={TD}>{row.turns === null ? '—' : qtyText(row.turns)}</td>
 								<td style={TD}>{row.daysOfStock === null ? '—' : qtyText(row.daysOfStock)}</td>
 								<td style={TD}><b>{qtyText(row.currentQty)}</b><div style={{ color: row.availableQty <= 0 ? '#b42318' : '#7a8699', fontSize: 12 }}>своб. {qtyText(row.availableQty)}</div></td>
+								{costColumns.average && <td style={{ ...TD, whiteSpace: 'nowrap', color: row.averagePurchasePrice === null ? '#98a2b3' : '#1a2231' }}>{moneyText(row.averagePurchasePrice)}</td>}
+								{costColumns.total && <td style={{ ...TD, whiteSpace: 'nowrap', color: row.stockValue === null ? '#98a2b3' : '#1a2231' }}>{moneyText(row.stockValue)}</td>}
 								<td style={TD}>{qtyText(row.reservedQty)}</td>
 								<td style={TD}>{qtyText(row.orderedQty)}</td>
 								<td style={{ ...TD, fontSize: 12 }}><div>приход: {row.lastReceiptDate || '—'}</div><div>продажа: {row.lastSaleDate || '—'}</div></td>
