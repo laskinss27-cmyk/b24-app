@@ -5804,6 +5804,24 @@ body.deal-placement-body #root {
 	font-weight: 700;
 }
 
+.supply-direct-delivery {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin-bottom: 14px;
+	padding: 11px 13px;
+	border: 1px solid #b9dfc8;
+	border-radius: 9px;
+	background: #effaf3;
+	color: #24613b;
+}
+
+.supply-direct-delivery span {
+	color: #47735a;
+	font-size: 13px;
+}
+
 .supply-document-facts input,
 .supply-document-facts select,
 .supply-document-modal-footer select {

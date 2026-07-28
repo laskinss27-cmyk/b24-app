@@ -746,7 +746,7 @@ export interface SupplyTransferChild {
 	receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[]; history?: TransferHistoryEventDto[];
 	actionWarning?: string;
 }
-export interface SupplyPurchaseReceiptChild { name: string; status: string; purchaseOrder?: string; lines: TransferLineDto[] }
+export interface SupplyPurchaseReceiptChild { name: string; status: string; docstatus?: number; purchaseOrder?: string; lines: TransferLineDto[] }
 export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
 export interface SupplyPurchaseChild { name: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
 export interface SupplyOrderRow {

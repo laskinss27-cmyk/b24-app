@@ -2,12 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, b24StoreTitle, erpContext, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
 import { canManageStock } from './api-stock.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData, parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
 import { supplyTaskUrl, taskLink } from '../b24/supply-task.js';
+import { directReceiptFulfillment } from '../supply/progress.js';
 
 /**
  * API рабочего места «Снаб». Источник спроса — ЗАЯВКИ (Material Request) ядра по сделкам:
@@ -27,7 +28,7 @@ function errInfo(err: unknown): string {
 
 interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string; requestQty?: number }
 type TransferProgress = StoredTransfer;
-interface PurchaseReceiptChild { name: string; status: string; purchaseOrder: string; lines: TransferLine[] }
+interface PurchaseReceiptChild { name: string; status: string; docstatus: number; purchaseOrder: string; lines: TransferLine[] }
 interface PurchaseChild {
 	name: string;
 	supplier: string;
@@ -105,10 +106,11 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 	const requestNames = requests.map((request) => request.name);
 	const byName = new Map(requests.map((request) => [request.name, request]));
 	try {
+		const ctx = await erpContext(erp);
 		const receipts = new Map<string, PurchaseReceiptChild[]>();
 		const receiptHeaders = await erp.list<Record<string, unknown>>(
 			'Purchase Receipt',
-			['name', 'status', SUPPLY_REQUEST_FIELD, SUPPLY_PURCHASE_ORDER_FIELD],
+			['name', 'status', 'docstatus', SUPPLY_REQUEST_FIELD, SUPPLY_PURCHASE_ORDER_FIELD],
 			[[SUPPLY_REQUEST_FIELD, 'in', requestNames], ['docstatus', '!=', 2]],
 			0,
 			'creation desc',
@@ -123,9 +125,10 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 			const child: PurchaseReceiptChild = {
 				name: String(h['name'] ?? ''),
 				status: String(h['status'] ?? ''),
+				docstatus: Number(h['docstatus'] ?? full?.['docstatus'] ?? 0),
 				purchaseOrder: String(h[SUPPLY_PURCHASE_ORDER_FIELD] ?? full?.[SUPPLY_PURCHASE_ORDER_FIELD] ?? ''),
 				lines: rawItems
-					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0), warehouse: String(l['warehouse'] ?? '') }))
+					.map((l) => ({ productId: Number(l['item_code']), name: String(l['item_name'] ?? l['item_code'] ?? ''), qty: Number(l['qty'] ?? 0), rate: Number(l['rate'] ?? 0), warehouse: b24StoreTitle(ctx, String(l['warehouse'] ?? '')) }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0),
 			};
 			receipts.set(request.requestKey, [...(receipts.get(request.requestKey) ?? []), child]);
@@ -182,7 +185,11 @@ async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): 
 	return out;
 }
 
-function addCovered(covered: Map<string, Map<number, number>>, requestName: string, lines: TransferLine[]): void {
+function addCovered(
+	covered: Map<string, Map<number, number>>,
+	requestName: string,
+	lines: Array<{ productId: number; qty: number }>,
+): void {
 	const byProduct = covered.get(requestName) ?? new Map<number, number>();
 	for (const l of lines) byProduct.set(l.productId, (byProduct.get(l.productId) ?? 0) + l.qty);
 	covered.set(requestName, byProduct);
@@ -297,6 +304,16 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 				for (const purchase of purchases) {
 					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestKey, purchaseRequestLines(purchase.lines));
 				}
+			}
+			// Если поставщик привёз товар сразу на склад назначения заявки, физического
+			// перемещения не будет и оно не нужно. Проведённый приход сам завершает эту
+			// часть заявки; приход на любой другой склад по-прежнему ждёт перемещение.
+			for (const request of reqs) {
+				const directLines = directReceiptFulfillment(
+					request.toStore,
+					purchasesByRequest.get(request.requestKey) ?? [],
+				);
+				addCovered(fulfilled, request.requestKey, directLines);
 			}
 			const enriched = reqs.map((o) => {
 				const byProduct = planned.get(o.requestKey) ?? new Map<number, number>();

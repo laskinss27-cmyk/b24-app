@@ -234,6 +234,10 @@ const purchaseStatus = (purchase: SupplyPurchaseChild): { label: string; tone: s
 	return { label: 'Черновик', tone: 'muted' };
 };
 
+const sameStore = (left: string | undefined, right: string | undefined): boolean =>
+	Boolean(left?.trim() && right?.trim())
+	&& left!.trim().toLocaleLowerCase('ru-RU') === right!.trim().toLocaleLowerCase('ru-RU');
+
 function purchaseTransferAvailable(order: SupplyOrderRow, purchase: SupplyPurchaseChild): Map<number, number> {
 	const requested = new Map<number, number>();
 	for (const line of order.originalItems ?? order.items) requested.set(line.productId, (requested.get(line.productId) ?? 0) + Number(line.qty || 0));
@@ -247,7 +251,15 @@ function purchaseTransferAvailable(order: SupplyOrderRow, purchase: SupplyPurcha
 		}
 	}
 	const received = new Map<number, number>();
-	for (const receipt of purchase.receipts) for (const line of receipt.lines) received.set(line.productId, (received.get(line.productId) ?? 0) + Number(line.qty || 0));
+	for (const receipt of purchase.receipts) {
+		if (receipt.docstatus !== 1) continue;
+		for (const line of receipt.lines) {
+		// Прямой приход уже находится на складе назначения заявки — перемещать его
+		// со склада в тот же самый склад не требуется.
+			if (sameStore(line.warehouse, order.toStore)) continue;
+			received.set(line.productId, (received.get(line.productId) ?? 0) + Number(line.qty || 0));
+		}
+	}
 	return new Map(purchase.lines.map((line) => {
 		const alreadyForwarded = forwarded.get(line.productId) ?? 0;
 		const onReceiptStore = Math.max((received.get(line.productId) ?? 0) - alreadyForwarded, 0);
@@ -593,6 +605,11 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		const canReceivePurchase = currentPurchase.supplyStage === 'ordered' && purchaseLines.some((line) => Math.max(Number(line.qty || 0) - (receivedByProduct.get(line.productId) ?? 0), 0) > 0);
 		const transferAvailable = purchaseTransferAvailable(order, currentPurchase);
 		const canCreatePurchaseTransfer = [...transferAvailable.values()].some((qty) => qty > 0);
+		const directDeliveryQty = currentPurchase.receipts.reduce((sum, receipt) =>
+			sum + (receipt.docstatus === 1 ? receipt.lines : [])
+				.filter((line) => sameStore(line.warehouse, order.toStore))
+				.reduce((subtotal, line) => subtotal + Number(line.qty || 0), 0),
+		0);
 		const receivePurchasePayload = purchaseLines.map((line) => ({
 			productId: line.productId,
 			qty: Math.max(0, Math.min(Number(purchaseReceiveLines[String(line.productId)] || 0), Math.max(Number(line.qty || 0) - (receivedByProduct.get(line.productId) ?? 0), 0))),
@@ -615,6 +632,12 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 						<div><dt>Ожидаем</dt><dd><input type="date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} /></dd></div>
 						<div><dt>Сумма</dt><dd>{total > 0.01 ? `${money(total)} ₽` : '—'}</dd></div>
 					</dl>
+					{directDeliveryQty > 0 && (
+						<div className="supply-direct-delivery">
+							<strong>Доставлено напрямую на склад назначения</strong>
+							<span>Принято: {directDeliveryQty}. Для этого количества перемещение не требуется.</span>
+						</div>
+					)}
 					<div className="supply-document-lines">
 						<table><thead><tr><th>Позиция</th><th>Количество</th><th>Цена</th><th>Сумма</th>{canReceivePurchase && <th>К приходу</th>}{canCreatePurchaseTransfer && <th>К перемещению</th>}<th aria-label="Удалить" /></tr></thead><tbody>
 							{purchaseLines.map((line) => {
