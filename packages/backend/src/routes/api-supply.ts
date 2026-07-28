@@ -9,6 +9,7 @@ import { newTransferData, parseTransferItem, type StoredTransfer, type TransferD
 import { sendStoreChatMessage } from '../transfers/chats.js';
 import { supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { directReceiptFulfillment } from '../supply/progress.js';
+import { readableDocumentTitle } from '../erp/document-titles.js';
 
 /**
  * API рабочего места «Снаб». Источник спроса — ЗАЯВКИ (Material Request) ядра по сделкам:
@@ -28,9 +29,10 @@ function errInfo(err: unknown): string {
 
 interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string; requestQty?: number }
 type TransferProgress = StoredTransfer;
-interface PurchaseReceiptChild { name: string; status: string; docstatus: number; purchaseOrder: string; lines: TransferLine[] }
+interface PurchaseReceiptChild { name: string; displayTitle?: string; status: string; docstatus: number; purchaseOrder: string; lines: TransferLine[] }
 interface PurchaseChild {
 	name: string;
+	displayTitle?: string;
 	supplier: string;
 	status: string;
 	supplyStage: string;
@@ -330,12 +332,41 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 					.map((item) => ({ ...item, qty: Math.max(item.qty - (fulfilledByProduct.get(item.productId) ?? 0), 0) }))
 					.filter((item) => item.qty > 0);
 				const closedByProgress = o.items.length > 0 && unfulfilled.length === 0;
+				const purchases = (purchasesByRequest.get(o.requestKey) ?? []).map((purchase) => ({
+					...purchase,
+					displayTitle: readableDocumentTitle({
+						kind: 'purchase_order',
+						dealId: o.dealId,
+						parent: o.name,
+						supplier: purchase.supplier,
+					}),
+					receipts: purchase.receipts.map((receipt) => ({
+						...receipt,
+						displayTitle: readableDocumentTitle({
+							kind: 'purchase_receipt',
+							dealId: o.dealId,
+							parent: purchase.name,
+							toStore: [...new Set(receipt.lines.map((line) => line.warehouse).filter(Boolean))].join(', '),
+						}),
+					})),
+				}));
+				const transfers = (transfersByRequest.get(o.requestKey) ?? []).map((transfer) => ({
+					...transfer,
+					displayTitle: readableDocumentTitle({
+						kind: 'transfer',
+						dealId: o.dealId,
+						parent: transfer.purchaseOrder || o.name,
+						fromStore: transfer.fromStore,
+						toStore: transfer.toStore,
+					}),
+				}));
 				return {
 					...o,
+					displayTitle: readableDocumentTitle({ kind: 'supply_request', dealId: o.dealId, toStore: o.toStore }),
 					items: remaining,
 					originalItems: o.items.map(withFreeStocks),
-					transfers: transfersByRequest.get(o.requestKey) ?? [],
-					purchases: purchasesByRequest.get(o.requestKey) ?? [],
+					transfers,
+					purchases,
 					dealTitle: titleMap.get(Number(o.dealId)) ?? '',
 					closed: MR_DONE.has(o.status) || closedByProgress,
 				};
@@ -344,6 +375,7 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 			const orders = standalonePurchases.length || standaloneTransfers.length
 				? [...enriched, {
 					name: STANDALONE_SUPPLY_REQUEST,
+					displayTitle: 'Самостоятельные документы',
 					requestKey: '',
 					createdAt: '',
 					dealId: '',

@@ -739,18 +739,19 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
 export interface SupplyTransferChild {
-	id: number; name: string; purchaseOrder?: string; status: string; fromStore: string; toStore: string;
+	id: number; name: string; displayTitle?: string; purchaseOrder?: string; status: string; fromStore: string; toStore: string;
 	shipEntry?: string; receiveEntry?: string; shortageReturnEntry?: string;
 	correctionOf?: number | null; correctionKind?: 'shortage_return' | 'overage_transfer' | null; correctionIds?: number[];
 	lines: TransferLineDto[]; collectedLines?: TransferLineDto[]; shippedLines?: TransferLineDto[]; acceptedLines?: TransferLineDto[];
 	receivedLines: TransferLineDto[]; shortageLines: TransferLineDto[]; history?: TransferHistoryEventDto[];
 	actionWarning?: string;
 }
-export interface SupplyPurchaseReceiptChild { name: string; status: string; docstatus?: number; purchaseOrder?: string; lines: TransferLineDto[] }
+export interface SupplyPurchaseReceiptChild { name: string; displayTitle?: string; status: string; docstatus?: number; purchaseOrder?: string; lines: TransferLineDto[] }
 export type SupplyPurchaseStage = 'draft' | 'approval' | 'approved' | 'ordered' | 'cancelled';
-export interface SupplyPurchaseChild { name: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
+export interface SupplyPurchaseChild { name: string; displayTitle?: string; supplier: string; status: string; supplyStage?: string; orderedAt?: string; expectedAt?: string; total?: number; lines: TransferLineDto[]; receipts: SupplyPurchaseReceiptChild[] }
 export interface SupplyOrderRow {
 	name: string;
+	displayTitle?: string;
 	requestKey: string;
 	dealId: string;
 	dealTitle: string;

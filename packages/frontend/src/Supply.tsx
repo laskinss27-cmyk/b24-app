@@ -43,6 +43,7 @@ import {
 const MOCK_ORDERS: SupplyOrderRow[] = [
 	{
 		name: 'MAT-MR-2026-0001',
+		displayTitle: 'Снабжение · Сделка #36766 · → Максидом Дунайский 64',
 		requestKey: 'MAT-MR-2026-0001@demo',
 		dealId: '36766',
 		dealTitle: '37204_тест ERP',
@@ -60,6 +61,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 		transfers: [{
 			id: 9001,
 			name: 'Перемещение #36766: Максидом Тельмана 31 → Максидом Дунайский 64',
+			displayTitle: 'Перемещение · Сделка #36766 · по MAT-MR-2026-0001 · Максидом Тельмана 31 → Максидом Дунайский 64',
 			status: 'accepted',
 			fromStore: 'Максидом Тельмана 31',
 			toStore: 'Максидом Дунайский 64',
@@ -623,7 +625,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 			<div className="supply-proto-overlay">
 				<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Заявка поставщику ${currentPurchase.name}`}>
 					<header>
-						<div><span className="supply-document-eyebrow">Заявка поставщику</span><h2>{currentPurchase.name}</h2><p>{order.standalone ? 'Самостоятельная закупка' : `${order.name} · сделка #${order.dealId}`}</p></div>
+						<div><span className="supply-document-eyebrow">Заявка поставщику</span><h2>{currentPurchase.displayTitle || currentPurchase.name}</h2><p>{currentPurchase.displayTitle ? `${currentPurchase.name} · ${order.name}` : order.standalone ? 'Самостоятельная закупка' : `${order.name} · сделка #${order.dealId}`}</p></div>
 						<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 					</header>
 					<dl className="supply-document-facts">
@@ -682,7 +684,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 		<div className="supply-proto-overlay">
 			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferDocumentLabel(transfer)}`}>
 				<header>
-						<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transferDocumentLabel(transfer)}</h2><p>{transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
+						<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transfer.displayTitle || transferDocumentLabel(transfer)}</h2><p>{transferDocumentLabel(transfer)} · {transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
 					<div className="supply-document-modal-head"><span>{status.label}</span>{transferHasDiscrepancy(transfer) && <span className="supply-discrepancy">Расхождение</span>}<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 				</header>
 				<div className="transfer-destination">
@@ -956,8 +958,8 @@ function OrdersView({
 						<article key={order.name} className={`supply-order-card${isOpen ? ' open' : ''}`}>
 							<button className="supply-order-head" type="button" onClick={() => onToggle(order.name)}>
 								<div>
-									<b>{order.name} · {order.dealTitle || `сделка #${order.dealId}`}</b>
-									<small>#{order.dealId} · {order.toStore || 'склад не указан'} · нужно до {order.deadline || 'дата не указана'}</small>
+									<b>{order.displayTitle || `${order.name} · ${order.dealTitle || `сделка #${order.dealId}`}`}</b>
+									<small>{order.name} · {order.dealTitle || `сделка #${order.dealId}`} · нужно до {order.deadline || 'дата не указана'}</small>
 								</div>
 								<div className="supply-order-head-meta">
 									<Pill tone={requestState.tone}>{requestState.label}</Pill>
@@ -991,7 +993,7 @@ function OrdersView({
 												return (
 													<div key={`t-${transfer.id}`} className="supply-document-branch">
 														<button className="supply-document-row" type="button" onClick={() => onOpenTransfer(order, transfer)}>
-													<div><span className="kind">Перемещение</span><b>{transferDocumentLabel(transfer)}</b><small>{transfer.fromStore} → {transfer.toStore}{transfer.purchaseOrder ? ` · ${transfer.purchaseOrder}` : ''}</small></div>
+													<div><span className="kind">Перемещение</span><b>{transfer.displayTitle || transferDocumentLabel(transfer)}</b><small>{transferDocumentLabel(transfer)} · {transfer.fromStore} → {transfer.toStore}{transfer.purchaseOrder ? ` · ${transfer.purchaseOrder}` : ''}</small></div>
 													<div className="supply-document-meta"><span>{documentAmount(transfer.lines)}</span>{transferHasDiscrepancy(transfer) && <span className="supply-discrepancy">Расхождение</span>}<span className="status">{status.label}</span></div>
 														</button>
 														{corrections.length > 0 && <div className="supply-correction-list">{corrections.map((correction) => {
@@ -1009,7 +1011,7 @@ function OrdersView({
 												return (
 													<div key={`p-${purchase.name}`} className="supply-document-branch">
 														<button className="supply-document-row" type="button" onClick={() => onOpenPurchase(order, purchase)}>
-															<div><span className="kind">Заявка поставщику</span><b>{purchase.supplier || 'Поставщик не выбран'}</b><small>{purchase.name}</small></div>
+															<div><span className="kind">Заявка поставщику</span><b>{purchase.displayTitle || purchase.supplier || 'Поставщик не выбран'}</b><small>{purchase.name}{purchase.displayTitle && purchase.supplier ? ` · ${purchase.supplier}` : ''}</small></div>
 															<div className="supply-document-meta"><span>{documentAmount(purchase.lines)}</span><span className="status">{status.label}</span></div>
 														</button>
 													</div>
@@ -1086,7 +1088,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 				{orders.map((order) => (
 					<div key={order.name} className="supply-proto-deal">
 						<div className="supply-proto-deal-head">
-							<div><b>{order.name}</b><small>#{order.dealId} · {order.dealTitle || order.toStore}</small></div>
+							<div><b>{order.displayTitle || order.name}</b><small>{order.name} · #{order.dealId} · {order.dealTitle || order.toStore}</small></div>
 							<Pill tone={order.closed ? 'ok' : 'info'}>{order.closed ? 'закрыто' : requestItemsForOrder(order).length ? 'требует решения' : 'в исполнении'}</Pill>
 						</div>
 						<div className="supply-proto-thread">
@@ -1095,11 +1097,11 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 								return (
 									<div key={`${order.name}-${purchase.name}`} className="supply-proto-node">
 									<div className="node-top">
-										<div><span className="kind">заявка поставщику</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenPurchase(order, purchase)}>{purchase.name}</button> · {purchase.supplier || 'поставщик не выбран'}</div>
+										<div><span className="kind">заявка поставщику</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenPurchase(order, purchase)}>{purchase.displayTitle || purchase.name}</button> · {purchase.name}</div>
 										<Pill tone={status.tone}>{status.label}</Pill>
 										</div>
 										<p>{purchase.lines.map(lineTitle).join(' · ')}</p>
-										{purchase.receipts.map((receipt) => <p key={receipt.name} className="subline">Приход {receipt.name}: {receipt.lines.map(lineTitle).join(' · ')}</p>)}
+										{purchase.receipts.map((receipt) => <p key={receipt.name} className="subline">{receipt.displayTitle || `Приход ${receipt.name}`} · {receipt.name}: {receipt.lines.map(lineTitle).join(' · ')}</p>)}
 									</div>
 								);
 							})}
@@ -1108,7 +1110,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 								return (
 									<div key={`${order.name}-${transfer.id}`} className={`supply-proto-node${transfer.correctionOf ? ' correction' : ''}`}>
 									<div className="node-top">
-										<div><span className="kind">{transfer.correctionOf ? 'корректировка' : 'перемещение'}</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transferDocumentLabel(transfer)}</button> · {transfer.fromStore || 'склад'} → {transfer.toStore || 'точка'}</div>
+										<div><span className="kind">{transfer.correctionOf ? 'корректировка' : 'перемещение'}</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transfer.displayTitle || transferDocumentLabel(transfer)}</button> · {transferDocumentLabel(transfer)}</div>
 											<div className="supply-status-pair">{transferHasDiscrepancy(transfer) && <Pill tone="warn">Расхождение</Pill>}<Pill tone={status.tone}>{status.label}</Pill></div>
 										</div>
 										<p>{transfer.lines.map(lineTitle).join(' · ')}</p>
