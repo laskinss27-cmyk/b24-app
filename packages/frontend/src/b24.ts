@@ -1485,6 +1485,43 @@ export async function fetchItemHistory(productId: number): Promise<ItemMovement[
 	return json.movements ?? [];
 }
 
+export type TurnoverStatus = 'ending' | 'ordered' | 'normal' | 'excess' | 'no_movement' | 'no_stock';
+export interface TurnoverReportRow {
+	productId: number;
+	name: string;
+	article: string;
+	brand: string;
+	section: string;
+	currentQty: number;
+	reservedQty: number;
+	orderedQty: number;
+	availableQty: number;
+	openingQty: number;
+	closingQty: number;
+	averageQty: number;
+	receivedQty: number;
+	soldQty: number;
+	returnedQty: number;
+	writtenOffQty: number;
+	turns: number | null;
+	dailySales: number;
+	daysOfStock: number | null;
+	lastReceiptDate: string;
+	lastSaleDate: string;
+	status: TurnoverStatus;
+}
+
+/** Оборачиваемость всех складских позиций за произвольный период. Только чтение ядра. */
+export async function fetchTurnoverReport(from: string, to: string, store?: string): Promise<{ rows: TurnoverReportRow[]; generatedAt: string; days: number }> {
+	const res = await fetch('/api/stock/turnover-report', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), from, to, ...(store ? { store } : {}) }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: TurnoverReportRow[]; generatedAt?: string; days?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось построить отчёт оборачиваемости');
+	return { rows: json.rows ?? [], generatedAt: json.generatedAt ?? '', days: Number(json.days ?? 0) };
+}
+
 // ── Формы создания в окне «Складской учёт» ────────────────────────────────────
 
 /** Найденный в каталоге ядра товар (пикер позиций). stocks/total — остатки по складам (для наличия в пикере). */

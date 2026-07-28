@@ -7,6 +7,7 @@ import {
 	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
 	fetchCoreDocDetail, itemStockLedger, updateCoreCatalogPrices,
 } from '../erp/operations.js';
+import { buildTurnoverReport } from '../erp/turnover-report.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
@@ -25,6 +26,14 @@ interface AuthBody { domain?: string; accessToken?: string }
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+}
+
+function moscowDate(): string {
+	const parts = new Intl.DateTimeFormat('en-GB', {
+		timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit',
+	}).formatToParts(new Date());
+	const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((item) => item.type === type)?.value ?? '';
+	return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
 const SUPPLY_DEPARTMENT_ID = 10;
@@ -182,6 +191,32 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 			return { ok: true, movements: await itemStockLedger(erp, productId) };
 		} catch (e) {
 			app.log.error({}, `[api/stock/item-history] failed — ${errInfo(e)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(e) });
+		}
+	});
+
+	// Отчёт оборачиваемости по всем товарным позициям. Только чтение данных ядра.
+	app.post('/api/stock/turnover-report', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { from?: unknown; to?: unknown; store?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const from = String(b.from ?? '');
+		const to = String(b.to ?? '');
+		const today = moscowDate();
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+			return reply.code(400).send({ ok: false, error: 'нужны даты от и до' });
+		}
+		if (from > to) return reply.code(400).send({ ok: false, error: 'дата «от» должна быть раньше даты «до»' });
+		if (to > today) return reply.code(400).send({ ok: false, error: 'отчёт нельзя построить за будущий период' });
+		const store = String(b.store ?? '').trim();
+		try {
+			const data = await buildTurnoverReport(erp, { from, to, ...(store ? { store } : {}) });
+			app.log.info({ rows: data.rows.length, from, to, store }, '[api/stock/turnover-report] ok');
+			return { ok: true, ...data };
+		} catch (e) {
+			app.log.error({}, `[api/stock/turnover-report] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
 		}
 	});
