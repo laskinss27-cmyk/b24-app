@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, type CSSProperties, type FocusEvent } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
-import { KpDocument } from './Kp.js';
+import { KpDocument, type DealPrintKind } from './Kp.js';
 import {
 	fetchProductRows,
 	fetchStores,
@@ -25,6 +25,7 @@ import {
 	deleteDealQuoteVariant,
 	selectDealQuoteVariant,
 	cancelDealQuoteVariantSelection,
+	downloadDealKpDocx,
 	downloadDealXlsx,
 	fetchDealContractContext,
 	downloadDealContract,
@@ -326,7 +327,7 @@ export function DealProductsTab(): JSX.Element {
 		| { kind: 'stage'; stageId: string; stageName: string }
 		| null
 	>(null);
-	const [showKp, setShowKp] = useState(false);
+	const [printKind, setPrintKind] = useState<DealPrintKind | null>(null);
 	const [kpVariantId, setKpVariantId] = useState<string | null>(null);
 	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
@@ -479,8 +480,8 @@ export function DealProductsTab(): JSX.Element {
 		);
 	}
 
-	if (showKp) {
-		return <KpDocument dealId={ctx.dealId} {...(kpVariantId ? { variantId: kpVariantId } : {})} mock={Boolean(ctx.__mock)} onBack={() => { setShowKp(false); setKpVariantId(null); }} />;
+	if (printKind) {
+		return <KpDocument dealId={ctx.dealId} {...(kpVariantId ? { variantId: kpVariantId } : {})} mock={Boolean(ctx.__mock)} kind={printKind} onBack={() => { setPrintKind(null); setKpVariantId(null); }} />;
 	}
 
 	const activeVariant = state.data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
@@ -495,7 +496,7 @@ export function DealProductsTab(): JSX.Element {
 			payment: null,
 		}
 		: state.data;
-	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onKp={(variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setShowKp(true); }} onReload={reload} />;
+	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -565,7 +566,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onKp, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onKp: (variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
 	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
@@ -685,19 +686,35 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 	const [exportBusy, setExportBusy] = useState(false);
 	const [showContract, setShowContract] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
+	const documentVariantId = activeVariantId && activeVariantId !== data.quoteVariants.selectedId ? activeVariantId : undefined;
 	const exportXlsx = async (): Promise<void> => {
 		if (dealId == null || exportBusy) return;
 		setExportBusy(true);
 		setNotice(null);
 		try {
-			const variantId = activeVariantId && activeVariantId !== data.quoteVariants.selectedId ? activeVariantId : undefined;
-			await downloadDealXlsx(dealId, variantId);
-			setNotice({ kind: 'ok', text: '✅ Excel сформирован и скачан.' });
+			await downloadDealXlsx(dealId, documentVariantId);
+			setNotice({ kind: 'ok', text: '✅ КП в Excel сформировано и скачано.' });
 		} catch (error) {
 			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
 		} finally {
 			setExportBusy(false);
 		}
+	};
+	const exportDocx = async (): Promise<void> => {
+		if (dealId == null || exportBusy || dev) return;
+		setExportBusy(true);
+		setNotice(null);
+		try {
+			await downloadDealKpDocx(dealId, documentVariantId);
+			setNotice({ kind: 'ok', text: '✅ КП в Word сформировано и скачано.' });
+		} catch (error) {
+			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
+		} finally {
+			setExportBusy(false);
+		}
+	};
+	const closeDocumentMenu = (element: HTMLElement): void => {
+		element.closest('details')?.removeAttribute('open');
 	};
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const [dealTransfers, setDealTransfers] = useState<TransferDoc[]>([]);
@@ -1368,7 +1385,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 									<span><b>{variant.name}</b><small>{variant.items.length} {plural(variant.items.length, 'позиция', 'позиции', 'позиций')} · {rub(variantTotal(variant))}</small></span>
 									<em>{selectedVariant ? 'Выбран клиентом' : rejectedVariant ? 'Не выбран' : 'Черновик'}</em>
 								</button>
-								<button type="button" className="deal-variant-print" onClick={() => onKp(variant.id)}>Печать КП</button>
 							</div>;
 						})}
 					</div>
@@ -1395,9 +1411,16 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						requestB24FitWindow(160);
 					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
-				<button className="btn-secondary" onClick={() => onKp()}>КП</button>
-				{workingMode && <button className="btn-secondary" disabled={dealId == null || dev} onClick={() => setShowContract(true)}>Договор</button>}
-				<button className="btn-secondary" disabled={dealId == null || exportBusy} onClick={() => void exportXlsx()}>{exportBusy ? 'Формируем…' : 'Скачать Excel'}</button>
+				<details className="deal-document-menu">
+					<summary className="btn-secondary">{exportBusy ? 'Формируем…' : 'Документы'}<span aria-hidden="true">▾</span></summary>
+					<div className="deal-document-menu-list">
+						<button type="button" disabled={dealId == null || exportBusy || dev} onClick={(event) => { closeDocumentMenu(event.currentTarget); void exportDocx(); }}>КП в Word</button>
+						<button type="button" disabled={dealId == null || exportBusy} onClick={(event) => { closeDocumentMenu(event.currentTarget); void exportXlsx(); }}>КП в Excel</button>
+						<button type="button" onClick={(event) => { closeDocumentMenu(event.currentTarget); onPrintDocument('kp', documentVariantId); }}>КП в PDF</button>
+						<button type="button" onClick={(event) => { closeDocumentMenu(event.currentTarget); onPrintDocument('receipt', documentVariantId); }}>Товарный чек</button>
+						<button type="button" disabled={!workingMode || dealId == null || dev} onClick={(event) => { closeDocumentMenu(event.currentTarget); setShowContract(true); }}>Договор</button>
+					</div>
+				</details>
 				{(proposalEditable || canSwitchVariant || viewingSelected) && activeVariant && (
 					<button
 						className={viewingSelected ? 'btn-secondary danger' : 'btn-primary'}

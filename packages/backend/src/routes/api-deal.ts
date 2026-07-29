@@ -8,6 +8,7 @@ import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStage
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
+import { buildDealKpDocx } from '../deal-kp-docx.js';
 import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { backfillDealServiceSumSince, ensureDealServiceSumField, syncDealServiceSum } from '../deal-service-sum.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
@@ -1371,6 +1372,28 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			};
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/kp] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Word-версия КП собирается из уже подготовленных данных /api/deal/kp.
+	// Документ ничего не записывает в сделку: клиент получает обычный .docx для редактирования.
+	app.post('/api/deal/kp-docx', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; kp?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const file = await buildDealKpDocx(b.kp);
+			app.log.info({ dealId }, '[api/deal/kp-docx] ok');
+			return reply
+				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+				.header('Content-Disposition', `attachment; filename="kp-${dealId}.docx"`)
+				.header('Cache-Control', 'no-store')
+				.send(file);
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/kp-docx] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

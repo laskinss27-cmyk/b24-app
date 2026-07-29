@@ -33,7 +33,43 @@ const MOCK_KP: KpData = {
 	sumGoods: 25500, sumWorks: 18000, total: 43500,
 };
 
-export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number | null; variantId?: string; mock: boolean; onBack: () => void }): JSX.Element {
+export type DealPrintKind = 'kp' | 'receipt';
+
+function ReceiptDocument({ kp }: { kp: KpData }): JSX.Element {
+	const rows = [...kp.goods, ...kp.works];
+	return (
+		<div className="deal-receipt">
+			<div className="deal-receipt-head">
+				<img src={REPAIR_LOGO} alt="Умный дом" />
+				<div><b>ТОВАРНЫЙ ЧЕК № {kp.number}</b><span>от {ruDate(kp.date)}</span></div>
+			</div>
+			<div className="deal-receipt-meta">
+				<span>Продавец: <b>Умный дом</b></span>
+				<span>Покупатель: <b>{kp.client.name || '—'}</b>{kp.client.phone ? ` · ${kp.client.phone}` : ''}</span>
+			</div>
+			<table>
+				<thead><tr><th>№</th><th>Наименование</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead>
+				<tbody>{rows.map((row, index) => (
+					<tr key={`${row.isWork ? 'w' : 'g'}-${row.productId}-${index}`}>
+						<td>{index + 1}</td>
+						<td>{row.name}{row.article && <small>{row.article}</small>}{row.stage && <small>{row.stage}</small>}</td>
+						<td className="num">{row.qty}</td>
+						<td className="num">{money(row.price)}</td>
+						<td className="num">{money(row.sum)}</td>
+					</tr>
+				))}</tbody>
+			</table>
+			<div className="deal-receipt-total">Итого: <b>{money(kp.total)}</b></div>
+			<div className="deal-receipt-words">Всего наименований: {rows.length}, на сумму {money(kp.total)}</div>
+			<div className="deal-receipt-signatures">
+				<span>Продавец __________________ / {kp.manager.name || '____________'} /</span>
+				<span>Покупатель ________________ / ________________ /</span>
+			</div>
+		</div>
+	);
+}
+
+export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: number | null; variantId?: string; mock: boolean; kind: DealPrintKind; onBack: () => void }): JSX.Element {
 	const [kp, setKp] = useState<KpData | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 
@@ -44,7 +80,7 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 	}, [dealId, mock, variantId]);
 
 	const printKp = async (): Promise<void> => {
-		const pending = [...document.querySelectorAll<HTMLImageElement>('.kp-doc img')]
+		const pending = [...document.querySelectorAll<HTMLImageElement>('.kp-doc img, .deal-receipt img')]
 			.filter((image) => !image.complete)
 			.map((image) => new Promise<void>((resolve) => {
 				image.addEventListener('load', () => resolve(), { once: true });
@@ -105,13 +141,13 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 		<div className="kp-wrap">
 			<div className="blank-toolbar no-print">
 				<button className="btn-secondary" onClick={onBack}>← Назад</button>
-				{kp && <button className="btn-primary" onClick={() => void printKp()}>🖨 Печать</button>}
+				{kp && <button className="btn-primary" onClick={() => void printKp()}>🖨 Печать / сохранить PDF</button>}
 			</div>
 
 			{err && <p className="error">⛔ {err}</p>}
 			{!kp && !err && <p className="base-load">Собираю КП…</p>}
 
-			{kp && (
+			{kp && kind === 'kp' && (
 				<div className="kp-doc">
 					<div className="kp-head">
 						<img className="kp-logo" src={REPAIR_LOGO} alt="Умный дом" />
@@ -155,6 +191,7 @@ export function KpDocument({ dealId, variantId, mock, onBack }: { dealId: number
 					<div className="kp-foot">Предложение действительно 14 дней. Гарантия на оборудование — по гарантии производителя, на работы — 12 мес.</div>
 				</div>
 			)}
+			{kp && kind === 'receipt' && <ReceiptDocument kp={kp} />}
 		</div>
 	);
 }

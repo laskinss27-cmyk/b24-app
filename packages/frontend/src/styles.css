@@ -3141,6 +3141,26 @@ html, body, #root { height: 100%; }
 .kp-grand-sum { color: #ED2024; }
 .kp-foot { padding: 11px 28px; background: #fafafa; border-top: 1px solid #eee; font-size: 11px; color: #6b7280; line-height: 1.6; }
 
+/* ── Товарный чек из сделки ───────────────────────────────────── */
+.deal-receipt { max-width: 760px; margin: 0 auto; padding: 28px 32px 36px; background: #fff; color: #111; border: 1px solid #d9dee7; box-shadow: 0 1px 10px rgba(0,0,0,.07); }
+.deal-receipt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 14px; border-bottom: 2px solid #111; }
+.deal-receipt-head img { width: auto; height: 44px; }
+.deal-receipt-head > div { display: grid; gap: 5px; text-align: right; }
+.deal-receipt-head b { font-size: 18px; }
+.deal-receipt-head span { font-size: 12px; color: #555; }
+.deal-receipt-meta { display: grid; gap: 5px; margin: 16px 0; font-size: 13px; }
+.deal-receipt table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.deal-receipt th, .deal-receipt td { padding: 7px 8px; border: 1px solid #888; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.deal-receipt th:first-child, .deal-receipt td:first-child { width: 34px; text-align: center; }
+.deal-receipt th:nth-child(3), .deal-receipt td:nth-child(3) { width: 64px; }
+.deal-receipt th:nth-child(4), .deal-receipt td:nth-child(4),
+.deal-receipt th:nth-child(5), .deal-receipt td:nth-child(5) { width: 100px; }
+.deal-receipt td.num { text-align: right; white-space: nowrap; }
+.deal-receipt td small { display: block; margin-top: 2px; color: #666; font-size: 10.5px; }
+.deal-receipt-total { margin-top: 14px; text-align: right; font-size: 17px; }
+.deal-receipt-words { margin-top: 6px; color: #444; font-size: 12px; text-align: right; }
+.deal-receipt-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; margin-top: 46px; font-size: 12px; }
+
 /* ── Статус оплаты сделки ─────────────────────────────────────── */
 .deal-pay { display: inline-block; padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 500; margin-bottom: 12px; }
 .pay-full { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
@@ -3257,6 +3277,47 @@ body.deal-placement-body #root {
 	background: #eef5ff;
 	color: #174f8a;
 }
+.deal-document-menu { position: relative; }
+.deal-document-menu > summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	list-style: none;
+	cursor: pointer;
+	user-select: none;
+}
+.deal-document-menu > summary::-webkit-details-marker { display: none; }
+.deal-document-menu[open] > summary {
+	border-color: #8da9cf;
+	background: #eef5ff;
+	color: #174f8a;
+}
+.deal-document-menu-list {
+	position: absolute;
+	z-index: 80;
+	top: calc(100% + 6px);
+	left: 0;
+	display: grid;
+	min-width: 210px;
+	padding: 6px;
+	border: 1px solid #cfd7e3;
+	border-radius: 9px;
+	background: #fff;
+	box-shadow: 0 12px 30px rgba(31, 45, 67, .18);
+}
+.deal-document-menu-list button {
+	border: 0;
+	border-radius: 6px;
+	padding: 9px 11px;
+	background: transparent;
+	color: #1f2937;
+	text-align: left;
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+.deal-document-menu-list button:hover:not(:disabled) { background: #eef5ff; color: #174f8a; }
+.deal-document-menu-list button:disabled { color: #a0a8b5; cursor: not-allowed; }
 .deal-stage-band td {
 	padding: 12px 14px;
 	border-top: 10px solid #f4f6f9;
@@ -7478,7 +7539,7 @@ body.deal-placement-body #root {
 	body * { visibility: hidden; }
 	/* .inv добавлен: этот глобальный `body * {hidden}` (для Ремонтов/КП) иначе прячет
 	   и печать инвентаризации → пустые листы. Хром .inv скрыт display:none в 1-м @media print. */
-	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .inv, .inv *, .stock-blank, .stock-blank *, .supply-print, .supply-print *, .turnover-print, .turnover-print * { visibility: visible; }
+	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .deal-receipt, .deal-receipt *, .inv, .inv *, .stock-blank, .stock-blank *, .supply-print, .supply-print *, .turnover-print, .turnover-print * { visibility: visible; }
 	.stock-blank { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
 	.supply-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
 	.turnover-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
@@ -7488,6 +7549,7 @@ body.deal-placement-body #root {
 	.supply-print-table .supplier-row, .supply-print-table .subtotal-row { break-inside: avoid; page-break-inside: avoid; }
 	.repair-blank { position: absolute; left: 0; top: 0; width: 100%; }
 	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
+	.deal-receipt { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; box-sizing: border-box; }
 	.no-print { display: none !important; }
 	/* 1 акт = 1 печатная страница: разрыв страницы после каждого экземпляра (кроме последнего), акт не рвём. */
 	.blank-page { break-after: page; page-break-after: always; }

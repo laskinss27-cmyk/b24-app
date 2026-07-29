@@ -32,7 +32,7 @@ All placement routes accept a Bitrix24 POST and return the same built frontend w
 
 | Prefix | Area |
 |---|---|
-| `/api/deal/*` | deal items, phases, variants, proposals, Excel, requests, and sales |
+| `/api/deal/*` | deal items, phases, variants, proposals in Word/Excel/PDF, sales receipt, requests, and sales |
 | `/api/contracts/*` | contract context and generation |
 | `/api/catalog/*` | catalogue, product cards, prices, stock, and comparison |
 | `/api/inventory/*` | stocktakes and adjustment documents |
@@ -47,6 +47,8 @@ All placement routes accept a Bitrix24 POST and return the same built frontend w
 | `/api/quicksale/*` | quick sale |
 
 The authoritative list of individual endpoints is the `app.get` and `app.post` registration in `packages/backend/src/routes/`. This document must be updated whenever a route group is added or removed.
+
+Deal print forms share the data returned by `POST /api/deal/kp`. The read-only `POST /api/deal/kp-docx` route creates the Word file, while `POST /api/deal/export-xlsx` creates Excel. The proposal PDF and sales receipt use the frontend and the browser's system print dialog. Contract context and Word generation are served by `/api/contracts/context` and `/api/contracts/generate`.
 
 ## Request authentication
 
