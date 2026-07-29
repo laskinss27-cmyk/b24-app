@@ -2005,12 +2005,13 @@ export async function downloadDealKpDocx(dealId: number, variantId?: string): Pr
 	}
 }
 
-/** Скачать Excel-снимок текущего состава сделки или открытого варианта КП. */
+/** Скачать клиентскую Excel-версию КП. */
 export async function downloadDealXlsx(dealId: number, variantId?: string): Promise<void> {
-	const res = await fetch('/api/deal/export-xlsx', {
+	const kp = await fetchDealKp(dealId, variantId);
+	const res = await fetch('/api/deal/kp-xlsx', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, ...(variantId ? { variantId } : {}) }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, kp }),
 	});
 	const contentType = res.headers.get('content-type') ?? '';
 	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
@@ -2023,7 +2024,7 @@ export async function downloadDealXlsx(dealId: number, variantId?: string): Prom
 	}
 	const blob = await res.blob();
 	const disposition = res.headers.get('content-disposition') ?? '';
-	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? `deal-${dealId}.xlsx`;
+	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? `kp-${dealId}.xlsx`;
 	const url = URL.createObjectURL(blob);
 	try {
 		const link = document.createElement('a');

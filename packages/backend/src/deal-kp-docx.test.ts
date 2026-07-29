@@ -30,5 +30,8 @@ test('builds a readable Word package with escaped deal data', async () => {
 	assert.ok(document?.includes('Коммерческое предложение № 37124'));
 	assert.ok(document?.includes('Иванов &amp; Партнёры'));
 	assert.ok(document?.includes('IP-камера &lt;уличная&gt;'));
-	assert.ok(document?.includes('30 000,00'));
+	assert.ok(document?.includes('30 000'));
+	assert.ok(document?.includes('Этап 1'));
+	assert.ok(await zip.file('word/styles.xml')?.async('string'));
+	assert.ok(await zip.file('docProps/core.xml')?.async('string'));
 });

@@ -9,6 +9,7 @@ import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
 import { buildDealKpDocx } from '../deal-kp-docx.js';
+import { buildDealKpXlsx } from '../deal-kp-xlsx.js';
 import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { backfillDealServiceSumSince, ensureDealServiceSumField, syncDealServiceSum } from '../deal-service-sum.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
@@ -1394,6 +1395,28 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				.send(file);
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/kp-docx] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Клиентская Excel-версия КП собирается из тех же данных, что Word и PDF.
+	// Складские поля, реализации и внутренние остатки в этот документ не попадают.
+	app.post('/api/deal/kp-xlsx', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; kp?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const file = await buildDealKpXlsx(b.kp);
+			app.log.info({ dealId }, '[api/deal/kp-xlsx] ok');
+			return reply
+				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+				.header('Content-Disposition', `attachment; filename="kp-${dealId}.xlsx"`)
+				.header('Cache-Control', 'no-store')
+				.send(file);
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/kp-xlsx] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
