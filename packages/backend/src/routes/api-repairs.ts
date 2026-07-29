@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
+import { appPermission } from '../access-policy.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	calculateDealPlanTotal,
@@ -687,7 +688,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				await ensureRepairNotifyTask(client, r, app.log);
 			}
 			const me = await currentUser(client);
-			return { ok: true, repairs, canEditPrice: me.canEditPrice };
+			return { ok: true, repairs, canEditPrice: appPermission(req, 'repairs.edit_prices', me.canEditPrice) };
 		} catch (err) {
 			app.log.error({}, `[api/repairs/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -719,6 +720,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		const reqOur = payType === 'paid' && b['ourPrice'] != null && b['ourPrice'] !== '' && Number.isFinite(Number(b['ourPrice'])) ? Number(b['ourPrice']) : null;
 		try {
 			const me = await currentUser(client);
+			me.canEditPrice = appPermission(req, 'repairs.edit_prices', me.canEditPrice);
 			const byId = me.id;
 			const byName = me.name;
 			const cost = me.canEditPrice ? reqCost : null; // цену проставит только тот, кому разрешено
@@ -876,8 +878,10 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
+			const canEditLocked = appPermission(req, 'repairs.edit', me.canEditPrice);
+			me.canEditPrice = appPermission(req, 'repairs.edit_prices', me.canEditPrice);
 			// Заморозка с «принято в офисе»: правит только снабжение+.
-			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+			if (isLocked(normalizeStatus(data.status)) && !canEditLocked) {
 				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — изменять может только снабжение' });
 			}
 			const cl = (b['client'] ?? {}) as { contactId?: unknown; name?: unknown; phone?: unknown };
@@ -969,6 +973,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
+			me.canEditPrice = appPermission(req, 'repairs.edit_prices', me.canEditPrice);
 			// Заморозка с «принято в офисе»: правит только снабжение+.
 			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
 				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — изменять может только снабжение' });
@@ -1013,7 +1018,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
-			if (!me.canEditPrice) {
+			if (!appPermission(req, 'repairs.request_price_approval', me.canEditPrice)) {
 				return reply.code(403).send({ ok: false, error: 'отправить цену на согласование может только снабжение / руководитель' });
 			}
 			const point = String(data.point ?? '').trim();
@@ -1076,7 +1081,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (raw) {
 				const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 				const me = await currentUser(client);
-				if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+				if (isLocked(normalizeStatus(data.status)) && !appPermission(req, 'repairs.delete', me.canEditPrice)) {
 					return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — удалить может только снабжение' });
 				}
 			}
@@ -1108,7 +1113,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const me = await currentUser(client);
 			// Заморозка (только клиентский): с «принято в офисе» двигать статус может только снабжение+.
 			// presale не замораживаем — isLocked для его статусов = false.
-			if (isLocked(normalizeStatus(data.status, kind)) && !me.canEditPrice) {
+			if (isLocked(normalizeStatus(data.status, kind)) && !appPermission(req, 'repairs.change_status', me.canEditPrice)) {
 				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — статус двигает только снабжение' });
 			}
 			data.status = status;
@@ -1146,7 +1151,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
-			if (isLocked(normalizeStatus(data.status)) && !me.canEditPrice) {
+			if (isLocked(normalizeStatus(data.status)) && !appPermission(req, 'repairs.change_issue_store', me.canEditPrice)) {
 				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — склад выдачи задаёт снабжение' });
 			}
 			data.issueStore = issueStore || null;

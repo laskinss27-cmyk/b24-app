@@ -1,9 +1,9 @@
 /**
- * Черновая модель будущих прав приложения.
+ * Права самого приложения.
  *
- * ВАЖНО: policyMode пока всегда `draft`. Эти настройки сохраняются и показываются
- * руководству, но не участвуют в проверках рабочих API — действующие права остаются
- * ровно такими, какими были до появления окна.
+ * Если для сотрудника и его отделов ничего не настроено, решение остаётся `inherit`:
+ * продолжают действовать прежние ролевые правила. Это позволяет включать новую модель
+ * постепенно, не блокируя работающих сотрудников.
  */
 export type AccessDecision = 'inherit' | 'allow' | 'deny';
 
@@ -112,14 +112,20 @@ export const ACCESS_PERMISSIONS = [
 	{ id: 'reports.stock_movements', group: 'Отчёты', label: 'Открывать отчёт по движениям товара' },
 	{ id: 'reports.export', group: 'Отчёты', label: 'Выгружать отчёты' },
 
+	{ id: 'inventory.view', group: 'Инвентаризация', label: 'Открывать инвентаризации' },
+	{ id: 'inventory.create', group: 'Инвентаризация', label: 'Создавать инвентаризацию', dangerous: true },
+	{ id: 'inventory.count', group: 'Инвентаризация', label: 'Проводить пересчёт своей точки' },
+	{ id: 'inventory.manage', group: 'Инвентаризация', label: 'Управлять точками и расхождениями', dangerous: true },
+	{ id: 'inventory.post', group: 'Инвентаризация', label: 'Формировать и проводить документы', dangerous: true },
+	{ id: 'inventory.delete', group: 'Инвентаризация', label: 'Удалять инвентаризацию', dangerous: true },
+
 	{ id: 'admin.manage_access', group: 'Администрирование', label: 'Настраивать права сотрудников', dangerous: true },
 	{ id: 'admin.view_access_audit', group: 'Администрирование', label: 'Просматривать историю изменения прав' },
 	{ id: 'admin.manage_profiles', group: 'Администрирование', label: 'Настраивать базовые профили прав', dangerous: true },
-	{ id: 'admin.activate_policy', group: 'Администрирование', label: 'Включать новые правила доступа', dangerous: true },
 ] as const satisfies readonly AccessPermissionDefinition[];
 
 export type AccessPermissionId = (typeof ACCESS_PERMISSIONS)[number]['id'];
-export type AccessProfileId = 'legacy' | 'manager' | 'supply' | 'service' | 'leadership';
+export type AccessProfileId = 'legacy' | 'manager' | 'supply' | 'administrator' | 'leadership';
 
 export interface AccessProfileDefinition {
 	id: AccessProfileId;
@@ -160,18 +166,16 @@ export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 		id: 'supply',
 		label: 'Снабжение',
 		description: 'Полная рабочая зона каталога, склада, перемещений и закупок без административных настроек.',
-		decisions: allow(...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение')),
+		decisions: allow(
+			...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение'),
+			'reports.stock_movements', 'reports.export',
+		),
 	},
 	{
-		id: 'service',
-		label: 'Сервис',
-		description: 'Каталог и работа с ремонтами без закупочных цен и складских операций.',
-		decisions: allow(
-			'catalog.view', 'catalog.search', 'catalog.view_all_stores',
-			'repairs.view', 'repairs.create', 'repairs.edit', 'repairs.edit_internal_comment',
-			'repairs.change_status', 'repairs.request_price_approval', 'repairs.change_issue_store',
-			'repairs.print_acceptance', 'repairs.print_issue',
-		),
+		id: 'administrator',
+		label: 'Администратор',
+		description: 'Полный доступ ко всем рабочим разделам и настройке прав приложения.',
+		decisions: allow(...ACCESS_PERMISSIONS.map((item) => item.id)),
 	},
 	{
 		id: 'leadership',
@@ -183,24 +187,29 @@ export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 	},
 ] as const;
 
-export interface EmployeeAccessDraft {
+export interface AccessSubjectRule {
 	profileId: AccessProfileId;
 	overrides: Partial<Record<AccessPermissionId, Exclude<AccessDecision, 'inherit'>>>;
 	note?: string;
 }
+
+/** Старое имя оставлено как совместимый алиас для существующих импортов. */
+export type EmployeeAccessDraft = AccessSubjectRule;
 
 export interface AccessAuditEntry {
 	at: string;
 	byId: string;
 	byName: string;
 	changedUserIds: string[];
+	changedDepartmentIds?: string[];
 }
 
 export interface AccessControlDraft {
-	version: 1;
+	version: 2;
 	revision: number;
-	policyMode: 'draft';
-	employees: Record<string, EmployeeAccessDraft>;
+	policyMode: 'draft' | 'active';
+	employees: Record<string, AccessSubjectRule>;
+	departments: Record<string, AccessSubjectRule>;
 	updatedAt: string | null;
 	updatedById: string | null;
 	updatedByName: string | null;
@@ -209,10 +218,11 @@ export interface AccessControlDraft {
 
 export function emptyAccessControlDraft(): AccessControlDraft {
 	return {
-		version: 1,
+		version: 2,
 		revision: 0,
 		policyMode: 'draft',
 		employees: {},
+		departments: {},
 		updatedAt: null,
 		updatedById: null,
 		updatedByName: null,
@@ -222,11 +232,30 @@ export function emptyAccessControlDraft(): AccessControlDraft {
 
 /** Явный индивидуальный запрет/доступ сильнее профиля. */
 export function effectiveDraftDecision(
-	employee: EmployeeAccessDraft | undefined,
+	subject: AccessSubjectRule | undefined,
 	permissionId: AccessPermissionId,
 ): AccessDecision {
-	const override = employee?.overrides[permissionId];
+	const override = subject?.overrides[permissionId];
 	if (override) return override;
-	const profile = ACCESS_PROFILES.find((item) => item.id === (employee?.profileId ?? 'legacy'));
-	return profile?.decisions[permissionId] ?? 'inherit';
+	const profileId = subject?.profileId ?? 'legacy';
+	if (profileId === 'legacy') return 'inherit';
+	const profile = ACCESS_PROFILES.find((item) => item.id === profileId);
+	return profile?.decisions[permissionId] ?? 'deny';
+}
+
+/**
+ * Приоритет: персональное правило → правила отделов → прежние права.
+ * Между несколькими отделами безопасный запрет сильнее разрешения.
+ */
+export function effectiveAccessDecision(
+	employee: AccessSubjectRule | undefined,
+	departments: readonly (AccessSubjectRule | undefined)[],
+	permissionId: AccessPermissionId,
+): AccessDecision {
+	const employeeDecision = effectiveDraftDecision(employee, permissionId);
+	if (employeeDecision !== 'inherit') return employeeDecision;
+	const departmentDecisions = departments.map((item) => effectiveDraftDecision(item, permissionId));
+	if (departmentDecisions.includes('deny')) return 'deny';
+	if (departmentDecisions.includes('allow')) return 'allow';
+	return 'inherit';
 }

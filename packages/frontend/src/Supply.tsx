@@ -16,6 +16,7 @@ import {
 	deleteSupplyPurchaseOrder,
 	deleteTransfer,
 	fetchCurrentUserId,
+	fetchCurrentAppAccess,
 	fetchStockFormData,
 	openDeal,
 	fetchSupplyOrders,
@@ -1357,6 +1358,7 @@ export function Supply(): JSX.Element {
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
 	const [documentBusy, setDocumentBusy] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState('');
+	const [canDeleteDocuments, setCanDeleteDocuments] = useState(Boolean(ctx.__mock));
 	const [notice, setNotice] = useState<string | null>(null);
 	const [creationErrors, setCreationErrors] = useState<Record<string, string>>({});
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
@@ -1534,12 +1536,15 @@ export function Supply(): JSX.Element {
 		}
 		bx.init(() => {
 			void (async () => {
-				const [uid, access] = await Promise.all([
+				const [uid, access, appAccess] = await Promise.all([
 					withTimeout(fetchCurrentUserId(), 15000, 'user.current'),
 					withTimeout(fetchStockFormData(), 15000, 'stock.form-data'),
+					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
 				]);
 				setCurrentUserId(uid);
 				setStockForm(access);
+				const deleteDecision = appAccess?.decisions['supply.delete_documents'] ?? 'inherit';
+				setCanDeleteDocuments(deleteDecision === 'allow' || (deleteDecision === 'inherit' && uid === '1858'));
 				const hasSmartLink = requestId > 0 || transferDeepLinkId > 0 || dealSupplyId > 0;
 				const managerLink = hasSmartLink && (linkTarget === 'manager' || (linkTarget !== 'supply' && !access.isSupply));
 				if (managerLink) {
@@ -1547,7 +1552,9 @@ export function Supply(): JSX.Element {
 					setPhase('manager-link');
 					return;
 				}
-				if (!access.canCreate) { setLoading(false); setPhase('denied'); return; }
+				const supplyDecision = appAccess?.decisions['supply.view'] ?? 'inherit';
+				const canOpenSupply = supplyDecision === 'allow' || (supplyDecision === 'inherit' && access.canCreate);
+				if (!canOpenSupply) { setLoading(false); setPhase('denied'); return; }
 				setPhase('ready');
 				try {
 					const [loaded, supplierList] = await Promise.all([fetchSupplyOrders(), fetchSupplySuppliers()]);
@@ -1780,7 +1787,7 @@ export function Supply(): JSX.Element {
 				document={openDocument}
 				suppliers={suppliers}
 				busy={documentBusy}
-				canDelete={currentUserId === '1858'}
+				canDelete={canDeleteDocuments}
 				onClose={() => setOpenDocument(null)}
 				onDelete={() => void deleteOpenDocument()}
 				onCreateSupplier={addSupplier}

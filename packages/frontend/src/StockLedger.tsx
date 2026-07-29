@@ -4,7 +4,7 @@ import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import {
 	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements, openDeal,
-	fetchCurrentUserId, withTimeout,
+	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createSupplyTtRequest, createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
 	fetchDocDetail, fetchItemHistory, fetchTurnoverReport, downloadTurnoverReportXlsx,
@@ -972,7 +972,12 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 	useEffect(() => {
 		if (!supplyMode) { setCanDelete(false); return; }
 		if (getContext().__mock) { setCanDelete(true); return; }
-		void fetchCurrentUserId().then((id) => setCanDelete(id === '1858')).catch(() => setCanDelete(false));
+		void Promise.all([fetchCurrentUserId(), fetchCurrentAppAccess().catch(() => null)])
+			.then(([id, access]) => {
+				const decision = access?.decisions['transfers.delete'] ?? 'inherit';
+				setCanDelete(decision === 'allow' || (decision === 'inherit' && id === '1858'));
+			})
+			.catch(() => setCanDelete(false));
 	}, [supplyMode]);
 
 	const changeDestination = async (t: TransferDoc, toStore: string): Promise<TransferDoc> => {

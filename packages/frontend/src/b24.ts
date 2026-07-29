@@ -7,7 +7,7 @@
  */
 
 import type { BX24Sdk } from './b24-context.js';
-import { canonicalProductId, type AccessControlDraft } from '@b24-app/shared';
+import { canonicalProductId, type AccessControlDraft, type AccessDecision, type AccessPermissionId } from '@b24-app/shared';
 
 function getBx24(): BX24Sdk {
 	const bx = window.BX24;
@@ -2451,7 +2451,7 @@ export async function setInitiators(ids: string[]): Promise<void> {
 	await call('app.option.set', { options: { inv_initiators: JSON.stringify([...new Set(ids)]) } });
 }
 
-// ── Скрытый черновик будущих прав сотрудников ────────────────────────────────
+// ── Права сотрудников и отделов приложения ───────────────────────────────────
 
 export interface AccessEmployee {
 	id: string;
@@ -2460,7 +2460,20 @@ export interface AccessEmployee {
 	departments: number[];
 }
 
-async function accessControlRequest<T>(path: 'load' | 'users' | 'save', extra: Record<string, unknown> = {}): Promise<T> {
+export interface AccessDepartment {
+	id: number;
+	name: string;
+	memberCount: number;
+}
+
+export interface CurrentAppAccess {
+	user: { id: string; name: string; departments: number[]; isPortalAdmin: boolean } | null;
+	policyMode: 'draft' | 'active';
+	decisions: Partial<Record<AccessPermissionId, AccessDecision>>;
+	canManageAccess: boolean;
+}
+
+async function accessControlRequest<T>(path: 'me' | 'load' | 'users' | 'save', extra: Record<string, unknown> = {}): Promise<T> {
 	const response = await fetch(`/api/access-control/${path}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -2477,8 +2490,27 @@ export async function fetchAccessControlDraft(): Promise<AccessControlDraft> {
 }
 
 export async function fetchAccessEmployees(): Promise<AccessEmployee[]> {
-	const result = await accessControlRequest<{ ok: true; users: AccessEmployee[] }>('users');
+	const result = await fetchAccessSubjects();
 	return result.users;
+}
+
+export async function fetchAccessSubjects(): Promise<{ users: AccessEmployee[]; departments: AccessDepartment[] }> {
+	const result = await accessControlRequest<{
+		ok: true;
+		users: AccessEmployee[];
+		departments: AccessDepartment[];
+	}>('users');
+	return { users: result.users, departments: result.departments };
+}
+
+export async function fetchCurrentAppAccess(): Promise<CurrentAppAccess> {
+	const result = await accessControlRequest<{ ok: true } & CurrentAppAccess>('me');
+	return {
+		user: result.user,
+		policyMode: result.policyMode,
+		decisions: result.decisions,
+		canManageAccess: result.canManageAccess,
+	};
 }
 
 export async function saveAccessControlDraft(draft: AccessControlDraft): Promise<AccessControlDraft> {

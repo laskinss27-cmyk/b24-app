@@ -18,6 +18,7 @@ import {
 	type CatalogProductContent,
 } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
+import { appPermission } from '../access-policy.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -286,7 +287,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
-		const canEditPrices = await canEditCatalogPrices(client);
+		const legacyCanEditPrices = await canEditCatalogPrices(client);
+		const canEditPrices = appPermission(req, 'catalog.edit_retail_prices', legacyCanEditPrices)
+			&& appPermission(req, 'catalog.edit_purchase_prices', legacyCanEditPrices);
+		const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		const now = Date.now();
 		const hit = baseCache.get(cacheKey);
@@ -307,7 +311,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			}
 			const { data, stores } = await buildCoreProductBase(erp, metadata);
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source: 'core' }, '[api/catalog/browse] ok');
-			return { ok: true, rows: data.rows, stores, generatedAt: data.generatedAt, cached, canEditPrices };
+			const rows = canViewPurchasePrices
+				? data.rows
+				: data.rows.map((row) => ({ ...row, purchase: null }));
+			return { ok: true, rows, stores, generatedAt: data.generatedAt, cached, canEditPrices };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -318,7 +325,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody;
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!(await canExportCatalogComparison(client))) {
+		if (!appPermission(req, 'catalog.export_comparison', await canExportCatalogComparison(client))) {
 			return reply.code(403).send({ ok: false, error: 'сверка каталога недоступна для текущего пользователя' });
 		}
 		const erp = ErpClient.fromEnv();
@@ -362,7 +369,11 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!(await canEditCatalogPrices(client))) {
+		const legacyCanEditPrices = await canEditCatalogPrices(client);
+		if (
+			!appPermission(req, 'catalog.edit_retail_prices', legacyCanEditPrices)
+			|| !appPermission(req, 'catalog.edit_purchase_prices', legacyCanEditPrices)
+		) {
 			return reply.code(403).send({ ok: false, error: 'редактирование цен доступно снабжению и Константину Ласкину' });
 		}
 		const productId = Number(body['productId']);
@@ -388,7 +399,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!(await canEditCatalogPrices(client))) {
+		if (!appPermission(req, 'catalog.edit_card', await canEditCatalogPrices(client))) {
 			return reply.code(403).send({ ok: false, error: 'редактирование товаров доступно снабжению и Константину Ласкину' });
 		}
 		const productId = Number(body['productId']);
@@ -629,9 +640,13 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			]);
 			// Возвращаем КАЖДЫЙ запрошенный товар (даже с нулём — чтобы не потерять закупку у бесстоковых).
 			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number }> = {};
+			const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 			for (const requestedId of requestedIds) {
 				const pid = canonicalProductId(requestedId);
-				byProduct[requestedId] = { stocks: stocks.get(pid) ?? {}, purchasing: purchasing.get(pid) ?? 0 };
+				byProduct[requestedId] = {
+					stocks: stocks.get(pid) ?? {},
+					purchasing: canViewPurchasePrices ? purchasing.get(pid) ?? 0 : 0,
+				};
 			}
 			app.log.info({ products: Object.keys(byProduct).length }, '[api/catalog/erp-stocks] ok');
 			return { ok: true, byProduct };

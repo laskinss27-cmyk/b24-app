@@ -12,6 +12,7 @@ import { buildTurnoverXlsx, type TurnoverExportFilters } from '../erp/turnover-r
 import { resolveDealOwners } from '../b24/deal-info.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
+import { appPermission } from '../access-policy.js';
 
 /**
  * API окна «Складской учёт».
@@ -278,7 +279,10 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 			const [stores, suppliers, access] = await Promise.all([
 				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), stockAccess(client),
 			]);
-			return { ok: true, stores, suppliers, canCreate: access.canManage, isSupply: access.isSupply };
+			const canCreate = appPermission(req, 'stock.create_receipt', access.canManage)
+				|| appPermission(req, 'stock.create_issue', access.canManage);
+			const isSupply = appPermission(req, 'supply.view', access.isSupply);
+			return { ok: true, stores, suppliers, canCreate, isSupply };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
@@ -320,7 +324,9 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const name = String(b.name ?? '').trim();
 		if (name.length < 2) return reply.code(400).send({ ok: false, error: 'имя товара слишком короткое' });
 		try {
-			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'создавать товар может только снабжение' });
+			if (!appPermission(req, 'stock.create_product', await canManageStock(client))) {
+				return reply.code(403).send({ ok: false, error: 'создавать товар может только снабжение' });
+			}
 			// iblock 24 = базовый каталог CRM (productIblockId=null); type 1 = простой товар; measure 9 = штуки (дефолт портала).
 			const r = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', { fields: { iblockId: 24, name, type: 1, measure: 9, active: 'Y' } });
 			const productId = Number(r?.element?.id ?? 0) || 0;
@@ -342,9 +348,12 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'создавать складские документы может только снабжение' });
 			const kind = b['kind'] === 'receipt' ? 'receipt' : b['kind'] === 'issue' ? 'issue' : null;
 			if (!kind) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
+			const permissionId = kind === 'receipt' ? 'stock.create_receipt' : 'stock.create_issue';
+			if (!appPermission(req, permissionId, await canManageStock(client))) {
+				return reply.code(403).send({ ok: false, error: 'создавать складские документы может только снабжение' });
+			}
 
 			if (kind === 'receipt') {
 				const toStore = String(b['toStore'] ?? '').trim();
@@ -406,7 +415,9 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		const doctype = b.kind === 'receipt' ? 'Purchase Receipt' : b.kind === 'issue' ? 'Stock Entry' : null;
 		if (!doctype) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
 		try {
-			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
+			if (!appPermission(req, 'stock.post_documents', await canManageStock(client))) {
+				return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
+			}
 			if (b.kind === 'issue') {
 				const doc = await erp.get<Record<string, unknown>>('Stock Entry', name);
 				const stores = await listActiveStoreTitles(erp);

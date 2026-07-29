@@ -7066,7 +7066,7 @@ body.deal-placement-body #root {
 	}
 }
 
-/* ── Скрытый черновик прав сотрудников ───────────────────────────────────── */
+/* ── Права сотрудников и отделов ─────────────────────────────────────────── */
 .access-control {
 	min-height: 100vh;
 	padding: 22px;
@@ -7105,6 +7105,12 @@ body.deal-placement-body #root {
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: .03em;
+}
+
+.access-draft-badge.active {
+	border-color: #9ad7ae;
+	background: #edf9f1;
+	color: #176b36;
 }
 
 .access-header-actions {
@@ -7192,6 +7198,25 @@ body.deal-placement-body #root {
 	overflow: auto;
 }
 
+.access-subject-heading {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: 9px 8px 5px;
+	background: #fff;
+	color: #7a8699;
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: .05em;
+	text-transform: uppercase;
+}
+
+.access-subject-empty {
+	padding: 24px 8px;
+	color: #7a8699;
+	text-align: center;
+}
+
 .access-user-list > button {
 	display: grid;
 	grid-template-columns: 34px minmax(0, 1fr) 12px;
@@ -7225,6 +7250,12 @@ body.deal-placement-body #root {
 	background: #dfeaf6;
 	color: #325f8d;
 	font-weight: 700;
+}
+
+.access-avatar.department {
+	border-radius: 9px;
+	background: #e8e2f8;
+	color: #6046a5;
 }
 
 .access-user-text {

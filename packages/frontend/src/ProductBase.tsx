@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import type { AccessPermissionId } from '@b24-app/shared';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
@@ -7,14 +8,13 @@ import {
 	updateCatalogProduct,
 	updateCatalogPrices,
 	fetchCurrentUserId,
+	fetchCurrentAppAccess,
 	createQuickSale,
 	openDeal,
 	photoFullUrl,
-	isPortalAdmin,
 	withTimeout,
 	withRetry,
 	QUICKSALE_USER_IDS,
-	MANAGEMENT_USER_IDS,
 	type BaseRow,
 	type CatalogProductUpdateInput,
 	type CatalogProductCandidate,
@@ -603,6 +603,8 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [exportingComparison, setExportingComparison] = useState(false);
 	const [comparisonError, setComparisonError] = useState('');
 	const [uid, setUid] = useState('');
+	const [canManageAccess, setCanManageAccess] = useState(false);
+	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
 	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
@@ -638,6 +640,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			setRows(MOCK_ROWS);
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
 			setCanEditPrices(true);
+			setCanManageAccess(true);
 			setMode('base');
 			return;
 		}
@@ -654,11 +657,16 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				const uid = await withRetry(() => fetchCurrentUserId(), 2, 15000, 'user.current');
 				setGate('ready');
 				setUid(uid);
-				const base = await withTimeout(fetchProductBase(forceInitialRefresh), 90000, 'catalog/browse');
+				const [base, appAccess] = await Promise.all([
+					withTimeout(fetchProductBase(forceInitialRefresh), 90000, 'catalog/browse'),
+					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
+				]);
 				setRows(base.rows);
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setCanEditPrices(base.canEditPrices);
+				setCanManageAccess(Boolean(appAccess?.canManageAccess));
+				setAppAccess(appAccess);
 				setMode('base');
 			})().catch((e: unknown) => {
 				setGate('error');
@@ -667,8 +675,8 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		});
 	}, [ctx, forceInitialRefresh]);
 
-	// Временный скрытый вход для руководства: Ctrl+Alt+Shift+P в окне «Товары».
-	// В интерфейсе кнопки нет; сама панель дополнительно проверяет руководящую учётку.
+	// Горячую клавишу оставляем как быстрый вход в дополнение к обычной кнопке.
+	// Право на открытие приходит с сервера из той же политики, что защищает API.
 	useEffect(() => {
 		if (pickMode) return;
 		const onKeyDown = (event: KeyboardEvent): void => {
@@ -677,7 +685,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				&& event.altKey
 				&& event.shiftKey
 				&& event.code === 'KeyP'
-				&& (ctx.__mock || MANAGEMENT_USER_IDS.includes(uid) || isPortalAdmin())
+				&& canManageAccess
 			) {
 				event.preventDefault();
 				setAccessOpen(true);
@@ -685,7 +693,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		};
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
-	}, [ctx.__mock, pickMode, uid]);
+	}, [canManageAccess, pickMode]);
 
 	const allowedStoreTitles = useMemo(
 		() => picker?.allowedStoreTitles?.map(normalizeStoreTitle) ?? [],
@@ -784,7 +792,15 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	}
 
 	// ── корзина быстрой продажи ───────────────────────────────────────────────
-	const canQuickSale = !readOnly && QUICKSALE_USER_IDS.includes(uid);
+	const permissionAllows = (permissionId: AccessPermissionId, legacyAllowed: boolean): boolean => {
+		const decision = appAccess?.decisions[permissionId] ?? 'inherit';
+		return decision === 'allow' ? true : decision === 'deny' ? false : legacyAllowed;
+	};
+	const canQuickSale = !readOnly && permissionAllows('realizations.create', QUICKSALE_USER_IDS.includes(uid));
+	const canPrintPriceTags = permissionAllows('catalog.print_price_tags', true);
+	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canEditPrices);
+	const canExportComparison = permissionAllows('catalog.export_comparison', canEditPrices || canQuickSale);
+	const canViewSalesReport = permissionAllows('reports.sales', !readOnly);
 	const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 	const cartList = useMemo(
 		() => [...cart.entries()].map(([id, qty]) => ({ row: rowById.get(id), qty })).filter((c): c is { row: BaseRow; qty: number } => Boolean(c.row)),
@@ -937,7 +953,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	if (gate === 'checking') return <div className="base"><header><h1>База товаров</h1></header><p className="base-load">Загрузка…</p></div>;
 	if (gate === 'error') return <div className="base"><header><h1>База товаров</h1></header><p className="error">⛔ {errMsg}</p></div>;
 	if (accessOpen) {
-		return <AccessControl currentUserId={uid} mock={Boolean(ctx.__mock)} onClose={() => setAccessOpen(false)} />;
+		return <AccessControl currentUserId={uid} mock={Boolean(ctx.__mock)} canManageAccess={canManageAccess} onClose={() => setAccessOpen(false)} />;
 	}
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
@@ -990,7 +1006,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					))}
 				</div>}
 				<div className="tb-spacer" />
-				{!pickMode && (priceTagMode
+				{!pickMode && canPrintPriceTags && (priceTagMode
 					? <>
 						<button className="btn-secondary" type="button" onClick={cancelPriceTagSelection}>Отмена</button>
 						<button className="btn-primary" type="button" disabled={priceTagItems.length === 0} onClick={() => setShowPriceTags(true)}>Подготовить ({priceTagItems.length})</button>
@@ -999,14 +1015,15 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
-				{(pickMode || allowCreateProduct || canEditPrices) && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
-				{!pickMode && (canEditPrices || canQuickSale) && (
+				{canCreateCatalogProduct && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
+				{!pickMode && canExportComparison && (
 					<button className="btn-secondary" type="button" onClick={() => void exportComparison()} disabled={exportingComparison}>
 						{exportingComparison ? 'Готовлю сверку…' : 'Сверка с Битрикс'}
 					</button>
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
-				{!pickMode && !readOnly && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
+				{!pickMode && canViewSalesReport && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
+				{!pickMode && canManageAccess && <button className="btn-secondary" onClick={() => setAccessOpen(true)}>⚙ Права доступа</button>}
 			</div>
 			{comparisonError && <p className="cart-err">{comparisonError}</p>}
 
@@ -1108,7 +1125,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					</div>
 				)}
 
-			{(pickMode || allowCreateProduct || canEditPrices) && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
+			{canCreateCatalogProduct && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
 
 			{priceRow && <CatalogPriceModal row={priceRow} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
 

@@ -5,6 +5,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { assertDealQuoteVariantSelected, completeTransferFromTransit, fetchErpStocksFor, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
+import { appPermission } from '../access-policy.js';
 import {
 	newTransferData,
 	normalizeTransferLines,
@@ -314,8 +315,10 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const me = await currentUser(client);
 			const all = await loadTransferRequests(client);
-			const requests = me.isSupply ? all : all.filter((request) => request.createdById === me.id);
-			return { ok: true, requests, isSupply: me.isSupply };
+			const canViewAll = appPermission(req, 'transfers.view_all', me.isSupply);
+			const canManage = appPermission(req, 'transfers.manage_requests', me.isSupply);
+			const requests = canViewAll ? all : all.filter((request) => request.createdById === me.id);
+			return { ok: true, requests, isSupply: canManage };
 		} catch (err) {
 			app.log.error({}, `[api/transfer-requests/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err), requests: [] });
@@ -332,7 +335,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
-			if (!me.isSupply && request.createdById !== me.id) return reply.code(403).send({ ok: false, error: 'можно отменить только свою заявку' });
+			if (!appPermission(req, 'transfers.cancel_own_request', me.isSupply || request.createdById === me.id)) {
+				return reply.code(403).send({ ok: false, error: 'можно отменить только свою заявку' });
+			}
 			if (request.status !== 'pending') return reply.code(409).send({ ok: false, error: 'заявка уже обработана' });
 			const canceled = { ...request, status: 'canceled' as const, canceledAt: new Date().toISOString(), canceledById: me.id, canceledByName: me.name };
 			await saveTransferRequest(client, canceled);
@@ -357,7 +362,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			await Promise.all([ensureTransferRequestsEntity(client), ensureTransfersEntity(client)]);
 			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'создать перемещение по заявке может только снабжение' });
+			if (!appPermission(req, 'transfers.manage_requests', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'создать перемещение по заявке может только снабжение' });
+			}
 			if (request.kind !== 'transfer') return reply.code(409).send({ ok: false, error: 'по этой заявке нельзя создать перемещение' });
 			if (request.status !== 'pending') return reply.code(409).send({ ok: false, error: 'заявка уже обработана' });
 			const fromStore = String(b['fromStore'] ?? request.fromStore).trim();
@@ -505,7 +512,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		await ensureTransfersEntity(client);
 		try {
 			const me = await currentUser(client);
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'создавать перемещение может только снабжение' });
+			if (!appPermission(req, 'transfers.create', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'создавать перемещение может только снабжение' });
+			}
 			const transfer = await createDraftTransfer({ client, erp, me, fromStore, toStore, lines, ...(note ? { note } : {}), historyNote: 'создано вручную в окне' });
 			app.log.info({ id: transfer.id, fromStore, toStore }, '[api/transfers/create-manual] ok');
 			return { ok: true, transfer };
@@ -533,7 +542,11 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (to) transfers = transfers.filter((t) => (t.createdAt || '').slice(0, 10) <= to);
 			const me = await currentUser(client);
 			const owners = await resolveDealOwners(client, transfers.map((t) => t.dealId));
-			return { ok: true, transfers: transfers.map((t) => ({ ...t, ownerName: owners.get(t.dealId) ?? '' })), isSupply: me.isSupply };
+			return {
+				ok: true,
+				transfers: transfers.map((t) => ({ ...t, ownerName: owners.get(t.dealId) ?? '' })),
+				isSupply: appPermission(req, 'transfers.manage_requests', me.isSupply),
+			};
 		} catch (err) {
 			app.log.error({}, `[api/transfers/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -558,7 +571,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				listActiveStoreTitles(erp),
 			]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'менять склад назначения может только снабжение' });
+			if (!appPermission(req, 'transfers.edit_destination', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'менять склад назначения может только снабжение' });
+			}
 			if (doc.status !== 'draft' && doc.status !== 'collected' && doc.status !== 'requested') {
 				return reply.code(409).send({ ok: false, error: 'склад назначения можно изменить только до отправки перемещения' });
 			}
@@ -615,7 +630,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const [doc, me] = await Promise.all([loadOne(client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'количество перемещения может менять только снабжение' });
+			if (!appPermission(req, 'transfers.edit_quantity', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'количество перемещения может менять только снабжение' });
+			}
 			if (!['draft', 'collected', 'accepted', 'requested'].includes(doc.status)) {
 				return reply.code(409).send({ ok: false, error: `нельзя менять количество из статуса ${doc.status}` });
 			}
@@ -864,7 +881,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const [doc, me] = await Promise.all([loadOne(client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'проводить перемещение может только снабжение' });
+			if (!appPermission(req, 'transfers.post', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'проводить перемещение может только снабжение' });
+			}
 			if (doc.status !== 'accepted') return reply.code(409).send({ ok: false, error: `нельзя провести из статуса ${doc.status}` });
 			if (!sameTransferQuantities(doc.lines, doc.acceptedLines)) {
 				return reply.code(409).send({ ok: false, error: 'принятое количество не совпадает с документом — сначала скорректируй количество' });
@@ -983,7 +1002,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (doc.status !== 'shortage') return reply.code(409).send({ ok: false, error: `нельзя скорректировать недовоз из статуса ${doc.status}` });
 			if (!doc.shortageLines.length) return reply.code(409).send({ ok: false, error: 'у перемещения нет хвоста недовоза' });
 			const me = await currentUser(client);
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'корректировать недовоз может только снабжение (закупка)' });
+			if (!appPermission(req, 'transfers.resolve_shortage', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'корректировать недовоз может только снабжение (закупка)' });
+			}
 			const did = Number(doc.dealId) || 0;
 			const { name: returnEntry } = await receiveTransferFromTransit(erp, {
 				transferId: id,
@@ -1022,7 +1043,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		try {
 			const [doc, me] = await Promise.all([loadOne(client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (!me.isSupply) return reply.code(403).send({ ok: false, error: 'отменять перемещение может только снабжение' });
+			if (!appPermission(req, 'transfers.cancel', me.isSupply)) {
+				return reply.code(403).send({ ok: false, error: 'отменять перемещение может только снабжение' });
+			}
 			if (!['draft', 'collected', 'requested'].includes(doc.status)) return reply.code(409).send({ ok: false, error: `нельзя отменить из статуса ${doc.status}` });
 			const now = new Date().toISOString();
 			const data: TransferData = {

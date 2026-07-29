@@ -4,6 +4,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, b24StoreTitle, erpContext, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
 import { canManageStock } from './api-stock.js';
+import { appPermission } from '../access-policy.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData, parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
@@ -439,7 +440,9 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName || requestName === STANDALONE_SUPPLY_REQUEST) return reply.code(400).send({ ok: false, error: 'неверная заявка снабжению' });
 		try {
-			if (!(await canManageStock(client))) return reply.code(403).send({ ok: false, error: 'редактирование комментария доступно снабжению' });
+			if (!appPermission(req, 'supply.edit_request_note', await canManageStock(client))) {
+				return reply.code(403).send({ ok: false, error: 'редактирование комментария доступно снабжению' });
+			}
 			const note = await updateSupplyRequestNote(erp, requestName, String(b.note ?? ''));
 			app.log.info({ requestName }, '[api/supply/request-note] updated');
 			return { ok: true, note };
@@ -753,7 +756,9 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const me = await currentUser(client);
-		if (!SUPPLY_DOCUMENT_DELETE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
+		if (!appPermission(req, 'supply.delete_documents', SUPPLY_DOCUMENT_DELETE_IDS.has(me.id))) {
+			return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
+		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		const purchaseOrder = String(b.purchaseOrder ?? '').trim();

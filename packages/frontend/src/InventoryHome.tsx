@@ -14,6 +14,7 @@ import {
 	buildPointDocuments,
 	getInitiators,
 	fetchCurrentUser,
+	fetchCurrentAppAccess,
 	isPortalAdmin,
 	withTimeout,
 	previewErpDoc,
@@ -183,8 +184,11 @@ export function InventoryHome(): JSX.Element {
 				} catch {
 					initiators = [];
 				}
-				// роль инициатора — ниже (админ ИЛИ в списке инициаторов)
-					const init = isPortalAdmin() || initiators.includes(uid);
+				// Явное право приложения сильнее старого списка инициаторов.
+				const legacyInitiator = isPortalAdmin() || initiators.includes(uid);
+				const appAccess = await withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null);
+				const manageDecision = appAccess?.decisions['inventory.manage'] ?? 'inherit';
+				const init = manageDecision === 'allow' ? true : manageDecision === 'deny' ? false : legacyInitiator;
 				setIsInitiator(init);
 
 				const sts = await withTimeout(fetchStores(), 15000, 'core stores');
