@@ -621,6 +621,31 @@ function removeParagraphsContaining(xml: string, needle: string): string {
 	});
 }
 
+function signatureTableXml(): string {
+	const cell = (width: number, token: 'CONTRACTOR_SIGNATURE' | 'CUSTOMER_SIGNATURE'): string =>
+		`<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>`
+		+ '<w:vAlign w:val="top"/><w:tcBorders>'
+		+ '<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>'
+		+ '</w:tcBorders><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="0" w:type="dxa"/>'
+		+ '<w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>'
+		+ '<w:p><w:pPr><w:spacing w:after="0"/><w:keepLines/></w:pPr>'
+		+ `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>`
+		+ `<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>{{${token}}}</w:t></w:r></w:p></w:tc>`;
+	return '<w:tbl><w:tblPr><w:tblW w:w="9930" w:type="dxa"/><w:tblLayout w:type="fixed"/>'
+		+ '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/>'
+		+ '<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+		+ '<w:tblLook w:val="0400" w:firstRow="0" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="1" w:noVBand="1"/>'
+		+ '</w:tblPr><w:tblGrid><w:gridCol w:w="4980"/><w:gridCol w:w="4950"/></w:tblGrid>'
+		+ `<w:tr>${cell(4980, 'CONTRACTOR_SIGNATURE')}${cell(4950, 'CUSTOMER_SIGNATURE')}</w:tr></w:tbl>`;
+}
+
+function separateAnnexSignatureBlocks(xml: string): string {
+	return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) =>
+		paragraph.includes('{{CONTRACTOR_SIGNATURE}}') && paragraph.includes('{{CUSTOMER_SIGNATURE}}')
+			? signatureTableXml()
+			: paragraph);
+}
+
 export async function buildContractDocx(data: {
 	templateId: ContractTemplateId;
 	contractNumber: string;
@@ -647,6 +672,7 @@ export async function buildContractDocx(data: {
 	if (data.customer.kind === 'person') {
 		xml = removeParagraphsContaining(xml, 'Расчеты по Договору осуществляются в рублях путем безналичных платежей');
 	}
+	xml = separateAnnexSignatureBlocks(xml);
 	const rowPattern = /<w:tr\b[\s\S]*?<\/w:tr>/g;
 	xml = xml.replace(rowPattern, (rowTemplate) => {
 		if (!rowTemplate.includes('{{PRODUCT_NAME}}')) return rowTemplate;

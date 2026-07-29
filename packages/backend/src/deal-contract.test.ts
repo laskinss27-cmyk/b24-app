@@ -87,7 +87,13 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 	assert.doesNotMatch(xml, /Кутепова|38(?:\s| )*500|№ 514/);
 	assert.equal((xml.match(/Реле/g) ?? []).length, 2);
 	assert.equal((xml.match(/Монтаж/g) ?? []).length, 2);
-	assert.equal((xml.match(/<w:tbl>/g) ?? []).length, 4);
+	assert.equal((xml.match(/<w:tbl>/g) ?? []).length, 6);
+	const paragraphs = xml.match(/<w:p\b[\s\S]*?<\/w:p>/g) ?? [];
+	assert.equal(
+		paragraphs.some((paragraph) => paragraph.includes('Забоев Г.А.') && paragraph.includes('Иванов И.И.')),
+		false,
+	);
+	assert.equal((xml.match(/<w:tblW w:w="9930" w:type="dxa"\/>/g) ?? []).length, 3);
 	assert.match(xml, /НДС 22%/);
 	assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/);
 	assert.match(xml, /Забоева Григория Анатольевича/);
