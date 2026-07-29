@@ -133,6 +133,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
 type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'inventory';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
+type OrderStatusFilter = 'all' | 'needs_action' | 'in_progress' | 'closed';
 
 interface DecisionState {
 	id: string;
@@ -148,6 +149,8 @@ const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юно�
 const supplierNorm = (name: string): string => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const money = (value: number): string => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(value);
 const requestItemsForOrder = (order: SupplyOrderRow): SupplyOrderItem[] => order.items ?? [];
+const orderStatus = (order: SupplyOrderRow): Exclude<OrderStatusFilter, 'all'> =>
+	order.closed ? 'closed' : requestItemsForOrder(order).length > 0 ? 'needs_action' : 'in_progress';
 const rowKey = (orderName: string, productId: number, index: number): string => `${orderName}:${productId}:${index}`;
 let allocationSequence = 0;
 const makeDecision = (key: string, qty: number): DecisionState => ({
@@ -868,7 +871,9 @@ function OrdersView({
 	busy,
 	reviewing,
 	creationErrors,
+	statusFilter,
 	onSort,
+	onStatusFilter,
 	onToggle,
 	onPatch,
 	onAdd,
@@ -891,7 +896,9 @@ function OrdersView({
 	busy: string | null;
 	reviewing: string;
 	creationErrors: Record<string, string>;
+	statusFilter: OrderStatusFilter;
 	onSort: (sort: SortKey) => void;
+	onStatusFilter: (status: OrderStatusFilter) => void;
 	onToggle: (name: string) => void;
 	onPatch: (key: string, id: string, patch: Partial<DecisionState>) => void;
 	onAdd: (key: string, qty: number) => void;
@@ -911,15 +918,26 @@ function OrdersView({
 					<h2>Обеспечение и заказы</h2>
 					<p>Открой заявку, выбери по каждой строке закупку или перемещение, затем создай документы одним явным действием.</p>
 				</div>
-				<label className="supply-sort">
-					<span>Сортировка</span>
-					<select value={sort} onChange={(e) => onSort(e.target.value as SortKey)}>
-						<option value="dateDesc">сначала новые</option>
-						<option value="dateAsc">сначала старые</option>
-						<option value="store">по точке</option>
-						<option value="deal">по сделке</option>
-					</select>
-				</label>
+				<div className="supply-order-filters">
+					<label className="supply-sort">
+						<span>Статус</span>
+						<select value={statusFilter} onChange={(e) => onStatusFilter(e.target.value as OrderStatusFilter)}>
+							<option value="all">Все статусы</option>
+							<option value="needs_action">Требуют обработки</option>
+							<option value="in_progress">В исполнении</option>
+							<option value="closed">Закрытые</option>
+						</select>
+					</label>
+					<label className="supply-sort">
+						<span>Сортировка</span>
+						<select value={sort} onChange={(e) => onSort(e.target.value as SortKey)}>
+							<option value="dateDesc">сначала новые</option>
+							<option value="dateAsc">сначала старые</option>
+							<option value="store">по точке</option>
+							<option value="deal">по сделке</option>
+						</select>
+					</label>
+				</div>
 			</div>
 			<div className="supply-order-list">
 				{orders.length === 0 && <div className="empty">{search.trim() ? 'Ничего не найдено.' : 'Заявок пока нет.'}</div>}
@@ -959,9 +977,13 @@ function OrdersView({
 					return (
 						<article key={order.name} className={`supply-order-card${isOpen ? ' open' : ''}`}>
 							<button className="supply-order-head" type="button" onClick={() => onToggle(order.name)}>
-								<div>
+								<div className="supply-order-head-main">
 									<b>{order.displayTitle || `${order.name} · ${order.dealTitle || `сделка #${order.dealId}`}`}</b>
 									<small>{order.name} · {order.dealTitle || `сделка #${order.dealId}`} · нужно до {order.deadline || 'дата не указана'}</small>
+								</div>
+								<div className={`supply-order-head-comment${order.note.trim() ? '' : ' is-empty'}`}>
+									<span>Общий комментарий</span>
+									<p title={order.note.trim()}>{order.note.trim() || 'Комментария нет'}</p>
 								</div>
 								<div className="supply-order-head-meta">
 									<Pill tone={requestState.tone}>{requestState.label}</Pill>
@@ -1351,6 +1373,7 @@ export function Supply(): JSX.Element {
 	const [view, setView] = useState<ViewKey>(requestId > 0 ? 'incoming' : 'orders');
 	const [reportsOpen, setReportsOpen] = useState(false);
 	const [sort, setSort] = useState<SortKey>('dateDesc');
+	const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
 	const [expanded, setExpanded] = useState('');
 	const [decisions, setDecisions] = useState<DecisionMap>({});
 	const [busy, setBusy] = useState<string | null>(null);
@@ -1601,8 +1624,10 @@ export function Supply(): JSX.Element {
 		return String(b.date).localeCompare(String(a.date));
 	}), [requestOrders, sort]);
 	const filteredOrders = useMemo(
-		() => sortedOrders.filter((order) => searchMatches(searches.orders, orderSearchValues(order))),
-		[sortedOrders, searches.orders],
+		() => sortedOrders.filter((order) =>
+			(orderStatusFilter === 'all' || orderStatus(order) === orderStatusFilter)
+			&& searchMatches(searches.orders, orderSearchValues(order))),
+		[orderStatusFilter, sortedOrders, searches.orders],
 	);
 
 	const patchDecision = (key: string, id: string, patch: Partial<DecisionState>): void => {
@@ -1768,7 +1793,7 @@ export function Supply(): JSX.Element {
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} />}
+				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>

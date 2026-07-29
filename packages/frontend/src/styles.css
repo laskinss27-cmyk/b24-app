@@ -5237,6 +5237,14 @@ body.deal-placement-body #root {
 	color: #7a8699;
 }
 
+.supply-order-filters {
+	display: flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
 .supply-order-list {
 	display: grid;
 	gap: 10px;
@@ -5259,9 +5267,9 @@ body.deal-placement-body #root {
 	width: 100%;
 	border: 0;
 	background: #fff;
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(280px, 1.35fr) minmax(220px, 1fr) auto;
 	align-items: center;
-	justify-content: space-between;
 	gap: 16px;
 	padding: 12px 14px;
 	text-align: left;
@@ -5278,10 +5286,46 @@ body.deal-placement-body #root {
 	display: block;
 }
 
+.supply-order-head-main {
+	min-width: 0;
+}
+
 .supply-order-head small {
 	color: #7a8699;
 	font-size: 12px;
 	margin-top: 3px;
+}
+
+.supply-order-head-comment {
+	min-width: 0;
+	padding-left: 16px;
+	border-left: 1px solid #e3e8ef;
+}
+
+.supply-order-head-comment span {
+	display: block;
+	margin-bottom: 3px;
+	color: #7a8699;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.supply-order-head-comment p {
+	display: -webkit-box;
+	margin: 0;
+	overflow: hidden;
+	color: #344054;
+	font-size: 13px;
+	line-height: 1.35;
+	white-space: pre-wrap;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+
+.supply-order-head-comment.is-empty p {
+	color: #98a2b3;
 }
 
 .supply-order-head-meta {
@@ -5290,6 +5334,50 @@ body.deal-placement-body #root {
 	justify-content: flex-end;
 	gap: 8px;
 	flex-wrap: wrap;
+}
+
+@media (max-width: 980px) {
+	.supply-proto-card-head {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.supply-order-filters {
+		justify-content: flex-start;
+		width: 100%;
+	}
+
+	.supply-order-head {
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.supply-order-head-comment {
+		grid-column: 1 / -1;
+		grid-row: 2;
+		padding-top: 9px;
+		padding-left: 0;
+		border-top: 1px solid #eef1f5;
+		border-left: 0;
+	}
+}
+
+@media (max-width: 620px) {
+	.supply-order-filters .supply-sort {
+		width: 100%;
+	}
+
+	.supply-order-head {
+		grid-template-columns: 1fr;
+	}
+
+	.supply-order-head-comment,
+	.supply-order-head-meta {
+		grid-column: 1;
+	}
+
+	.supply-order-head-meta {
+		justify-content: flex-start;
+	}
 }
 
 .supply-order-body {
