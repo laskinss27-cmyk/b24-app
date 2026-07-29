@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
+import { InventoryHome } from './InventoryHome.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
 import {
 	cancelTransfer,
@@ -129,7 +130,7 @@ const MOCK_ORDERS: SupplyOrderRow[] = [
 ];
 
 type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
-type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover';
+type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'inventory';
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 
 interface DecisionState {
@@ -1360,7 +1361,7 @@ export function Supply(): JSX.Element {
 	const [creationErrors, setCreationErrors] = useState<Record<string, string>>({});
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', inventory: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
 	const [stockForm, setStockForm] = useState<Awaited<ReturnType<typeof fetchStockFormData>> | null>(ctx.__mock
 		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: DEFAULT_SUPPLIERS, canCreate: true, isSupply: true }
@@ -1699,7 +1700,7 @@ export function Supply(): JSX.Element {
 					<div className="supply-proto-nav-group">
 						<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
 						<button
-							className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' ? ' active' : ''}`}
+							className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' || view === 'inventory' ? ' active' : ''}`}
 							type="button"
 							aria-expanded={reportsOpen}
 							aria-controls="supply-reports-menu"
@@ -1711,6 +1712,7 @@ export function Supply(): JSX.Element {
 							<div id="supply-reports-menu" className="supply-proto-subnav">
 								<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
 								<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => setView('turnover')}>Оборачиваемость</button>
+								<button className={view === 'inventory' ? 'active' : ''} type="button" onClick={() => setView('inventory')}>Инвентаризация</button>
 							</div>
 						)}
 					</div>
@@ -1720,7 +1722,7 @@ export function Supply(): JSX.Element {
 				</nav>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>
-			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' ? ' supply-proto-main-wide' : ''}`}>
+			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
 				<header className="supply-proto-top">
 					<div>
 						<h1>Снабжение</h1>
@@ -1732,6 +1734,8 @@ export function Supply(): JSX.Element {
 							? 'История прихода, перемещения, реализации и инвентаризации по выбранному товару.'
 							: view === 'turnover'
 							? 'Оборачиваемость каждой товарной позиции за выбранный период и текущая ситуация с запасами.'
+							: view === 'inventory'
+							? 'Создание и проведение инвентаризаций по торговым точкам и складам.'
 							: view === 'incoming'
 								? 'Заявки торговых точек, по которым снабжение должно принять решение.'
 							: view === 'logistics'
@@ -1768,6 +1772,7 @@ export function Supply(): JSX.Element {
 				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card supply-stock-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
 				{view === 'ledger' && <div className="supply-proto-card supply-stock-card"><LedgerTab /></div>}
 				{view === 'turnover' && <div className="supply-proto-card supply-stock-card"><TurnoverReportTab stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
+				{view === 'inventory' && <InventoryHome />}
 			</main>
 			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onCreateSupplier={addSupplier} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}
 			{openDocument && <DocumentDetail
