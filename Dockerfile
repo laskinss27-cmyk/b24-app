@@ -14,8 +14,12 @@ RUN npm ci --ignore-scripts
 # ── Слой 2: код и сборка.
 COPY tsconfig.base.json ./
 COPY packages ./packages
+# Backend imports runtime access-policy helpers from the shared workspace.
+# Bundle that workspace for plain Node.js and point only the container copy at it.
 RUN npm -w @b24-app/frontend run build \
- && npm -w @b24-app/backend run build
+ && npm -w @b24-app/backend run build \
+ && npx esbuild packages/shared/src/index.ts --bundle --platform=node --format=esm --outfile=packages/shared/dist/index.js \
+ && sed -i 's#\./src/index\.ts#./dist/index.js#g' packages/shared/package.json
 
 # ── Рантайм-настройки
 ENV NODE_ENV=production
