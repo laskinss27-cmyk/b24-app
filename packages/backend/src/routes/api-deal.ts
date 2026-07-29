@@ -4,7 +4,7 @@ import { B24Client, B24ApiError, type BatchCall } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, listActiveStoreTitles, coreStoreId, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, fetchErpRetailPrices, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, listActiveStoreTitles, coreStoreId, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem, type DealStage, type ErpRealization, type PlanItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { buildDealExportXlsx, type DealExportRow } from '../deal-export-xlsx.js';
@@ -421,6 +421,18 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		]);
 		const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
 		return stages.length > 0 || realizations.length > 0 || supply.length > 0 || transfers.length > 0;
+	};
+	const supplyTransferAllocation = async (client: B24Client, dealId: number): Promise<Map<string, Map<number, number>>> => {
+		await ensureTransfersEntity(client);
+		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+		const result = new Map<string, Map<number, number>>();
+		for (const transfer of (items ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId))) {
+			if (!transfer || transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || !transfer.supplyRequestKey) continue;
+			const byProduct = result.get(transfer.supplyRequestKey) ?? new Map<number, number>();
+			for (const line of transfer.lines) byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);
+			result.set(transfer.supplyRequestKey, byProduct);
+		}
+		return result;
 	};
 	const syncDealTechnicalFields = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
 		try {
@@ -1146,8 +1158,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const lines = (Array.isArray(b.items) ? b.items : [])
-			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown; isService?: unknown })
-			.map((it) => ({ productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent) || 0, isService: Boolean(it.isService) }))
+			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown; isService?: unknown; lineKey?: unknown })
+			.map((it) => ({ productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent) || 0, isService: Boolean(it.isService), lineKey: String(it.lineKey ?? '').trim() }))
 			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.qty) && it.qty > 0 && Number.isFinite(it.priceListRate) && it.priceListRate >= 0 && it.discountPercent >= 0 && it.discountPercent <= 100);
 		try {
 			const serviceIds = await fetchServiceProductIds(client, lines.map((l) => l.productId));
@@ -1180,8 +1192,11 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			if (changedPrices.length) await syncDealRealizationPrices(erp, dealId, changedPrices);
 			let savedPlan: Awaited<ReturnType<typeof upsertDealPlan>>;
 			try {
-				savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}) })), today);
+				savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.lineKey ? { lineKey: l.lineKey } : {}) })), today);
+				const transferAllocation = await supplyTransferAllocation(client, dealId);
+				await syncSupplyRequestQuantitiesFromDeal(erp, { dealId, previousPlan, nextPlan: savedPlan.lines, transferAllocation });
 			} catch (error) {
+				await upsertDealPlan(erp, dealId, previousPlan, today).catch(() => undefined);
 				if (changedPrices.length) {
 					const rollbackPrices = changedPrices.flatMap(({ productId }) => {
 						const previousRate = previousByProduct.get(productId);
@@ -1248,6 +1263,40 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				.send(file);
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/export-xlsx] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/deal/replace-plan-product', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; oldProductId?: unknown; newProductId?: unknown; newItemName?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
+		const dealId = Number(b.dealId);
+		const oldProductId = Number(b.oldProductId);
+		const newProductId = Number(b.newProductId);
+		if (![dealId, oldProductId, newProductId].every((value) => Number.isInteger(value) && value > 0)) {
+			return reply.code(400).send({ ok: false, error: 'некорректные данные замены' });
+		}
+		try {
+			await assertDealQuoteVariantSelected(erp, dealId);
+			const transferAllocation = await supplyTransferAllocation(client, dealId);
+			const plan = await replaceDealPlanSupplyProduct(erp, {
+				dealId,
+				oldProductId,
+				newProductId,
+				newItemName: String(b.newItemName ?? '').trim(),
+				deliveryDate: new Date().toISOString().slice(0, 10),
+				transferAllocation,
+			});
+			const total = await calculateDealPlanTotal(erp, dealId);
+			await setDealB24Service(client, dealId, total);
+			await syncDealTechnicalFields(client, erp, dealId);
+			app.log.info({ dealId, oldProductId, newProductId }, '[api/deal/replace-plan-product] ok');
+			return { ok: true, total, lines: plan.length };
+		} catch (err) {
+			app.log.error({ dealId, oldProductId, newProductId }, `[api/deal/replace-plan-product] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});

@@ -50,6 +50,8 @@ The authoritative list of individual endpoints is the `app.get` and `app.post` r
 
 Deal print forms share the data returned by `POST /api/deal/kp`. The read-only `POST /api/deal/kp-docx` route creates the Word file, while `POST /api/deal/export-xlsx` creates Excel. The proposal PDF and sales receipt use the frontend and the browser's system print dialog. Contract context and Word generation are served by `/api/contracts/context` and `/api/contracts/generate`. For generation, the frontend supplies the template, our legal entity, customer type, date, address, and work duration; the backend derives the contract number and VAT automatically.
 
+Linked deal and supply-request lines are changed only through server routes. `POST /api/deal/replace-plan-product` replaces an unallocated product in both the working deal composition and its open supply request. `POST /api/supply/request-line` lets supply staff change the product or quantity and applies the same change to the deal. Quantity cannot fall below the allocated amount, and a fully allocated line is locked.
+
 ## Request authentication
 
 The frontend supplies:

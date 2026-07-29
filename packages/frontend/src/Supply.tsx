@@ -32,6 +32,8 @@ import {
 	updateSupplyPurchaseOrder,
 	updateSupplyPurchaseStage,
 	updateSupplyOrderNote,
+	updateSupplyRequestLine,
+	searchProducts,
 	type SupplyDecisionAction,
 	type SupplyDecisionLine,
 	type SupplyOrderItem,
@@ -735,9 +737,81 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 	);
 }
 
+function SupplyRequestLineEditor({
+	order,
+	item,
+	onSaved,
+}: {
+	order: SupplyOrderRow;
+	item: SupplyOrderItem;
+	onSaved: () => Promise<void>;
+}): JSX.Element {
+	const [open, setOpen] = useState(false);
+	const [query, setQuery] = useState(item.itemName);
+	const [selected, setSelected] = useState({ id: item.productId, name: item.itemName });
+	const [qty, setQty] = useState(String(item.requestedQty ?? item.qty));
+	const [results, setResults] = useState<Array<{ id: number; name: string }>>([]);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+	const minimum = Number(item.allocatedQty ?? 0);
+
+	useEffect(() => {
+		if (!open || query.trim().length < 2 || query.trim() === selected.name) { setResults([]); return; }
+		let alive = true;
+		const timer = window.setTimeout(() => {
+			void searchProducts(query).then((rows) => { if (alive) setResults(rows.slice(0, 12)); }).catch(() => { if (alive) setResults([]); });
+		}, 250);
+		return () => { alive = false; window.clearTimeout(timer); };
+	}, [open, query, selected.name]);
+
+	const save = async (): Promise<void> => {
+		const nextQty = Number(qty.replace(',', '.'));
+		if (query.trim() !== selected.name) { setError('Выберите товар из результатов поиска.'); return; }
+		if (!Number.isFinite(nextQty) || nextQty <= 0) { setError('Укажите количество больше нуля.'); return; }
+		if (nextQty < minimum) { setError(`Нельзя уменьшить ниже уже распределённого количества: ${minimum}.`); return; }
+		setBusy(true); setError('');
+		try {
+			await updateSupplyRequestLine({
+				dealId: Number(order.dealId),
+				requestName: order.name,
+				requestKey: order.requestKey,
+				...(item.rowName ? { rowName: item.rowName } : {}),
+				productId: item.productId,
+				nextProductId: selected.id,
+				nextItemName: selected.name,
+				nextQty,
+			});
+			await onSaved();
+			setOpen(false);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : 'Не удалось изменить позицию.');
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<>
+			<button className="supply-line-edit" type="button" onClick={() => setOpen(true)}>изменить</button>
+			{open && <div className="supply-proto-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
+				<section className="supply-proto-modal supply-line-edit-modal" role="dialog" aria-modal="true" aria-label="Изменить позицию заявки" onMouseDown={(event) => event.stopPropagation()}>
+					<header><div><h2>Изменить позицию</h2><p>{order.name} · сделка #{order.dealId}</p></div><button type="button" disabled={busy} onClick={() => setOpen(false)}>×</button></header>
+					<label><span>Товар</span><input value={query} disabled={busy} onChange={(event) => { setQuery(event.target.value); setError(''); }} /></label>
+					{results.length > 0 && <div className="supply-line-search-results">{results.map((row) => <button key={row.id} type="button" onClick={() => { setSelected(row); setQuery(row.name); setResults([]); }}>{row.name}<small>#{row.id}</small></button>)}</div>}
+					<label><span>Количество в заявке</span><input type="number" min={minimum || 0.001} step="any" value={qty} disabled={busy} onChange={(event) => { setQty(event.target.value); setError(''); }} /><small>Уже распределено: {minimum}</small></label>
+					{selected.id !== item.productId && minimum > 0 && <p className="supply-order-review-error">Товар уже частично распределён и заменить его нельзя. Для остатка добавьте новую строку в сделке.</p>}
+					{error && <p className="supply-order-review-error">{error}</p>}
+					<footer><button type="button" disabled={busy} onClick={() => setOpen(false)}>Отмена</button><button className="primary" type="button" disabled={busy || !selected.id || query.trim() !== selected.name || (selected.id !== item.productId && minimum > 0)} onClick={() => void save()}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></footer>
+				</section>
+			</div>}
+		</>
+	);
+}
+
 function DecisionRows({
 	order,
 	item,
+	originalItem,
 	index,
 	decisions,
 	suppliers,
@@ -745,9 +819,11 @@ function DecisionRows({
 	onPatch,
 	onAdd,
 	onRemove,
+	onEditLine,
 }: {
 	order: SupplyOrderRow;
 	item: SupplyOrderItem;
+	originalItem: SupplyOrderItem;
 	index: number;
 	decisions: DecisionState[];
 	suppliers: string[];
@@ -755,6 +831,7 @@ function DecisionRows({
 	onPatch: (id: string, patch: Partial<DecisionState>) => void;
 	onAdd: () => void;
 	onRemove: (id: string) => void;
+	onEditLine: () => Promise<void>;
 }): JSX.Element {
 	const entries = stockEntries(item).filter(([store]) => store !== order.toStore);
 	const assigned = decisions.filter(decisionReady).reduce((sum, decision) => sum + decision.qty, 0);
@@ -781,7 +858,7 @@ function DecisionRows({
 						{allocationIndex === 0 && (
 							<>
 								<td className="supply-order-line-main" rowSpan={decisions.length}>
-									<b>{item.itemName || `#${item.productId}`}</b>
+									<b>{item.itemName || `#${item.productId}`}</b> <SupplyRequestLineEditor order={order} item={originalItem} onSaved={onEditLine} />
 									<small>{item.note || `строка ${index + 1}`}</small>
 									<div className={`supply-allocation-progress${covered >= item.qty ? ' complete' : ''}`}>
 										<span>Распределено {covered} из {item.qty}</span>
@@ -885,6 +962,7 @@ function OrdersView({
 	onOpenTransfer,
 	onPrintApproval,
 	onSaveNote,
+	onEditLine,
 }: {
 	orders: SupplyOrderRow[];
 	sort: SortKey;
@@ -910,6 +988,7 @@ function OrdersView({
 	onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void;
 	onPrintApproval: (order: SupplyOrderRow) => void;
 	onSaveNote: (order: SupplyOrderRow, note: string) => Promise<void>;
+	onEditLine: (order: SupplyOrderRow, item: SupplyOrderItem) => Promise<void>;
 }): JSX.Element {
 	return (
 		<section className="supply-proto-card">
@@ -997,11 +1076,14 @@ function OrdersView({
 										<table className="supply-proto-table supply-decision-table">
 											<thead><tr><th>Позиция</th><th>Нужно</th><th>Остатки</th><th>Действие</th><th>Откуда / поставщик</th><th>Кол-во</th></tr></thead>
 											<tbody>
-											{items.length === 0 ? <tr><td colSpan={6} className="empty">{order.closed ? 'Заявка выполнена.' : 'Все позиции распределены. Ожидается исполнение документов.'}</td></tr> : items.map((item, index) => {
+												{items.length === 0 ? <tr><td colSpan={6} className="empty">{order.closed ? 'Заявка выполнена.' : 'Все позиции распределены. Ожидается исполнение документов.'}</td></tr> : items.map((item, index) => {
 													const key = rowKey(order.name, item.productId, index);
 													const rowDecisions = decisionsForRow(decisions, key, item.qty);
 													const assigned = rowDecisions.filter(decisionReady).reduce((sum, decision) => sum + decision.qty, 0);
-													return <DecisionRows key={key} order={order} item={item} index={index} decisions={rowDecisions} suppliers={suppliers} onCreateSupplier={onCreateSupplier} onPatch={(id, patch) => onPatch(key, id, patch)} onAdd={() => onAdd(key, Math.max(item.qty - assigned, 1))} onRemove={(id) => onRemove(key, id)} />;
+													const originalItem = (order.originalItems ?? []).find((row) => row.rowName && row.rowName === item.rowName)
+														?? (order.originalItems ?? []).find((row) => row.productId === item.productId)
+														?? item;
+													return <DecisionRows key={key} order={order} item={item} originalItem={originalItem} index={index} decisions={rowDecisions} suppliers={suppliers} onCreateSupplier={onCreateSupplier} onPatch={(id, patch) => onPatch(key, id, patch)} onAdd={() => onAdd(key, Math.max(item.qty - assigned, 1))} onRemove={(id) => onRemove(key, id)} onEditLine={() => onEditLine(order, originalItem)} />;
 												})}
 											</tbody>
 										</table>
@@ -1413,6 +1495,12 @@ export function Supply(): JSX.Element {
 		const loaded = await fetchSupplyOrders();
 		setOrders(loaded);
 	};
+	const refreshAfterRequestLineEdit = async (order: SupplyOrderRow): Promise<void> => {
+		setReviewing('');
+		setDecisions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${order.name}:`))));
+		await reload();
+		setNotice(`${order.name}: позиция синхронизирована со сделкой.`);
+	};
 
 	const saveOrderNote = async (order: SupplyOrderRow, note: string): Promise<void> => {
 		const saved = ctx.__mock ? note.trim() : await updateSupplyOrderNote(order.name, note);
@@ -1793,7 +1881,7 @@ export function Supply(): JSX.Element {
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} />}
+				{view === 'orders' && <OrdersView orders={filteredOrders} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onEditLine={refreshAfterRequestLineEdit} />}
 				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>

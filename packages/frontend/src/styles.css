@@ -5407,6 +5407,68 @@ body.deal-placement-body #root {
 	display: block;
 }
 
+.supply-line-edit {
+	border: 0;
+	background: transparent;
+	color: #2067b0;
+	font-size: 12px;
+	padding: 0;
+	margin-left: 6px;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.supply-line-edit-modal {
+	max-width: 620px;
+}
+
+.supply-line-edit-modal > label {
+	display: grid;
+	gap: 6px;
+	margin: 14px 0;
+	font-size: 13px;
+	color: #607086;
+}
+
+.supply-line-edit-modal > label input {
+	min-height: 38px;
+	border: 1px solid #cfd8e6;
+	border-radius: 7px;
+	padding: 7px 10px;
+	color: #17253a;
+}
+
+.supply-line-search-results {
+	display: grid;
+	max-height: 260px;
+	overflow: auto;
+	border: 1px solid #dbe2ec;
+	border-radius: 8px;
+}
+
+.supply-line-search-results button {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	border: 0;
+	border-bottom: 1px solid #edf1f6;
+	background: #fff;
+	padding: 9px 11px;
+	text-align: left;
+}
+
+.supply-line-search-results button:last-child {
+	border-bottom: 0;
+}
+
+.supply-line-search-results button:hover {
+	background: #f4f8fd;
+}
+
+.supply-line-search-results small {
+	color: #8793a5;
+}
+
 .supply-allocation-extra td {
 	background: #f8fafc;
 }

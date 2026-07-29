@@ -11,6 +11,7 @@ import {
 	removeDealProduct,
 	updateDealProduct,
 	setDealPlan,
+	replaceDealPlanProduct,
 	updateDealStageItem,
 	removeDealStageItem,
 	renameDealStage,
@@ -330,6 +331,7 @@ export function DealProductsTab(): JSX.Element {
 		| { kind: 'stage'; stageId: string; stageName: string }
 		| null
 	>(null);
+	const [replacing, setReplacing] = useState<{ productId: number; name: string } | null>(null);
 	const [printKind, setPrintKind] = useState<DealPrintKind | null>(null);
 	const [kpVariantId, setKpVariantId] = useState<string | null>(null);
 	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
@@ -371,7 +373,7 @@ export function DealProductsTab(): JSX.Element {
 			window.removeEventListener('resize', syncHeight);
 			if (timer != null) window.clearTimeout(timer);
 		};
-	}, [adding, ctx.__mock]);
+	}, [adding, replacing, ctx.__mock]);
 
 	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
@@ -453,23 +455,35 @@ export function DealProductsTab(): JSX.Element {
 	};
 
 	// «Добавить товар» → открываем «Базу» как страницу-каталог (пикер). «Готово» → пачкой в сделку.
-	if (adding && ctx.dealId != null) {
+	if ((adding || replacing) && ctx.dealId != null) {
 		const dealId = ctx.dealId;
-		const isNewStage = adding.kind === 'new-stage';
-		const isExistingStage = adding.kind === 'stage';
-		const isVariant = adding.kind === 'variant';
+		const isNewStage = adding?.kind === 'new-stage';
+		const isExistingStage = adding?.kind === 'stage';
+		const isVariant = adding?.kind === 'variant';
 		return (
 			<ProductBase
 				picker={{
-					title: isVariant
+					title: replacing
+						? `Заменить «${replacing.name}»`
+						: isVariant && adding?.kind === 'variant'
 						? `Добавить в вариант «${adding.variantName}»`
-						: isNewStage
+						: isNewStage && adding?.kind === 'new-stage'
 						? `Новый этап «${adding.stageName}»`
-						: isExistingStage
+						: isExistingStage && adding?.kind === 'stage'
 							? `Добавить в этап «${adding.stageName}»`
 							: `Добавить товар в сделку #${dealId}`,
-					onCancel: () => setAdding(null),
+					...(replacing ? { kindFilter: 'goods' as const } : {}),
+					onCancel: () => { setAdding(null); setReplacing(null); },
 					onDone: async (items) => {
+						if (replacing) {
+							if (items.length !== 1) throw new Error('Для замены выберите ровно один товар.');
+							const item = items[0]!;
+							await replaceDealPlanProduct(dealId, replacing.productId, { productId: item.productId, name: item.name });
+							setReplacing(null);
+							await reload();
+							return;
+						}
+						if (!adding) return;
 						await addProductsToDeal(
 							dealId,
 							items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })),
@@ -499,7 +513,7 @@ export function DealProductsTab(): JSX.Element {
 			payment: null,
 		}
 		: state.data;
-	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} workingVariantHasActivity={state.data.stages.length > 0 || state.data.coreReals.length > 0 || state.data.supply.length > 0} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
+	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} workingVariantHasActivity={state.data.stages.length > 0 || state.data.coreReals.length > 0 || state.data.supply.length > 0} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onReplace={(row) => setReplacing({ productId: row.productId, name: row.name })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -569,7 +583,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onReplace: (row: EnrichedRow) => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
 	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
@@ -1110,6 +1124,12 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 								onClick={() => void doRemove(r)}
 								title={r.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
 							>{removing === r.id ? '…' : '✕'}</button>}
+							{workingMode && rowEditable(r) && r.segmentKind !== 'stage' && <button
+								className="row-del-x"
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle'}
+								onClick={() => onReplace(r)}
+								title="Заменить товар одновременно в сделке и необработанной заявке снабжению"
+							>↔</button>}
 							{workingMode && <input
 								type="checkbox"
 								className="row-check"

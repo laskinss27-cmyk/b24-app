@@ -737,7 +737,7 @@ export async function addProductsToDeal(dealId: number, items: { productId: numb
 }
 
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
-export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number> }
+export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number>; rowName?: string; dealLineKey?: string; dealQty?: number; requestedQty?: number; allocatedQty?: number }
 export interface SupplyTransferChild {
 	id: number; name: string; displayTitle?: string; purchaseOrder?: string; status: string; fromStore: string; toStore: string;
 	shipEntry?: string; receiveEntry?: string; shortageReturnEntry?: string;
@@ -816,6 +816,26 @@ export async function updateSupplyOrderNote(requestName: string, note: string): 
 	const json = (await res.json()) as { ok: boolean; error?: string; note?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить комментарий');
 	return json.note ?? '';
+}
+
+export async function updateSupplyRequestLine(input: {
+	dealId: number;
+	requestName: string;
+	requestKey: string;
+	rowName?: string;
+	productId: number;
+	nextProductId: number;
+	nextItemName: string;
+	nextQty: number;
+}): Promise<number> {
+	const res = await fetch('/api/supply/request-line', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; dealQty?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось изменить строку заявки');
+	return Number(json.dealQty ?? 0);
 }
 
 export async function createSupplyDocuments(args: { requestName: string; requestKey: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {
@@ -948,6 +968,7 @@ export interface DealPlanItem {
 	discountPercent: number;
 	delivered: number;
 	isService?: boolean;
+	lineKey?: string;
 }
 
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
@@ -1056,6 +1077,17 @@ export interface SupplyCard {
 	stageId: string;
 	source?: 'b24' | 'core';
 	productIds?: number[];
+}
+
+export async function replaceDealPlanProduct(dealId: number, oldProductId: number, next: { productId: number; name: string }): Promise<number> {
+	const res = await fetch('/api/deal/replace-plan-product', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, oldProductId, newProductId: next.productId, newItemName: next.name }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; total?: number };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось заменить товар');
+	return Number(json.total ?? 0);
 }
 
 /** Изменить одну строку конкретного этапа и синхронно пересчитать общий план сделки. */
