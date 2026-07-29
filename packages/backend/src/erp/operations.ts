@@ -1935,9 +1935,27 @@ export async function updateSupplyRequestLineAndDeal(
 	const storedKey = String(target[SUPPLY_DEAL_LINE_KEY_FIELD] ?? '').trim();
 	const planLine = (storedKey ? plan.find((line) => line.lineKey === storedKey) : undefined)
 		?? plan.find((line) => line.productId === args.productId);
-	if (!planLine) throw new Error('связанная позиция больше не найдена в сделке');
 	const requestQty = Number(target['qty'] ?? 0);
 	const allocatedQty = Math.min(requestQty, await requestLineAllocation(erp, args.requestName, args.requestKey, args.productId, args.transferAllocation));
+	if (!planLine) {
+		const existingReplacement = !storedKey && args.nextProductId !== args.productId
+			? plan.find((line) => line.productId === args.nextProductId)
+			: undefined;
+		if (!existingReplacement) throw new Error('связанная позиция больше не найдена в сделке');
+		assertProductReplaceAllowed(allocatedQty);
+		if (args.nextQty - existingReplacement.qty > 0.000001) {
+			throw new Error(`в сделке новой позиции только ${existingReplacement.qty}; заявка не может быть больше`);
+		}
+		await ensureCoreItem(erp, { productId: args.nextProductId, name: args.nextItemName || `#${args.nextProductId}` });
+		const after = rawItems.map((item) => requestItemPayload(item, item === target ? {
+			item_code: String(args.nextProductId),
+			qty: args.nextQty,
+			[SUPPLY_DEAL_LINE_KEY_FIELD]: existingReplacement.lineKey,
+			[SUPPLY_DEAL_QTY_FIELD]: existingReplacement.qty,
+		} : {}));
+		await erp.update('Material Request', args.requestName, { items: after });
+		return { dealQty: existingReplacement.qty };
+	}
 	if (args.nextProductId !== args.productId) assertProductReplaceAllowed(allocatedQty);
 	const dealQty = quantityFromSupplyChange({ dealQty: planLine.qty, requestQty, nextRequestQty: args.nextQty, allocatedQty });
 	if (dealQty <= 0.000001) throw new Error('позицию нельзя обнулить из снабжения; удалите или замените её в сделке');
