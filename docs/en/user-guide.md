@@ -66,14 +66,19 @@ Generation is available when:
 
 Verify:
 
-1. our legal entity: Sole Proprietor Polyakov or Novy Dom LLC;
-2. customer type: LLC, sole proprietor, or individual;
-3. VAT rate: 5% or 22%;
-4. number and date;
-5. site address;
-6. signatory's full name and position.
+1. contract template;
+2. selected legal entity;
+3. customer type: LLC, sole proprietor, or individual;
+4. contract date;
+5. work duration and calendar or working days;
+6. site address;
+7. signatory's full name and position.
 
-A first name such as `Danila`, without a surname or details, will be copied into the contract as-is. Correct the customer card in Bitrix24 first. Object-address coordinates are excluded from the contract.
+The contract number is assigned automatically per legal entity. VAT is not selected manually: sole proprietors use 5%, while LLCs use 22%.
+
+The universal work contract is currently available for generation. Other templates in the list are marked as in preparation.
+
+A first name such as `Danila`, without a surname and patronymic, blocks contract generation. Correct the customer card in Bitrix24 first. Sole proprietors and LLCs also require organisation, address, and bank details. Object-address coordinates are excluded from the contract.
 
 ## 3. Products and services catalogue
 

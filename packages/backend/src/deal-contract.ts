@@ -1,11 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
 import { listDealPlan, type PlanItem } from './erp/operations.js';
 
-const TEMPLATE_PATH = resolve(process.cwd(), 'packages', 'backend', 'assets', 'contract-template.docx');
+const TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'contract-template.docx');
 const CONTRACT_NUMBER_FIELD = 'UF_CRM_CONTRACT_NUMBER';
 const CONTRACT_COMPANY_FIELD = 'UF_CRM_CONTRACT_COMPANY';
 const CONTRACT_VAT_FIELD = 'UF_CRM_CONTRACT_VAT';
@@ -22,22 +23,146 @@ const CONTRACT_FIELD_SPECS = [
 	{ fieldName: CONTRACT_VAT_FIELD, name: 'CONTRACT_VAT', xmlId: 'B24_APP_CONTRACT_VAT', label: 'НДС договора' },
 ] as const;
 
+export type ContractTemplateId = 'universal_work' | 'supply' | 'design' | 'smart_home';
+export type ContractPartyKind = 'company' | 'ip' | 'person';
+export type ContractDurationUnit = 'calendar' | 'working';
+
+export interface ContractTemplateInfo {
+	id: ContractTemplateId;
+	title: string;
+	available: boolean;
+	ourRole: string;
+	customerRole: string;
+}
+
+export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
+	{ id: 'universal_work', title: 'Универсальный договор подряда', available: true, ourRole: 'Подрядчик', customerRole: 'Заказчик' },
+	{ id: 'supply', title: 'Договор поставки (Shelly)', available: false, ourRole: 'Поставщик', customerRole: 'Покупатель' },
+	{ id: 'design', title: 'Договор на проектирование', available: false, ourRole: 'Исполнитель', customerRole: 'Заказчик' },
+	{ id: 'smart_home', title: 'Универсальный договор «Умные дома»', available: false, ourRole: 'Подрядчик', customerRole: 'Заказчик' },
+] as const;
+
 type Address = Record<string, unknown>;
 type Requisite = Record<string, unknown>;
 type BankDetail = Record<string, unknown>;
+
+interface KnownOwnCompany {
+	requisite: Requisite;
+	address: Address;
+	bank: BankDetail;
+	certificate?: string;
+}
+
+const KNOWN_OWN_COMPANIES: Record<string, KnownOwnCompany> = {
+	'780525373242': {
+		requisite: { RQ_NAME: 'Поляков Дмитрий Юрьевич', RQ_INN: '780525373242', RQ_OGRNIP: '310784730600340' },
+		address: { POSTAL_CODE: '198096', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'проспект Стачек, д. 59, кв. 328' },
+		bank: {
+			RQ_BANK_NAME: 'Филиал «Центральный» Банка ВТБ (ПАО)',
+			RQ_BIK: '044525411',
+			RQ_COR_ACC_NUM: '30101810145250000411',
+			RQ_ACC_NUM: '40802810626280002991',
+		},
+		certificate: 'Серия и № Свидетельства 78 007832908 от 02.11.2010',
+	},
+	'470379634080': {
+		requisite: { RQ_NAME: 'Нагайцев Олег Александрович', RQ_INN: '470379634080', RQ_OGRNIP: '316470400108991' },
+		address: { POSTAL_CODE: '194100', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'Большой Сампсониевский проспект, д. 70' },
+		bank: {
+			RQ_BANK_NAME: 'Северо-Западный банк ПАО Сбербанк',
+			RQ_BIK: '044030653',
+			RQ_COR_ACC_NUM: '30101810500000000653',
+			RQ_ACC_NUM: '40802810855000482445',
+		},
+	},
+	'7816287495': {
+		requisite: {
+			RQ_COMPANY_NAME: 'ООО «Новый Дом»',
+			RQ_COMPANY_FULL_NAME: 'Общество с ограниченной ответственностью «Новый Дом»',
+			RQ_DIRECTOR: 'Забоев Григорий Анатольевич',
+			RQ_INN: '7816287495',
+			RQ_KPP: '781601001',
+			RQ_OGRN: '1157847344797',
+		},
+		address: { POSTAL_CODE: '192102', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'ул. Стрельбищенская, д. 15А, корп. 2, лит. А, помещение 6Н' },
+		bank: {
+			RQ_BANK_NAME: 'Филиал «Санкт-Петербургский» АО «Альфа-Банк»',
+			RQ_BIK: '044030786',
+			RQ_COR_ACC_NUM: '30101810600000000786',
+			RQ_ACC_NUM: '40702810332060006744',
+		},
+	},
+	'7816473082': {
+		requisite: {
+			RQ_COMPANY_NAME: 'ООО «Дом Бизнес Строй»',
+			RQ_COMPANY_FULL_NAME: 'Общество с ограниченной ответственностью «Дом Бизнес Строй»',
+			RQ_DIRECTOR: 'Нагайцев Олег Александрович',
+			RQ_INN: '7816473082',
+			RQ_KPP: '781601001',
+			RQ_OGRN: '1097847284810',
+		},
+		address: { POSTAL_CODE: '192102', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'ул. Стрельбищенская, д. 15, корп. 2, лит. А, помещение 6-Н' },
+		bank: {
+			RQ_BANK_NAME: 'Северо-Западный банк ПАО Сбербанк',
+			RQ_BIK: '044030653',
+			RQ_COR_ACC_NUM: '30101810500000000653',
+			RQ_ACC_NUM: '40702810255100001743',
+		},
+	},
+	'7842177523': {
+		requisite: {
+			RQ_COMPANY_NAME: 'ООО «И-ОН»',
+			RQ_COMPANY_FULL_NAME: 'Общество с ограниченной ответственностью «И-ОН»',
+			RQ_DIRECTOR: 'Поляков Дмитрий Юрьевич',
+			RQ_INN: '7842177523',
+			RQ_KPP: '780501001',
+			RQ_OGRN: '1197847241855',
+		},
+		address: { POSTAL_CODE: '198096', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'МО Автово, проспект Стачек, д. 59, лит. А' },
+		bank: {
+			RQ_BANK_NAME: 'Северо-Западный банк ПАО Сбербанк',
+			RQ_BIK: '044030653',
+			RQ_COR_ACC_NUM: '30101810500000000653',
+			RQ_ACC_NUM: '40702810355000037186',
+		},
+	},
+	'7816268460': {
+		requisite: {
+			RQ_COMPANY_NAME: 'ООО «РА Анемоне»',
+			RQ_COMPANY_FULL_NAME: 'Общество с ограниченной ответственностью «Рекламное Агентство Анемоне»',
+			RQ_DIRECTOR: 'Поляков Дмитрий Юрьевич',
+			RQ_INN: '7816268460',
+			RQ_KPP: '781601001',
+			RQ_OGRN: '1157847184637',
+		},
+		address: { POSTAL_CODE: '192102', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'ул. Стрельбищенская, д. 15, корп. 2, лит. А, помещение 6-Н' },
+		bank: {
+			RQ_BANK_NAME: 'Филиал «Центральный» Банка ВТБ (ПАО)',
+			RQ_BIK: '044525411',
+			RQ_COR_ACC_NUM: '30101810145250000411',
+			RQ_ACC_NUM: '40702810617130004006',
+		},
+	},
+};
 
 export interface ContractParty {
 	id: number;
 	entityTypeId: 3 | 4;
 	title: string;
-	kind: 'company' | 'ip' | 'person';
+	kind: ContractPartyKind;
 	fullName: string;
 	shortName: string;
 	director: string;
 	email: string;
+	nameParts: {
+		last: string;
+		first: string;
+		patronymic: string;
+	};
 	requisite: Requisite | null;
 	address: Address | null;
 	bank: BankDetail | null;
+	certificate: string;
 	missing: string[];
 }
 
@@ -47,20 +172,25 @@ export interface ContractContext {
 	ownCompanies: ContractParty[];
 	selectedCompanyId: number | null;
 	customer: ContractParty | null;
-	objectType: string;
+	customerMissingByKind: Record<ContractPartyKind, string[]>;
 	objectAddress: string;
 	contractNumber: string;
 	contractDate: string;
 	vatRate: 5 | 22;
+	templates: readonly ContractTemplateInfo[];
+	selectedTemplateId: ContractTemplateId;
+	workDuration: number;
+	workDurationUnit: ContractDurationUnit;
 }
 
 export interface ContractGenerateInput {
 	companyId: number;
-	vatRate: 5 | 22;
+	templateId: ContractTemplateId;
+	customerKind: ContractPartyKind;
 	contractDate: string;
-	contractNumber?: string;
-	objectType: string;
 	objectAddress: string;
+	workDuration: number;
+	workDurationUnit: ContractDurationUnit;
 }
 
 export interface ContractLine {
@@ -78,6 +208,15 @@ const titleCase = (value: string): string => value.toLocaleLowerCase('ru-RU').re
 const firstEmail = (value: unknown): string => {
 	const rows = Array.isArray(value) ? value : [];
 	return clean((rows[0] as Record<string, unknown> | undefined)?.['VALUE']);
+};
+const fillMissing = <T extends Record<string, unknown>>(primary: T | null | undefined, fallback: T | null | undefined): T | null => {
+	if (!primary && !fallback) return null;
+	const result = { ...(fallback ?? {}), ...(primary ?? {}) } as T;
+	const mutable = result as Record<string, unknown>;
+	for (const [key, value] of Object.entries(fallback ?? {})) {
+		if (!clean(mutable[key])) mutable[key] = value;
+	}
+	return result;
 };
 
 export function contractObjectAddress(value: unknown): string {
@@ -130,6 +269,50 @@ function addressText(address: Address | null): string {
 	return parts.join(', ');
 }
 
+function namePartsFrom(value: string): ContractParty['nameParts'] {
+	const [last = '', first = '', patronymic = ''] = clean(value).split(/\s+/).filter(Boolean);
+	return { last, first, patronymic };
+}
+
+function missingPartyFields(party: Omit<ContractParty, 'missing'>, kind: ContractPartyKind): string[] {
+	const missing: string[] = [];
+	const rq = party.requisite ?? {};
+	const bank = party.bank ?? {};
+	const personParts = kind === 'person'
+		? party.nameParts
+		: namePartsFrom(clean(rq['RQ_NAME']) || party.fullName.replace(/^ИП\s+/i, ''));
+	if (kind === 'person') {
+		if (party.entityTypeId !== 3) missing.push('клиент должен быть указан контактом');
+		if (!personParts.last) missing.push('фамилия');
+		if (!personParts.first) missing.push('имя');
+		if (!personParts.patronymic) missing.push('отчество');
+		return missing;
+	}
+	if (!party.requisite) missing.push('реквизиты');
+	if (kind === 'ip') {
+		if (!personParts.last) missing.push('фамилия');
+		if (!personParts.first) missing.push('имя');
+		if (!personParts.patronymic) missing.push('отчество');
+	} else if (!clean(rq['RQ_COMPANY_NAME']) && !clean(rq['RQ_COMPANY_FULL_NAME'])) {
+		missing.push('наименование компании');
+	}
+	if (!clean(rq['RQ_INN'])) missing.push('ИНН');
+	if (kind === 'ip' && !clean(rq['RQ_OGRNIP'])) missing.push('ОГРНИП');
+	if (kind === 'company' && !clean(rq['RQ_OGRN'])) missing.push('ОГРН');
+	if (kind === 'company' && !clean(rq['RQ_KPP'])) missing.push('КПП');
+	if (kind === 'company' && !party.director) missing.push('генеральный директор');
+	if (!addressText(party.address)) missing.push('адрес');
+	if (!party.bank) {
+		missing.push('банковские реквизиты');
+	} else {
+		if (!clean(bank['RQ_BANK_NAME'])) missing.push('наименование банка');
+		if (!clean(bank['RQ_BIK'])) missing.push('БИК');
+		if (!clean(bank['RQ_ACC_NUM'])) missing.push('расчётный счёт');
+		if (!clean(bank['RQ_COR_ACC_NUM'])) missing.push('корреспондентский счёт');
+	}
+	return [...new Set(missing)];
+}
+
 async function fetchParty(
 	client: B24Client,
 	entityTypeId: 3 | 4,
@@ -141,8 +324,8 @@ async function fetchParty(
 		select: ['*'],
 		order: { SORT: 'ASC', ID: 'ASC' },
 	}).catch(() => []);
-	const requisite = requisites[0] ?? null;
-	const requisiteId = Number(requisite?.['ID'] ?? 0);
+	const baseRequisite = requisites[0] ?? null;
+	const requisiteId = Number(baseRequisite?.['ID'] ?? 0);
 	const [addresses, banks] = requisiteId > 0 ? await Promise.all([
 		client.call<Array<Address>>('crm.address.list', {
 			filter: { ENTITY_TYPE_ID: 8, ENTITY_ID: requisiteId },
@@ -153,10 +336,20 @@ async function fetchParty(
 			order: { SORT: 'ASC', ID: 'ASC' },
 		}).catch(() => []),
 	]) : [[], []];
+	const isOwnCompany = clean(entity['IS_MY_COMPANY']) === 'Y';
+	const known = isOwnCompany ? KNOWN_OWN_COMPANIES[clean(baseRequisite?.['RQ_INN'])] : undefined;
+	const requisite = fillMissing(baseRequisite, known?.requisite);
+	const address = fillMissing(addresses[0], known?.address);
+	const bank = fillMissing(banks[0], known?.bank);
 	const rqName = clean(requisite?.['RQ_NAME']);
 	const companyName = clean(requisite?.['RQ_COMPANY_NAME']);
 	const entityTitle = clean(entity['TITLE']);
-	const contactName = [entity['LAST_NAME'], entity['NAME'], entity['SECOND_NAME']].map(clean).filter(Boolean).join(' ');
+	const nameParts = {
+		last: clean(entity['LAST_NAME']),
+		first: clean(entity['NAME']),
+		patronymic: clean(entity['SECOND_NAME']),
+	};
+	const contactName = [nameParts.last, nameParts.first, nameParts.patronymic].filter(Boolean).join(' ');
 	const kind: ContractParty['kind'] = entityTypeId === 3
 		? 'person'
 		: clean(requisite?.['RQ_OGRNIP']) ? 'ip' : 'company';
@@ -171,16 +364,7 @@ async function fetchParty(
 			? `ИП ${shortPersonName(rqName || fullName)}`
 			: (companyName || entityTitle);
 	const director = clean(requisite?.['RQ_DIRECTOR']);
-	const missing: string[] = [];
-	if (!requisite && kind !== 'person') missing.push('реквизиты');
-	if (!fullName) missing.push('наименование или ФИО');
-	if (kind !== 'person' && !clean(requisite?.['RQ_INN'])) missing.push('ИНН');
-	if (kind === 'ip' && !clean(requisite?.['RQ_OGRNIP'])) missing.push('ОГРНИП');
-	if (kind === 'company' && !clean(requisite?.['RQ_OGRN'])) missing.push('ОГРН');
-	if (kind === 'company' && !clean(requisite?.['RQ_KPP'])) missing.push('КПП');
-	if (kind === 'company' && !director) missing.push('руководитель');
-	if (kind !== 'person' && !banks[0]) missing.push('банковские реквизиты');
-	return {
+	const party: Omit<ContractParty, 'missing'> = {
 		id: entityId,
 		entityTypeId,
 		title: entityTitle || fullName,
@@ -189,11 +373,13 @@ async function fetchParty(
 		shortName,
 		director,
 		email: firstEmail(entity['EMAIL']),
+		nameParts,
 		requisite,
-		address: addresses[0] ?? null,
-		bank: banks[0] ?? null,
-		missing,
+		address,
+		bank,
+		certificate: known?.certificate ?? '',
 	};
+	return { ...party, missing: missingPartyFields(party, kind) };
 }
 
 async function listOwnCompanies(client: B24Client): Promise<ContractParty[]> {
@@ -219,6 +405,28 @@ async function fetchCustomer(client: B24Client, deal: Record<string, unknown>): 
 	return null;
 }
 
+export function contractPartyAsKind(party: ContractParty, kind: ContractPartyKind): ContractParty {
+	const rq = party.requisite ?? {};
+	const rqName = clean(rq['RQ_NAME']);
+	const companyName = clean(rq['RQ_COMPANY_NAME']);
+	const fullName = kind === 'person'
+		? [party.nameParts.last, party.nameParts.first, party.nameParts.patronymic].filter(Boolean).join(' ')
+		: kind === 'ip'
+			? (rqName || companyName || party.title)
+			: (clean(rq['RQ_COMPANY_FULL_NAME']) || companyName || party.title);
+	const shortName = kind === 'person'
+		? shortPersonName(fullName)
+		: kind === 'ip'
+			? `ИП ${shortPersonName(rqName || fullName)}`
+			: (companyName || party.title);
+	const normalized: Omit<ContractParty, 'missing'> = { ...party, kind, fullName, shortName };
+	return { ...normalized, missing: missingPartyFields(normalized, kind) };
+}
+
+export function contractVatRate(party: Pick<ContractParty, 'kind'>): 5 | 22 {
+	return party.kind === 'ip' ? 5 : 22;
+}
+
 export async function getContractContext(client: B24Client, dealId: number): Promise<ContractContext> {
 	const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
 	const [ownCompanies, customer] = await Promise.all([
@@ -226,21 +434,33 @@ export async function getContractContext(client: B24Client, dealId: number): Pro
 		fetchCustomer(client, deal),
 	]);
 	const selectedCompanyId = Number(deal['MYCOMPANY_ID'] ?? 0) || ownCompanies[0]?.id || null;
+	const selectedCompany = ownCompanies.find((item) => item.id === selectedCompanyId) ?? ownCompanies[0];
+	const customerMissingByKind: Record<ContractPartyKind, string[]> = customer
+		? {
+			company: contractPartyAsKind(customer, 'company').missing,
+			ip: contractPartyAsKind(customer, 'ip').missing,
+			person: contractPartyAsKind(customer, 'person').missing,
+		}
+		: { company: [], ip: [], person: [] };
 	return {
 		dealId,
 		dealTitle: clean(deal['TITLE']),
 		ownCompanies,
 		selectedCompanyId,
 		customer,
-		objectType: clean(deal['UF_CRM_1750227509']) || clean(deal['UF_CRM_1779357673658']) || 'Квартира',
+		customerMissingByKind,
 		objectAddress: contractObjectAddress(deal['UF_CRM_1750227483']),
 		contractNumber: clean(deal[CONTRACT_NUMBER_FIELD]),
 		contractDate: clean(deal[CONTRACT_DATE_FIELD]).slice(0, 10),
-		vatRate: Number(deal[CONTRACT_VAT_FIELD]) === 22 ? 22 : 5,
+		vatRate: selectedCompany ? contractVatRate(selectedCompany) : 5,
+		templates: CONTRACT_TEMPLATES,
+		selectedTemplateId: 'universal_work',
+		workDuration: 14,
+		workDurationUnit: 'calendar',
 	};
 }
 
-function partyPreamble(party: ContractParty, role: 'Подрядчик' | 'Заказчик'): string {
+function partyPreamble(party: ContractParty, role: string): string {
 	if (party.kind === 'person') {
 		return `${titleCase(party.fullName)}, ${namedRole(party.fullName)} в дальнейшем «${role}»`;
 	}
@@ -259,14 +479,14 @@ function partyRequisites(party: ContractParty): string {
 	}
 	const rq = party.requisite ?? {};
 	const bank = party.bank ?? {};
+	const address = addressText(party.address);
 	const rows = [
 		party.kind === 'ip' ? `ИП ${titleCase(clean(rq['RQ_NAME']) || party.fullName)}` : party.shortName,
-		party.kind === 'company' && addressText(party.address) ? `Юридический адрес: ${addressText(party.address)}` : '',
-		party.id === 8 ? '198096, г. Санкт-Петербург, проспект Стачек, д. 59' : '',
+		address ? `${party.kind === 'company' ? 'Юридический адрес: ' : ''}${address}` : '',
 		`ИНН ${clean(rq['RQ_INN'])}`,
 		party.kind === 'company' ? `КПП ${clean(rq['RQ_KPP'])}` : '',
 		party.kind === 'ip' ? `ОГРНИП ${clean(rq['RQ_OGRNIP'])}` : `ОГРН ${clean(rq['RQ_OGRN'])}`,
-		party.id === 8 ? 'Серия и № Свидетельства 78 007832908 от 02.11.2010' : '',
+		party.certificate,
 		clean(bank['RQ_BANK_NAME']),
 		clean(bank['RQ_BIK']) ? `БИК ${clean(bank['RQ_BIK'])}` : '',
 		clean(bank['RQ_COR_ACC_NUM']) ? `К/с ${clean(bank['RQ_COR_ACC_NUM'])}` : '',
@@ -276,8 +496,31 @@ function partyRequisites(party: ContractParty): string {
 }
 
 function signature(party: ContractParty): string {
-	const name = party.kind === 'company' ? shortPersonName(party.director) : shortPersonName(clean(party.requisite?.['RQ_NAME']) || party.fullName);
-	return `_____________/ ${name} /`;
+	const fullName = titleCase(party.kind === 'company'
+		? party.director
+		: clean(party.requisite?.['RQ_NAME']) || party.fullName);
+	const line = `_____________/ ${shortPersonName(fullName)} /`;
+	return party.kind === 'company'
+		? `Генеральный директор\n${fullName}\n${line}\nМ.П.`
+		: line;
+}
+
+function completionActPartyName(party: ContractParty): string {
+	if (party.kind === 'company') return titleCase(party.director);
+	return titleCase(clean(party.requisite?.['RQ_NAME']) || party.fullName);
+}
+
+function contractorEmail(party: ContractParty): string {
+	const inn = clean(party.requisite?.['RQ_INN']);
+	const known: Record<string, string> = {
+		'780525373242': 'manager@umniydom.pro',
+		'470379634080': 'buh@umdim.ru',
+		'7816287495': 'buh@homelogicsoft.com',
+		'7816473082': 'buh@dom-electro.ru',
+		'7842177523': 'buh@umniydom.pro',
+		'7816268460': 'buh@anemone.su',
+	};
+	return known[inn] ?? party.email;
 }
 
 function numberForms(value: number, forms: [string, string, string]): string {
@@ -335,6 +578,15 @@ function moneyWords(value: number): string {
 		+ `${String(kopecks).padStart(2, '0')} ${numberForms(kopecks, ['копейка', 'копейки', 'копеек'])}`;
 }
 
+export function contractWorkDuration(value: number, unit: ContractDurationUnit): string {
+	const duration = Math.max(1, Math.min(3650, Math.trunc(value)));
+	const words = integerToWords(duration);
+	const dayForms: [string, string, string] = unit === 'working'
+		? ['рабочий день', 'рабочих дня', 'рабочих дней']
+		: ['календарный день', 'календарных дня', 'календарных дней'];
+	return `${duration} (${words}) ${numberForms(duration, dayForms)}`;
+}
+
 function formatMoney(value: number): string {
 	return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
@@ -356,20 +608,45 @@ function replaceToken(xml: string, token: string, value: string): string {
 	return xml.split(`{{${token}}}`).join(wordXmlText(value));
 }
 
+function removeParagraphsContaining(xml: string, needle: string): string {
+	return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) => {
+		const text = paragraph
+			.replace(/<[^>]+>/g, '')
+			.replace(/&quot;/g, '"')
+			.replace(/&apos;/g, "'")
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.replace(/&amp;/g, '&');
+		return text.includes(needle) ? '' : paragraph;
+	});
+}
+
 export async function buildContractDocx(data: {
+	templateId: ContractTemplateId;
 	contractNumber: string;
 	contractDate: string;
 	company: ContractParty;
 	customer: ContractParty;
-	objectType: string;
 	objectAddress: string;
-	vatRate: 5 | 22;
+	workDuration: number;
+	workDurationUnit: ContractDurationUnit;
 	lines: ContractLine[];
 }): Promise<Buffer> {
+	const template = CONTRACT_TEMPLATES.find((item) => item.id === data.templateId);
+	if (!template) throw new Error('неизвестный шаблон договора');
+	if (!template.available) throw new Error(`шаблон «${template.title}» пока не подключён`);
 	const zip = await JSZip.loadAsync(await readFile(TEMPLATE_PATH));
 	const documentFile = zip.file('word/document.xml');
 	if (!documentFile) throw new Error('в шаблоне договора нет word/document.xml');
 	let xml = await documentFile.async('string');
+	xml = xml
+		.split('14 (четырнадцать) календарных дней').join(wordXmlText(contractWorkDuration(data.workDuration, data.workDurationUnit)))
+		.split('buh@homelogicsoft.com').join(wordXmlText(contractorEmail(data.company)))
+		.split('Объект, адрес объекта, виды и объемы работ').join('Адрес объекта, виды и объемы работ');
+	xml = removeParagraphsContaining(xml, '{{OBJECT_TYPE}}');
+	if (data.customer.kind === 'person') {
+		xml = removeParagraphsContaining(xml, 'Расчеты по Договору осуществляются в рублях путем безналичных платежей');
+	}
 	const rowPattern = /<w:tr\b[\s\S]*?<\/w:tr>/g;
 	xml = xml.replace(rowPattern, (rowTemplate) => {
 		if (!rowTemplate.includes('{{PRODUCT_NAME}}')) return rowTemplate;
@@ -383,24 +660,24 @@ export async function buildContractDocx(data: {
 		}).join('');
 	});
 	const total = data.lines.reduce((sum, line) => sum + line.total, 0);
+	const vatRate = contractVatRate(data.company);
 	const values: Record<string, string> = {
 		CONTRACT_NUMBER: data.contractNumber,
 		CONTRACT_DATE: data.contractDate,
 		CITY: 'г. Санкт-Петербург',
-		CONTRACTOR_PREAMBLE: `${partyPreamble(data.company, 'Подрядчик')}, с одной стороны, и`,
-		CUSTOMER_PREAMBLE: `${partyPreamble(data.customer, 'Заказчик')}, с другой стороны, именуемые в дальнейшем по отдельности «Сторона», а при совместном упоминании «Стороны», заключили настоящий договор (далее – «Договор») о нижеследующем:`,
+		CONTRACTOR_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
+		CUSTOMER_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, именуемые в дальнейшем по отдельности «Сторона», а при совместном упоминании «Стороны», заключили настоящий договор (далее – «Договор») о нижеследующем:`,
 		CONTRACTOR_REQUISITES: partyRequisites(data.company),
 		CUSTOMER_REQUISITES: partyRequisites(data.customer),
 		CONTRACTOR_SIGNATURE: signature(data.company),
 		CUSTOMER_SIGNATURE: signature(data.customer),
 		CONTRACTOR_SHORT: data.company.shortName,
-		CUSTOMER_SHORT: data.customer.shortName || data.customer.fullName,
+		CUSTOMER_SHORT: completionActPartyName(data.customer),
 		CUSTOMER_EMAIL: data.customer.email || 'не указан',
-		OBJECT_TYPE: data.objectType,
 		OBJECT_ADDRESS: data.objectAddress,
 		TOTAL: formatMoney(total),
 		TOTAL_WORDS: moneyWords(total),
-		VAT_RATE: String(data.vatRate),
+		VAT_RATE: String(vatRate),
 	};
 	for (const [token, value] of Object.entries(values)) xml = replaceToken(xml, token, value);
 	zip.file('word/document.xml', xml);
@@ -544,41 +821,49 @@ export async function generateDealContract(
 	if (!company) throw new Error('выбранная наша компания не найдена в Битрикс24');
 	if (company.missing.length) throw new Error(`у нашей компании не заполнено: ${company.missing.join(', ')}`);
 	if (!context.customer) throw new Error('в сделке не указан клиент');
-	if (context.customer.missing.length) throw new Error(`у клиента не заполнено: ${context.customer.missing.join(', ')}`);
-	if (!input.objectType.trim()) throw new Error('не указан тип объекта');
+	const customer = contractPartyAsKind(context.customer, input.customerKind);
+	if (customer.missing.length) throw new Error(`у клиента не заполнено: ${customer.missing.join(', ')}`);
+	const template = CONTRACT_TEMPLATES.find((item) => item.id === input.templateId);
+	if (!template) throw new Error('неизвестный шаблон договора');
+	if (!template.available) throw new Error(`шаблон «${template.title}» пока не подключён`);
 	const objectAddress = contractObjectAddress(input.objectAddress);
 	if (!objectAddress) throw new Error('не указан адрес объекта');
+	if (!Number.isInteger(input.workDuration) || input.workDuration < 1 || input.workDuration > 3650) {
+		throw new Error('срок работ должен быть целым числом от 1 до 3650 дней');
+	}
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
 	const lines = await loadContractLines(client, erp, dealId);
 	if (!lines.length) throw new Error('в сделке нет товаров или работ для сметы');
-	const contractNumber = await allocateContractNumber(client, dealId, company.id, clean(input.contractNumber));
+	const contractNumber = await allocateContractNumber(client, dealId, company.id, '');
 	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
 	const [year, month, day] = dateIso.split('-');
 	const contractDate = `${day}.${month}.${year}`;
 	const file = await buildContractDocx({
+		templateId: input.templateId,
 		contractNumber,
 		contractDate,
 		company,
-		customer: context.customer,
-		objectType: input.objectType.trim(),
+		customer,
 		objectAddress,
-		vatRate: input.vatRate,
+		workDuration: input.workDuration,
+		workDurationUnit: input.workDurationUnit,
 		lines,
 	});
+	const vatRate = contractVatRate(company);
 	await client.call('crm.deal.update', {
 		id: dealId,
 		fields: {
 			MYCOMPANY_ID: company.id,
 			[CONTRACT_NUMBER_FIELD]: contractNumber,
 			[CONTRACT_COMPANY_FIELD]: String(company.id),
-			[CONTRACT_VAT_FIELD]: String(input.vatRate),
+			[CONTRACT_VAT_FIELD]: String(vatRate),
 			[CONTRACT_DATE_FIELD]: dateIso,
 		},
 	});
 	return {
 		file,
-		filename: `contract-${company.id}-${contractNumber}.docx`,
+		filename: `contract-${input.templateId}-${company.id}-${contractNumber}.docx`,
 		contractNumber,
 	};
 }

@@ -9,6 +9,9 @@ import {
 	buildContractDocx,
 	contractLinesFromB24ProductRows,
 	contractObjectAddress,
+	contractPartyAsKind,
+	contractVatRate,
+	contractWorkDuration,
 	type ContractParty,
 } from './deal-contract.js';
 
@@ -21,6 +24,7 @@ const company: ContractParty = {
 	shortName: 'ООО "НОВЫЙ ДОМ"',
 	director: 'ЗАБОЕВ ГРИГОРИЙ АНАТОЛЬЕВИЧ',
 	email: '',
+	nameParts: { last: '', first: '', patronymic: '' },
 	requisite: {
 		RQ_COMPANY_NAME: 'ООО "НОВЫЙ ДОМ"',
 		RQ_INN: '7816287495',
@@ -39,6 +43,7 @@ const company: ContractParty = {
 		RQ_ACC_NUM: '40702810332060006744',
 		RQ_COR_ACC_NUM: '30101810600000000786',
 	},
+	certificate: '',
 	missing: [],
 };
 
@@ -51,21 +56,24 @@ const customer: ContractParty = {
 	shortName: 'Иванов И.И.',
 	director: '',
 	email: 'client@example.test',
+	nameParts: { last: 'Иванов', first: 'Иван', patronymic: 'Иванович' },
 	requisite: null,
 	address: null,
 	bank: null,
+	certificate: '',
 	missing: [],
 };
 
 test('buildContractDocx fills markers and repeats both product tables', async () => {
 	const file = await buildContractDocx({
+		templateId: 'universal_work',
 		contractNumber: '515',
 		contractDate: '24.07.2026',
 		company,
 		customer,
-		objectType: 'Квартира',
 		objectAddress: 'Санкт-Петербург, тестовый адрес',
-		vatRate: 22,
+		workDuration: 21,
+		workDurationUnit: 'working',
 		lines: [
 			{ name: 'Реле', price: 3500, quantity: 2, total: 7000 },
 			{ name: 'Монтаж', price: 1500, quantity: 1, total: 1500 },
@@ -83,7 +91,30 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 	assert.match(xml, /НДС 22%/);
 	assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/);
 	assert.match(xml, /Забоева Григория Анатольевича/);
+	assert.match(xml, /21 \(двадцать один\) рабочий день/);
+	assert.match(xml, /buh@homelogicsoft\.com/);
+	assert.match(xml, /Генеральный директор/);
+	assert.doesNotMatch(xml, /ОБЪЕКТ_TYPE|OBJECT_TYPE|Объект:/);
+	assert.doesNotMatch(xml, /путем безналичных платежей платежными поручениями/);
 	assert.doesNotMatch(xml, /именуемый\(ая\)/);
+});
+
+test('VAT is derived from our legal entity type', () => {
+	assert.equal(contractVatRate({ kind: 'ip' }), 5);
+	assert.equal(contractVatRate({ kind: 'company' }), 22);
+});
+
+test('work duration uses the selected day type and Russian number words', () => {
+	assert.equal(contractWorkDuration(1, 'calendar'), '1 (один) календарный день');
+	assert.equal(contractWorkDuration(2, 'working'), '2 (два) рабочих дня');
+	assert.equal(contractWorkDuration(14, 'calendar'), '14 (четырнадцать) календарных дней');
+});
+
+test('customer type override exposes missing requisites instead of inventing them', () => {
+	const ip = contractPartyAsKind(customer, 'ip');
+	assert.ok(ip.missing.includes('реквизиты'));
+	assert.ok(ip.missing.includes('ИНН'));
+	assert.ok(ip.missing.includes('ОГРНИП'));
 });
 
 test('contractLinesFromB24ProductRows uses visible deal rows and skips the collapsed cover service', () => {

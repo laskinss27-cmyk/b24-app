@@ -49,6 +49,9 @@ import {
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type DealContractContext,
+	type ContractTemplateId,
+	type ContractPartyKind,
+	type ContractDurationUnit,
 	type SupplyCard,
 	type TransferDoc,
 } from './b24.js';
@@ -1729,11 +1732,12 @@ function ContractModal({ dealId, onClose, onDone }: {
 }): JSX.Element {
 	const [context, setContext] = useState<DealContractContext | null>(null);
 	const [companyId, setCompanyId] = useState(0);
-	const [vatRate, setVatRate] = useState<5 | 22>(5);
+	const [templateId, setTemplateId] = useState<ContractTemplateId>('universal_work');
+	const [customerKind, setCustomerKind] = useState<ContractPartyKind>('person');
 	const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0, 10));
-	const [contractNumber, setContractNumber] = useState('');
-	const [objectType, setObjectType] = useState('');
 	const [objectAddress, setObjectAddress] = useState('');
+	const [workDuration, setWorkDuration] = useState(14);
+	const [workDurationUnit, setWorkDurationUnit] = useState<ContractDurationUnit>('calendar');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -1743,11 +1747,12 @@ function ContractModal({ dealId, onClose, onDone }: {
 			if (!alive) return;
 			setContext(data);
 			setCompanyId(data.selectedCompanyId ?? data.ownCompanies[0]?.id ?? 0);
-			setVatRate(data.vatRate);
+			setTemplateId(data.selectedTemplateId);
+			setCustomerKind(data.customer?.kind ?? 'person');
 			setContractDate(data.contractDate || new Date().toISOString().slice(0, 10));
-			setContractNumber(data.contractNumber);
-			setObjectType(data.objectType);
 			setObjectAddress(data.objectAddress);
+			setWorkDuration(data.workDuration);
+			setWorkDurationUnit(data.workDurationUnit);
 		}).catch((reason) => {
 			if (alive) setError(String(reason instanceof Error ? reason.message : reason));
 		});
@@ -1755,12 +1760,15 @@ function ContractModal({ dealId, onClose, onDone }: {
 	}, [dealId]);
 
 	const company = context?.ownCompanies.find((item) => item.id === companyId) ?? null;
+	const template = context?.templates.find((item) => item.id === templateId) ?? null;
+	const vatRate = company?.kind === 'ip' ? 5 : 22;
 	const blockers = [
 		...(company?.missing.map((field) => `Наша компания: ${field}`) ?? []),
-		...(context?.customer?.missing.map((field) => `Клиент: ${field}`) ?? []),
+		...(context?.customerMissingByKind[customerKind]?.map((field) => `Клиент: ${field}`) ?? []),
 		...(!context?.customer && context ? ['В сделке не указан клиент'] : []),
-		...(!objectType.trim() && context ? ['Не указан тип объекта'] : []),
+		...(template && !template.available ? [`Шаблон «${template.title}» пока не подключён`] : []),
 		...(!objectAddress.trim() && context ? ['Не указан адрес объекта'] : []),
+		...((!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650) && context ? ['Срок работ должен быть целым числом от 1 до 3650 дней'] : []),
 	];
 
 	const generate = async (): Promise<void> => {
@@ -1771,11 +1779,12 @@ function ContractModal({ dealId, onClose, onDone }: {
 			const number = await downloadDealContract({
 				dealId,
 				companyId,
-				vatRate,
+				templateId,
+				customerKind,
 				contractDate,
-				...(contractNumber.trim() ? { contractNumber: contractNumber.trim() } : {}),
-				objectType: objectType.trim(),
 				objectAddress: objectAddress.trim(),
+				workDuration,
+				workDurationUnit,
 			});
 			onDone(`✅ Договор${number ? ` № ${number}` : ''} сформирован и скачан.`);
 		} catch (reason) {
@@ -1788,22 +1797,31 @@ function ContractModal({ dealId, onClose, onDone }: {
 	return (
 		<div style={splitOv} onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
 			<div style={{ ...splitCard, maxWidth: 700 }}>
-				<h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Сформировать договор</h2>
-				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 14 }}>Сделка #{dealId}. Проверьте стороны, ставку НДС и данные объекта.</div>
+				<h2 style={{ fontSize: 18, margin: '0 0 4px' }}>Конструктор договора</h2>
+				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 14 }}>Сделка #{dealId}. Номер и НДС определяются автоматически.</div>
 				{!context && !error && <p style={{ color: '#7a8699' }}>Загружаю реквизиты из Битрикс24…</p>}
 				{context && <>
 					<div className="deal-contract-grid">
+						<label className="wide"><span>Шаблон договора</span><select value={templateId} disabled={busy} onChange={(event) => setTemplateId(event.target.value as ContractTemplateId)}>
+							{context.templates.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>{item.title}{item.available ? '' : ' — готовится'}</option>)}
+						</select></label>
 						<label><span>Наша компания</span><select value={companyId} disabled={busy || Boolean(context.contractNumber)} onChange={(event) => setCompanyId(Number(event.target.value))}>
 							{context.ownCompanies.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
 						</select></label>
 						<label><span>Заказчик</span><input value={context.customer?.title ?? 'Не указан'} readOnly /></label>
-						<label><span>НДС</span><select value={vatRate} disabled={busy} onChange={(event) => setVatRate(Number(event.target.value) === 22 ? 22 : 5)}>
-							<option value={5}>НДС 5%</option>
-							<option value={22}>НДС 22%</option>
+						<label><span>Тип клиента</span><select value={customerKind} disabled={busy} onChange={(event) => setCustomerKind(event.target.value as ContractPartyKind)}>
+							<option value="ip">ИП</option>
+							<option value="company">ООО</option>
+							<option value="person">Физическое лицо</option>
 						</select></label>
+						<label><span>НДС автоматически</span><input value={`НДС ${vatRate}%`} readOnly /></label>
 						<label><span>Дата договора</span><input type="date" value={contractDate} disabled={busy} onChange={(event) => setContractDate(event.target.value)} /></label>
-						<label><span>Номер договора</span><input value={contractNumber} disabled={busy || Boolean(context.contractNumber)} placeholder="автоматически" onChange={(event) => setContractNumber(event.target.value.replace(/[^\d]/g, ''))} /></label>
-						<label><span>Тип объекта</span><input value={objectType} disabled={busy} placeholder="Квартира" onChange={(event) => setObjectType(event.target.value)} /></label>
+						<label><span>Номер автоматически</span><input value={context.contractNumber ? `№ ${context.contractNumber}` : 'будет присвоен при создании'} readOnly /></label>
+						<label><span>Срок работ</span><input type="number" min={1} max={3650} step={1} value={workDuration} disabled={busy} onChange={(event) => setWorkDuration(Number(event.target.value))} /></label>
+						<label><span>Единица срока</span><select value={workDurationUnit} disabled={busy} onChange={(event) => setWorkDurationUnit(event.target.value as ContractDurationUnit)}>
+							<option value="calendar">Календарные дни</option>
+							<option value="working">Рабочие дни</option>
+						</select></label>
 						<label className="wide"><span>Адрес объекта</span><input value={objectAddress} disabled={busy} onChange={(event) => setObjectAddress(event.target.value)} /></label>
 					</div>
 					{blockers.length > 0 && <div className="deal-contract-blockers"><b>Договор пока сформировать нельзя:</b>{blockers.map((item) => <span key={item}>• {item}</span>)}</div>}

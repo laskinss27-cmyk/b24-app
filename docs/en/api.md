@@ -48,7 +48,7 @@ All placement routes accept a Bitrix24 POST and return the same built frontend w
 
 The authoritative list of individual endpoints is the `app.get` and `app.post` registration in `packages/backend/src/routes/`. This document must be updated whenever a route group is added or removed.
 
-Deal print forms share the data returned by `POST /api/deal/kp`. The read-only `POST /api/deal/kp-docx` route creates the Word file, while `POST /api/deal/export-xlsx` creates Excel. The proposal PDF and sales receipt use the frontend and the browser's system print dialog. Contract context and Word generation are served by `/api/contracts/context` and `/api/contracts/generate`.
+Deal print forms share the data returned by `POST /api/deal/kp`. The read-only `POST /api/deal/kp-docx` route creates the Word file, while `POST /api/deal/export-xlsx` creates Excel. The proposal PDF and sales receipt use the frontend and the browser's system print dialog. Contract context and Word generation are served by `/api/contracts/context` and `/api/contracts/generate`. For generation, the frontend supplies the template, our legal entity, customer type, date, address, and work duration; the backend derives the contract number and VAT automatically.
 
 ## Request authentication
 

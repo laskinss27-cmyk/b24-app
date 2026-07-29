@@ -2050,17 +2050,33 @@ export interface ContractPartyInfo {
 	missing: string[];
 }
 
+export type ContractTemplateId = 'universal_work' | 'supply' | 'design' | 'smart_home';
+export type ContractPartyKind = 'company' | 'ip' | 'person';
+export type ContractDurationUnit = 'calendar' | 'working';
+
+export interface ContractTemplateInfo {
+	id: ContractTemplateId;
+	title: string;
+	available: boolean;
+	ourRole: string;
+	customerRole: string;
+}
+
 export interface DealContractContext {
 	dealId: number;
 	dealTitle: string;
 	ownCompanies: ContractPartyInfo[];
 	selectedCompanyId: number | null;
 	customer: ContractPartyInfo | null;
-	objectType: string;
+	customerMissingByKind: Record<ContractPartyKind, string[]>;
 	objectAddress: string;
 	contractNumber: string;
 	contractDate: string;
 	vatRate: 5 | 22;
+	templates: ContractTemplateInfo[];
+	selectedTemplateId: ContractTemplateId;
+	workDuration: number;
+	workDurationUnit: ContractDurationUnit;
 }
 
 export async function fetchDealContractContext(dealId: number): Promise<DealContractContext> {
@@ -2077,11 +2093,12 @@ export async function fetchDealContractContext(dealId: number): Promise<DealCont
 export async function downloadDealContract(input: {
 	dealId: number;
 	companyId: number;
-	vatRate: 5 | 22;
+	templateId: ContractTemplateId;
+	customerKind: ContractPartyKind;
 	contractDate: string;
-	contractNumber?: string;
-	objectType: string;
 	objectAddress: string;
+	workDuration: number;
+	workDurationUnit: ContractDurationUnit;
 }): Promise<string> {
 	const res = await fetch('/api/contracts/generate', {
 		method: 'POST',

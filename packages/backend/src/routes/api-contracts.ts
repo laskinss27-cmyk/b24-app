@@ -38,30 +38,38 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody & {
 			dealId?: unknown;
 			companyId?: unknown;
-			vatRate?: unknown;
+			templateId?: unknown;
+			customerKind?: unknown;
 			contractDate?: unknown;
-			contractNumber?: unknown;
-			objectType?: unknown;
 			objectAddress?: unknown;
+			workDuration?: unknown;
+			workDurationUnit?: unknown;
 		};
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(body.dealId);
 		const companyId = Number(body.companyId);
-		const vatRate = Number(body.vatRate);
+		const templateId = String(body.templateId ?? '');
+		const customerKind = String(body.customerKind ?? '');
+		const workDuration = Number(body.workDuration);
+		const workDurationUnit = String(body.workDurationUnit ?? '');
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		if (!Number.isInteger(companyId) || companyId <= 0) return reply.code(400).send({ ok: false, error: 'bad companyId' });
-		if (vatRate !== 5 && vatRate !== 22) return reply.code(400).send({ ok: false, error: 'bad vatRate' });
+		if (!['universal_work', 'supply', 'design', 'smart_home'].includes(templateId)) return reply.code(400).send({ ok: false, error: 'bad templateId' });
+		if (!['company', 'ip', 'person'].includes(customerKind)) return reply.code(400).send({ ok: false, error: 'bad customerKind' });
+		if (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650) return reply.code(400).send({ ok: false, error: 'bad workDuration' });
+		if (workDurationUnit !== 'calendar' && workDurationUnit !== 'working') return reply.code(400).send({ ok: false, error: 'bad workDurationUnit' });
 		try {
 			const result = await generateDealContract(client, dealId, {
 				companyId,
-				vatRate,
+				templateId: templateId as 'universal_work' | 'supply' | 'design' | 'smart_home',
+				customerKind: customerKind as 'company' | 'ip' | 'person',
 				contractDate: String(body.contractDate ?? ''),
-				contractNumber: String(body.contractNumber ?? ''),
-				objectType: String(body.objectType ?? ''),
 				objectAddress: String(body.objectAddress ?? ''),
+				workDuration,
+				workDurationUnit: workDurationUnit as 'calendar' | 'working',
 			});
-			app.log.info({ dealId, companyId, contractNumber: result.contractNumber }, '[api/contracts/generate] ok');
+			app.log.info({ dealId, companyId, templateId, contractNumber: result.contractNumber }, '[api/contracts/generate] ok');
 			return reply
 				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 				.header('Content-Disposition', `attachment; filename="${result.filename}"`)

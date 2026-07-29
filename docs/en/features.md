@@ -18,7 +18,9 @@ This list describes delivered user-facing functionality. The availability of ind
 - contract generation;
 - list of deal documents.
 
-The contract generator reads the positions from our deal interface. It supports Sole Proprietor Polyakov and Novy Dom LLC, LLC/sole-proprietor/individual customers, and VAT rates of 5% or 22%.
+The contract builder reads the positions from our deal interface and supports all six of our legal entities. A manager selects the template, our legal entity, customer type, date, work duration, and site address. Contract numbers are assigned automatically per legal entity. VAT is derived automatically: 5% for sole proprietors and 22% for LLCs.
+
+The universal work contract is currently enabled. The supply contract, design contract, and universal Smart Homes contract are shown as in preparation and cannot be generated until their reviewed Word templates are connected.
 
 The standard Bitrix24 product section must not expose a second, independent editor for the same working composition.
 
