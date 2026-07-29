@@ -411,6 +411,17 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
+	const hasDealQuoteVariantActivity = async (client: B24Client, erp: ErpClient, dealId: number): Promise<boolean> => {
+		await ensureTransfersEntity(client);
+		const [stages, realizations, supply, transferItems] = await Promise.all([
+			listDealStages(erp, dealId),
+			listDealRealizations(erp, dealId),
+			listSupplyRequestsForDeal(erp, dealId),
+			client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
+		]);
+		const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
+		return stages.length > 0 || realizations.length > 0 || supply.length > 0 || transfers.length > 0;
+	};
 	const syncDealTechnicalFields = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
 		try {
 			const result = await syncDealFulfillmentStatus(client, erp, dealId);
@@ -676,7 +687,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const variantId = String(b.variantId ?? '').trim();
 				if (variantId) {
 					const state = await listDealQuoteVariants(erp, dealId);
-					if (state.selectedId) throw new Error('вариант уже выбран клиентом; добавляйте новые позиции через этап');
 					const variant = state.variants.find((row) => row.id === variantId);
 					if (!variant) throw new Error('вариант КП не найден');
 					const byId = new Map(variant.items.map((item) => [item.productId, { ...item }]));
@@ -978,16 +988,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
 			const current = await listDealQuoteVariants(erp, dealId);
-			if (!current.enabled) {
-				const [stages, realizations, supply] = await Promise.all([listDealStages(erp, dealId), listDealRealizations(erp, dealId), listSupplyRequestsForDeal(erp, dealId)]);
-				if (stages.length || realizations.length || supply.length) throw new Error('варианты КП можно включить только до этапов, заказов снабжению и реализаций');
-			}
+			const selectCreated = !current.enabled && await hasDealQuoteVariantActivity(client, erp, dealId);
 			const me = await client.call<{ ID?: unknown; NAME?: unknown; LAST_NAME?: unknown }>('user.current', {});
 			const variants = await createDealQuoteVariant(erp, dealId, {
 				name: String(b.name ?? ''),
 				...(String(b.sourceVariantId ?? '').trim() ? { sourceVariantId: String(b.sourceVariantId).trim() } : {}),
 				createdById: String(me?.ID ?? ''),
 				createdByName: [String(me?.NAME ?? '').trim(), String(me?.LAST_NAME ?? '').trim()].filter(Boolean).join(' '),
+				...(selectCreated ? { selectCreated: true } : {}),
 			});
 			return { ok: true, variants };
 		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
@@ -1025,16 +1033,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const current = await listDealQuoteVariants(erp, dealId);
 			if (!current.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
 			if (current.selectedId && current.selectedId !== variantId) {
-				await ensureTransfersEntity(client);
-				const [stages, realizations, supply, transferItems] = await Promise.all([
-					listDealStages(erp, dealId),
-					listDealRealizations(erp, dealId),
-					listSupplyRequestsForDeal(erp, dealId),
-					client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
-				]);
-				const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
-				if (stages.length || realizations.length || supply.length || transfers.length) {
-					throw new Error('смена варианта недоступна: по сделке уже есть этапы, заявки снабжению, реализации или перемещения');
+				if (await hasDealQuoteVariantActivity(client, erp, dealId)) {
+					throw new Error('основной вариант зафиксирован: по нему уже есть этапы, заявки снабжению, реализации или перемещения');
 				}
 			}
 			const variants = await selectDealQuoteVariant(erp, dealId, variantId, new Date().toISOString().slice(0, 10));
@@ -1057,16 +1057,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		try {
 			const current = await listDealQuoteVariants(erp, dealId);
 			if (!current.selectedId) return { ok: true, variants: current };
-			await ensureTransfersEntity(client);
-			const [stages, realizations, supply, transferItems] = await Promise.all([
-				listDealStages(erp, dealId),
-				listDealRealizations(erp, dealId),
-				listSupplyRequestsForDeal(erp, dealId),
-				client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
-			]);
-			const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
-			if (stages.length || realizations.length || supply.length || transfers.length) {
-				throw new Error('отмена выбора недоступна: по сделке уже есть этапы, заявки снабжению, реализации или перемещения');
+			if (await hasDealQuoteVariantActivity(client, erp, dealId)) {
+				throw new Error('основной вариант зафиксирован: по нему уже есть этапы, заявки снабжению, реализации или перемещения');
 			}
 			return { ok: true, variants: await cancelDealQuoteVariantSelection(erp, dealId) };
 		} catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }

@@ -1845,11 +1845,12 @@ export async function createDealQuoteVariant(erp: ErpClient, dealId: number, arg
 	sourceVariantId?: string;
 	createdById: string;
 	createdByName: string;
+	/** Для уже начатой сделки первый вариант — снимок текущего рабочего состава и сразу основной. */
+	selectCreated?: boolean;
 }): Promise<DealQuoteVariants> {
 	const plan = await dealPlanDocument(erp, dealId);
 	if (!plan) throw new Error('сначала добавьте в сделку хотя бы одну позицию');
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
-	if (state.selectedId) throw new Error('вариант уже выбран клиентом; новые варианты недоступны');
 	const cleanName = args.name.trim().slice(0, 80);
 	if (!cleanName) throw new Error('укажите название варианта');
 	if (state.variants.some((variant) => variant.name.toLocaleLowerCase('ru-RU') === cleanName.toLocaleLowerCase('ru-RU'))) throw new Error('вариант с таким названием уже есть');
@@ -1858,13 +1859,21 @@ export async function createDealQuoteVariant(erp: ErpClient, dealId: number, arg
 		items = (await listDealPlan(erp, dealId)).map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
 	} else if (!args.sourceVariantId) {
 		items = [];
+	} else if (args.sourceVariantId === state.selectedId) {
+		// Выбранный вариант живёт в рабочем плане и мог измениться после выбора:
+		// копируем актуальный состав, а не его старый снимок в JSON вариантов.
+		items = (await listDealPlan(erp, dealId)).map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
 	} else {
 		const source = state.variants.find((variant) => variant.id === args.sourceVariantId);
 		if (!source) throw new Error('вариант для копирования не найден');
 		items = source.items.map((item) => ({ ...item }));
 	}
 	const variant: DealQuoteVariant = { id: randomUUID(), name: cleanName, createdAt: new Date().toISOString(), createdById: args.createdById, createdByName: args.createdByName, items };
-	const next: DealQuoteVariants = { enabled: true, selectedId: null, variants: [...state.variants, variant] };
+	const next: DealQuoteVariants = {
+		enabled: true,
+		selectedId: args.selectCreated ? variant.id : state.selectedId,
+		variants: [...state.variants, variant],
+	};
 	await saveDealQuoteVariants(erp, plan.name, next);
 	return next;
 }
@@ -1873,10 +1882,10 @@ export async function renameDealQuoteVariant(erp: ErpClient, dealId: number, var
 	const plan = await dealPlanDocument(erp, dealId);
 	if (!plan) throw new Error('план сделки не найден');
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
-	if (state.selectedId) throw new Error('после выбора клиента названия вариантов зафиксированы');
 	const cleanName = name.trim().slice(0, 80);
 	if (!cleanName) throw new Error('укажите название варианта');
 	if (!state.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
+	if (state.selectedId === variantId) throw new Error('основной вариант переименовывается через рабочую сделку');
 	if (state.variants.some((variant) => variant.id !== variantId && variant.name.toLocaleLowerCase('ru-RU') === cleanName.toLocaleLowerCase('ru-RU'))) throw new Error('вариант с таким названием уже есть');
 	const next = { ...state, variants: state.variants.map((variant) => variant.id === variantId ? { ...variant, name: cleanName } : variant) };
 	await saveDealQuoteVariants(erp, plan.name, next);
@@ -1887,7 +1896,7 @@ export async function deleteDealQuoteVariant(erp: ErpClient, dealId: number, var
 	const plan = await dealPlanDocument(erp, dealId);
 	if (!plan) throw new Error('план сделки не найден');
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
-	if (state.selectedId) throw new Error('после выбора клиента варианты зафиксированы');
+	if (state.selectedId === variantId) throw new Error('основной вариант удалить нельзя');
 	if (state.variants.length <= 1) throw new Error('последний вариант удалить нельзя');
 	const next = { ...state, variants: state.variants.filter((variant) => variant.id !== variantId) };
 	if (next.variants.length === state.variants.length) throw new Error('вариант не найден');
@@ -1899,8 +1908,8 @@ export async function updateDealQuoteVariantItems(erp: ErpClient, dealId: number
 	const plan = await dealPlanDocument(erp, dealId);
 	if (!plan) throw new Error('план сделки не найден');
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
-	if (state.selectedId) throw new Error('выбранный вариант изменяется через рабочий состав и этапы');
 	if (!state.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
+	if (state.selectedId === variantId) throw new Error('основной вариант изменяется через рабочий состав и этапы');
 	for (const item of items) await ensureCoreItem(erp, { productId: item.productId, name: item.itemName, isService: Boolean(item.isService) });
 	const next = { ...state, variants: state.variants.map((variant) => variant.id === variantId ? { ...variant, items: items.map((item) => ({ ...item })) } : variant) };
 	await saveDealQuoteVariants(erp, plan.name, next);

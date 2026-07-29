@@ -143,7 +143,7 @@ const dealContentHeight = (minHeight = 0): number => {
 	));
 };
 
-const mockVariantData = (selected = false): TableData => {
+const mockVariantData = (selected = false, activity = false): TableData => {
 	const first = { id: 'mock-min', name: 'Минимальный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: MOCK_DATA.plan.map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: Boolean(item.isService) })) };
 	const second = { id: 'mock-max', name: 'Расширенный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: first.items.map((item) => ({ ...item, qty: item.qty * 2 })) };
 	const toRows = (variant: typeof first): EnrichedRow[] => variant.items.map((item) => {
@@ -151,7 +151,7 @@ const mockVariantData = (selected = false): TableData => {
 		const rate = item.priceListRate * (1 - item.discountPercent / 100);
 		return { ...(source ?? { type: item.isService ? 7 : 1, measure: 'шт', stocks: [], purchasingPrice: null }), id: `variant-${variant.id}-${item.productId}`, productId: item.productId, name: item.itemName, price: rate, quantity: item.qty, discountSum: item.priceListRate - rate };
 	});
-	return { ...MOCK_DATA, rows: [], stages: [], payment: null, quoteVariants: { enabled: true, selectedId: selected ? first.id : null, variants: [first, second] }, variantRows: { [first.id]: toRows(first), [second.id]: toRows(second) } };
+	return { ...MOCK_DATA, rows: [], stages: activity ? MOCK_DATA.stages : [], payment: null, quoteVariants: { enabled: true, selectedId: selected ? first.id : null, variants: [first, second] }, variantRows: { [first.id]: toRows(first), [second.id]: toRows(second) } };
 };
 
 const requestB24FitWindow = (delay = 120): void => {
@@ -374,7 +374,7 @@ export function DealProductsTab(): JSX.Element {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
 		if (ctx.__mock) {
 			const params = new URLSearchParams(window.location.search);
-			const data = params.has('variants') ? mockVariantData(params.has('selected')) : MOCK_DATA;
+			const data = params.has('variants') ? mockVariantData(params.has('selected'), params.has('activity')) : MOCK_DATA;
 			setState({ phase: 'ready', data, viewer: 'dev (mock)', dev: true, canReturn: true });
 			setActiveVariantId(data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
 			return;
@@ -496,7 +496,7 @@ export function DealProductsTab(): JSX.Element {
 			payment: null,
 		}
 		: state.data;
-	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
+	return <RealTable data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} workingVariantHasActivity={state.data.stages.length > 0 || state.data.coreReals.length > 0 || state.data.supply.length > 0} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
 }
 
 const splitOv: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1000, overflow: 'auto' };
@@ -566,16 +566,15 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 	);
 }
 
-function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onActiveVariant, onAdd, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
+function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
 	const { rows, coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
 	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
 	const viewingSelected = Boolean(activeVariant && data.quoteVariants.selectedId === activeVariant.id);
 	const workingMode = !data.quoteVariants.enabled || viewingSelected;
-	const proposalEditable = variantsPending && Boolean(activeVariant);
+	const proposalEditable = data.quoteVariants.enabled && Boolean(activeVariant) && !viewingSelected;
 	const tableEditable = workingMode || proposalEditable;
-	const rejectedView = data.quoteVariants.enabled && Boolean(data.quoteVariants.selectedId) && !viewingSelected;
-	const canSwitchVariant = rejectedView && Boolean(activeVariant);
+	const alternativeView = data.quoteVariants.enabled && Boolean(data.quoteVariants.selectedId) && !viewingSelected;
 	const line = (r: EnrichedRow): number => r.price * r.quantity;
 	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
 	const discPct = (r: EnrichedRow): number => { const base = r.price + r.discountSum; return base > 0 && r.discountSum > 0 ? Math.round((r.discountSum / base) * 1000) / 10 : 0; };
@@ -724,6 +723,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		listTransfers(dealId).then((r) => { if (alive) setDealTransfers(r.transfers); }).catch(() => { if (alive) setDealTransfers([]); });
 		return () => { alive = false; };
 	}, [dealId]);
+	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
 	/** Дефолтный склад строк (UI-выпадайки вверху больше нет — склад выбирается на самой строке).
 	 *  Дефолт = склад-источник сделки (из резервов заказа), если активен; иначе первый склад.
 	 *  Per-row селектор (rowStore) переопределяет его на конкретной строке. */
@@ -879,6 +879,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		finally { setStageBusy(false); }
 	};
 	const chooseVariant = async (): Promise<void> => {
+		if (variantSelectionLocked) {
+			setVariantError('Основной вариант зафиксирован: по нему уже начались этапы, снабжение, реализации или перемещения.');
+			return;
+		}
 		const changing = Boolean(data.quoteVariants.selectedId);
 		const message = changing
 			? `Заменить выбранный клиентом вариант на «${activeVariant?.name ?? ''}»? Рабочий состав сделки будет заменён.`
@@ -893,6 +897,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 		finally { setVariantBusy(false); }
 	};
 	const cancelVariantSelection = async (): Promise<void> => {
+		if (variantSelectionLocked) {
+			setVariantError('Основной вариант зафиксирован: по нему уже начались этапы, снабжение, реализации или перемещения.');
+			return;
+		}
 		const selected = data.quoteVariants.variants.find((variant) => variant.id === data.quoteVariants.selectedId);
 		const message = `Отменить выбор клиента${selected ? ` «${selected.name}»` : ''}? Текущий состав сохранится в этом варианте, после чего снова можно будет создавать и редактировать варианты КП.`;
 		if (dealId == null || variantBusy || !window.confirm(message)) return;
@@ -1015,7 +1023,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 				<div className="row-controls">
 					{rowEditable(r) && <button
 						className="row-del-x"
-						disabled={busy || removing != null || realizePhase !== 'idle' || rejectedView}
+						disabled={busy || removing != null || realizePhase !== 'idle'}
 						onClick={() => void doRemove(r)}
 						title={r.segmentKind === 'stage' ? 'Удалить работу из этого этапа' : 'Удалить работу из сделки'}
 					>{removing === r.id ? '…' : '✕'}</button>}
@@ -1032,14 +1040,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			<td>{r.name}</td>
 			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
-				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r) || rejectedView} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 			</td>
 			<td className="num">
-				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !rowEditable(r) || rejectedView} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 			</td>
 			<td className="num">
-				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !rowEditable(r) || rejectedView} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
+				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
 			</td>
 			<td className="num">{workingMode ? <b className="realized-qty">{shippedForRow(r)}</b> : <span className="none">—</span>}</td>
 			<td className="num">
@@ -1051,7 +1059,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			<td><span className="muted small">не требуется</span></td>
 			<td>{workingMode
 				? <span className={`st-badge ${drafted ? 'requested' : left <= 0 ? 'ready' : 'proposal'}`}>{drafted ? 'черновик' : left <= 0 ? '✓ реализовано' : 'без склада'}</span>
-				: <span className="st-badge proposal">{rejectedView ? 'не выбран' : 'расчёт'}</span>}</td>
+				: <span className="st-badge proposal">{alternativeView ? 'альтернатива' : 'расчёт'}</span>}</td>
 		</tr>
 		);
 	};
@@ -1095,7 +1103,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						<div className="row-controls">
 							{rowEditable(r) && <button
 								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle' || rejectedView}
+								disabled={busy || supplyBusy || removing != null || realizePhase !== 'idle'}
 								onClick={() => void doRemove(r)}
 								title={r.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
 							>{removing === r.id ? '…' : '✕'}</button>}
@@ -1114,17 +1122,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					</td>
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
-						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r) || rejectedView} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
+						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
 						<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
 						{r.purchasingPrice != null
 							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
 							: <div className="purchase-hint muted-hint">закуп —</div>}
 					</td>
 					<td className="num">
-						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !rowEditable(r) || rejectedView} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
+						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
 					</td>
 					<td className="num">
-						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !rowEditable(r) || rejectedView} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
+						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
 					</td>
 					<td className="num">{workingMode ? <b className="realized-qty">{shippedForRow(r)}</b> : <span className="none">—</span>}</td>
 					<td className="num">
@@ -1148,7 +1156,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						) : <span className="none">нет нигде</span>}
 					</td>
 					<td className="realize-cell">
-						{!workingMode ? <span className="st-badge proposal">{rejectedView ? 'не выбран' : 'расчёт'}</span> : <>
+						{!workingMode ? <span className="st-badge proposal">{alternativeView ? 'альтернатива' : 'расчёт'}</span> : <>
 						<select
 							className="store-select" value={storeOf(r)} disabled={realizePhase !== 'idle' || busy}
 							onChange={(e) => setRowStore((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
@@ -1379,11 +1387,11 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					<div className="deal-variant-tabs">
 						{data.quoteVariants.variants.map((variant) => {
 							const selectedVariant = data.quoteVariants.selectedId === variant.id;
-							const rejectedVariant = Boolean(data.quoteVariants.selectedId) && !selectedVariant;
-							return <div key={variant.id} className={`deal-variant-tab${activeVariantId === variant.id ? ' active' : ''}${selectedVariant ? ' selected' : ''}${rejectedVariant ? ' rejected' : ''}`}>
+							const alternativeVariant = Boolean(data.quoteVariants.selectedId) && !selectedVariant;
+							return <div key={variant.id} className={`deal-variant-tab${activeVariantId === variant.id ? ' active' : ''}${selectedVariant ? ' selected' : ''}`}>
 								<button type="button" className="deal-variant-open" onClick={() => onActiveVariant(variant.id)}>
 									<span><b>{variant.name}</b><small>{variant.items.length} {plural(variant.items.length, 'позиция', 'позиции', 'позиций')} · {rub(variantTotal(variant))}</small></span>
-									<em>{selectedVariant ? 'Выбран клиентом' : rejectedVariant ? 'Не выбран' : 'Черновик'}</em>
+									<em>{selectedVariant ? 'Основной вариант' : alternativeVariant ? 'Альтернатива' : 'Черновик'}</em>
 								</button>
 							</div>;
 						})}
@@ -1395,14 +1403,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 			<div className="deal-addbar">
 				<div className="deal-actions">
 				{(!data.quoteVariants.enabled || proposalEditable) && <button className="btn-primary" onClick={onAdd}>Добавить товар</button>}
-				{!data.quoteVariants.enabled && data.stages.length === 0 && data.supply.length === 0 && data.coreReals.length === 0 && dealTransfers.length === 0 && (
+				{!data.quoteVariants.enabled && (
 					<button className="btn-secondary" onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: 'Вариант 1' }); }}>Варианты КП</button>
 				)}
-				{proposalEditable && activeVariant && <>
+				{data.quoteVariants.enabled && <>
 					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: nextVariantName() }); }}>Добавить вариант</button>
-					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'copy', value: availableVariantName(`Копия ${activeVariant.name}`) }); }}>Копировать</button>
-					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); }}>Переименовать</button>
-					{data.quoteVariants.variants.length > 1 && <button className="btn-secondary danger" disabled={variantBusy} onClick={() => void removeVariant()}>Удалить</button>}
+					{activeVariant && <button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'copy', value: availableVariantName(`Копия ${activeVariant.name}`) }); }}>Копировать</button>}
+					{proposalEditable && activeVariant && <button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); }}>Переименовать</button>}
+					{proposalEditable && activeVariant && data.quoteVariants.variants.length > 1 && <button className="btn-secondary danger" disabled={variantBusy} onClick={() => void removeVariant()}>Удалить</button>}
 				</>}
 				{workingMode && data.stages.length > 0 && (
 					<button className={`btn-secondary${summaryView ? ' active' : ''}`} onClick={() => {
@@ -1421,12 +1429,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 						<button type="button" disabled={!workingMode || dealId == null || dev} onClick={(event) => { closeDocumentMenu(event.currentTarget); setShowContract(true); }}>Договор</button>
 					</div>
 				</details>
-				{(proposalEditable || canSwitchVariant || viewingSelected) && activeVariant && (
+				{(proposalEditable || viewingSelected) && activeVariant && (
 					<button
 						className={viewingSelected ? 'btn-secondary danger' : 'btn-primary'}
-						disabled={variantBusy || (!viewingSelected && activeVariant.items.length === 0)}
+						disabled={variantBusy || variantSelectionLocked || (!viewingSelected && activeVariant.items.length === 0)}
 						onClick={() => void (viewingSelected ? cancelVariantSelection() : chooseVariant())}
-					>{viewingSelected ? 'Отменить выбор клиента' : canSwitchVariant ? 'Выбрать вместо текущего' : 'Выбран клиентом'}</button>
+						title={variantSelectionLocked ? 'По основному варианту уже начались этапы, снабжение, реализации или перемещения' : undefined}
+					>{variantSelectionLocked ? 'Основной зафиксирован' : viewingSelected ? 'Отменить основной' : data.quoteVariants.selectedId ? 'Сделать основным' : 'Выбран клиентом'}</button>
 				)}
 				{workingMode && <button
 					className="btn-secondary"
@@ -1442,7 +1451,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, onAc
 					}}
 				>Документы по сделке{hiddenDocumentCount ? ` (${hiddenDocumentCount})` : ''}</button>}
 				</div>
-				<span className="hint">{workingMode ? 'Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.' : rejectedView ? 'Этот вариант сохранён для истории.' : 'КП формируется только из открытого варианта.'}</span>
+				<span className="hint">{workingMode ? 'Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.' : alternativeView ? 'Альтернативный вариант можно редактировать и печатать независимо от основного.' : 'КП формируется только из открытого варианта.'}</span>
 			</div>
 
 			{workingMode && showDealDocuments && (

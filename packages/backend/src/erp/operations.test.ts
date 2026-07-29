@@ -8,6 +8,8 @@ import {
 	MARKETPLACE_BUNDLE_SOURCE_FIELD,
 	MARKETPLACE_BUNDLE_UNITS_FIELD,
 	REALIZATION_SEGMENT_FIELD,
+	createDealQuoteVariant,
+	deleteDealQuoteVariant,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
 	createMarketplaceReturnBatch,
@@ -16,7 +18,9 @@ import {
 	listMarketplaceReturnOptions,
 	listMarketplaceReturnSales,
 	marketplaceSaleTitle,
+	renameDealQuoteVariant,
 	syncDealRealizationPrices,
+	updateDealQuoteVariantItems,
 } from './operations.js';
 
 type Doc = Record<string, unknown> & {
@@ -76,6 +80,10 @@ class FakeErp {
 			this.itemPatches.set(name, patch);
 			return { name, ...patch };
 		}
+		if (doctype === 'Sales Order' && this.salesOrder && String(this.salesOrder['name']) === name) {
+			Object.assign(this.salesOrder, structuredClone(fields));
+			return structuredClone(this.salesOrder);
+		}
 		const document = this.documents.get(name);
 		if (!document) throw new Error(`missing ${name}`);
 		Object.assign(document, structuredClone(fields));
@@ -120,6 +128,87 @@ const item = (name: string, productId: number, qty: number, rate: number, extra:
 	rate,
 	price_list_rate: rate,
 	...extra,
+});
+
+test('selected quote stays active while editable alternatives are created and maintained', async () => {
+	const selectedId = 'selected';
+	const alternativeId = 'alternative';
+	const variants = {
+		enabled: true,
+		selectedId,
+		variants: [
+			{
+				id: selectedId,
+				name: 'Основной',
+				createdAt: '2026-07-29T00:00:00.000Z',
+				createdById: '1',
+				createdByName: 'Manager',
+				items: [{ productId: 101, itemName: 'Старый снимок', qty: 1, priceListRate: 100, discountPercent: 0, isService: false }],
+			},
+			{
+				id: alternativeId,
+				name: 'Альтернатива',
+				createdAt: '2026-07-29T00:00:00.000Z',
+				createdById: '1',
+				createdByName: 'Manager',
+				items: [{ productId: 202, itemName: 'Product 202', qty: 1, priceListRate: 200, discountPercent: 0, isService: false }],
+			},
+		],
+	};
+	const erp = new FakeErp([], {
+		name: 'SO-77',
+		docstatus: 0,
+		b24_deal_id: '77',
+		b24_quote_variants: JSON.stringify(variants),
+		items: [{ item_code: '101', item_name: 'Актуальный состав', qty: 4, rate: 125, price_list_rate: 125, discount_percentage: 0 }],
+	});
+
+	const created = await createDealQuoteVariant(erp.asClient(), 77, {
+		name: 'Копия основного',
+		sourceVariantId: selectedId,
+		createdById: '2',
+		createdByName: 'Second manager',
+	});
+	assert.equal(created.selectedId, selectedId);
+	const copy = created.variants.find((variant) => variant.name === 'Копия основного');
+	assert.ok(copy);
+	assert.equal(copy.items[0]?.qty, 4);
+	assert.equal(copy.items[0]?.priceListRate, 125);
+
+	const updated = await updateDealQuoteVariantItems(erp.asClient(), 77, copy.id, [
+		{ productId: 303, itemName: 'Product 303', qty: 2, priceListRate: 300, discountPercent: 5, isService: false },
+	]);
+	assert.equal(updated.selectedId, selectedId);
+	assert.equal(updated.variants.find((variant) => variant.id === copy.id)?.items[0]?.productId, 303);
+	await assert.rejects(
+		updateDealQuoteVariantItems(erp.asClient(), 77, selectedId, []),
+		/основной вариант изменяется через рабочий состав/,
+	);
+
+	const renamed = await renameDealQuoteVariant(erp.asClient(), 77, copy.id, 'Новая альтернатива');
+	assert.equal(renamed.variants.find((variant) => variant.id === copy.id)?.name, 'Новая альтернатива');
+	const deleted = await deleteDealQuoteVariant(erp.asClient(), 77, copy.id);
+	assert.equal(deleted.selectedId, selectedId);
+	assert.ok(!deleted.variants.some((variant) => variant.id === copy.id));
+});
+
+test('first quote on an active deal can be recorded as the already selected working variant', async () => {
+	const erp = new FakeErp([], {
+		name: 'SO-88',
+		docstatus: 0,
+		b24_deal_id: '88',
+		items: [{ item_code: '404', item_name: 'Рабочий товар', qty: 2, rate: 450, price_list_rate: 500, discount_percentage: 10 }],
+	});
+	const created = await createDealQuoteVariant(erp.asClient(), 88, {
+		name: 'Текущий состав',
+		createdById: '1',
+		createdByName: 'Manager',
+		selectCreated: true,
+	});
+	assert.equal(created.variants.length, 1);
+	assert.equal(created.selectedId, created.variants[0]?.id);
+	assert.equal(created.variants[0]?.items[0]?.productId, 404);
+	assert.equal(created.variants[0]?.items[0]?.discountPercent, 10);
 });
 
 test('stage price change amends only that stage realization and its return without changing stock quantity', async () => {
