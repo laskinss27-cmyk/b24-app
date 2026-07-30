@@ -7,68 +7,8 @@ import {
 	PAID_REPAIR_SERVICE_NAME,
 	PAID_REPAIR_SERVICE_PRODUCT_ID,
 	mergeRepairServiceLine,
-	normalizeLegacyB24DealRows,
 	setDealB24CollapsedService,
 } from './deal-service.js';
-
-test('legacy paid repair row becomes the real non-stock catalog service', () => {
-	const rows = normalizeLegacyB24DealRows([
-		{ PRODUCT_ID: 0, PRODUCT_NAME: '  Платный   ремонт ', PRICE: 7350, QUANTITY: 1 },
-		{ PRODUCT_ID: 15001, PRODUCT_NAME: 'Камера', PRICE: 12000, QUANTITY: 2, TYPE: 1 },
-	]);
-	assert.deepEqual(rows, [
-		{ PRODUCT_ID: 15001, PRODUCT_NAME: 'Камера', PRICE: 12000, QUANTITY: 2, TYPE: 1 },
-		{
-			PRODUCT_ID: PAID_REPAIR_SERVICE_PRODUCT_ID,
-			PRODUCT_NAME: PAID_REPAIR_SERVICE_NAME,
-			PRICE: 7350,
-			QUANTITY: 1,
-			TYPE: 7,
-		},
-	]);
-});
-
-test('zero warranty row and Bitrix collapsed cover are not imported into the core plan', () => {
-	assert.deepEqual(normalizeLegacyB24DealRows([
-		{ PRODUCT_ID: 0, PRODUCT_NAME: 'Гарантийный ремонт', PRICE: 0, QUANTITY: 1 },
-		{ PRODUCT_ID: B24_COLLAPSE_SERVICE_PRODUCT_ID, PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME, PRICE: 5000, QUANTITY: 1 },
-	]), []);
-});
-
-test('unknown free rows stay blocked', () => {
-	assert.throws(
-		() => normalizeLegacyB24DealRows([
-			{ PRODUCT_ID: 0, PRODUCT_NAME: 'Монтаж вручную', PRICE: 5000, QUANTITY: 1 },
-		]),
-		/позиции без карточки товара: Монтаж вручную/,
-	);
-});
-
-test('ambiguous paid repair duplicates stay blocked instead of doubling the deal total', () => {
-	assert.throws(
-		() => normalizeLegacyB24DealRows([
-			{ PRODUCT_ID: 0, PRODUCT_NAME: 'Платный ремонт', PRICE: 5000, QUANTITY: 1 },
-			{ PRODUCT_ID: PAID_REPAIR_SERVICE_PRODUCT_ID, PRODUCT_NAME: 'Платный ремонт', PRICE: 5000, QUANTITY: 1, TYPE: 7 },
-		]),
-		/одновременно найдены карточка и свободная строка/,
-	);
-	assert.throws(
-		() => normalizeLegacyB24DealRows([
-			{ PRODUCT_ID: 0, PRODUCT_NAME: 'Платный ремонт', PRICE: 5000, QUANTITY: 1 },
-			{ PRODUCT_ID: 0, PRODUCT_NAME: 'Платный ремонт', PRICE: 5000, QUANTITY: 1 },
-		]),
-		/несколько свободных строк/,
-	);
-});
-
-test('non-zero warranty row stays blocked', () => {
-	assert.throws(
-		() => normalizeLegacyB24DealRows([
-			{ PRODUCT_ID: 0, PRODUCT_NAME: 'Гарантийный ремонт', PRICE: 100, QUANTITY: 1 },
-		]),
-		/ненулевая цена/,
-	);
-});
 
 test('repair price update preserves all equipment and replaces only service 19108', () => {
 	const equipment = {

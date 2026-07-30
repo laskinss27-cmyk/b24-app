@@ -3,13 +3,10 @@ import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
 import {
-	fetchProductRows,
 	fetchStores,
 	fetchProfitCoef,
 	fetchStockPreferCore,
 	addProductsToDeal,
-	removeDealProduct,
-	updateDealProduct,
 	setDealPlan,
 	replaceDealPlanProduct,
 	updateDealStageItem,
@@ -133,7 +130,6 @@ const MOCK_DATA: TableData = {
 	],
 };
 
-const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 const PRODUCT_PICKER_MIN_HEIGHT = 900;
 
@@ -172,8 +168,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [bxRows, stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants] = await Promise.all([
-		withTimeout(fetchProductRows(dealId), 20000, 'crm.deal.productrows.get').catch(() => [] as DealProductRow[]),
+	const [stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants] = await Promise.all([
 		withTimeout(fetchStores(), 20000, 'core stores').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
@@ -185,27 +180,18 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchDealStages(dealId), 25000, 'deal/stages').catch(() => [] as DealStage[]),
 		withTimeout(fetchDealQuoteVariants(dealId), 25000, 'deal/variants').catch((): DealQuoteVariants => ({ enabled: false, selectedId: null, variants: [] })),
 	]);
-	// Строки предпочитаем серверные (BX24 на фронте флапает — «пустая вкладка после добавления»);
-	// если бэкенд их не отдал — берём BX24-результат.
-	const rows = shippedInfo.rows ?? bxRows;
+	const rows: EnrichedRow[] = [];
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
-	// Остатки/закупки тянем для ТОВАРОВ ПЛАНА (из ядра) — именно они теперь товары сделки.
-	// + productId строк Б24 (на случай старых сделок без плана) — подстраховка.
+	// Остатки/закупки тянем только для состава сделки из ядра.
 	const planIds = plan.map((p) => p.productId).filter((id) => id > 0);
-	const b24GoodsIds = rows.filter((r) => !isWorkRow(r.type)).map((r) => r.productId).filter((id) => id > 0);
 	const realizedIds = coreReals.flatMap((document) => document.items.map((item) => item.productId)).filter((id) => id > 0);
 	const variantIds = quoteVariants.variants.flatMap((variant) => variant.items.map((item) => item.productId));
-	const allIds = [...new Set([...planIds, ...b24GoodsIds, ...realizedIds, ...variantIds])];
+	const allIds = [...new Set([...planIds, ...realizedIds, ...variantIds])];
 	const enrich: Record<number, ProductEnrichment> = allIds.length
 		? await withTimeout(fetchStockPreferCore(allIds), 25000, 'stock/purchasing').catch(() => ({}))
 		: {};
 	const mkStocks = (pid: number): EnrichedRow['stocks'] =>
 		(enrich[pid]?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));
-	const enriched: EnrichedRow[] = rows.map((r) => ({
-		...r,
-		stocks: mkStocks(r.productId),
-		purchasingPrice: enrich[r.productId]?.purchasingPrice ?? null,
-	}));
 	// Товары сделки = строки ПЛАНА (ядро), приведённые к формату строки таблицы — чтобы весь движок
 	// реализации (чекбоксы/склад/статусы/партии/«Реализовать») работал на них без изменений.
 	const planRowsFromCore: EnrichedRow[] = plan.map((p) => ({
@@ -220,12 +206,8 @@ async function loadAll(dealId: number): Promise<TableData> {
 		stocks: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? [] : mkStocks(p.productId),
 		purchasingPrice: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? null : (enrich[p.productId]?.purchasingPrice ?? null),
 	}));
-	// Старые/ручные сделки могут содержать реальные товары только в строках Б24, без Sales Order
-	// в ядре. Не прячем их: показываем как товарные строки, пока пользователь не перенесёт/правит
-	// состав через наше окно. Служебная свёртка суммы Б24 сюда не попадёт: это TYPE 7.
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
-	const b24OnlyGoods = enriched.filter((r) => !isWorkRow(r.type) && r.productId > 0 && !planIdsSet.has(r.productId));
-	const visibleProductIds = new Set([...planIdsSet, ...b24OnlyGoods.map((row) => row.productId)]);
+	const visibleProductIds = planIdsSet;
 	const realizedHistory = new Map<number, { itemName: string; qty: number; amount: number }>();
 	for (const document of coreReals) {
 		for (const item of document.items) {
@@ -256,7 +238,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			purchasingPrice: enrich[productId]?.purchasingPrice ?? null,
 		}];
 	});
-	const planRows = [...planRowsFromCore, ...b24OnlyGoods, ...historicalGoods];
+	const planRows = [...planRowsFromCore, ...historicalGoods];
 	const variantRows = Object.fromEntries(quoteVariants.variants.map((variant) => [variant.id, variant.items.map((item) => {
 		const rate = Math.round(item.priceListRate * (1 - item.discountPercent / 100) * 100) / 100;
 		return {
@@ -272,7 +254,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			purchasingPrice: item.isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
 		} satisfies EnrichedRow;
 	})]));
-	return { rows: enriched, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
+	return { rows, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -584,7 +566,7 @@ function TransferSplitModal({ dealId, productId, name, need, destName, sources, 
 }
 
 function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onReplace: (row: EnrichedRow) => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
-	const { rows, coef } = data;
+	const { coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
 	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
 	const viewingSelected = Boolean(activeVariant && data.quoteVariants.selectedId === activeVariant.id);
@@ -632,7 +614,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				// + пересчёт служебной строки с общей суммой в Б24.
 				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
 			} else {
-				await updateDealProduct(dealId, Number(r.id), q, p, d);
+				throw new Error('Историческую строку нельзя редактировать: текущий состав сделки хранится только в ядре.');
 			}
 			clearEdit(r.id);
 			await onReload();
@@ -829,7 +811,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				// Товар плана: убираем из состава ядра + пересчёт служебной строки с общей суммой в Б24.
 				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId));
 			} else {
-				await removeDealProduct(dealId, Number(r.id));
+				throw new Error('Историческую строку нельзя удалить: текущий состав сделки хранится только в ядре.');
 			}
 			setNotice({ kind: 'ok', text: `✅ Удалено из сделки: ${r.name.slice(0, 40)}` });
 			await onReload();
@@ -939,13 +921,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	// ТОВАРЫ сделки = строки ПЛАНА (из ядра). На них работает весь движок реализации ниже.
 	const goods = data.planRows.filter((r) => !isWorkRow(r.type));
 	const planWorks = data.planRows.filter((r) => isWorkRow(r.type));
-	const works = rows.filter((r) => isWorkRow(r.type));
-	const planWorkIds = new Set(planWorks.map((row) => row.productId));
-	// ProductId 9814 — служебная свёртка товаров для Б24, в нашей вкладке НЕ показываем.
-	// У старых сделок оказанную услугу Б24 удалить запрещает: если она уже перенесена в план ядра,
-	// оставляем строку Б24 на месте, но второй раз во вкладке не рисуем.
-	const legacyWorks = works.filter((r) => r.productId !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID && !planWorkIds.has(r.productId));
-	const realWorks = [...planWorks, ...legacyWorks];
+	const realWorks = planWorks;
 	const stageQtyByProduct = new Map<number, number>();
 	for (const stage of data.stages) {
 		for (const item of stage.items) stageQtyByProduct.set(item.productId, (stageQtyByProduct.get(item.productId) ?? 0) + item.qty);
@@ -980,18 +956,18 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	}));
 	const stagedPlanRows = [...basePlanRows, ...stageSections.flatMap((section) => section.rows)];
 	const visibleGoods = summaryView ? goods : stagedPlanRows.filter((row) => !isWorkRow(row.type));
-	const visibleWorks = summaryView ? realWorks : [...stagedPlanRows.filter((row) => isWorkRow(row.type)), ...legacyWorks];
+	const visibleWorks = summaryView ? realWorks : stagedPlanRows.filter((row) => isWorkRow(row.type));
 	const pricedGoods = workingMode && data.stages.length
 		? stagedPlanRows.filter((row) => !isWorkRow(row.type))
 		: goods;
 	const pricedWorks = workingMode && data.stages.length
-		? [...stagedPlanRows.filter((row) => isWorkRow(row.type)), ...legacyWorks]
+		? stagedPlanRows.filter((row) => isWorkRow(row.type))
 		: realWorks;
 	const sumRealWorks = pricedWorks.reduce((a, r) => a + line(r), 0);
 	const sumGoods = pricedGoods.reduce((a, r) => a + line(r), 0);
 	const sumWorks = sumRealWorks;
 
-	const discount = rows.reduce((a, r) => a + r.discountSum, 0);
+	const discount = data.planRows.reduce((a, r) => a + r.discountSum, 0);
 	const total = sumGoods + sumWorks;
 	const profitWorks = sumWorks * coef;
 	let profitGoods = 0;
@@ -1546,7 +1522,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					) : (
 						<>
 							{(() => {
-								const baseWorks = [...basePlanRows.filter((row) => isWorkRow(row.type)), ...legacyWorks];
+								const baseWorks = basePlanRows.filter((row) => isWorkRow(row.type));
 								const baseGoods = basePlanRows.filter((row) => !isWorkRow(row.type));
 								const all = [...baseGoods, ...baseWorks];
 								return (

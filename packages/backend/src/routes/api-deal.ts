@@ -15,7 +15,6 @@ import { backfillDealServiceSumSince, ensureDealServiceSumField, syncDealService
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
 import {
 	B24_COLLAPSE_SERVICE_PRODUCT_ID,
-	normalizeLegacyB24DealRows,
 	setDealB24CollapsedService,
 } from '../deal-service.js';
 
@@ -54,6 +53,7 @@ function errInfo(err: unknown): string {
 // закрывается без проводки по складу.
 const VYEZD_PRODUCT_ID = B24_COLLAPSE_SERVICE_PRODUCT_ID;
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
+const legacyB24CompositionDisabled = (): boolean => true;
 
 /** Поставить в Б24-сделку одну служебную строку на сумму total (или очистить, если total<=0). */
 async function setDealB24Service(client: B24Client, dealId: number, total: number): Promise<void> {
@@ -107,46 +107,6 @@ type DealPlanDraftLine = {
 	discountPercent: number;
 	isService?: boolean;
 };
-
-/**
- * Before the first core edit, legacy deals still keep their real product rows in B24.
- * Import them once so replacing B24 rows with the cover service cannot erase the deal composition.
- */
-async function listLegacyB24DealLines(client: B24Client, dealId: number): Promise<DealPlanDraftLine[]> {
-	const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
-	const candidates = normalizeLegacyB24DealRows(rows ?? []);
-	if (!candidates.length) return [];
-
-	const ids = candidates.map((row) => Number(row['PRODUCT_ID']));
-	const serviceIds = await fetchServiceProductIds(client, ids);
-	const accumulated = new Map<number, DealPlanDraftLine & { amount: number }>();
-	for (const row of candidates) {
-		const productId = Number(row['PRODUCT_ID']);
-		const qty = Number(row['QUANTITY'] ?? 0);
-		const price = Number(row['PRICE'] ?? 0);
-		if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) continue;
-		const previous = accumulated.get(productId);
-		if (previous) {
-			previous.qty += qty;
-			previous.amount += price * qty;
-			previous.isService = previous.isService || Number(row['TYPE'] ?? 0) === 7 || serviceIds.has(productId);
-			continue;
-		}
-		accumulated.set(productId, {
-			productId,
-			itemName: String(row['PRODUCT_NAME'] ?? '').trim() || `#${productId}`,
-			qty,
-			priceListRate: price,
-			discountPercent: 0,
-			isService: Number(row['TYPE'] ?? 0) === 7 || serviceIds.has(productId),
-			amount: price * qty,
-		});
-	}
-	return [...accumulated.values()].map(({ amount, ...line }) => ({
-		...line,
-		priceListRate: Math.round((amount / line.qty) * 100) / 100,
-	}));
-}
 
 const normName = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
@@ -512,19 +472,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 				await assertDealQuoteVariantSelected(erp, dealId);
-				// Старые сделки до первого изменения всё ещё могут хранить весь состав только в Б24.
-				// Фиксируем его в ядре ДО первой реализации: после неё Б24/менеджер может очистить
-				// нативные строки, а проведённые документы восстановят только товары, но не работы.
-				if (!(await listDealPlan(erp, dealId)).length) {
-					const legacyLines = await listLegacyB24DealLines(client, dealId);
-					if (legacyLines.length) {
-						const today = new Date().toISOString().slice(0, 10);
-						const savedPlan = await upsertDealPlan(erp, dealId, legacyLines, today);
-						const total = Math.round(savedPlan.lines.reduce((sum, line) => sum + line.priceListRate * (1 - line.discountPercent / 100) * line.qty, 0) * 100) / 100;
-						await setDealB24Service(client, dealId, total);
-						app.log.info({ dealId, lines: savedPlan.lines.length, total }, '[api/deal/realize-core] legacy composition preserved');
-					}
-				}
 				const groups = Array.isArray(b.groups) ? b.groups : [];
 				const requestedProductIds = groups.flatMap((g) => {
 					const gg = g as { lines?: unknown };
@@ -695,7 +642,8 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			const priced = clean.map((it) => ({ ...it, isService: it.isService || serviceIds.has(it.productId), price: Number.isFinite(it.price) && it.price >= 0 ? it.price : (basePrices.get(it.productId) ?? 0) }));
 
 			const erp = ErpClient.fromEnv();
-			if (erp) {
+			if (!erp) throw new Error('ядро склада не подключено — состав сделки нельзя изменить');
+			{
 				const variantId = String(b.variantId ?? '').trim();
 				if (variantId) {
 					const state = await listDealQuoteVariants(erp, dealId);
@@ -719,9 +667,14 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				const targetStageId = String(b.stageId ?? '').trim();
 				const addingToStage = Boolean(targetStageId) || b.stage === true;
 				const currentPlan = await listDealPlan(erp, dealId);
-				const initialLines = currentPlan.length
-					? currentPlan.map((p) => ({ productId: p.productId, itemName: p.itemName, qty: p.qty, priceListRate: p.priceListRate, discountPercent: p.discountPercent, isService: p.isService }))
-					: await listLegacyB24DealLines(client, dealId);
+				const initialLines = currentPlan.map((p) => ({
+					productId: p.productId,
+					itemName: p.itemName,
+					qty: p.qty,
+					priceListRate: p.priceListRate,
+					discountPercent: p.discountPercent,
+					isService: p.isService,
+				}));
 				for (const p of initialLines) byId.set(p.productId, p);
 				for (const it of priced) {
 					const prev = byId.get(it.productId);
@@ -760,18 +713,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				app.log.info({ dealId, planLines: savedPlan.lines.length, total }, '[api/deal/add-products] core plan + B24 service');
 				return { ok: true, added: priced.length, plan: savedPlan.lines.length, total };
 			}
-
-			// ФОЛБЭК (ядро не подключено): как раньше — товары в строки Б24.
-			let added = 0;
-			for (const it of priced) {
-				if (it.productId === CORE_ENGINEER_VISIT_SERVICE_ID) {
-					throw new Error('услуга «Выезд инженера» требует подключенного ядра склада');
-				}
-				await client.call('crm.item.productrow.add', { fields: { ownerType: 'D', ownerId: dealId, productId: it.productId, price: it.price, quantity: it.quantity, ...(it.isService ? { type: 7 } : {}) } });
-				added++;
-			}
-			app.log.info({ dealId, added }, '[api/deal/add-products] ok (b24 fallback)');
-			return { ok: true, added };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/add-products] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -783,6 +724,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; rowId?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (legacyB24CompositionDisabled()) return reply.code(410).send({ ok: false, error: 'товарный состав сделки редактируется только в ядре' });
 		const dealId = Number(b.dealId);
 		const rowId = Number(b.rowId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
@@ -824,6 +766,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; rowId?: unknown; quantity?: unknown; price?: unknown; discountRate?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (legacyB24CompositionDisabled()) return reply.code(410).send({ ok: false, error: 'товарный состав сделки редактируется только в ядре' });
 		const dealId = Number(b.dealId);
 		const rowId = Number(b.rowId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
@@ -887,8 +830,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// СВЕРНУТЬ сделку в одну служебную услугу вручную (на случай старых сделок; при добавлении
-	// товара через /add-products сворачивание уже идёт автоматически). productId 9814 — VYEZD_PRODUCT_ID.
+	// Повторно записать в Б24 единственную служебную строку по сумме состава из ядра.
 	app.post('/api/deal/collapse-service', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
 		const client = clientFrom(b);
@@ -896,18 +838,12 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
-			const all = rows ?? [];
-			// Сумма сделки = Σ PRICE×QUANTITY текущих строк (PRICE = итог за ед. после скидки).
-			const total = Math.round(all.reduce((a, r) => a + Number(r['PRICE'] ?? 0) * Number(r['QUANTITY'] ?? 0), 0) * 100) / 100;
-			if (total <= 0) return reply.code(400).send({ ok: false, error: 'в сделке нет суммы для сворачивания' });
-			// Уже свёрнута в одну служебную строку? Не трогаем, идемпотентно.
-			if (all.length === 1 && Number(all[0]?.['PRODUCT_ID']) === VYEZD_PRODUCT_ID) {
-				return { ok: true, total, already: true };
-			}
+			const erp = ErpClient.fromEnv();
+			if (!erp) throw new Error('ядро склада не подключено — сумму сделки нельзя определить');
+			const total = await calculateDealPlanTotal(erp, dealId);
 			await setDealB24Service(client, dealId, total);
-			app.log.info({ dealId, total, was: all.length }, '[api/deal/collapse-service] ok');
-			return { ok: true, total, replaced: all.length };
+			app.log.info({ dealId, total }, '[api/deal/collapse-service] core total synchronized');
+			return { ok: true, total };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/collapse-service] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -1172,12 +1108,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				return { ok: true, total, lines: variantItems.length };
 			}
 			const previousPlan = await listDealPlan(erp, dealId);
-			if (!lines.length && !previousPlan.length) {
-				const legacyLines = await listLegacyB24DealLines(client, dealId);
-				if (legacyLines.length) {
-					return reply.code(409).send({ ok: false, error: 'нельзя очистить старую сделку до переноса её состава в ядро' });
-				}
-			}
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const today = new Date().toISOString().slice(0, 10);
 			const previousByProduct = new Map(previousPlan.map((line) => [line.productId, line.rate]));
@@ -1248,7 +1178,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					]);
 				}
 			}
-			if (!plan.length && !variantId) plan = await listLegacyB24DealLines(client, dealId);
 			const rows = dealExportRows(plan, stages, realizations, Boolean(variantId));
 			const file = await buildDealExportXlsx({
 				dealId,
@@ -1331,7 +1260,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 			// КП должно смотреть на НАШ состав сделки из ядра (Sales Order), а не на нативные строки Б24:
 			// в Б24 мы специально держим одну служебную строку на всю сумму.
 			const erp = ErpClient.fromEnv();
-			let source: 'core' | 'b24-fallback' = 'core';
+			const source = 'core';
 			const variantId = String(b.variantId ?? '').trim();
 			const variantState = erp && variantId ? await listDealQuoteVariants(erp, dealId) : null;
 			const variant = variantState?.variants.find((row) => row.id === variantId);
@@ -1363,16 +1292,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					price: r.priceListRate * (1 - r.discountPercent / 100),
 					stage: r.stage,
 				}));
-			}
-			if (!raw.length && !variantId) {
-				source = 'b24-fallback';
-				const old = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId }).catch(() => [] as Array<Record<string, unknown>>);
-				raw = (old ?? [])
-					.map((r) => ({
-						productId: Number(r['PRODUCT_ID'] ?? 0), name: String(r['PRODUCT_NAME'] ?? ''),
-						type: Number(r['TYPE'] ?? 0), qty: Number(r['QUANTITY'] ?? 0), price: Number(r['PRICE'] ?? 0),
-					}))
-					.filter((r) => r.productId !== VYEZD_PRODUCT_ID);
 			}
 			const catalogInfo = await enrichCatalogProducts(
 				client,
@@ -1470,24 +1389,10 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const [info, b24Supply, coreSupply, rows] = await Promise.all([
+			const [info, b24Supply, coreSupply] = await Promise.all([
 				loadDealOrderInfo(client, dealId),
 				listSupplyCards(client, dealId).catch(() => [] as SupplyCard[]),
 				listCoreSupplyCards(dealId).catch(() => [] as SupplyCard[]),
-				// Строки сделки серверным клиентом: фронтовый BX24 флапает (пустая вкладка после
-				// «Добавить товар»), чистый JSON-REST стабилен. null → фронт падает на BX24-фолбэк.
-				client.call<{ productRows?: Array<Record<string, unknown>> }>('crm.item.productrow.list', {
-					filter: { '=ownerType': 'D', '=ownerId': dealId },
-				}).then((res) => (res?.productRows ?? []).map((r) => ({
-					id: String(r['id']),
-					productId: Number(r['productId'] ?? 0),
-					name: String(r['productName'] ?? ''),
-					type: Number(r['type'] ?? 0),
-					price: Number(r['price'] ?? 0),
-					quantity: Number(r['quantity'] ?? 0),
-					discountSum: Number(r['discountSum'] ?? 0),
-					measure: String(r['measureName'] ?? ''),
-				}))).catch((err) => { app.log.warn({ dealId }, `[api/deal/shipped] productrow.list не отдался — ${errInfo(err)}`); return null; }),
 			]);
 			const supply = [...coreSupply, ...b24Supply];
 			return {
@@ -1499,7 +1404,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 				payment: info.payment,
 				sourceStoreId: info.sourceStoreId,
 				supply,
-				rows,
+				rows: [],
 			};
 		} catch (err) {
 			app.log.error({ dealId }, `[api/deal/shipped] failed — ${errInfo(err)}`);
@@ -1817,6 +1722,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; productId?: unknown; quantity?: unknown; price?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (legacyB24CompositionDisabled()) return reply.code(410).send({ ok: false, error: 'товарный состав сделки редактируется только в ядре' });
 
 		const dealId = Number(b.dealId);
 		const productId = Number(b.productId);

@@ -831,10 +831,8 @@ export function contractLinesFromB24ProductRows(rows: Array<Record<string, unkno
 }
 
 async function loadContractLines(client: B24Client, erp: ErpClient, dealId: number): Promise<ContractLine[]> {
-	const planLines = linesFromPlan(await listDealPlan(erp, dealId));
-	if (planLines.length) return planLines;
-	const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
-	return contractLinesFromB24ProductRows(rows ?? []);
+	void client;
+	return linesFromPlan(await listDealPlan(erp, dealId));
 }
 
 export async function generateDealContract(
