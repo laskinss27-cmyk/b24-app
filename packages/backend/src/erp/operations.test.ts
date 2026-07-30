@@ -14,12 +14,17 @@ import {
 	createMarketplaceReturn,
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
+	deliverRepairUnit,
+	listDealRealizations,
 	listMarketplaceOperations,
 	listMarketplaceReturnOptions,
 	listMarketplaceReturnSales,
+	locateRepairUnit,
 	marketplaceSaleTitle,
+	moveRepairUnit,
 	renameDealQuoteVariant,
 	syncDealRealizationPrices,
+	upsertDealPlan,
 	updateDealQuoteVariantItems,
 } from './operations.js';
 
@@ -128,6 +133,117 @@ const item = (name: string, productId: number, qty: number, rate: number, extra:
 	rate,
 	price_list_rate: rate,
 	...extra,
+});
+
+test('repair stock operations allow zero valuation and remove a failed draft', async () => {
+	const erp = new FakeErp([]);
+	const client = erp.asClient();
+
+	await moveRepairUnit(client, {
+		itemCode: 'REPAIR-107',
+		fromStore: 'Измайловский 18Д',
+		toStore: 'Goods In Transit',
+	});
+	const transfer = erp.active().find((document) => document._doctype === 'Stock Entry');
+	assert.equal(transfer?.docstatus, 1);
+	assert.equal(transfer?.items[0]?.['allow_zero_valuation_rate'], 1);
+
+	await deliverRepairUnit(client, {
+		itemCode: 'REPAIR-107',
+		storeTitle: 'Goods In Transit',
+		dealId: 37238,
+	});
+	const delivery = erp.active().find((document) => document._doctype === 'Delivery Note');
+	assert.equal(delivery?.docstatus, 1);
+	assert.equal(delivery?.items[0]?.['allow_zero_valuation_rate'], 1);
+
+	const failing = new FakeErp([]);
+	const failingClient = failing.asClient();
+	failingClient.submit = async () => { throw new Error('submit failed'); };
+	await assert.rejects(
+		deliverRepairUnit(failingClient, {
+			itemCode: 'REPAIR-108',
+			storeTitle: 'Измайловский 18Д',
+			dealId: 37239,
+		}),
+		/submit failed/,
+	);
+	assert.equal(failing.active().length, 0);
+});
+
+test('repair location is read from ERP bins and inconsistent balances are rejected', async () => {
+	const oneStore = {
+		list: async (doctype: string) => doctype === 'Company'
+			? [{ name: 'Test Company', abbr: 'TEST' }]
+			: doctype === 'Bin'
+				? [
+					{ warehouse: 'Измайловский 18Д - TEST', actual_qty: 1 },
+					{ warehouse: 'Goods In Transit - TEST', actual_qty: 0 },
+				]
+				: [],
+	} as unknown as ErpClient;
+	assert.deepEqual(await locateRepairUnit(oneStore, 'REPAIR-107'), {
+		storeTitle: 'Измайловский 18Д',
+		qty: 1,
+	});
+
+	const split = {
+		list: async (doctype: string) => doctype === 'Bin'
+			? [
+				{ warehouse: 'Измайловский 18Д - TEST', actual_qty: 0.5 },
+				{ warehouse: 'Goods In Transit - TEST', actual_qty: 0.5 },
+			]
+			: [{ name: 'Test Company', abbr: 'TEST' }],
+	} as unknown as ErpClient;
+	await assert.rejects(locateRepairUnit(split, 'REPAIR-107'), /ожидалась 1 штука на одном складе/);
+});
+
+test('repair delivery notes never enter the commercial deal plan as NaN', async () => {
+	const erp = new FakeErp([
+		{
+			name: 'DN-SERVICE',
+			docstatus: 1,
+			b24_deal_id: '37238',
+			items: [item('SERVICE-ROW', 19108, 1, 1620, { warehouse: '' })],
+		},
+		{
+			name: 'DN-REPAIR',
+			docstatus: 0,
+			b24_deal_id: '37238',
+			items: [{
+				name: 'REPAIR-ROW',
+				item_code: 'REPAIR-107',
+				item_name: '[ремонт]Монитор',
+				qty: 1,
+				warehouse: 'Измайловский 18Д - TEST',
+				rate: 0,
+			}],
+		},
+	], {
+		name: 'SO-37238',
+		docstatus: 0,
+		b24_deal_id: '37238',
+		items: [
+			item('SO-SERVICE', 19108, 1, 3000, { price_list_rate: 3000, discount_percentage: 0 }),
+			{ name: 'SO-BROKEN', item_code: 'NaN', item_name: '[ремонт]Монитор', qty: 1, rate: 0 },
+		],
+	});
+
+	const realizations = await listDealRealizations(erp.asClient(), 37238);
+	assert.deepEqual(realizations.map((document) => document.name), ['DN-SERVICE']);
+	assert.deepEqual(realizations[0]?.items.map((line) => line.productId), [19108]);
+
+	await upsertDealPlan(erp.asClient(), 37238, [{
+		productId: 19108,
+		itemName: 'Платный ремонт',
+		qty: 1,
+		priceListRate: 3000,
+		discountPercent: 0,
+		isService: true,
+	}], '2026-07-30');
+	const saved = await erp.asClient().get<Record<string, unknown>>('Sales Order', 'SO-37238');
+	const codes = ((saved?.['items'] as Array<Record<string, unknown>>) ?? []).map((line) => line['item_code']);
+	assert.deepEqual(codes, ['19108']);
 });
 
 test('selected quote stays active while editable alternatives are created and maintained', async () => {

@@ -9,6 +9,7 @@ import {
 	deliverRepairUnit,
 	fetchErpStoreStockFull,
 	listDealPlan,
+	locateRepairUnit,
 	moveRepairUnit,
 	receiveRepairUnit,
 	renameRepairItem,
@@ -473,7 +474,10 @@ async function resolveOrCreateContact(
  *  Best-effort: ядро недоступно/без точки приёмки — ремонт всё равно сохраняется. Мутирует data.repairItemCode. */
 async function syncRepairStock(data: RepairData, log: FastifyInstance['log'], opts: { allowCreate: boolean } = { allowCreate: true }): Promise<void> {
 	const erp = ErpClient.fromEnv();
-	if (!erp) return; // ядро не сконфигурировано — фича оживёт при переключении склада на ядро
+	if (!erp) {
+		if (opts.allowCreate) throw new Error('ядро склада недоступно — ремонт не принят');
+		return;
+	}
 	const itemName = buildRepairItemName(data);
 	try {
 		if (data.repairItemCode) {
@@ -484,7 +488,7 @@ async function syncRepairStock(data: RepairData, log: FastifyInstance['log'], op
 		// оприходуем на склад давно закрытые ремонты.
 		if (!opts.allowCreate) return;
 		const store = data.point.trim();
-		if (!store) { log.warn({ repairNo: data.repairNo }, '[repairs] склад приёмки (точка) не указан — позиция на складе не заведена'); return; }
+		if (!store) throw new Error('склад приёмки не указан — ремонт не принят');
 		const itemCode = `REPAIR-${data.repairNo}`;
 		await receiveRepairUnit(erp, { itemCode, itemName, storeTitle: store });
 		data.repairItemCode = itemCode;
@@ -492,51 +496,68 @@ async function syncRepairStock(data: RepairData, log: FastifyInstance['log'], op
 		log.info({ itemCode, store }, '[repairs] позиция ремонта заведена на складе ядра');
 	} catch (err) {
 		log.warn({ repairNo: data.repairNo }, `[repairs] склад ядра: позицию завести/переименовать не вышло — ${errInfo(err)}`);
+		if (opts.allowCreate) throw err;
 	}
 }
 
-/** Движение позиции по смене статуса (этап 2). Best-effort; мутирует data.repairStore.
+/** Движение позиции по смене статуса (этап 2). Ошибка блокирует смену статуса; мутирует data.repairStore.
  *  Только вперёд: откат статуса остаток не двигает (ограничение v1). Карта:
- *   принято в офисе → Измайловский · отправлено в ремонт → транзит · отправлено на ТТ → без движения (в пути)
+ *   принято в офисе → Измайловский · отправлено в ремонт → транзит · отправлено на ТТ → транзит
  *   готово к выдаче → склад выдачи · выдано → склад не трогаем (дальше работа в сделке). */
 async function moveRepairForStatus(data: RepairData, newStatus: RepairStatus, log: FastifyInstance['log']): Promise<void> {
 	const erp = ErpClient.fromEnv();
-	if (!erp || !data.repairItemCode) return;
+	if (!data.repairItemCode) {
+		throw new Error(`у ремонта №${data.repairNo} нет складской карточки — сначала восстановите учёт аппарата в ядре`);
+	}
+	if (!erp) throw new Error('ядро склада недоступно — статус ремонта не изменён');
 	const target = newStatus === 'received_office' ? OFFICE_STORE
 		: newStatus === 'sent' ? TRANSIT_STORE
+		: newStatus === 'sent_to_tt' ? TRANSIT_STORE
 		: newStatus === 'ready_tt' ? (data.issueStore?.trim() || null)
 		: null;
 	if (!target) {
-		if (newStatus === 'ready_tt') log.warn({ repairNo: data.repairNo }, '[repairs] «готово к выдаче» без склада выдачи — перемещение не сделано');
+		if (newStatus === 'ready_tt') throw new Error('для статуса «Готово к выдаче» сначала выберите склад выдачи');
+		const actual = await locateRepairUnit(erp, data.repairItemCode);
+		if (!actual) throw new Error(`ремонтная позиция ${data.repairItemCode} отсутствует на складах ядра`);
+		data.repairStore = actual.storeTitle;
 		return;
 	}
-	const from = data.repairStore?.trim();
-	if (!from) { log.warn({ repairNo: data.repairNo }, '[repairs] текущий склад позиции неизвестен — перемещение пропущено'); return; }
+	const actual = await locateRepairUnit(erp, data.repairItemCode);
+	if (!actual) throw new Error(`ремонтная позиция ${data.repairItemCode} отсутствует на складах ядра`);
+	const from = actual.storeTitle;
+	data.repairStore = from;
 	if (from === target) { data.repairStore = target; return; } // уже там (напр. приняли сразу в офисе)
-	try {
-		await moveRepairUnit(erp, { itemCode: data.repairItemCode, fromStore: from, toStore: target });
-		data.repairStore = target;
-		log.info({ itemCode: data.repairItemCode, from, to: target }, '[repairs] позиция перемещена по статусу');
-	} catch (err) {
-		log.warn({ repairNo: data.repairNo }, `[repairs] перемещение позиции (${from}→${target}) не вышло — ${errInfo(err)}`);
-	}
+	await moveRepairUnit(erp, { itemCode: data.repairItemCode, fromStore: from, toStore: target });
+	data.repairStore = target;
+	log.info({ itemCode: data.repairItemCode, from, to: target }, '[repairs] позиция перемещена по статусу');
 }
 
 /** Списание аппарата при «Выдано» (клиентский): Delivery Note в ядре, цена 0 (выдаём владельцу, не продаём),
- *  привязка к сделке → виден в её реализациях. Идемпотентно (по repairDeliveryNote), best-effort. */
+ *  привязка к сделке. Идемпотентно; ошибка блокирует смену статуса. */
 async function writeOffRepairOnIssue(data: RepairData, log: FastifyInstance['log']): Promise<void> {
 	const erp = ErpClient.fromEnv();
-	if (!erp || !data.repairItemCode || data.repairDeliveryNote) return;
-	const store = data.repairStore?.trim();
-	if (!store) { log.warn({ repairNo: data.repairNo }, '[repairs] выдача: склад аппарата неизвестен — списание пропущено'); return; }
-	try {
-		const dn = await deliverRepairUnit(erp, { itemCode: data.repairItemCode, storeTitle: store, ...(data.dealId ? { dealId: data.dealId } : {}) });
-		data.repairDeliveryNote = dn.name;
-		data.repairStore = null; // аппарат выдан — со склада списан
-		log.info({ itemCode: data.repairItemCode, dn: dn.name }, '[repairs] аппарат списан при выдаче (Delivery Note)');
-	} catch (err) {
-		log.warn({ repairNo: data.repairNo }, `[repairs] списание при выдаче не вышло — ${errInfo(err)}`);
+	if (!data.repairItemCode) {
+		throw new Error(`у ремонта №${data.repairNo} нет складской карточки — выдача без списания аппарата запрещена`);
 	}
+	if (!erp) throw new Error('ядро склада недоступно — выдача ремонта не проведена');
+	if (data.repairDeliveryNote) {
+		const existing = await erp.get<Record<string, unknown>>('Delivery Note', data.repairDeliveryNote);
+		if (Number(existing?.['docstatus'] ?? 0) === 1) {
+			data.repairStore = null;
+			return;
+		}
+		data.repairDeliveryNote = null;
+	}
+	const actual = await locateRepairUnit(erp, data.repairItemCode);
+	if (!actual) throw new Error(`ремонтная позиция ${data.repairItemCode} отсутствует на складах ядра`);
+	const dn = await deliverRepairUnit(erp, {
+		itemCode: data.repairItemCode,
+		storeTitle: actual.storeTitle,
+		...(data.dealId ? { dealId: data.dealId } : {}),
+	});
+	data.repairDeliveryNote = dn.name;
+	data.repairStore = null; // аппарат выдан — со склада списан
+	log.info({ itemCode: data.repairItemCode, dn: dn.name }, '[repairs] аппарат списан при выдаче (Delivery Note)');
 }
 
 /** ПРЕДПРОДАЖНЫЙ: движение существующего товара (productId) по статусам. Best-effort; мутирует repairStore.
@@ -850,10 +871,11 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				createdByName: byName,
 				history: [{ at: now, status: 'received_tt', byId, byName }],
 			};
-			// Сделка — на любой ремонт (пишет data.dealId). Затем позиция аппарата на складе ядра (пишет data.repairItemCode).
+			// Сначала обязательно принимаем сам аппарат в ядре. Без складской карточки ремонт
+			// не считаем принятым; сделку создаём только после успешного прихода.
+			await syncRepairStock(data, app.log);
 			const dealClient = systemClient() ?? client;
 			const dealSync = await syncRepairDeal(dealClient, data, app.log);
-			await syncRepairStock(data, app.log);
 			const nameParts = [device, data.model, data.client.name].filter(Boolean);
 			const added = await client.call<number | { id?: number }>('entity.item.add', {
 				ENTITY: REPAIRS_ENTITY,

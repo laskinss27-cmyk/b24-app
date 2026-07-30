@@ -1625,20 +1625,32 @@ export async function createClientReturns(
 /** Все партии-реализации сделки — одним фильтром по b24_deal_id. */
 export async function listDealRealizations(erp: ErpClient, dealId: number): Promise<ErpRealization[]> {
 	const ctx = await erpContext(erp);
-	const documents = await activeDealDeliveryNotes(erp, dealId);
+	const documents = (await activeDealDeliveryNotes(erp, dealId)).filter((document) =>
+		document.items.some((item) => {
+			const productId = Number(item['item_code']);
+			return Number.isInteger(productId) && productId > 0;
+		}));
 	await assignRealizationSegments(erp, dealId, documents);
 	const out: ErpRealization[] = [];
 	for (const document of documents) {
-		const items = document.items.map((it) => ({
-			productId: Number(it['item_code']),
-			itemName: String(it['item_name'] ?? ''),
-			qty: Number(it['qty'] ?? 0),
-			storeTitle: b24StoreTitle(ctx, String(it['warehouse'] ?? '')),
-			rate: Number(it['rate'] ?? 0),
-			rowName: String(it['name'] ?? ''),
-			sourceRow: String(it['dn_detail'] ?? ''),
-			segmentId: String(it[REALIZATION_SEGMENT_FIELD] ?? ''),
-		}));
+		// Ремонтное оборудование живёт в ERPNext под строковыми кодами REPAIR-* и не является
+		// коммерческой строкой сделки. Не пропускаем его в движок реализаций, где productId
+		// по архитектуре всегда является положительным числом из каталога.
+		const items = document.items.flatMap((it) => {
+			const productId = Number(it['item_code']);
+			if (!Number.isInteger(productId) || productId <= 0) return [];
+			return [{
+				productId,
+				itemName: String(it['item_name'] ?? ''),
+				qty: Number(it['qty'] ?? 0),
+				storeTitle: b24StoreTitle(ctx, String(it['warehouse'] ?? '')),
+				rate: Number(it['rate'] ?? 0),
+				rowName: String(it['name'] ?? ''),
+				sourceRow: String(it['dn_detail'] ?? ''),
+				segmentId: String(it[REALIZATION_SEGMENT_FIELD] ?? ''),
+			}];
+		});
+		if (!items.length) continue;
 		out.push({
 			name: document.name,
 			dealId: String(document.doc[DEAL_FIELD] ?? ''),
@@ -1813,17 +1825,21 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 		const rows = await erp.list('Item', ['name', 'is_stock_item'], [['name', 'in', ids.slice(i, i + 100)]]);
 		for (const row of rows) serviceById.set(String(row['name']), Number(row['is_stock_item'] ?? 1) === 0);
 	}
-	return items.map((it) => ({
-		productId: Number(it['item_code']),
-		itemName: String(it['item_name'] ?? ''),
-		qty: Number(it['qty'] ?? 0),
-		rate: Number(it['rate'] ?? 0),
-		priceListRate: Number(it['price_list_rate'] ?? it['rate'] ?? 0),
-		discountPercent: Number(it['discount_percentage'] ?? 0),
-		delivered: Number(it['delivered_qty'] ?? 0),
-		isService: Number(it['item_code']) === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
-		lineKey: String(it[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(it['name'] ?? '').trim(),
-	}));
+	return items.flatMap((it) => {
+		const productId = Number(it['item_code']);
+		if (!Number.isInteger(productId) || productId <= 0) return [];
+		return [{
+			productId,
+			itemName: String(it['item_name'] ?? ''),
+			qty: Number(it['qty'] ?? 0),
+			rate: Number(it['rate'] ?? 0),
+			priceListRate: Number(it['price_list_rate'] ?? it['rate'] ?? 0),
+			discountPercent: Number(it['discount_percentage'] ?? 0),
+			delivered: Number(it['delivered_qty'] ?? 0),
+			isService: productId === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
+			lineKey: String(it[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(it['name'] ?? '').trim(),
+		}];
+	});
 }
 
 function planDraft(line: PlanItem): PlanLine {
@@ -3317,15 +3333,52 @@ export async function receiveRepairUnit(erp: ErpClient, args: { itemCode: string
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureRepairItem(erp, { itemCode: args.itemCode, itemName: args.itemName });
+	const existing = await locateRepairUnit(erp, args.itemCode);
+	if (existing) return { name: '' };
 	const doc = await erp.create('Purchase Receipt', {
 		company: ctx.company,
 		supplier: TECH_SUPPLIER,
 		set_posting_time: 1,
-		items: [{ item_code: args.itemCode, qty: 1, warehouse: erpWarehouse(ctx, args.storeTitle), rate: 0 }],
+		items: [{
+			item_code: args.itemCode,
+			qty: 1,
+			warehouse: erpWarehouse(ctx, args.storeTitle),
+			rate: 0,
+			allow_zero_valuation_rate: 1,
+		}],
 	});
 	const name = String(doc['name']);
-	await erp.submit('Purchase Receipt', name);
+	try {
+		await erp.submit('Purchase Receipt', name);
+	} catch (err) {
+		await erp.delete('Purchase Receipt', name).catch(() => undefined);
+		throw err;
+	}
 	return { name };
+}
+
+export interface RepairUnitLocation {
+	storeTitle: string;
+	qty: number;
+}
+
+/** Фактическое местонахождение клиентского аппарата берём из Bin, а не из кэша карточки ремонта. */
+export async function locateRepairUnit(erp: ErpClient, itemCode: string): Promise<RepairUnitLocation | null> {
+	const ctx = await erpContext(erp);
+	const bins = await erp.list('Bin', ['warehouse', 'actual_qty'], [['item_code', '=', itemCode]]);
+	const nonZero = bins
+		.map((bin) => ({
+			storeTitle: b24StoreTitle(ctx, String(bin['warehouse'] ?? '')),
+			qty: Number(bin['actual_qty'] ?? 0),
+		}))
+		.filter((bin) => Math.abs(bin.qty) > 0.000001);
+	if (!nonZero.length) return null;
+	const total = nonZero.reduce((sum, bin) => sum + bin.qty, 0);
+	if (nonZero.some((bin) => bin.qty < 0) || nonZero.length !== 1 || Math.abs(total - 1) > 0.000001) {
+		const details = nonZero.map((bin) => `${bin.storeTitle}: ${bin.qty}`).join(', ');
+		throw new Error(`ремонтная позиция ${itemCode}: ожидалась 1 штука на одном складе, найдено ${details || '0'}`);
+	}
+	return nonZero[0]!;
 }
 
 /** Перемещение 1 шт ремонтного аппарата между складами (Stock Entry: Material Transfer, сразу проведён).
@@ -3341,10 +3394,16 @@ export async function moveRepairUnit(erp: ErpClient, args: { itemCode: string; f
 			qty: 1,
 			s_warehouse: erpWarehouse(ctx, args.fromStore),
 			t_warehouse: erpWarehouse(ctx, args.toStore),
+			allow_zero_valuation_rate: 1,
 		}],
 	});
 	const name = String(doc['name']);
-	await erp.submit('Stock Entry', name);
+	try {
+		await erp.submit('Stock Entry', name);
+	} catch (err) {
+		await erp.delete('Stock Entry', name).catch(() => undefined);
+		throw err;
+	}
 	return { name };
 }
 
@@ -3353,15 +3412,41 @@ export async function moveRepairUnit(erp: ErpClient, args: { itemCode: string; f
 export async function deliverRepairUnit(erp: ErpClient, args: { itemCode: string; storeTitle: string; dealId?: number }): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
+	// Повтор после сетевой/ERP-ошибки не должен плодить документы. Проведённую выдачу
+	// используем повторно, старый черновик той же ремонтной позиции удаляем.
+	const childRows = await erp.list('Delivery Note Item', ['name'], [['item_code', '=', args.itemCode]]);
+	for (const childHead of childRows) {
+		const childName = String(childHead['name'] ?? '');
+		const child = childName ? await erp.get<Record<string, unknown>>('Delivery Note Item', childName) : null;
+		const parentName = String(child?.['parent'] ?? '');
+		if (!parentName) continue;
+		const parent = await erp.get<Record<string, unknown>>('Delivery Note', parentName);
+		if (!parent) continue;
+		if (args.dealId && String(parent[DEAL_FIELD] ?? '') !== String(args.dealId)) continue;
+		const docstatus = Number(parent['docstatus'] ?? 0);
+		if (docstatus === 1) return { name: parentName };
+		if (docstatus === 0) await erp.delete('Delivery Note', parentName);
+	}
 	const doc = await erp.create('Delivery Note', {
 		company: ctx.company,
 		customer: TECH_CUSTOMER,
 		set_posting_time: 1,
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
-		items: [{ item_code: args.itemCode, qty: 1, warehouse: erpWarehouse(ctx, args.storeTitle), rate: 0 }],
+		items: [{
+			item_code: args.itemCode,
+			qty: 1,
+			warehouse: erpWarehouse(ctx, args.storeTitle),
+			rate: 0,
+			allow_zero_valuation_rate: 1,
+		}],
 	});
 	const name = String(doc['name']);
-	await erp.submit('Delivery Note', name);
+	try {
+		await erp.submit('Delivery Note', name);
+	} catch (err) {
+		await erp.delete('Delivery Note', name).catch(() => undefined);
+		throw err;
+	}
 	return { name };
 }
 
