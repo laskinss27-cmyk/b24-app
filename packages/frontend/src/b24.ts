@@ -2111,6 +2111,9 @@ export interface ContractTemplateInfo {
 	available: boolean;
 	ourRole: string;
 	customerRole: string;
+	usesObjectAddress: boolean;
+	usesObjectName: boolean;
+	usesWorkDuration: boolean;
 }
 
 export interface DealContractContext {
@@ -2148,6 +2151,7 @@ export async function downloadDealContract(input: {
 	customerKind: ContractPartyKind;
 	contractDate: string;
 	objectAddress: string;
+	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
 }): Promise<string> {

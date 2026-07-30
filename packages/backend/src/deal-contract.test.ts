@@ -5,11 +5,13 @@ import { join } from 'node:path';
 import test from 'node:test';
 import JSZip from 'jszip';
 import {
+	CONTRACT_TEMPLATES,
 	allocatePersistentContractNumber,
 	buildContractDocx,
 	contractLinesFromB24ProductRows,
 	contractObjectAddress,
 	contractPartyAsKind,
+	contractDateText,
 	contractVatRate,
 	contractWorkDuration,
 	type ContractParty,
@@ -72,6 +74,7 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 		company,
 		customer,
 		objectAddress: 'Санкт-Петербург, тестовый адрес',
+		objectName: '',
 		workDuration: 21,
 		workDurationUnit: 'working',
 		lines: [
@@ -93,7 +96,7 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 		paragraphs.some((paragraph) => paragraph.includes('Забоев Г.А.') && paragraph.includes('Иванов И.И.')),
 		false,
 	);
-	assert.equal((xml.match(/<w:tblW w:w="9930" w:type="dxa"\/>/g) ?? []).length, 3);
+	assert.equal((xml.match(/<w:tblW w:w="9930" w:type="dxa"\/>/g) ?? []).length, 4);
 	assert.match(xml, /НДС 22%/);
 	assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/);
 	assert.match(xml, /Забоева Григория Анатольевича/);
@@ -103,6 +106,71 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 	assert.doesNotMatch(xml, /ОБЪЕКТ_TYPE|OBJECT_TYPE|Объект:/);
 	assert.doesNotMatch(xml, /путем безналичных платежей платежными поручениями/);
 	assert.doesNotMatch(xml, /именуемый\(ая\)/);
+	assert.doesNotMatch(xml, /w:highlight/);
+	assert.match(xml, /2\.1\.1\. Выполнить свои обязательства в полном объеме в соответствии с Приложениями к Договору в сроки, указанные в п\. 3\.1\. Договора\./);
+	assert.doesNotMatch(xml, /согласно строительных норм и правил/);
+	assert.equal((xml.match(/<w:insideV w:val="single"/g) ?? []).length, 3);
+	assert.match(xml, /<w:t>Г\. Санкт-Петербург<\/w:t>/);
+	assert.equal((xml.match(/<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"\/>/g) ?? []).length, 1);
+});
+
+test('all contract templates are connected and expose only their required fields', () => {
+	assert.deepEqual(
+		CONTRACT_TEMPLATES.map(({ id, available, usesObjectAddress, usesObjectName, usesWorkDuration }) => ({
+			id,
+			available,
+			usesObjectAddress,
+			usesObjectName,
+			usesWorkDuration,
+		})),
+		[
+			{ id: 'universal_work', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true },
+			{ id: 'supply', available: true, usesObjectAddress: false, usesObjectName: false, usesWorkDuration: false },
+			{ id: 'design', available: true, usesObjectAddress: true, usesObjectName: true, usesWorkDuration: false },
+			{ id: 'smart_home', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true },
+		],
+	);
+});
+
+test('new contract templates replace sample parties, dates, numbers and object data', async () => {
+	for (const templateId of ['supply', 'design', 'smart_home'] as const) {
+		const file = await buildContractDocx({
+			templateId,
+			contractNumber: '901',
+			contractDate: '29 июля 2026г.',
+			company,
+			customer,
+			objectAddress: 'Санкт-Петербург, Невский проспект, 1',
+			objectName: 'Частный дом',
+			workDuration: 14,
+			workDurationUnit: 'calendar',
+			lines: [
+				{ name: 'Тестовое оборудование', price: 10_000, quantity: 2, total: 20_000 },
+				{ name: 'Монтажные работы', price: 5_000, quantity: 1, total: 5_000 },
+			],
+		});
+		const zip = await JSZip.loadAsync(file);
+		const xml = await zip.file('word/document.xml')?.async('string');
+		assert.ok(xml, `${templateId}: missing word/document.xml`);
+		assert.doesNotMatch(xml, /\{\{[A-Z_]+\}\}/, `${templateId}: unresolved marker`);
+		assert.doesNotMatch(
+			xml,
+			/Нагайцев|Пуровский Центр Недвижимости|Щелкунов|Иванов Сергей Сергеевич|Жуковский пр|№ 223|№ 536|июня 2025/,
+			`${templateId}: sample data leaked`,
+		);
+		assert.match(xml, /№ 901/, `${templateId}: contract number`);
+		assert.match(xml, /29 июля 2026г\./, `${templateId}: contract date`);
+		assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/, `${templateId}: our company`);
+		assert.match(xml, /Иванов Иван Иванович/, `${templateId}: customer`);
+		assert.doesNotMatch(xml, /w:highlight/, `${templateId}: highlight`);
+		const headerSpacers = (xml.match(/<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"\/>/g) ?? []).length;
+		assert.equal(headerSpacers, templateId === 'smart_home' ? 1 : 0, `${templateId}: top header spacer`);
+	}
+});
+
+test('contract date is printed with a Russian month name', () => {
+	assert.equal(contractDateText('2026-07-29'), '29 июля 2026г.');
+	assert.equal(contractDateText('not-a-date'), 'not-a-date');
 });
 
 test('VAT is derived from our legal entity type', () => {

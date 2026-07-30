@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { generateDealContract, getContractContext } from '../deal-contract.js';
+import { CONTRACT_TEMPLATES, generateDealContract, getContractContext } from '../deal-contract.js';
 import { normalizeDomain } from '../security.js';
 
 interface AuthBody {
@@ -42,6 +42,7 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 			customerKind?: unknown;
 			contractDate?: unknown;
 			objectAddress?: unknown;
+			objectName?: unknown;
 			workDuration?: unknown;
 			workDurationUnit?: unknown;
 		};
@@ -57,8 +58,13 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 		if (!Number.isInteger(companyId) || companyId <= 0) return reply.code(400).send({ ok: false, error: 'bad companyId' });
 		if (!['universal_work', 'supply', 'design', 'smart_home'].includes(templateId)) return reply.code(400).send({ ok: false, error: 'bad templateId' });
 		if (!['company', 'ip', 'person'].includes(customerKind)) return reply.code(400).send({ ok: false, error: 'bad customerKind' });
-		if (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650) return reply.code(400).send({ ok: false, error: 'bad workDuration' });
-		if (workDurationUnit !== 'calendar' && workDurationUnit !== 'working') return reply.code(400).send({ ok: false, error: 'bad workDurationUnit' });
+		const template = CONTRACT_TEMPLATES.find((item) => item.id === templateId);
+		if (template?.usesWorkDuration && (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650)) {
+			return reply.code(400).send({ ok: false, error: 'bad workDuration' });
+		}
+		if (template?.usesWorkDuration && workDurationUnit !== 'calendar' && workDurationUnit !== 'working') {
+			return reply.code(400).send({ ok: false, error: 'bad workDurationUnit' });
+		}
 		try {
 			const result = await generateDealContract(client, dealId, {
 				companyId,
@@ -66,8 +72,11 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 				customerKind: customerKind as 'company' | 'ip' | 'person',
 				contractDate: String(body.contractDate ?? ''),
 				objectAddress: String(body.objectAddress ?? ''),
-				workDuration,
-				workDurationUnit: workDurationUnit as 'calendar' | 'working',
+				objectName: String(body.objectName ?? ''),
+				workDuration: template?.usesWorkDuration ? workDuration : 14,
+				workDurationUnit: template?.usesWorkDuration
+					? workDurationUnit as 'calendar' | 'working'
+					: 'calendar',
 			});
 			app.log.info({ dealId, companyId, templateId, contractNumber: result.contractNumber }, '[api/contracts/generate] ok');
 			return reply

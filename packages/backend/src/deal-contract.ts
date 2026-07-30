@@ -6,7 +6,7 @@ import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
 import { listDealPlan, type PlanItem } from './erp/operations.js';
 
-const TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'contract-template.docx');
+const ASSETS_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 const CONTRACT_NUMBER_FIELD = 'UF_CRM_CONTRACT_NUMBER';
 const CONTRACT_COMPANY_FIELD = 'UF_CRM_CONTRACT_COMPANY';
 const CONTRACT_VAT_FIELD = 'UF_CRM_CONTRACT_VAT';
@@ -33,14 +33,60 @@ export interface ContractTemplateInfo {
 	available: boolean;
 	ourRole: string;
 	customerRole: string;
+	usesObjectAddress: boolean;
+	usesObjectName: boolean;
+	usesWorkDuration: boolean;
 }
 
 export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
-	{ id: 'universal_work', title: 'Универсальный договор подряда', available: true, ourRole: 'Подрядчик', customerRole: 'Заказчик' },
-	{ id: 'supply', title: 'Договор поставки (Shelly)', available: false, ourRole: 'Поставщик', customerRole: 'Покупатель' },
-	{ id: 'design', title: 'Договор на проектирование', available: false, ourRole: 'Исполнитель', customerRole: 'Заказчик' },
-	{ id: 'smart_home', title: 'Универсальный договор «Умные дома»', available: false, ourRole: 'Подрядчик', customerRole: 'Заказчик' },
+	{
+		id: 'universal_work',
+		title: 'Универсальный договор подряда',
+		available: true,
+		ourRole: 'Подрядчик',
+		customerRole: 'Заказчик',
+		usesObjectAddress: true,
+		usesObjectName: false,
+		usesWorkDuration: true,
+	},
+	{
+		id: 'supply',
+		title: 'Договор поставки (Shelly)',
+		available: true,
+		ourRole: 'Поставщик',
+		customerRole: 'Покупатель',
+		usesObjectAddress: false,
+		usesObjectName: false,
+		usesWorkDuration: false,
+	},
+	{
+		id: 'design',
+		title: 'Договор на проектирование',
+		available: true,
+		ourRole: 'Исполнитель',
+		customerRole: 'Заказчик',
+		usesObjectAddress: true,
+		usesObjectName: true,
+		usesWorkDuration: false,
+	},
+	{
+		id: 'smart_home',
+		title: 'Универсальный договор «Умные дома»',
+		available: true,
+		ourRole: 'Подрядчик',
+		customerRole: 'Заказчик',
+		usesObjectAddress: true,
+		usesObjectName: false,
+		usesWorkDuration: true,
+	},
 ] as const;
+
+const CONTRACT_TEMPLATE_PATHS: Record<ContractTemplateId, string> = {
+	universal_work: resolve(ASSETS_PATH, 'contract-template.docx'),
+	supply: resolve(ASSETS_PATH, 'contract-supply.docx'),
+	design: resolve(ASSETS_PATH, 'contract-design.docx'),
+	smart_home: resolve(ASSETS_PATH, 'contract-smart-home.docx'),
+};
 
 type Address = Record<string, unknown>;
 type Requisite = Record<string, unknown>;
@@ -189,6 +235,7 @@ export interface ContractGenerateInput {
 	customerKind: ContractPartyKind;
 	contractDate: string;
 	objectAddress: string;
+	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
 }
@@ -587,6 +634,19 @@ export function contractWorkDuration(value: number, unit: ContractDurationUnit):
 	return `${duration} (${words}) ${numberForms(duration, dayForms)}`;
 }
 
+export function contractDateText(dateIso: string): string {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateIso);
+	if (!match) return dateIso;
+	const monthNames = [
+		'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+		'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+	];
+	const monthIndex = Number(match[2]) - 1;
+	const day = Number(match[3]);
+	if (!monthNames[monthIndex] || day < 1 || day > 31) return dateIso;
+	return `${day} ${monthNames[monthIndex]} ${match[1]}г.`;
+}
+
 function formatMoney(value: number): string {
 	return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
@@ -621,29 +681,143 @@ function removeParagraphsContaining(xml: string, needle: string): string {
 	});
 }
 
-function signatureTableXml(): string {
-	const cell = (width: number, token: 'CONTRACTOR_SIGNATURE' | 'CUSTOMER_SIGNATURE'): string =>
-		`<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>`
-		+ '<w:vAlign w:val="top"/><w:tcBorders>'
-		+ '<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>'
-		+ '</w:tcBorders><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="0" w:type="dxa"/>'
-		+ '<w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>'
-		+ '<w:p><w:pPr><w:spacing w:after="0"/><w:keepLines/></w:pPr>'
-		+ `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>`
-		+ `<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>{{${token}}}</w:t></w:r></w:p></w:tc>`;
-	return '<w:tbl><w:tblPr><w:tblW w:w="9930" w:type="dxa"/><w:tblLayout w:type="fixed"/>'
-		+ '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/>'
-		+ '<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
-		+ '<w:tblLook w:val="0400" w:firstRow="0" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="1" w:noVBand="1"/>'
-		+ '</w:tblPr><w:tblGrid><w:gridCol w:w="4980"/><w:gridCol w:w="4950"/></w:tblGrid>'
-		+ `<w:tr>${cell(4980, 'CONTRACTOR_SIGNATURE')}${cell(4950, 'CUSTOMER_SIGNATURE')}</w:tr></w:tbl>`;
+const CONTRACT_TABLE_WIDTH = 9930;
+const CONTRACT_TABLE_COLUMN_WIDTH = CONTRACT_TABLE_WIDTH / 2;
+
+function contractTableBordersXml(): string {
+	return '<w:tblBorders>'
+		+ '<w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/>'
+		+ '<w:left w:val="single" w:sz="8" w:space="0" w:color="000000"/>'
+		+ '<w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/>'
+		+ '<w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>'
+		+ '<w:insideH w:val="single" w:sz="8" w:space="0" w:color="000000"/>'
+		+ '<w:insideV w:val="single" w:sz="8" w:space="0" w:color="000000"/>'
+		+ '</w:tblBorders>';
 }
 
-function separateAnnexSignatureBlocks(xml: string): string {
-	return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) =>
+function contractTableCellXml(args: {
+	value: string;
+	align?: 'left' | 'center' | 'right';
+	bold?: boolean;
+	keepNext?: boolean;
+}): string {
+	const alignment = args.align ?? 'left';
+	const bold = args.bold ? '<w:b/><w:bCs/>' : '';
+	const keepNext = args.keepNext ? '<w:keepNext/>' : '';
+	return `<w:tc><w:tcPr><w:tcW w:w="${CONTRACT_TABLE_COLUMN_WIDTH}" w:type="dxa"/>`
+		+ '<w:vAlign w:val="top"/><w:tcMar>'
+		+ '<w:top w:w="80" w:type="dxa"/><w:left w:w="100" w:type="dxa"/>'
+		+ '<w:bottom w:w="80" w:type="dxa"/><w:right w:w="100" w:type="dxa"/>'
+		+ '</w:tcMar></w:tcPr>'
+		+ `<w:p><w:pPr>${keepNext}<w:spacing w:before="0" w:after="0"/>`
+		+ `<w:jc w:val="${alignment}"/><w:keepLines/></w:pPr>`
+		+ '<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>'
+		+ `${bold}<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>`
+		+ `<w:t>${args.value}</w:t></w:r></w:p></w:tc>`;
+}
+
+function contractTableXml(rows: string[]): string {
+	return `<w:tbl><w:tblPr><w:tblW w:w="${CONTRACT_TABLE_WIDTH}" w:type="dxa"/>`
+		+ '<w:tblLayout w:type="fixed"/>'
+		+ contractTableBordersXml()
+		+ '<w:tblLook w:val="0400" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="1" w:noVBand="1"/>'
+		+ `</w:tblPr><w:tblGrid><w:gridCol w:w="${CONTRACT_TABLE_COLUMN_WIDTH}"/>`
+		+ `<w:gridCol w:w="${CONTRACT_TABLE_COLUMN_WIDTH}"/></w:tblGrid>`
+		+ rows.join('')
+		+ '</w:tbl>';
+}
+
+function contractPartyHeaderRowXml(ourRole: string, customerRole: string): string {
+	return '<w:tr><w:trPr><w:cantSplit/></w:trPr>'
+		+ contractTableCellXml({ value: escapeXml(ourRole), align: 'center', bold: true, keepNext: true })
+		+ contractTableCellXml({ value: escapeXml(customerRole), align: 'center', bold: true, keepNext: true })
+		+ '</w:tr>';
+}
+
+function requisitesTableXml(ourRole: string, customerRole: string): string {
+	const details = '<w:tr><w:trPr><w:cantSplit/></w:trPr>'
+		+ contractTableCellXml({ value: '{{CONTRACTOR_REQUISITES}}', keepNext: true })
+		+ contractTableCellXml({ value: '{{CUSTOMER_REQUISITES}}', keepNext: true })
+		+ '</w:tr>';
+	const signatures = '<w:tr><w:trPr><w:cantSplit/></w:trPr>'
+		+ contractTableCellXml({ value: '{{CONTRACTOR_SIGNATURE}}' })
+		+ contractTableCellXml({ value: '{{CUSTOMER_SIGNATURE}}' })
+		+ '</w:tr>';
+	return contractTableXml([contractPartyHeaderRowXml(ourRole, customerRole), details, signatures]);
+}
+
+function replaceTableContaining(xml: string, needles: string[], replacement: string): string {
+	return xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (table) =>
+		needles.every((needle) => table.includes(needle)) ? replacement : table);
+}
+
+function contractHeaderTableXml(): string {
+	const cell = (token: 'CITY' | 'CONTRACT_DATE', align: 'left' | 'right'): string =>
+		`<w:tc><w:tcPr><w:tcW w:w="${CONTRACT_TABLE_COLUMN_WIDTH}" w:type="dxa"/>`
+		+ '<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders>'
+		+ '</w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0"/>'
+		+ `<w:jc w:val="${align}"/></w:pPr><w:r><w:rPr>`
+		+ '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>'
+		+ `<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>{{${token}}}</w:t></w:r></w:p></w:tc>`;
+	return `<w:tbl><w:tblPr><w:tblW w:w="${CONTRACT_TABLE_WIDTH}" w:type="dxa"/><w:tblLayout w:type="fixed"/>`
+		+ '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/>'
+		+ '<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+		+ `</w:tblPr><w:tblGrid><w:gridCol w:w="${CONTRACT_TABLE_COLUMN_WIDTH}"/>`
+		+ `<w:gridCol w:w="${CONTRACT_TABLE_COLUMN_WIDTH}"/></w:tblGrid><w:tr>`
+		+ cell('CITY', 'left') + cell('CONTRACT_DATE', 'right')
+		+ '</w:tr></w:tbl>';
+}
+
+function contractHeaderSpacerXml(): string {
+	return '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
+		+ '<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>'
+		+ '<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p>';
+}
+
+function replaceContractHeaders(xml: string, addSpacerAfterFirst: boolean): string {
+	let firstHeaderReplaced = false;
+	const replacement = (): string => {
+		const spacer = addSpacerAfterFirst && !firstHeaderReplaced ? contractHeaderSpacerXml() : '';
+		firstHeaderReplaced = true;
+		return contractHeaderTableXml() + spacer;
+	};
+	let result = xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (table) =>
+		table.includes('{{CITY}}') && table.includes('{{CONTRACT_DATE}}') ? replacement() : table);
+	result = result.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) =>
+		paragraph.includes('{{CITY}}') && paragraph.includes('{{CONTRACT_DATE}}') ? replacement() : paragraph);
+	return result;
+}
+
+function signatureTableXml(ourRole: string, customerRole: string): string {
+	const signatures = '<w:tr><w:trPr><w:cantSplit/></w:trPr>'
+		+ contractTableCellXml({ value: '{{CONTRACTOR_SIGNATURE}}' })
+		+ contractTableCellXml({ value: '{{CUSTOMER_SIGNATURE}}' })
+		+ '</w:tr>';
+	return contractTableXml([contractPartyHeaderRowXml(ourRole, customerRole), signatures]);
+}
+
+function separateAnnexSignatureBlocks(xml: string, ourRole: string, customerRole: string): string {
+	let result = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) =>
 		paragraph.includes('{{CONTRACTOR_SIGNATURE}}') && paragraph.includes('{{CUSTOMER_SIGNATURE}}')
-			? signatureTableXml()
+			? signatureTableXml(ourRole, customerRole)
 			: paragraph);
+	result = result.replace(/<w:p\b(?:(?!<w:p\b)[\s\S])*?<\/w:p>(?=<w:tbl\b)/g, (paragraph, offset, source: string) => {
+		const next = source.slice(offset + paragraph.length);
+		return paragraph.includes('Подрядчик:') && paragraph.includes('Заказчик:')
+			&& next.startsWith('<w:tbl') && next.includes('{{CONTRACTOR_SIGNATURE}}')
+			? ''
+			: paragraph;
+	});
+	return result;
+}
+
+function replaceMarkedSignatureTables(xml: string, ourRole: string, customerRole: string): string {
+	return xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (table) =>
+		table.includes('{{CONTRACTOR_SIGNATURE}}')
+			&& table.includes('{{CUSTOMER_SIGNATURE}}')
+			&& !table.includes('{{CONTRACTOR_REQUISITES}}')
+			? signatureTableXml(ourRole, customerRole)
+			: table);
 }
 
 export async function buildContractDocx(data: {
@@ -653,6 +827,7 @@ export async function buildContractDocx(data: {
 	company: ContractParty;
 	customer: ContractParty;
 	objectAddress: string;
+	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
 	lines: ContractLine[];
@@ -660,25 +835,39 @@ export async function buildContractDocx(data: {
 	const template = CONTRACT_TEMPLATES.find((item) => item.id === data.templateId);
 	if (!template) throw new Error('неизвестный шаблон договора');
 	if (!template.available) throw new Error(`шаблон «${template.title}» пока не подключён`);
-	const zip = await JSZip.loadAsync(await readFile(TEMPLATE_PATH));
+	const zip = await JSZip.loadAsync(await readFile(CONTRACT_TEMPLATE_PATHS[data.templateId]));
 	const documentFile = zip.file('word/document.xml');
 	if (!documentFile) throw new Error('в шаблоне договора нет word/document.xml');
 	let xml = await documentFile.async('string');
 	xml = xml
-		.split('14 (четырнадцать) календарных дней').join(wordXmlText(contractWorkDuration(data.workDuration, data.workDurationUnit)))
 		.split('buh@homelogicsoft.com').join(wordXmlText(contractorEmail(data.company)))
-		.split('Объект, адрес объекта, виды и объемы работ').join('Адрес объекта, виды и объемы работ');
+		.split('Объект, адрес объекта, виды и объемы работ').join('Адрес объекта, виды и объемы работ')
+		.split('2.1.1. Выполнить свои обязательства в полном объеме согласно строительных норм и правил, действующего законодательства, и в соответствии с Приложениями к Договору в сроки, указанные в п. 3.1. Договора.')
+		.join('2.1.1. Выполнить свои обязательства в полном объеме в соответствии с Приложениями к Договору в сроки, указанные в п. 3.1. Договора.')
+		.replace(/<w:highlight\b[^>]*\/>/g, '');
+	if (template.usesWorkDuration) {
+		xml = xml.split('14 (четырнадцать) календарных дней')
+			.join(wordXmlText(contractWorkDuration(data.workDuration, data.workDurationUnit)));
+	}
+	xml = replaceContractHeaders(xml, data.templateId === 'universal_work' || data.templateId === 'smart_home');
+	xml = replaceMarkedSignatureTables(xml, template.ourRole, template.customerRole);
+	xml = replaceTableContaining(
+		xml,
+		['{{CONTRACTOR_REQUISITES}}', '{{CUSTOMER_REQUISITES}}'],
+		requisitesTableXml(template.ourRole, template.customerRole),
+	);
 	xml = removeParagraphsContaining(xml, '{{OBJECT_TYPE}}');
 	if (data.customer.kind === 'person') {
 		xml = removeParagraphsContaining(xml, 'Расчеты по Договору осуществляются в рублях путем безналичных платежей');
 	}
-	xml = separateAnnexSignatureBlocks(xml);
+	xml = separateAnnexSignatureBlocks(xml, template.ourRole, template.customerRole);
 	const rowPattern = /<w:tr\b[\s\S]*?<\/w:tr>/g;
 	xml = xml.replace(rowPattern, (rowTemplate) => {
 		if (!rowTemplate.includes('{{PRODUCT_NAME}}')) return rowTemplate;
-		return data.lines.map((line) => {
-		let row = rowTemplate;
-		row = replaceToken(row, 'PRODUCT_NAME', line.name);
+		return data.lines.map((line, index) => {
+			let row = rowTemplate;
+			row = replaceToken(row, 'PRODUCT_INDEX', String(index + 1));
+			row = replaceToken(row, 'PRODUCT_NAME', line.name);
 		row = replaceToken(row, 'PRODUCT_PRICE', formatMoney(line.price));
 		row = replaceToken(row, 'PRODUCT_QTY', String(line.quantity));
 		row = replaceToken(row, 'PRODUCT_TOTAL', formatMoney(line.total));
@@ -686,13 +875,17 @@ export async function buildContractDocx(data: {
 		}).join('');
 	});
 	const total = data.lines.reduce((sum, line) => sum + line.total, 0);
+	const advance = total / 2;
+	const balance = total - advance;
 	const vatRate = contractVatRate(data.company);
 	const values: Record<string, string> = {
 		CONTRACT_NUMBER: data.contractNumber,
 		CONTRACT_DATE: data.contractDate,
-		CITY: 'г. Санкт-Петербург',
+		CITY: 'Г. Санкт-Петербург',
 		CONTRACTOR_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
 		CUSTOMER_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, именуемые в дальнейшем по отдельности «Сторона», а при совместном упоминании «Стороны», заключили настоящий договор (далее – «Договор») о нижеследующем:`,
+		CONTRACTOR_AGREEMENT_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
+		CUSTOMER_AGREEMENT_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, совместно именуемые «Стороны», заключили настоящее Дополнительное соглашение № 1 к Договору № ${data.contractNumber} от ${data.contractDate} (далее – «Договор») о нижеследующем:`,
 		CONTRACTOR_REQUISITES: partyRequisites(data.company),
 		CUSTOMER_REQUISITES: partyRequisites(data.customer),
 		CONTRACTOR_SIGNATURE: signature(data.company),
@@ -700,9 +893,16 @@ export async function buildContractDocx(data: {
 		CONTRACTOR_SHORT: data.company.shortName,
 		CUSTOMER_SHORT: completionActPartyName(data.customer),
 		CUSTOMER_EMAIL: data.customer.email || 'не указан',
+		CONTRACTOR_EMAIL: contractorEmail(data.company),
 		OBJECT_ADDRESS: data.objectAddress,
+		OBJECT_NAME: data.objectName,
+		WORK_DURATION: contractWorkDuration(data.workDuration, data.workDurationUnit),
 		TOTAL: formatMoney(total),
 		TOTAL_WORDS: moneyWords(total),
+		ADVANCE: formatMoney(advance),
+		ADVANCE_WORDS: moneyWords(advance),
+		BALANCE: formatMoney(balance),
+		BALANCE_WORDS: moneyWords(balance),
 		VAT_RATE: String(vatRate),
 	};
 	for (const [token, value] of Object.entries(values)) xml = replaceToken(xml, token, value);
@@ -851,8 +1051,10 @@ export async function generateDealContract(
 	if (!template) throw new Error('неизвестный шаблон договора');
 	if (!template.available) throw new Error(`шаблон «${template.title}» пока не подключён`);
 	const objectAddress = contractObjectAddress(input.objectAddress);
-	if (!objectAddress) throw new Error('не указан адрес объекта');
-	if (!Number.isInteger(input.workDuration) || input.workDuration < 1 || input.workDuration > 3650) {
+	if (template.usesObjectAddress && !objectAddress) throw new Error('не указан адрес объекта');
+	const objectName = clean(input.objectName);
+	if (template.usesObjectName && !objectName) throw new Error('не указано наименование объекта');
+	if (template.usesWorkDuration && (!Number.isInteger(input.workDuration) || input.workDuration < 1 || input.workDuration > 3650)) {
 		throw new Error('срок работ должен быть целым числом от 1 до 3650 дней');
 	}
 	const erp = ErpClient.fromEnv();
@@ -861,8 +1063,7 @@ export async function generateDealContract(
 	if (!lines.length) throw new Error('в сделке нет товаров или работ для сметы');
 	const contractNumber = await allocateContractNumber(client, dealId, company.id, '');
 	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
-	const [year, month, day] = dateIso.split('-');
-	const contractDate = `${day}.${month}.${year}`;
+	const contractDate = contractDateText(dateIso);
 	const file = await buildContractDocx({
 		templateId: input.templateId,
 		contractNumber,
@@ -870,6 +1071,7 @@ export async function generateDealContract(
 		company,
 		customer,
 		objectAddress,
+		objectName,
 		workDuration: input.workDuration,
 		workDurationUnit: input.workDurationUnit,
 		lines,

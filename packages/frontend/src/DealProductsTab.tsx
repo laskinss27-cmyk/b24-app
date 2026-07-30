@@ -1882,6 +1882,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 	const [customerKind, setCustomerKind] = useState<ContractPartyKind>('person');
 	const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0, 10));
 	const [objectAddress, setObjectAddress] = useState('');
+	const [objectName, setObjectName] = useState('');
 	const [workDuration, setWorkDuration] = useState(14);
 	const [workDurationUnit, setWorkDurationUnit] = useState<ContractDurationUnit>('calendar');
 	const [busy, setBusy] = useState(false);
@@ -1913,8 +1914,9 @@ function ContractModal({ dealId, onClose, onDone }: {
 		...(context?.customerMissingByKind[customerKind]?.map((field) => `Клиент: ${field}`) ?? []),
 		...(!context?.customer && context ? ['В сделке не указан клиент'] : []),
 		...(template && !template.available ? [`Шаблон «${template.title}» пока не подключён`] : []),
-		...(!objectAddress.trim() && context ? ['Не указан адрес объекта'] : []),
-		...((!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650) && context ? ['Срок работ должен быть целым числом от 1 до 3650 дней'] : []),
+		...(template?.usesObjectAddress && !objectAddress.trim() ? ['Не указан адрес объекта'] : []),
+		...(template?.usesObjectName && !objectName.trim() ? ['Не указано наименование объекта'] : []),
+		...(template?.usesWorkDuration && (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650) ? ['Срок работ должен быть целым числом от 1 до 3650 дней'] : []),
 	];
 
 	const generate = async (): Promise<void> => {
@@ -1929,6 +1931,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 				customerKind,
 				contractDate,
 				objectAddress: objectAddress.trim(),
+				objectName: objectName.trim(),
 				workDuration,
 				workDurationUnit,
 			});
@@ -1963,12 +1966,15 @@ function ContractModal({ dealId, onClose, onDone }: {
 						<label><span>НДС автоматически</span><input value={`НДС ${vatRate}%`} readOnly /></label>
 						<label><span>Дата договора</span><input type="date" value={contractDate} disabled={busy} onChange={(event) => setContractDate(event.target.value)} /></label>
 						<label><span>Номер автоматически</span><input value={context.contractNumber ? `№ ${context.contractNumber}` : 'будет присвоен при создании'} readOnly /></label>
-						<label><span>Срок работ</span><input type="number" min={1} max={3650} step={1} value={workDuration} disabled={busy} onChange={(event) => setWorkDuration(Number(event.target.value))} /></label>
-						<label><span>Единица срока</span><select value={workDurationUnit} disabled={busy} onChange={(event) => setWorkDurationUnit(event.target.value as ContractDurationUnit)}>
-							<option value="calendar">Календарные дни</option>
-							<option value="working">Рабочие дни</option>
-						</select></label>
-						<label className="wide"><span>Адрес объекта</span><input value={objectAddress} disabled={busy} onChange={(event) => setObjectAddress(event.target.value)} /></label>
+						{template?.usesObjectName && <label className="wide"><span>Наименование объекта</span><input value={objectName} disabled={busy} onChange={(event) => setObjectName(event.target.value)} /></label>}
+						{template?.usesWorkDuration && <>
+							<label><span>Срок работ</span><input type="number" min={1} max={3650} step={1} value={workDuration} disabled={busy} onChange={(event) => setWorkDuration(Number(event.target.value))} /></label>
+							<label><span>Единица срока</span><select value={workDurationUnit} disabled={busy} onChange={(event) => setWorkDurationUnit(event.target.value as ContractDurationUnit)}>
+								<option value="calendar">Календарные дни</option>
+								<option value="working">Рабочие дни</option>
+							</select></label>
+						</>}
+						{template?.usesObjectAddress && <label className="wide"><span>Адрес объекта</span><input value={objectAddress} disabled={busy} onChange={(event) => setObjectAddress(event.target.value)} /></label>}
 					</div>
 					{blockers.length > 0 && <div className="deal-contract-blockers"><b>Договор пока сформировать нельзя:</b>{blockers.map((item) => <span key={item}>• {item}</span>)}</div>}
 				</>}
