@@ -303,10 +303,16 @@ const plural = (n: number, one: string, few: string, many: string): string => {
 	return many;
 };
 
-type DealDocumentPreview =
+type DealDocumentPreview = (
 	| { kind: 'realization'; document: CoreRealization }
 	| { kind: 'supply'; document: SupplyCard }
-	| { kind: 'transfer'; document: TransferDoc };
+	| { kind: 'transfer'; document: TransferDoc }
+) & { anchorY: number };
+
+const documentPreviewAnchorY = (element: HTMLElement): number => {
+	const rect = element.getBoundingClientRect();
+	return Math.round(window.scrollY + rect.top + rect.height / 2);
+};
 
 function DealDocumentPreviewModal({
 	preview,
@@ -315,6 +321,12 @@ function DealDocumentPreviewModal({
 	preview: DealDocumentPreview;
 	onClose: () => void;
 }): JSX.Element {
+	const previewHeight = Math.min(760, Math.max(460, window.screen.availHeight - 180));
+	const overlayStyle: CSSProperties = {
+		top: Math.max(12, Math.round(preview.anchorY - previewHeight * 0.32)),
+		height: previewHeight,
+	};
+
 	useEffect(() => {
 		const closeOnEscape = (event: KeyboardEvent): void => {
 			if (event.key === 'Escape') onClose();
@@ -327,7 +339,7 @@ function DealDocumentPreviewModal({
 		const document = preview.document;
 		const title = document.isReturn ? 'Возврат' : 'Реализация';
 		return (
-			<div className="deal-document-preview-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<div className="deal-document-preview-overlay" style={overlayStyle} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 				<section className="deal-document-preview" role="dialog" aria-modal="true" aria-label={`${title} ${document.name}`}>
 					<header>
 						<div><span>{title}</span><h2>{document.name}</h2></div>
@@ -363,7 +375,7 @@ function DealDocumentPreviewModal({
 	if (preview.kind === 'supply') {
 		const document = preview.document;
 		return (
-			<div className="deal-document-preview-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<div className="deal-document-preview-overlay" style={overlayStyle} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 				<section className="deal-document-preview" role="dialog" aria-modal="true" aria-label={`Заявка снабжению ${document.title}`}>
 					<header>
 						<div><span>Заявка снабжению</span><h2>{document.title}</h2></div>
@@ -394,7 +406,7 @@ function DealDocumentPreviewModal({
 
 	const document = preview.document;
 	return (
-		<div className="deal-document-preview-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+		<div className="deal-document-preview-overlay" style={overlayStyle} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 			<section className="deal-document-preview" role="dialog" aria-modal="true" aria-label={`Перемещение ${document.name || document.id}`}>
 				<header>
 					<div><span>Перемещение</span><h2>{document.name || `Перемещение #${document.id}`}</h2></div>
@@ -1582,7 +1594,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						<div className="deal-documents-group">
 							<h3>Реализации</h3>
 							{realizationDocuments.map((document) => (
-								<button type="button" className="deal-document-row clickable" key={document.name} onClick={() => setDocumentPreview({ kind: 'realization', document })}>
+								<button type="button" className="deal-document-row clickable" key={document.name} onClick={(event) => setDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(event.currentTarget) })}>
 									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
 									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
 								</button>
@@ -1593,7 +1605,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						<div className="deal-documents-group">
 							<h3>Возвраты</h3>
 							{returnDocuments.map((document) => (
-								<button type="button" className="deal-document-row clickable" key={document.name} onClick={() => setDocumentPreview({ kind: 'realization', document })}>
+								<button type="button" className="deal-document-row clickable" key={document.name} onClick={(event) => setDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(event.currentTarget) })}>
 									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
 									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
 								</button>
@@ -1608,8 +1620,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 									type="button"
 									key={`${document.source ?? 'b24'}-${document.id}-${document.title}`}
 									className="deal-document-row clickable"
-									onClick={() => document.source === 'core'
-										? setDocumentPreview({ kind: 'supply', document })
+									onClick={(event) => document.source === 'core'
+										? setDocumentPreview({ kind: 'supply', document, anchorY: documentPreviewAnchorY(event.currentTarget) })
 										: document.id > 0 && openSupplyCard(document.id)}
 								>
 									<span><b>{document.title}</b><small>{document.source === 'core' ? 'ядро' : 'Битрикс24'}</small></span>
@@ -1622,7 +1634,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						<div className="deal-documents-group">
 							<h3>Перемещения</h3>
 							{dealTransfers.map((document) => (
-								<button type="button" className="deal-document-row clickable" key={document.id} onClick={() => setDocumentPreview({ kind: 'transfer', document })}>
+								<button type="button" className="deal-document-row clickable" key={document.id} onClick={(event) => setDocumentPreview({ kind: 'transfer', document, anchorY: documentPreviewAnchorY(event.currentTarget) })}>
 									<span><b>{document.name || `Перемещение #${document.id}`}</b><small>{document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
 									<span className="deal-document-status">{transferDocStatusLabel(document.status)}</span>
 								</button>
