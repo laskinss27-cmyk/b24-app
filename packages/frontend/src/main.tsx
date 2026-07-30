@@ -8,6 +8,7 @@ import { SalesReport } from './SalesReport.js';
 import { Repairs } from './Repairs.js';
 import { StockLedger } from './StockLedger.js';
 import { Supply } from './Supply.js';
+import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
 import './styles.css';
 
 const root = document.getElementById('root');
@@ -23,9 +24,11 @@ if (!root) {
 const ctx = getContext();
 const repairId = Number(new URLSearchParams(window.location.search).get('repairId') ?? 0);
 const opensRepair = (Number.isInteger(repairId) && repairId > 0) || (Number.isInteger(ctx.repairId) && Number(ctx.repairId) > 0);
+const lowVisionEnabled = initializeLowVisionMode();
 
 createRoot(root).render(
 	<StrictMode>
+		<LowVisionMode initialEnabled={lowVisionEnabled} />
 		{opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
 	</StrictMode>,
 );
