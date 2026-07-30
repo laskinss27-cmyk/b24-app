@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
 import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
-import { assertProductReplaceAllowed, quantityFromDealChange, quantityFromSupplyChange } from '../supply/line-sync.js';
+import { assertProductReplaceAllowed, quantityFromDealChange, quantityFromSupplyChange, resolveDealQtyAtSync } from '../supply/line-sync.js';
 
 const DEAL_FIELD = 'b24_deal_id';
 export const REALIZATION_BASE_SEGMENT = 'base';
@@ -2685,14 +2685,16 @@ export async function syncSupplyRequestQuantitiesFromDeal(
 				dirty = true;
 				continue;
 			}
-			const dealQtyAtSync = Number(item[SUPPLY_DEAL_QTY_FIELD] ?? previous.qty);
+			const storedDealQty = Number(item[SUPPLY_DEAL_QTY_FIELD]);
+			const hasStoredDealQty = Number.isFinite(storedDealQty) && storedDealQty > 0.000001;
+			const dealQtyAtSync = resolveDealQtyAtSync(item[SUPPLY_DEAL_QTY_FIELD], previous.qty);
 			const allocatedQty = Math.min(requestQty, (purchaseAllocation.get(productId) ?? 0) + (transferAllocation.get(productId) ?? 0));
 			const nextQty = quantityFromDealChange({ requestQty, dealQtyAtSync, nextDealQty: next.qty, allocatedQty });
 			if (nextQty <= 0.000001) {
 				dirty = true;
 				continue;
 			}
-			if (Math.abs(nextQty - requestQty) > 0.000001 || Math.abs(next.qty - dealQtyAtSync) > 0.000001 || !storedKey) dirty = true;
+			if (Math.abs(nextQty - requestQty) > 0.000001 || Math.abs(next.qty - dealQtyAtSync) > 0.000001 || !storedKey || !hasStoredDealQty) dirty = true;
 			items.push(requestItemPayload(item, {
 				qty: nextQty,
 				[SUPPLY_DEAL_LINE_KEY_FIELD]: lineKey,

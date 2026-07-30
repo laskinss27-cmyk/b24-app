@@ -1,5 +1,15 @@
 const EPSILON = 0.000001;
 
+/**
+ * У старых строк Material Request поле b24_deal_qty появилось позже самой заявки,
+ * поэтому ERPNext возвращает для него 0. Это не означает, что строка сделки была
+ * обнулена: до первой синхронизации её исходным количеством считаем текущий план.
+ */
+export function resolveDealQtyAtSync(storedDealQty: unknown, currentDealQty: number): number {
+	const stored = Number(storedDealQty);
+	return Number.isFinite(stored) && stored > EPSILON ? stored : currentDealQty;
+}
+
 export function quantityFromDealChange(args: {
 	requestQty: number;
 	dealQtyAtSync: number;
