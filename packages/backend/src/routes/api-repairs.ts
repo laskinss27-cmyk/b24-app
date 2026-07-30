@@ -506,10 +506,20 @@ async function syncRepairStock(data: RepairData, log: FastifyInstance['log'], op
  *   готово к выдаче → склад выдачи · выдано → склад не трогаем (дальше работа в сделке). */
 async function moveRepairForStatus(data: RepairData, newStatus: RepairStatus, log: FastifyInstance['log']): Promise<void> {
 	const erp = ErpClient.fromEnv();
-	if (!data.repairItemCode) {
-		throw new Error(`у ремонта №${data.repairNo} нет складской карточки — сначала восстановите учёт аппарата в ядре`);
-	}
 	if (!erp) throw new Error('ядро склада недоступно — статус ремонта не изменён');
+	if (!data.repairItemCode) {
+		const recoveredItemCode = `REPAIR-${data.repairNo}`;
+		const recoveredLocation = await locateRepairUnit(erp, recoveredItemCode);
+		if (!recoveredLocation) {
+			throw new Error(`у ремонта №${data.repairNo} нет складской карточки — сначала восстановите учёт аппарата в ядре`);
+		}
+		data.repairItemCode = recoveredItemCode;
+		data.repairStore = recoveredLocation.storeTitle;
+		log.info(
+			{ repairNo: data.repairNo, itemCode: recoveredItemCode, store: recoveredLocation.storeTitle },
+			'[repairs] восстановлена связь ремонта со складской карточкой',
+		);
+	}
 	const target = newStatus === 'received_office' ? OFFICE_STORE
 		: newStatus === 'sent' ? TRANSIT_STORE
 		: newStatus === 'sent_to_tt' ? TRANSIT_STORE
