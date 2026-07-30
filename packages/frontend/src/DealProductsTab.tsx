@@ -1619,17 +1619,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				)}
 				<div className="realize-actions">
 					<button
-						className={`btn-realize-all${realizePhase === 'drafted' ? ' submit' : ''}`}
-						disabled={dev || busy || supplyBusy || (realizePhase === 'idle' ? realizeDocumentCount === 0 : draftNames.length === 0)}
+						className={`btn-realize-all${hasPendingDrafts ? ' submit' : ''}`}
+						disabled={dev || busy || supplyBusy || (hasPendingDrafts ? pendingDraftNames.length === 0 : realizeDocumentCount === 0)}
 						title={dev ? 'В dev-режиме недоступно — реализация считается на проде через ядро' : undefined}
-						onClick={() => void (realizePhase === 'idle' ? doDraft() : doSubmit())}
+						onClick={() => void (hasPendingDrafts ? doSubmit() : doDraft())}
 					>
-						{busy ? '…' : realizePhase === 'idle' ? `Реализация${realizeDocumentCount ? ` (${realizeDocumentCount})` : ''}` : '✓ Провести'}
+						{busy ? '…' : hasPendingDrafts ? '✓ Провести' : `Реализация${realizeDocumentCount ? ` (${realizeDocumentCount})` : ''}`}
 					</button>
-					{realizePhase === 'drafted' && (
-						<button className="btn-cancel-draft" disabled={busy} onClick={doCancelDraft}>Отмена</button>
-					)}
-					{realizePhase === 'idle' && supplyGoods.length > 0 && (
+					{!hasPendingDrafts && supplyGoods.length > 0 && (
 						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => {
 							const first = supplyGoods[0];
 							setSupplyToStore(first ? storeName(storeOf(first)) : '');
