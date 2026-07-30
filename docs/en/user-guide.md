@@ -99,6 +99,12 @@ The form accepts prices, status, a short description, and an image. Selecting a 
 specification template derived from existing structured cards in that section; extra fields may be
 added manually. Before saving, make sure it is not a duplicate of an existing item.
 
+Permission to edit an existing product card is independent from permission to change prices. Edit
+mode can add or replace the product image; the application resizes it to a safe size before upload.
+Price fields are disabled when the user may edit the card but not its prices. On first save, a
+legacy card without structured specifications receives the new structure while preserving its
+existing description.
+
 The text `Б24 productId=...` is a legacy catalogue technical reference, not a description.
 
 ## 4. Procurement

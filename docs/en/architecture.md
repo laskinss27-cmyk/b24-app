@@ -60,6 +60,11 @@ technical Bitrix24 catalogue record and then creates the full ERPNext item. Spec
 description, status, prices, and the new image are stored in ERPNext. The client resizes the image
 before upload, and the backend validates it again.
 
+Product metadata and price permissions are checked separately. A user without price permission
+sees current prices as read-only, and the backend ignores those fields when saving the card. A new
+image for an existing card is uploaded to ERPNext through the same validated path used during
+product creation.
+
 ## Application entry points
 
 One frontend selects the screen from its context:

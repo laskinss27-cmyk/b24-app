@@ -19,6 +19,7 @@ import {
 	type CatalogProductContent,
 } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
+import { catalogAccessForUser, type CatalogAccess, type CatalogAccessUser } from '../catalog-access.js';
 import { appPermission } from '../access-policy.js';
 
 /**
@@ -58,7 +59,6 @@ export function invalidateCatalogCache(domain: string): void {
 	baseCache.delete(normalizeDomain(domain));
 }
 
-const SUPPLY_DEPARTMENT_ID = 10;
 const CATALOG_COMPARISON_USER_IDS = new Set([1858, 986, 1]);
 
 interface CatalogCandidate {
@@ -176,12 +176,13 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 	return { data: { rows, generatedAt: new Date().toISOString() }, stores };
 }
 
+async function catalogAccess(client: B24Client): Promise<CatalogAccess> {
+	const me = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
+	return catalogAccessForUser(me);
+}
+
 async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
-	const me = await client.call<{ NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
-	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
-	const isKonstantinLaskin = normalized(me?.NAME) === normalized('Константин')
-		&& normalized(me?.LAST_NAME) === normalized('Ласкин');
-	return departments.includes(SUPPLY_DEPARTMENT_ID) || isKonstantinLaskin;
+	return (await catalogAccess(client)).canEditPrices;
 }
 
 async function canExportCatalogComparison(client: B24Client): Promise<boolean> {
@@ -317,9 +318,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
-		const legacyCanEditPrices = await canEditCatalogPrices(client);
-		const canEditPrices = appPermission(req, 'catalog.edit_retail_prices', legacyCanEditPrices)
-			&& appPermission(req, 'catalog.edit_purchase_prices', legacyCanEditPrices);
+		const legacyAccess = await catalogAccess(client);
+		const canEditPrices = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices)
+			&& appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
+		const canEditCard = appPermission(req, 'catalog.edit_card', legacyAccess.canEditCard);
 		const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		const now = Date.now();
@@ -344,7 +346,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			const rows = canViewPurchasePrices
 				? data.rows
 				: data.rows.map((row) => ({ ...row, purchase: null }));
-			return { ok: true, rows, stores, generatedAt: data.generatedAt, cached, canEditPrices };
+			return { ok: true, rows, stores, generatedAt: data.generatedAt, cached, canEditCard, canEditPrices };
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -429,8 +431,12 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!appPermission(req, 'catalog.edit_card', await canEditCatalogPrices(client))) {
-			return reply.code(403).send({ ok: false, error: 'редактирование товаров доступно снабжению и Константину Ласкину' });
+		const legacyAccess = await catalogAccess(client);
+		const canEditCard = appPermission(req, 'catalog.edit_card', legacyAccess.canEditCard);
+		const canEditRetailPrice = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices);
+		const canEditPurchasePrice = appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
+		if (!canEditCard) {
+			return reply.code(403).send({ ok: false, error: 'нет права редактировать карточку товара' });
 		}
 		const productId = Number(body['productId']);
 		const iblockId = Number(body['iblockId']);
@@ -445,6 +451,12 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const retail = Number(body['retail']);
 		const purchase = Number(body['purchase']);
 		const isService = body['isService'] === true;
+		let photo: ReturnType<typeof catalogPhoto>;
+		try {
+			photo = catalogPhoto(body['photo']);
+		} catch (error) {
+			return reply.code(400).send({ ok: false, error: errInfo(error) });
+		}
 		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
 		if (iblockId !== 24 && iblockId !== 26) return reply.code(400).send({ ok: false, error: 'неверный каталог товара' });
 		if (name.length < 3) return reply.code(400).send({ ok: false, error: 'название товара должно быть не короче трёх символов' });
@@ -471,16 +483,12 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		let before: Record<string, unknown> | null = null;
 		let beforePrices: { retail?: number; purchase?: number } | undefined;
 		let metadataChanged = false;
+		let uploadedFileName = '';
 		try {
 			before = await erp.get<Record<string, unknown>>('Item', String(productId));
 			if (!before) return reply.code(404).send({ ok: false, error: 'товар не найден в ядре' });
-			const currentContent = parseCatalogContent(before['b24_catalog_content']);
-			if (!currentContent) {
-				return reply.code(409).send({
-					ok: false,
-					error: 'структурированное описание этой карточки ещё не подготовлено; свободное редактирование заблокировано',
-				});
-			}
+			const currentContent = parseCatalogContent(before['b24_catalog_content'])
+				?? createCatalogContent(before['description'], []);
 			const content = applyCatalogContentEdits(currentContent, body['summary'], body['attributeEdits']);
 			const renderedDescription = renderCatalogDescription(content);
 			if (description && description !== renderedDescription) {
@@ -488,6 +496,8 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			}
 			const category = cleanText(before['b24_filter_category']);
 			beforePrices = (await fetchCoreCatalogPrices(erp)).get(productId);
+			const nextRetail = canEditRetailPrice ? retail : beforePrices?.retail ?? 0;
+			const nextPurchase = canEditPurchasePrice ? purchase : beforePrices?.purchase ?? 0;
 			await erp.update('Item', String(productId), {
 				item_name: name.slice(0, 140),
 				is_stock_item: isService ? 0 : 1,
@@ -503,7 +513,23 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 				b24_filter_updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
 			});
 			metadataChanged = true;
-			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
+			let photoPath = '';
+			if (photo) {
+				const uploaded = await erp.uploadPublicFile({
+					fileName: photo.fileName,
+					mimeType: photo.mimeType,
+					content: photo.content,
+					doctype: 'Item',
+					docname: String(productId),
+					fieldname: 'image',
+				});
+				uploadedFileName = uploaded.name;
+				photoPath = uploaded.fileUrl;
+				await erp.update('Item', String(productId), { image: uploaded.fileUrl });
+			}
+			if (canEditRetailPrice || canEditPurchasePrice) {
+				await updateCoreCatalogPrices(erp, { productId, retail: nextRetail, purchase: nextPurchase });
+			}
 			baseCache.delete(normalizeDomain(body.domain ?? ''));
 			app.log.info({ productId, iblockId }, '[api/catalog/update-product] ok');
 			return {
@@ -521,11 +547,13 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					status: statuses.join(', '),
 					description: renderedDescription,
 					content,
-					retail,
-					purchase,
+					retail: nextRetail,
+					purchase: nextPurchase,
+					...(photoPath ? { photoPath: `/api/inventory/erp-image?p=${encodeURIComponent(photoPath)}` } : {}),
 				},
 			};
 		} catch (error) {
+			if (uploadedFileName) await erp.delete('File', uploadedFileName).catch(() => undefined);
 			if (metadataChanged && before) {
 				try {
 					await erp.update('Item', String(productId), {
@@ -541,6 +569,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 						b24_filter_attributes: before['b24_filter_attributes'],
 						b24_filter_schema_version: before['b24_filter_schema_version'],
 						b24_filter_updated_at: before['b24_filter_updated_at'],
+						image: before['image'],
 					});
 					await updateCoreCatalogPrices(erp, {
 						productId,

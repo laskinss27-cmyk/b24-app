@@ -598,11 +598,12 @@ function CatalogPriceModal({ row, onSave, onClose }: {
 	);
 }
 
-function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }: {
+function CatalogProductCard({ row, stores, sections, canEdit, canEditPrices, onSave, onClose }: {
 	row: BaseRow;
 	stores: StoreInfo[];
 	sections: Array<{ id: number; name: string }>;
 	canEdit: boolean;
+	canEditPrices: boolean;
 	onSave: (input: CatalogProductUpdateInput) => Promise<void>;
 	onClose: () => void;
 }): JSX.Element {
@@ -612,7 +613,7 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 	const [model, setModel] = useState(row.model ?? '');
 	const [article, setArticle] = useState(row.article ?? '');
 	const [statuses, setStatuses] = useState(() => productStatuses(row.status));
-	const [summary, setSummary] = useState(row.content?.summary ?? '');
+	const [summary, setSummary] = useState(row.content?.summary ?? row.description ?? '');
 	const [attributeEdits, setAttributeEdits] = useState(() =>
 		(row.content?.attributes ?? []).map((attribute) => ({
 			id: attribute.id,
@@ -625,9 +626,12 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 	const [sectionId, setSectionId] = useState(String(row.sectionId ?? ''));
 	const [retail, setRetail] = useState(String(row.retail ?? 0));
 	const [purchase, setPurchase] = useState(String(row.purchase ?? 0));
+	const [nextPhoto, setNextPhoto] = useState<PreparedCatalogPhoto | null>(null);
+	const [photoBusy, setPhotoBusy] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
-	const photo = row.photoPath ? photoFullUrl(row.photoPath) : null;
+	const currentPhoto = row.photoPath ? photoFullUrl(row.photoPath) : null;
+	const displayedPhoto = nextPhoto?.previewUrl ?? currentPhoto;
 	const stockRows = stores
 		.map((store) => ({ ...store, qty: Number(row.stockByStore[store.id] ?? 0) }))
 		.sort((a, b) => b.qty - a.qty || a.title.localeCompare(b.title, 'ru'));
@@ -638,7 +642,7 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 		setModel(row.model ?? '');
 		setArticle(row.article ?? '');
 		setStatuses(productStatuses(row.status));
-		setSummary(row.content?.summary ?? '');
+		setSummary(row.content?.summary ?? row.description ?? '');
 		setAttributeEdits((row.content?.attributes ?? []).map((attribute) => ({
 			id: attribute.id,
 			label: attribute.label,
@@ -650,8 +654,22 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 		setSectionId(String(row.sectionId ?? ''));
 		setRetail(String(row.retail ?? 0));
 		setPurchase(String(row.purchase ?? 0));
+		setNextPhoto(null);
 		setError('');
 		setEditing(false);
+	};
+	const selectPhoto = async (file: File | undefined): Promise<void> => {
+		if (!file) return;
+		setPhotoBusy(true);
+		setError('');
+		try {
+			setNextPhoto(await prepareCatalogPhoto(file));
+		} catch (reason) {
+			setNextPhoto(null);
+			setError(String(reason instanceof Error ? reason.message : reason));
+		} finally {
+			setPhotoBusy(false);
+		}
 	};
 	const save = async (): Promise<void> => {
 		const section = sections.find((item) => item.id === Number(sectionId));
@@ -681,7 +699,15 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 				attributeEdits: attributeEdits.map(({ id, label, rawValue }) => ({ id, label, rawValue: rawValue.trim() })),
 				retail: retailValue,
 				purchase: purchaseValue,
+				...(nextPhoto ? {
+					photo: {
+						fileName: nextPhoto.fileName,
+						mimeType: nextPhoto.mimeType,
+						content: nextPhoto.content,
+					},
+				} : {}),
 			});
+			setNextPhoto(null);
 			setEditing(false);
 		} catch (reason) {
 			setError(String(reason instanceof Error ? reason.message : reason));
@@ -703,9 +729,21 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 				</div>
 				<div className="catalog-product-card-body">
 					<aside className="catalog-product-visual">
-						{photo
-							? <img src={photo} alt={row.name} onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+						{displayedPhoto
+							? <img src={displayedPhoto} alt={row.name} onError={(event) => { event.currentTarget.style.display = 'none'; }} />
 							: <div className="catalog-product-no-photo">Фото пока нет</div>}
+						{editing && <div className="catalog-product-photo-editor">
+							<label className="btn-secondary">
+								{photoBusy ? 'Подготавливаю…' : currentPhoto || nextPhoto ? 'Заменить фото' : 'Добавить фото'}
+								<input
+									type="file"
+									accept="image/jpeg,image/png,image/webp"
+									disabled={photoBusy || busy}
+									onChange={(event) => void selectPhoto(event.target.files?.[0])}
+								/>
+							</label>
+							{nextPhoto && <small>{nextPhoto.fileName} · {Math.ceil(nextPhoto.size / 1024)} КБ</small>}
+						</div>}
 						<div className="catalog-product-totals">
 							<div><span>Розница</span><b>{fmt(row.retail)} ₽</b></div>
 							<div><span>Закупка</span><b>{fmt(row.purchase ?? 0)} ₽</b></div>
@@ -722,8 +760,9 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 									<label>Модель<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
 									<label>Артикул<input value={article} onChange={(event) => setArticle(event.target.value)} /></label>
 									<label>Раздел<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} onChange={(event) => setRetail(event.target.value)} /></label>
-									<label>Закупочная цена, ₽<input inputMode="decimal" value={purchase} onChange={(event) => setPurchase(event.target.value)} /></label>
+									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} disabled={!canEditPrices} onChange={(event) => setRetail(event.target.value)} /></label>
+									<label>Закупочная цена, ₽<input inputMode="decimal" value={purchase} disabled={!canEditPrices} onChange={(event) => setPurchase(event.target.value)} /></label>
+									{!canEditPrices && <div className="wide catalog-price-permission-note">Цены показаны только для справки — право на их изменение настраивается отдельно.</div>}
 									<fieldset className="wide catalog-status-editor">
 										<legend>Статус товара</legend>
 										<div>{PRODUCT_STATUS_OPTIONS.map((status) => <label key={status}>
@@ -822,11 +861,11 @@ function CatalogProductCard({ row, stores, sections, canEdit, onSave, onClose }:
 				</div>
 				<div className="catalog-product-actions">
 					{editing ? <>
-						<button type="button" className="btn-secondary" disabled={busy} onClick={reset}>Отмена</button>
-						<button type="button" className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить товар'}</button>
+						<button type="button" className="btn-secondary" disabled={busy || photoBusy} onClick={reset}>Отмена</button>
+						<button type="button" className="btn-primary" disabled={busy || photoBusy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить товар'}</button>
 					</> : <>
 						<button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button>
-						{canEdit && row.content && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
+						{canEdit && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
 					</>}
 				</div>
 			</div>
@@ -872,6 +911,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [comparisonError, setComparisonError] = useState('');
 	const [uid, setUid] = useState('');
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
+	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
 	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
@@ -906,6 +946,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			setStores(MOCK_STORES);
 			setRows(MOCK_ROWS);
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
+			setCanEditCard(true);
 			setCanEditPrices(true);
 			setMode('base');
 			return;
@@ -930,6 +971,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				setRows(base.rows);
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
+				setCanEditCard(base.canEditCard);
 				setCanEditPrices(base.canEditPrices);
 				setAppAccess(appAccess);
 				setMode('base');
@@ -1028,6 +1070,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			setRows(base.rows);
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
+			setCanEditCard(base.canEditCard);
 			setCanEditPrices(base.canEditPrices);
 		} catch {
 			/* пересборка не удалась — оставляем текущие данные */
@@ -1370,7 +1413,16 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 
 			{priceRow && <CatalogPriceModal row={priceRow} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
 
-			{cardRow && <CatalogProductCard key={cardRow.id} row={cardRow} stores={visibleStores} sections={sections} canEdit={canEditPrices && !pickMode} onSave={saveCatalogProduct} onClose={() => setCardRow(null)} />}
+			{cardRow && <CatalogProductCard
+				key={cardRow.id}
+				row={cardRow}
+				stores={visibleStores}
+				sections={sections}
+				canEdit={canEditCard && !pickMode}
+				canEditPrices={canEditPrices}
+				onSave={saveCatalogProduct}
+				onClose={() => setCardRow(null)}
+			/>}
 
 			{showPriceTags && <PriceTagsModal items={priceTagItems} onClose={() => setShowPriceTags(false)} />}
 

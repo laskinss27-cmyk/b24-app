@@ -524,6 +524,8 @@ export interface ProductBaseResult {
 	generatedAt: string;
 	/** true — отдано из кэша бэкенда (не пересобиралось). */
 	cached: boolean;
+	/** Право менять справочные поля и фото карточки независимо от цен. */
+	canEditCard: boolean;
 	/** Право менять справочные цены: отдел снабжения или Константин Ласкин. */
 	canEditPrices: boolean;
 }
@@ -539,9 +541,16 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditPrices?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditCard?: boolean; canEditPrices?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
-	return { rows: json.rows ?? [], stores: json.stores ?? [], generatedAt: json.generatedAt ?? '', cached: Boolean(json.cached), canEditPrices: Boolean(json.canEditPrices) };
+	return {
+		rows: json.rows ?? [],
+		stores: json.stores ?? [],
+		generatedAt: json.generatedAt ?? '',
+		cached: Boolean(json.cached),
+		canEditCard: Boolean(json.canEditCard),
+		canEditPrices: Boolean(json.canEditPrices),
+	};
 }
 
 export type CatalogAttributeType = 'text' | 'option' | 'multi_option' | 'number' | 'range' | 'boolean';
@@ -626,6 +635,11 @@ export interface CatalogProductUpdateInput {
 	attributeEdits: Array<{ id: string; rawValue: string; label?: string }>;
 	retail: number;
 	purchase: number;
+	photo?: {
+		fileName: string;
+		mimeType: 'image/jpeg';
+		content: string;
+	};
 }
 
 export async function updateCatalogProduct(input: CatalogProductUpdateInput): Promise<Partial<BaseRow>> {

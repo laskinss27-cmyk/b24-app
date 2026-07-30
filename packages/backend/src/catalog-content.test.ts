@@ -8,6 +8,7 @@ import {
 	serializeFilterAttributes,
 } from './catalog-content.js';
 import { splitCatalogProductNameStatus } from './catalog-product-status.js';
+import { catalogAccessForUser } from './catalog-access.js';
 
 const source = {
 	version: 1,
@@ -107,6 +108,40 @@ test('new catalog content normalizes filled template fields and skips empty ones
 	assert.match(renderCatalogDescription(content), /Разрешение матрицы: 4 Мп/u);
 	const filter = JSON.parse(serializeFilterAttributes(content, 'Камеры')) as { attributes: Array<{ key: string }> };
 	assert.deepEqual(filter.attributes.map((item) => item.key), ['megapixels', 'wifi']);
+});
+
+test('catalog card access is independent from price access', () => {
+	assert.deepEqual(catalogAccessForUser({
+		ID: 77,
+		NAME: 'Сотрудник',
+		LAST_NAME: 'Снабжения',
+		UF_DEPARTMENT: [10],
+	}), { canEditCard: true, canEditPrices: true });
+	assert.deepEqual(catalogAccessForUser({
+		ID: 1,
+		NAME: 'Администратор',
+		LAST_NAME: 'Приложения',
+		UF_DEPARTMENT: [5],
+	}), { canEditCard: true, canEditPrices: false });
+	assert.deepEqual(catalogAccessForUser({
+		ID: 77,
+		NAME: 'Администратор',
+		LAST_NAME: 'Портала',
+		UF_DEPARTMENT: [5],
+		ADMIN: 'Y',
+	}), { canEditCard: true, canEditPrices: false });
+	assert.deepEqual(catalogAccessForUser({
+		ID: 1246,
+		NAME: 'Константин',
+		LAST_NAME: 'Ласкин',
+		UF_DEPARTMENT: [5],
+	}), { canEditCard: true, canEditPrices: true });
+	assert.deepEqual(catalogAccessForUser({
+		ID: 77,
+		NAME: 'Обычный',
+		LAST_NAME: 'Сотрудник',
+		UF_DEPARTMENT: [5],
+	}), { canEditCard: false, canEditPrices: false });
 });
 
 test('legacy stock marker is moved from the product name into status', () => {
