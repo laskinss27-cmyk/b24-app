@@ -22,7 +22,6 @@ import {
 } from './b24.js';
 import { SalesReport } from './SalesReport.js';
 import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
-import { AccessControl } from './AccessControl.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -589,9 +588,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const pickMode = !!picker;
 	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
-	const [accessOpen, setAccessOpen] = useState(() =>
-		Boolean(getContext().__mock && new URLSearchParams(window.location.search).has('access')),
-	);
 	const [forceInitialRefresh] = useState(Boolean(picker?.forceRefreshOnMount));
 	const [gate, setGate] = useState<Gate>('checking');
 	const [errMsg, setErrMsg] = useState<string>('');
@@ -603,7 +599,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [exportingComparison, setExportingComparison] = useState(false);
 	const [comparisonError, setComparisonError] = useState('');
 	const [uid, setUid] = useState('');
-	const [canManageAccess, setCanManageAccess] = useState(false);
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
@@ -640,7 +635,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			setRows(MOCK_ROWS);
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
 			setCanEditPrices(true);
-			setCanManageAccess(true);
 			setMode('base');
 			return;
 		}
@@ -665,7 +659,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setCanEditPrices(base.canEditPrices);
-				setCanManageAccess(Boolean(appAccess?.canManageAccess));
 				setAppAccess(appAccess);
 				setMode('base');
 			})().catch((e: unknown) => {
@@ -674,26 +667,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			});
 		});
 	}, [ctx, forceInitialRefresh]);
-
-	// Горячую клавишу оставляем как быстрый вход в дополнение к обычной кнопке.
-	// Право на открытие приходит с сервера из той же политики, что защищает API.
-	useEffect(() => {
-		if (pickMode) return;
-		const onKeyDown = (event: KeyboardEvent): void => {
-			if (
-				event.ctrlKey
-				&& event.altKey
-				&& event.shiftKey
-				&& event.code === 'KeyP'
-				&& canManageAccess
-			) {
-				event.preventDefault();
-				setAccessOpen(true);
-			}
-		};
-		window.addEventListener('keydown', onKeyDown);
-		return () => window.removeEventListener('keydown', onKeyDown);
-	}, [canManageAccess, pickMode]);
 
 	const allowedStoreTitles = useMemo(
 		() => picker?.allowedStoreTitles?.map(normalizeStoreTitle) ?? [],
@@ -952,9 +925,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	// ── рендер ──────────────────────────────────────────────────────────────────
 	if (gate === 'checking') return <div className="base"><header><h1>База товаров</h1></header><p className="base-load">Загрузка…</p></div>;
 	if (gate === 'error') return <div className="base"><header><h1>База товаров</h1></header><p className="error">⛔ {errMsg}</p></div>;
-	if (accessOpen) {
-		return <AccessControl currentUserId={uid} mock={Boolean(ctx.__mock)} canManageAccess={canManageAccess} onClose={() => setAccessOpen(false)} />;
-	}
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}
@@ -1023,7 +993,6 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && canViewSalesReport && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
-				{!pickMode && canManageAccess && <button className="btn-secondary" onClick={() => setAccessOpen(true)}>⚙ Права доступа</button>}
 			</div>
 			{comparisonError && <p className="cart-err">{comparisonError}</p>}
 

@@ -13,6 +13,12 @@ import { normalizeDomain } from './security.js';
 
 export const ACCESS_POLICY_OPTION = 'ud_access_control_draft_v1';
 export const ACCESS_MANAGER_IDS = new Set(['1', '986', '1858']);
+/**
+ * Emergency fail-open switch. The saved policy is intentionally preserved, but it
+ * must not affect application access until the editor and rules are reviewed.
+ */
+export const ACCESS_POLICY_ENFORCEMENT_ENABLED = false;
+export const ACCESS_POLICY_EDITOR_ENABLED = false;
 
 const PROFILE_IDS = new Set<AccessProfileId>(['legacy', 'manager', 'supply', 'administrator', 'leadership']);
 const PERMISSION_IDS = new Set<string>(ACCESS_PERMISSIONS.map((item) => item.id));
@@ -170,7 +176,7 @@ export async function resolveCurrentAccess(
 	const departmentRules = user.departments.map((id) => policy.departments[String(id)]);
 	const decisions = Object.fromEntries(ACCESS_PERMISSIONS.map((permission) => [
 		permission.id,
-		policy.policyMode === 'active'
+		ACCESS_POLICY_ENFORCEMENT_ENABLED && policy.policyMode === 'active'
 			? effectiveAccessDecision(policy.employees[user.id], departmentRules, permission.id)
 			: 'inherit',
 	])) as Record<AccessPermissionId, 'inherit' | 'allow' | 'deny'>;
@@ -187,7 +193,9 @@ export async function hasAppPermissions(
 ): Promise<{ allowed: boolean; denied: AccessPermissionId[]; access: CurrentAccess | null }> {
 	const access = await resolveCurrentAccess(app, body);
 	if (!access) return { allowed: true, denied: [], access: null };
-	if (access.policy.policyMode !== 'active') return { allowed: true, denied: [], access };
+	if (!ACCESS_POLICY_ENFORCEMENT_ENABLED || access.policy.policyMode !== 'active') {
+		return { allowed: true, denied: [], access };
+	}
 	const denied = permissionIds.filter((permissionId) => access.decisions[permissionId] === 'deny');
 	return { allowed: denied.length === 0, denied, access };
 }

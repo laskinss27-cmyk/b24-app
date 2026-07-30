@@ -3,6 +3,7 @@ import type { AccessControlDraft, AccessSubjectRule } from '@b24-app/shared';
 import { B24ApiError, B24Client } from '../b24/client.js';
 import {
 	ACCESS_MANAGER_IDS,
+	ACCESS_POLICY_EDITOR_ENABLED,
 	ACCESS_POLICY_OPTION,
 	accessClientFrom,
 	cacheAccessPolicy,
@@ -169,6 +170,12 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 	});
 
 	app.post('/api/access-control/save', async (req, reply) => {
+		if (!ACCESS_POLICY_EDITOR_ENABLED) {
+			return reply.code(503).send({
+				ok: false,
+				error: 'Настройка прав временно отключена',
+			});
+		}
 		const body = (req.body ?? {}) as AccessAuthBody & { draft?: unknown };
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'нет авторизации' });
