@@ -662,6 +662,32 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		url.searchParams.set(base.includes('/marketplace/view/') ? 'params[repairId]' : 'repairId', String(id));
 		return `[URL=${url.toString()}]Открыть ремонт #${repairNo || id}[/URL]`;
 	};
+	const attachRepairLinkToCreatedDeal = async (
+		client: B24Client,
+		data: RepairData,
+		repairId: number,
+		dealSync: DealSyncResult,
+	): Promise<void> => {
+		if (!dealSync.created || !dealSync.dealId) return;
+		try {
+			await client.call('crm.deal.update', {
+				id: dealSync.dealId,
+				fields: {
+					COMMENTS: repairLink(repairId, data.repairNo),
+				},
+			});
+			app.log.info(
+				{ repairId, dealId: dealSync.dealId },
+				'[api/repairs] ссылка на ремонт добавлена в комментарий сделки',
+			);
+		} catch (error) {
+			// Ссылка полезна, но её временная ошибка не должна отменять уже созданные ремонт и сделку.
+			app.log.warn(
+				{ repairId, dealId: dealSync.dealId },
+				`[api/repairs] не удалось добавить ссылку в комментарий сделки — ${errInfo(error)}`,
+			);
+		}
+	};
 	const rub = (value: number | null): string => value == null ? '—' : `${value.toLocaleString('ru-RU')} ₽`;
 
 	// Список ремонтов (+ идемпотентно создаёт хранилище, если его ещё нет).
@@ -775,6 +801,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			});
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
+			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
 			const taskSync = await createRepairNotifyTask(client, data, id, app.log);
 			if (taskSync.taskId) {
 				data.taskId = taskSync.taskId;
@@ -917,6 +944,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			}
 			// Сделку держим в актуальном (мутирует data.dealId); позицию склада переименовываем вслед за карточкой.
 			const dealSync = await syncRepairDeal(client, data, app.log);
+			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
 			await syncRepairStock(data, app.log, { allowCreate: false });
 			if (Array.isArray(b['photos'])) {
 				data.photos = (b['photos'] as Array<Record<string, unknown>>).map((p) => ({ id: Number(p['id']) || 0, name: s(p['name']), url: s(p['url']) })).filter((p) => p.url);
@@ -997,6 +1025,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			}
 			// Сделка нужна и платному, и гарантийному ремонту: у гарантийного сумма будет 0.
 			const dealSync = await syncRepairDeal(client, data, app.log);
+			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, payType, byPriceEditor: me.canEditPrice }, '[api/repairs/set-pay] ok');
 			return { ok: true, payType: data.payType, cost: data.cost, ourPrice: data.ourPrice, dealId: data.dealId, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
@@ -1058,6 +1087,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				note: `цена отправлена на согласование: ${rub(customerPrice)}`,
 			});
 			const dealSync = await syncRepairDeal(client, data, app.log);
+			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, point }, '[api/repairs/request-price-approval] ok');
 			return { ok: true, repair: { id, name: String(raw['NAME'] ?? ''), ...data }, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };

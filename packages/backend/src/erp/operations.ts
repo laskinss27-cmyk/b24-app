@@ -2485,7 +2485,19 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number>; rowName: string; dealLineKey: string; dealQty: number }
 export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; items: SupplyReqItem[] }
-export interface SupplyRequestSummary { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; productIds: number[] }
+export interface SupplyRequestSummary {
+	name: string;
+	requestKey: string;
+	createdAt: string;
+	dealId: string;
+	date: string;
+	deadline: string;
+	status: string;
+	toStore: string;
+	note: string;
+	productIds: number[];
+	items: Array<{ productId: number; itemName: string; qty: number; note: string }>;
+}
 
 function materialRequestKey(name: string, creation: unknown): string {
 	return `${name}@${String(creation ?? '')}`;
@@ -2500,6 +2512,12 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 	const out: SupplyRequestSummary[] = [];
 	for (const h of heads) {
 		const mr = await erp.get<Record<string, unknown>>('Material Request', String(h['name']));
+		const items = ((mr?.['items'] as Array<Record<string, unknown>>) ?? []).map((item) => ({
+			productId: Number(item['item_code'] ?? 0),
+			itemName: String(item['item_name'] ?? ''),
+			qty: Number(item['qty'] ?? 0),
+			note: String(item['description'] ?? ''),
+		})).filter((item) => Number.isInteger(item.productId) && item.productId > 0);
 		out.push({
 			name: String(h['name']),
 			requestKey: materialRequestKey(String(h['name']), mr?.['creation']),
@@ -2510,7 +2528,8 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 			status: String(h['status'] ?? ''),
 			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
 			note: String(mr?.[NOTE_FIELD] ?? ''),
-			productIds: ((mr?.['items'] as Array<Record<string, unknown>>) ?? []).map((it) => Number(it['item_code'] ?? 0)).filter((id) => Number.isInteger(id) && id > 0),
+			productIds: items.map((item) => item.productId),
+			items,
 		});
 	}
 	return out;

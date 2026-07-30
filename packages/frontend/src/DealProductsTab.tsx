@@ -303,6 +303,125 @@ const plural = (n: number, one: string, few: string, many: string): string => {
 	return many;
 };
 
+type DealDocumentPreview =
+	| { kind: 'realization'; document: CoreRealization }
+	| { kind: 'supply'; document: SupplyCard }
+	| { kind: 'transfer'; document: TransferDoc };
+
+function DealDocumentPreviewModal({
+	preview,
+	onClose,
+}: {
+	preview: DealDocumentPreview;
+	onClose: () => void;
+}): JSX.Element {
+	useEffect(() => {
+		const closeOnEscape = (event: KeyboardEvent): void => {
+			if (event.key === 'Escape') onClose();
+		};
+		window.addEventListener('keydown', closeOnEscape);
+		return () => window.removeEventListener('keydown', closeOnEscape);
+	}, [onClose]);
+
+	if (preview.kind === 'realization') {
+		const document = preview.document;
+		const title = document.isReturn ? 'Возврат' : 'Реализация';
+		return (
+			<div className="deal-document-preview-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+				<section className="deal-document-preview" role="dialog" aria-modal="true" aria-label={`${title} ${document.name}`}>
+					<header>
+						<div><span>{title}</span><h2>{document.name}</h2></div>
+						<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button>
+					</header>
+					<div className="deal-document-preview-facts">
+						<div><span>Дата</span><b>{document.postingDate || '—'}</b></div>
+						<div><span>Статус</span><b>{document.submitted ? 'Проведён' : 'Черновик'}</b></div>
+						<div><span>Сумма</span><b>{rub(Math.abs(document.grandTotal))}</b></div>
+						{document.returnAgainst && <div><span>Основание</span><b>{document.returnAgainst}</b></div>}
+					</div>
+					<div className="deal-document-preview-table">
+						<table>
+							<thead><tr><th>Позиция</th><th>Склад</th><th className="num">Количество</th><th className="num">Цена</th><th className="num">Сумма</th></tr></thead>
+							<tbody>{document.items.map((item, index) => {
+								const qty = Math.abs(item.qty);
+								return <tr key={`${item.productId}-${item.segmentId ?? ''}-${index}`}>
+									<td><b>{item.itemName || `Товар #${item.productId}`}</b><small>ID {item.productId}</small></td>
+									<td>{item.storeTitle || '—'}</td>
+									<td className="num">{qty}</td>
+									<td className="num">{rub(item.rate)}</td>
+									<td className="num">{rub(qty * item.rate)}</td>
+								</tr>;
+							})}</tbody>
+						</table>
+					</div>
+					<footer><button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button></footer>
+				</section>
+			</div>
+		);
+	}
+
+	if (preview.kind === 'supply') {
+		const document = preview.document;
+		return (
+			<div className="deal-document-preview-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+				<section className="deal-document-preview" role="dialog" aria-modal="true" aria-label={`Заявка снабжению ${document.title}`}>
+					<header>
+						<div><span>Заявка снабжению</span><h2>{document.title}</h2></div>
+						<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button>
+					</header>
+					<div className="deal-document-preview-facts">
+						<div><span>Статус</span><b>{stageLabel(document.stageId)}</b></div>
+						<div><span>Дата</span><b>{document.date || '—'}</b></div>
+						<div><span>Нужно до</span><b>{document.deadline || '—'}</b></div>
+						<div><span>Склад назначения</span><b>{document.toStore || '—'}</b></div>
+					</div>
+					{document.note && <p className="deal-document-preview-note">{document.note}</p>}
+					<div className="deal-document-preview-table">
+						<table>
+							<thead><tr><th>Позиция</th><th className="num">Количество</th></tr></thead>
+							<tbody>{(document.items ?? []).map((item, index) => <tr key={`${item.productId}-${index}`}>
+								<td><b>{item.itemName || `Товар #${item.productId}`}</b><small>ID {item.productId}{item.note ? ` · ${item.note}` : ''}</small></td>
+								<td className="num">{item.qty}</td>
+							</tr>)}</tbody>
+						</table>
+						{!document.items?.length && <p className="deal-documents-empty">В заявке нет доступных для просмотра позиций.</p>}
+					</div>
+					<footer><button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button></footer>
+				</section>
+			</div>
+		);
+	}
+
+	const document = preview.document;
+	return (
+		<div className="deal-document-preview-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<section className="deal-document-preview" role="dialog" aria-modal="true" aria-label={`Перемещение ${document.name || document.id}`}>
+				<header>
+					<div><span>Перемещение</span><h2>{document.name || `Перемещение #${document.id}`}</h2></div>
+					<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button>
+				</header>
+				<div className="deal-document-preview-facts">
+					<div><span>Откуда</span><b>{document.fromStore || '—'}</b></div>
+					<div><span>Куда</span><b>{document.toStore || '—'}</b></div>
+					<div><span>Статус</span><b>{transferDocStatusLabel(document.status)}</b></div>
+					<div><span>Создано</span><b>{document.createdAt ? new Date(document.createdAt).toLocaleString('ru-RU') : '—'}</b></div>
+				</div>
+				{document.note && <p className="deal-document-preview-note">{document.note}</p>}
+				<div className="deal-document-preview-table">
+					<table>
+						<thead><tr><th>Позиция</th><th className="num">Количество</th></tr></thead>
+						<tbody>{document.lines.map((item, index) => <tr key={`${item.productId}-${index}`}>
+							<td><b>{item.name || `Товар #${item.productId}`}</b><small>ID {item.productId}</small></td>
+							<td className="num">{item.qty}</td>
+						</tr>)}</tbody>
+					</table>
+				</div>
+				<footer><button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button></footer>
+			</section>
+		</div>
+	);
+}
+
 export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [state, setState] = useState<State>({ phase: 'init' });
@@ -674,6 +793,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const [showReturn, setShowReturn] = useState(false);
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const [showDealDocuments, setShowDealDocuments] = useState(false);
+	const [documentPreview, setDocumentPreview] = useState<DealDocumentPreview | null>(null);
 	const [summaryView, setSummaryView] = useState(false);
 	const segmentActionsBlocked = summaryView && data.stages.length > 0;
 	const rowEditable = (row: EnrichedRow): boolean =>
@@ -1008,8 +1128,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			.filter((p): p is Part => p != null);
 		return parts;
 	};
+	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
-	const hiddenDocumentCount = returnDocuments.length + data.supply.length + dealTransfers.length;
+	const dealDocumentCount = data.coreReals.length + data.supply.length + dealTransfers.length;
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => {
 		const left = remaining(r);
@@ -1449,22 +1570,33 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						setShowDealDocuments((shown) => !shown);
 						requestB24FitWindow(160);
 					}}
-				>Документы по сделке{hiddenDocumentCount ? ` (${hiddenDocumentCount})` : ''}</button>}
+				>Документы по сделке{dealDocumentCount ? ` (${dealDocumentCount})` : ''}</button>}
 				</div>
 				<span className="hint">{workingMode ? 'Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.' : alternativeView ? 'Альтернативный вариант можно редактировать и печатать независимо от основного.' : 'КП формируется только из открытого варианта.'}</span>
 			</div>
 
 			{workingMode && showDealDocuments && (
 				<section className="deal-documents-panel" aria-label="Документы по сделке">
-					<header><h2>Документы по сделке</h2><span>{hiddenDocumentCount || 'нет документов'}</span></header>
+					<header><h2>Документы по сделке</h2><span>{dealDocumentCount || 'нет документов'}</span></header>
+					{realizationDocuments.length > 0 && (
+						<div className="deal-documents-group">
+							<h3>Реализации</h3>
+							{realizationDocuments.map((document) => (
+								<button type="button" className="deal-document-row clickable" key={document.name} onClick={() => setDocumentPreview({ kind: 'realization', document })}>
+									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
+									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
+								</button>
+							))}
+						</div>
+					)}
 					{returnDocuments.length > 0 && (
 						<div className="deal-documents-group">
 							<h3>Возвраты</h3>
 							{returnDocuments.map((document) => (
-								<div className="deal-document-row" key={document.name}>
+								<button type="button" className="deal-document-row clickable" key={document.name} onClick={() => setDocumentPreview({ kind: 'realization', document })}>
 									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
 									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
-								</div>
+								</button>
 							))}
 						</div>
 					)}
@@ -1472,7 +1604,14 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						<div className="deal-documents-group">
 							<h3>Снабжение</h3>
 							{data.supply.map((document) => (
-								<button type="button" key={`${document.source ?? 'b24'}-${document.id}-${document.title}`} className="deal-document-row clickable" onClick={() => document.id > 0 && openSupplyCard(document.id)}>
+								<button
+									type="button"
+									key={`${document.source ?? 'b24'}-${document.id}-${document.title}`}
+									className="deal-document-row clickable"
+									onClick={() => document.source === 'core'
+										? setDocumentPreview({ kind: 'supply', document })
+										: document.id > 0 && openSupplyCard(document.id)}
+								>
 									<span><b>{document.title}</b><small>{document.source === 'core' ? 'ядро' : 'Битрикс24'}</small></span>
 									<span className="deal-document-status">{stageLabel(document.stageId)}</span>
 								</button>
@@ -1483,16 +1622,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						<div className="deal-documents-group">
 							<h3>Перемещения</h3>
 							{dealTransfers.map((document) => (
-								<div className="deal-document-row" key={document.id}>
+								<button type="button" className="deal-document-row clickable" key={document.id} onClick={() => setDocumentPreview({ kind: 'transfer', document })}>
 									<span><b>{document.name || `Перемещение #${document.id}`}</b><small>{document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
 									<span className="deal-document-status">{transferDocStatusLabel(document.status)}</span>
-								</div>
+								</button>
 							))}
 						</div>
 					)}
-					{hiddenDocumentCount === 0 && <p className="deal-documents-empty">Других документов по сделке пока нет.</p>}
+					{dealDocumentCount === 0 && <p className="deal-documents-empty">Документов по сделке пока нет.</p>}
 				</section>
 			)}
+			{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={() => setDocumentPreview(null)} />}
 
 			<div className="table-wrap">
 			<table className="products-table">

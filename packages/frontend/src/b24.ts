@@ -1077,6 +1077,11 @@ export interface SupplyCard {
 	stageId: string;
 	source?: 'b24' | 'core';
 	productIds?: number[];
+	date?: string;
+	deadline?: string;
+	toStore?: string;
+	note?: string;
+	items?: Array<{ productId: number; itemName: string; qty: number; note: string }>;
 }
 
 export async function replaceDealPlanProduct(dealId: number, oldProductId: number, next: { productId: number; name: string }): Promise<number> {
