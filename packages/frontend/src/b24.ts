@@ -2269,6 +2269,8 @@ export interface Repair {
 	taskId?: number | null;
 	/** Временная подсказка после создания, если Б24 не дал создать задачу. В хранилище ремонта не пишется. */
 	taskWarning?: string;
+	/** Временное предупреждение о частичной синхронизации сделки. В хранилище ремонта не пишется. */
+	dealSyncWarning?: string;
 	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
 	repairItemCode?: string | null;
 	/** Где аппарат лежит сейчас (название склада Б24). */
@@ -2292,6 +2294,11 @@ export interface Repair {
 	history: Array<{ at: string; status: RepairStatus; byId: string; byName?: string; note?: string }>;
 }
 export interface RepairContact { id: number; name: string; phone: string }
+export interface RepairDealSyncResult {
+	dealCreated: boolean;
+	dealNoContact: boolean;
+	syncWarning: string | null;
+}
 export interface NewRepairInput {
 	client: { contactId: number | null; name: string; phone: string };
 	device: string;
@@ -2324,9 +2331,10 @@ export async function createRepair(input: NewRepairInput): Promise<Repair> {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...input }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; taskCreated?: boolean; taskError?: string | null };
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; syncWarning?: string | null; taskCreated?: boolean; taskError?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось принять в ремонт');
 	if ('taskCreated' in json && !json.taskCreated) json.repair.taskWarning = `Задача не создана: ${json.taskError || 'Б24 не вернул ID задачи'}`;
+	if (json.syncWarning) json.repair.dealSyncWarning = json.syncWarning;
 	return json.repair;
 }
 
@@ -2369,8 +2377,9 @@ export async function updateRepair(id: number, input: NewRepairInput): Promise<R
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), id, ...input }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair };
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; syncWarning?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось сохранить ремонт');
+	if (json.syncWarning) json.repair.dealSyncWarning = json.syncWarning;
 	return json.repair;
 }
 
@@ -2393,13 +2402,18 @@ export async function deleteRepair(id: number): Promise<void> {
 	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить ремонт');
 }
 
-export async function updateRepairStatus(id: number, status: RepairStatus): Promise<void> {
+export async function updateRepairStatus(id: number, status: RepairStatus): Promise<RepairDealSyncResult> {
 	const res = await fetch('/api/repairs/update-status', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), id, status }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string };
+	const json = (await res.json()) as { ok: boolean; error?: string; dealCreated?: boolean; dealNoContact?: boolean; syncWarning?: string | null };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сменить статус');
+	return {
+		dealCreated: Boolean(json.dealCreated),
+		dealNoContact: Boolean(json.dealNoContact),
+		syncWarning: json.syncWarning ?? null,
+	};
 }
 
 export async function searchRepairContacts(q: string): Promise<RepairContact[]> {
@@ -2479,24 +2493,39 @@ export async function setRepairIssueStore(id: number, issueStore: string): Promi
 	return json.issueStore ?? null;
 }
 
-export async function setRepairPayType(id: number, payType: 'warranty' | 'paid', cost: number | null, ourPrice: number | null): Promise<{ payType: 'warranty' | 'paid'; cost: number | null; ourPrice: number | null; dealId: number | null; dealCreated: boolean; dealNoContact: boolean }> {
+export async function setRepairPayType(id: number, payType: 'warranty' | 'paid', cost: number | null, ourPrice: number | null): Promise<{ payType: 'warranty' | 'paid'; cost: number | null; ourPrice: number | null; dealId: number | null } & RepairDealSyncResult> {
 	const res = await fetch('/api/repairs/set-pay', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), id, payType, cost, ourPrice }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; payType?: 'warranty' | 'paid'; cost?: number | null; ourPrice?: number | null; dealId?: number | null; dealCreated?: boolean; dealNoContact?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; payType?: 'warranty' | 'paid'; cost?: number | null; ourPrice?: number | null; dealId?: number | null; dealCreated?: boolean; dealNoContact?: boolean; syncWarning?: string | null };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сменить вид ремонта');
-	return { payType: json.payType ?? payType, cost: json.cost ?? null, ourPrice: json.ourPrice ?? null, dealId: json.dealId ?? null, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact) };
+	return { payType: json.payType ?? payType, cost: json.cost ?? null, ourPrice: json.ourPrice ?? null, dealId: json.dealId ?? null, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact), syncWarning: json.syncWarning ?? null };
 }
 
-export async function requestRepairPriceApproval(id: number, cost: number | null, ourPrice: number | null): Promise<{ repair: Repair; dealCreated: boolean; dealNoContact: boolean }> {
+export async function requestRepairPriceApproval(id: number, cost: number | null, ourPrice: number | null): Promise<{ repair: Repair } & RepairDealSyncResult> {
 	const res = await fetch('/api/repairs/request-price-approval', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), id, cost, ourPrice }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; dealCreated?: boolean; dealNoContact?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; dealCreated?: boolean; dealNoContact?: boolean; syncWarning?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось отправить цену на согласование');
-	return { repair: json.repair, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact) };
+	return { repair: json.repair, dealCreated: Boolean(json.dealCreated), dealNoContact: Boolean(json.dealNoContact), syncWarning: json.syncWarning ?? null };
+}
+
+export async function syncRepairDealNow(id: number): Promise<{ repair: Repair } & RepairDealSyncResult> {
+	const res = await fetch('/api/repairs/sync-deal', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; dealCreated?: boolean; dealNoContact?: boolean; syncWarning?: string | null };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось синхронизировать сделку');
+	return {
+		repair: json.repair,
+		dealCreated: Boolean(json.dealCreated),
+		dealNoContact: Boolean(json.dealNoContact),
+		syncWarning: json.syncWarning ?? null,
+	};
 }
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */

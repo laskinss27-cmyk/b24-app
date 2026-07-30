@@ -11,6 +11,7 @@ import {
 	updateRepairStatus,
 	setRepairPayType,
 	requestRepairPriceApproval,
+	syncRepairDealNow,
 	setRepairIssueStore,
 	deleteRepair,
 	getRepairFileUrl,
@@ -30,6 +31,7 @@ import {
 	type RepairContact,
 	type RepairPhoto,
 	type RepairFile,
+	type RepairDealSyncResult,
 } from './b24.js';
 
 /**
@@ -312,26 +314,37 @@ export function Repairs(): JSX.Element {
 					onStatus={async (st) => {
 						const historyRow = { at: new Date().toISOString(), status: st, byId: 'current' };
 						const next = { ...screen.repair, status: st, history: [...screen.repair.history, historyRow] };
-						if (!ctx.__mock) await updateRepairStatus(screen.repair.id, st);
+						const sync = ctx.__mock
+							? { dealCreated: false, dealNoContact: false, syncWarning: null }
+							: await updateRepairStatus(screen.repair.id, st);
 						setScreen({ k: 'card', repair: next });
 						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
+						return sync;
 					}}
 					onSetPay={async (payType, cost, ourPrice) => {
 						const res = ctx.__mock
-							? { payType, cost, ourPrice, dealId: screen.repair.dealId, dealCreated: false, dealNoContact: false }
+							? { payType, cost, ourPrice, dealId: screen.repair.dealId, dealCreated: false, dealNoContact: false, syncWarning: null }
 							: await setRepairPayType(screen.repair.id, payType, cost, ourPrice);
 						const next = { ...screen.repair, payType: res.payType, cost: res.cost, ourPrice: res.ourPrice, dealId: res.dealId ?? screen.repair.dealId };
 						setScreen({ k: 'card', repair: next });
 						setRepairs((prev) => prev.map((x) => (x.id === next.id ? next : x)));
-						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact };
+						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact, syncWarning: res.syncWarning };
 					}}
 					onRequestPriceApproval={async (cost, ourPrice) => {
 						const res = ctx.__mock
-							? { repair: { ...screen.repair, payType: 'paid' as const, cost, ourPrice }, dealCreated: false, dealNoContact: false }
+							? { repair: { ...screen.repair, payType: 'paid' as const, cost, ourPrice }, dealCreated: false, dealNoContact: false, syncWarning: null }
 							: await requestRepairPriceApproval(screen.repair.id, cost, ourPrice);
 						setScreen({ k: 'card', repair: res.repair });
 						setRepairs((prev) => prev.map((x) => (x.id === res.repair.id ? res.repair : x)));
-						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact };
+						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact, syncWarning: res.syncWarning };
+					}}
+					onSyncDeal={async () => {
+						const res = ctx.__mock
+							? { repair: screen.repair, dealCreated: false, dealNoContact: false, syncWarning: null }
+							: await syncRepairDealNow(screen.repair.id);
+						setScreen({ k: 'card', repair: res.repair });
+						setRepairs((prev) => prev.map((x) => (x.id === res.repair.id ? res.repair : x)));
+						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact, syncWarning: res.syncWarning };
 					}}
 					onSetIssueStore={async (store) => {
 						const issueStore = ctx.__mock ? (store || null) : await setRepairIssueStore(screen.repair.id, store);
@@ -791,15 +804,15 @@ function PresaleForm({ mock, onCancel, onDone }: { mock: boolean; onCancel: () =
 	);
 }
 
-function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternalComment, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSetIssueStore, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onSaveInternalComment: (comment: string) => Promise<void>; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<void>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<{ dealCreated: boolean; dealNoContact: boolean }>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
+function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternalComment, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSyncDeal, onSetIssueStore, onDelete }: {
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onSaveInternalComment: (comment: string) => Promise<void>; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<RepairDealSyncResult>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<RepairDealSyncResult>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<RepairDealSyncResult>; onSyncDeal: () => Promise<RepairDealSyncResult>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
 	const [costVal, setCostVal] = useState<string>(repair.cost != null ? String(repair.cost) : '');
 	const [ourVal, setOurVal] = useState<string>(repair.ourPrice != null ? String(repair.ourPrice) : '');
 	const [stErr, setStErr] = useState<string | null>(null);
-	const [dealMsg, setDealMsg] = useState<string | null>(null);
+	const [dealMsg, setDealMsg] = useState<string | null>(repair.dealSyncWarning ? `⚠ ${repair.dealSyncWarning}` : null);
 	const [issueStores, setIssueStores] = useState<StoreInfo[]>([]);
 	const [issueVal, setIssueVal] = useState<string>(repair.issueStore ?? '');
 	const [issueBusy, setIssueBusy] = useState(false);
@@ -816,10 +829,11 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternal
 	const needsIssueStore = (s: RepairStatus): boolean => presale ? (s === 'pre_to_point' || s === 'pre_at_tt') : s === 'ready_tt';
 	const costNum = (): number | null => (costVal.trim() !== '' && Number.isFinite(Number(costVal)) ? Number(costVal) : null);
 	const ourNum = (): number | null => (ourVal.trim() !== '' && Number.isFinite(Number(ourVal)) ? Number(ourVal) : null);
-	function reactDeal(res: { dealCreated: boolean; dealNoContact: boolean }): void {
-		if (res.dealCreated) setDealMsg('✓ Сделка по ремонту создана.');
+	function reactDeal(res: RepairDealSyncResult): void {
+		if (res.syncWarning) setDealMsg(`⚠ ${res.syncWarning}`);
+		else if (res.dealCreated) setDealMsg('✓ Сделка по ремонту создана.');
 		else if (res.dealNoContact) setDealMsg('⚠ Сделка не создана: у ремонта клиент без привязки к контакту Б24. Привяжи клиента в редактировании.');
-		else setDealMsg(null);
+		else setDealMsg('✓ Сделка синхронизирована.');
 	}
 	async function change(s: RepairStatus): Promise<void> {
 		if (s === repair.status) return;
@@ -829,7 +843,14 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternal
 			return;
 		}
 		setBusy(true); setStErr(null);
-		try { await onStatus(s); } catch (e: unknown) { setStErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
+		try {
+			const result = await onStatus(s);
+			if (!presale) reactDeal(result);
+		} catch (e: unknown) {
+			setStErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setBusy(false);
+		}
 	}
 	async function changeIssue(store: string): Promise<void> {
 		const previous = issueVal;
@@ -856,8 +877,19 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternal
 	async function sendPriceApproval(): Promise<void> {
 		setPayBusy(true); setStErr(null);
 		try {
-			reactDeal(await onRequestPriceApproval(costNum(), ourNum()));
-			setDealMsg('Цена отправлена на согласование в чат точки.');
+			const result = await onRequestPriceApproval(costNum(), ourNum());
+			reactDeal(result);
+			if (!result.syncWarning) setDealMsg('✓ Цена отправлена на согласование в чат точки, сделка синхронизирована.');
+		} catch (e: unknown) {
+			setStErr(String(e instanceof Error ? e.message : e));
+		} finally {
+			setPayBusy(false);
+		}
+	}
+	async function repeatDealSync(): Promise<void> {
+		setPayBusy(true); setStErr(null);
+		try {
+			reactDeal(await onSyncDeal());
 		} catch (e: unknown) {
 			setStErr(String(e instanceof Error ? e.message : e));
 		} finally {
@@ -897,9 +929,10 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternal
 				</div>
 			</div>
 			{locked && <p className="muted small">🔒 Ремонт принят в офисе — изменения (поля, цены, статус) доступны только снабжению.</p>}
-			{(repair.taskId || (!presale && repair.dealId)) && <div className="rc-related-links">
+			{(repair.taskId || !presale) && <div className="rc-related-links">
 				{repair.taskId ? <button type="button" className="rc-related-link" onClick={() => openTask(repair.taskId!)}><span>Задача</span><b>#{repair.taskId}</b></button> : null}
 				{!presale && repair.dealId ? <button type="button" className="rc-related-link" onClick={() => openDeal(repair.dealId!)}><span>Сделка</span><b>#{repair.dealId}</b></button> : null}
+				{!presale ? <button type="button" className="btn-secondary" disabled={payBusy} onClick={() => void repeatDealSync()}>↻ Синхронизировать сделку</button> : null}
 			</div>}
 			{repair.taskWarning ? <p className="error">⚠ {repair.taskWarning}</p> : null}
 
@@ -934,7 +967,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternal
 							<input type="number" min="0" step="1" value={costVal} placeholder="цена СЦ, ₽" disabled={payBusy} onChange={(e) => setCostVal(e.target.value)} title="Цена ремонта СЦ" />
 							<input type="number" min="0" step="1" value={ourVal} placeholder="наша цена, ₽" disabled={payBusy} onChange={(e) => setOurVal(e.target.value)} title="Наша цена (→ сделка)" />
 							<button className="btn-secondary" disabled={payBusy} onClick={() => void savePrices()}>Сохранить ₽</button>
-							<button className="btn-primary" disabled={payBusy || (costNum() == null && ourNum() == null)} onClick={() => void sendPriceApproval()}>Согласовать цену</button>
+							<button className="btn-primary" disabled={payBusy || ourNum() == null} onClick={() => void sendPriceApproval()} title={ourNum() == null ? 'Сначала укажи «Нашу цену»' : undefined}>Согласовать цену</button>
 						</span>
 					)}
 					{repair.payType === 'paid' && !canEditPrice && (
@@ -944,7 +977,7 @@ function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternal
 				</div>
 			)}
 			{!presale && !repair.dealId && repair.client.contactId == null && <p className="muted small">⚠ Чтобы создать сделку ремонта — привяжи клиента к контакту Б24 (в редактировании).</p>}
-			{dealMsg && <p className="muted small">{dealMsg}</p>}
+			{dealMsg && <p className={dealMsg.startsWith('⚠') ? 'error' : 'muted small'}>{dealMsg}</p>}
 			{stErr && <p className="error">⛔ {stErr}</p>}
 			{presale && commentEditing && (
 				<div className="rc-comment-editor">

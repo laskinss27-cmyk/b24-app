@@ -94,6 +94,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/repairs/update-internal-comment': ['repairs.edit_internal_comment'],
 	'/api/repairs/set-pay': ['repairs.edit_prices'],
 	'/api/repairs/request-price-approval': ['repairs.request_price_approval'],
+	'/api/repairs/sync-deal': ['repairs.edit'],
 	'/api/repairs/delete': ['repairs.delete'],
 	'/api/repairs/update-status': ['repairs.change_status'],
 	'/api/repairs/set-issue-store': ['repairs.change_issue_store'],

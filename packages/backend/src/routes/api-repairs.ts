@@ -21,6 +21,11 @@ import {
 	mergeRepairServiceLine,
 	setDealB24CollapsedService,
 } from '../deal-service.js';
+import {
+	existingRepairDealFields,
+	repairDealSyncWarning,
+	syncExistingRepairDealOperations,
+} from '../repair-deal-sync.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -258,14 +263,20 @@ async function ensureRepairNotifyTask(
 const QUICKSALE_REPAIR_CATEGORY_ID = 6;
 const QUICKSALE_REPAIR_STAGE_ID = 'C6:NEW';
 
-interface DealSyncResult { dealId: number | null; created: boolean; noContact: boolean }
+interface DealSyncResult {
+	dealId: number | null;
+	created: boolean;
+	noContact: boolean;
+	coreSynced: boolean;
+	b24Synced: boolean;
+	syncWarning: string | null;
+}
 
-async function syncRepairDealComposition(
-	client: B24Client,
+async function syncRepairCoreComposition(
 	data: RepairData,
 	dealId: number,
 	log: FastifyInstance['log'],
-): Promise<void> {
+): Promise<number> {
 	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ядро склада недоступно — состав ремонтной сделки не синхронизирован');
@@ -287,8 +298,8 @@ async function syncRepairDealComposition(
 	const today = new Date().toISOString().slice(0, 10);
 	await upsertDealPlan(erp, dealId, lines, today);
 	const total = await calculateDealPlanTotal(erp, dealId);
-	await setDealB24CollapsedService(client, dealId, total);
 	log.info({ dealId, payType: data.payType, repairPrice: price, total, lines: lines.length }, '[repairs] core deal composition synced');
+	return total;
 }
 
 /**
@@ -310,26 +321,43 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 	const repairKind = data.payType === 'paid' ? 'Платный ремонт' : 'Гарантийный ремонт';
 	const objectName = [`${repairKind} №${data.repairNo}`, data.client?.name, [data.device, data.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
 	if (data.dealId) {
-		// Сделка уже есть — подтянуть сумму/позицию под новую цену (best-effort, не валим запрос ремонта).
-		try {
-			await client.call('crm.deal.update', {
+		// Ядро обновляем первым и независимо. Этап/направление существующей сделки не трогаем.
+		const status = await syncExistingRepairDealOperations({
+			syncCore: () => syncRepairCoreComposition(data, data.dealId!, log),
+			updateMetadata: () => client.call('crm.deal.update', {
 				id: data.dealId,
-				fields: {
-					TITLE: objectName,
-					CATEGORY_ID: QUICKSALE_REPAIR_CATEGORY_ID,
-					STAGE_ID: QUICKSALE_REPAIR_STAGE_ID,
-					[DEAL_OBJECT_NAME_FIELD]: objectName,
-				},
-			});
-			try {
-				await syncRepairDealComposition(client, data, data.dealId, log);
-			} catch (err) {
-				log.error({ dealId: data.dealId }, `[repairs] синхронизация состава с ядром не удалась — ${errInfo(err)}`);
-			}
-		} catch (err) { log.warn({}, `[repairs] обновление сделки ${data.dealId} не удалось — ${errInfo(err)}`); }
-		return { dealId: data.dealId, created: false, noContact: false };
+				fields: existingRepairDealFields(objectName, DEAL_OBJECT_NAME_FIELD),
+			}).then(() => undefined),
+			syncBitrixRows: (total) => setDealB24CollapsedService(client, data.dealId!, total),
+		});
+		if (status.coreError) {
+			log.error({ dealId: data.dealId }, `[repairs] синхронизация состава с ядром не удалась — ${errInfo(status.coreError)}`);
+		}
+		if (status.bitrixMetadataError) {
+			log.warn({ dealId: data.dealId }, `[repairs] обновление названия сделки не удалось — ${errInfo(status.bitrixMetadataError)}`);
+		}
+		if (status.bitrixRowsError) {
+			log.warn({ dealId: data.dealId }, `[repairs] обновление суммы сделки в Битрикс24 не удалось — ${errInfo(status.bitrixRowsError)}`);
+		}
+		return {
+			dealId: data.dealId,
+			created: false,
+			noContact: false,
+			coreSynced: status.coreSynced,
+			b24Synced: status.bitrixMetadataSynced && status.bitrixRowsSynced,
+			syncWarning: repairDealSyncWarning(status),
+		};
 	}
-	if (!contactId) return { dealId: null, created: false, noContact: true }; // не на кого вешать
+	if (!contactId) {
+		return {
+			dealId: null,
+			created: false,
+			noContact: true,
+			coreSynced: false,
+			b24Synced: false,
+			syncWarning: null,
+		};
+	}
 	try {
 		// Имя сделки Б24 собирает как {{ID}}_{{Название объекта}} → кладём осмысленное в поле «Название объекта».
 		const fields: Record<string, unknown> = {
@@ -345,17 +373,49 @@ async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyI
 		const did = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 		if (!did) throw new Error('crm.deal.add не вернул id');
 		data.dealId = did;
+		let coreSynced = false;
+		let b24Synced = false;
 		try {
-			await syncRepairDealComposition(client, data, did, log);
+			const total = await syncRepairCoreComposition(data, did, log);
+			coreSynced = true;
+			try {
+				await setDealB24CollapsedService(client, did, total);
+				b24Synced = true;
+			} catch (err) {
+				log.warn({ dealId: did }, `[repairs] обновление суммы новой сделки в Битрикс24 не удалось — ${errInfo(err)}`);
+			}
 		} catch (err) {
 			log.error({ dealId: did }, `[repairs] синхронизация состава новой сделки с ядром не удалась — ${errInfo(err)}`);
-			await setLegacyRepairDealRow(client, did, data.payType, price);
+			try {
+				await setLegacyRepairDealRow(client, did, data.payType, price);
+				b24Synced = true;
+			} catch (fallbackError) {
+				log.warn({ dealId: did }, `[repairs] резервная строка новой сделки не установлена — ${errInfo(fallbackError)}`);
+			}
 		}
 		log.info({ dealId: did, repairNo: data.repairNo, payType: data.payType }, '[repairs] сделка по ремонту создана');
-		return { dealId: did, created: true, noContact: false };
+		return {
+			dealId: did,
+			created: true,
+			noContact: false,
+			coreSynced,
+			b24Synced,
+			syncWarning: !coreSynced
+				? 'Сделка создана, но её состав в ядре пока не синхронизирован. Нажми «Синхронизировать сделку».'
+				: (!b24Synced
+					? 'Состав сделки в ядре сохранён, но сумма в Битрикс24 пока не обновилась. Нажми «Синхронизировать сделку».'
+					: null),
+		};
 	} catch (err) {
 		log.error({}, `[repairs] создание сделки не удалось — ${errInfo(err)}`);
-		return { dealId: null, created: false, noContact: false };
+		return {
+			dealId: null,
+			created: false,
+			noContact: false,
+			coreSynced: false,
+			b24Synced: false,
+			syncWarning: 'Ремонт сохранён, но сделку Битрикс24 создать не удалось. Нажми «Синхронизировать сделку».',
+		};
 	}
 }
 
@@ -791,7 +851,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				history: [{ at: now, status: 'received_tt', byId, byName }],
 			};
 			// Сделка — на любой ремонт (пишет data.dealId). Затем позиция аппарата на складе ядра (пишет data.repairItemCode).
-			const dealSync = await syncRepairDeal(client, data, app.log);
+			const dealClient = systemClient() ?? client;
+			const dealSync = await syncRepairDeal(dealClient, data, app.log);
 			await syncRepairStock(data, app.log);
 			const nameParts = [device, data.model, data.client.name].filter(Boolean);
 			const added = await client.call<number | { id?: number }>('entity.item.add', {
@@ -801,14 +862,24 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			});
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
-			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
+			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
 			const taskSync = await createRepairNotifyTask(client, data, id, app.log);
 			if (taskSync.taskId) {
 				data.taskId = taskSync.taskId;
 				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: nameParts.join(' · ') || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
 			}
 			app.log.info({ id }, '[api/repairs/create] ok');
-			return { ok: true, id, repair: { id, name: nameParts.join(' · '), ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact, taskCreated: Boolean(taskSync.taskId), taskError: taskSync.error };
+			return {
+				ok: true,
+				id,
+				repair: { id, name: nameParts.join(' · '), ...data },
+				canEditPrice: me.canEditPrice,
+				dealCreated: dealSync.created,
+				dealNoContact: dealSync.noContact,
+				syncWarning: dealSync.syncWarning,
+				taskCreated: Boolean(taskSync.taskId),
+				taskError: taskSync.error,
+			};
 		} catch (err) {
 			app.log.error({}, `[api/repairs/create] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -943,8 +1014,9 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				data.history.push({ at: new Date().toISOString(), status: data.status, byId: me.id, byName: me.name, note: parts.join(', ') });
 			}
 			// Сделку держим в актуальном (мутирует data.dealId); позицию склада переименовываем вслед за карточкой.
-			const dealSync = await syncRepairDeal(client, data, app.log);
-			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
+			const dealClient = systemClient() ?? client;
+			const dealSync = await syncRepairDeal(dealClient, data, app.log);
+			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
 			await syncRepairStock(data, app.log, { allowCreate: false });
 			if (Array.isArray(b['photos'])) {
 				data.photos = (b['photos'] as Array<Record<string, unknown>>).map((p) => ({ id: Number(p['id']) || 0, name: s(p['name']), url: s(p['url']) })).filter((p) => p.url);
@@ -955,7 +1027,14 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			const name = [data.device, data.model, data.client.name].filter(Boolean).join(' · ') || 'Ремонт';
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id }, '[api/repairs/update] ok');
-			return { ok: true, repair: { id, name, ...data }, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
+			return {
+				ok: true,
+				repair: { id, name, ...data },
+				canEditPrice: me.canEditPrice,
+				dealCreated: dealSync.created,
+				dealNoContact: dealSync.noContact,
+				syncWarning: dealSync.syncWarning,
+			};
 		} catch (err) {
 			app.log.error({}, `[api/repairs/update] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -1024,11 +1103,22 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				data.history.push({ at: new Date().toISOString(), status: data.status, byId: me.id, byName: me.name, note: parts.join(', ') });
 			}
 			// Сделка нужна и платному, и гарантийному ремонту: у гарантийного сумма будет 0.
-			const dealSync = await syncRepairDeal(client, data, app.log);
-			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
+			const dealClient = systemClient() ?? client;
+			const dealSync = await syncRepairDeal(dealClient, data, app.log);
+			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, payType, byPriceEditor: me.canEditPrice }, '[api/repairs/set-pay] ok');
-			return { ok: true, payType: data.payType, cost: data.cost, ourPrice: data.ourPrice, dealId: data.dealId, canEditPrice: me.canEditPrice, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
+			return {
+				ok: true,
+				payType: data.payType,
+				cost: data.cost,
+				ourPrice: data.ourPrice,
+				dealId: data.dealId,
+				canEditPrice: me.canEditPrice,
+				dealCreated: dealSync.created,
+				dealNoContact: dealSync.noContact,
+				syncWarning: dealSync.syncWarning,
+			};
 		} catch (err) {
 			app.log.error({}, `[api/repairs/set-pay] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -1054,15 +1144,15 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			if (!point) return reply.code(400).send({ ok: false, error: 'у ремонта не указана точка приёма' });
 			const reqCost = b.cost != null && b.cost !== '' && Number.isFinite(Number(b.cost)) ? Number(b.cost) : null;
 			const reqOur = b.ourPrice != null && b.ourPrice !== '' && Number.isFinite(Number(b.ourPrice)) ? Number(b.ourPrice) : null;
-			if (reqCost == null && reqOur == null) {
-				return reply.code(400).send({ ok: false, error: 'сначала укажи цену ремонта' });
+			if (reqOur == null) {
+				return reply.code(400).send({ ok: false, error: 'сначала укажи «Нашу цену» — именно она попадёт в сделку' });
 			}
 			data.payType = 'paid';
 			data.cost = reqCost;
 			data.ourPrice = reqOur;
 			data.history = Array.isArray(data.history) ? data.history : [];
 			const title = [data.device, data.model].filter(Boolean).join(' ') || 'оборудование';
-			const customerPrice = data.ourPrice ?? data.cost;
+			const customerPrice = data.ourPrice;
 			const notificationClient = systemClient() ?? client;
 			// Ссылка ведёт на обычную страницу уже установленного приложения
 			// /marketplace/view/<appCode>/ и не требует placement.bind при каждом сообщении.
@@ -1086,13 +1176,66 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				byName: me.name,
 				note: `цена отправлена на согласование: ${rub(customerPrice)}`,
 			});
-			const dealSync = await syncRepairDeal(client, data, app.log);
-			await attachRepairLinkToCreatedDeal(client, data, id, dealSync);
+			const dealClient = systemClient() ?? client;
+			const dealSync = await syncRepairDeal(dealClient, data, app.log);
+			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, point }, '[api/repairs/request-price-approval] ok');
-			return { ok: true, repair: { id, name: String(raw['NAME'] ?? ''), ...data }, dealCreated: dealSync.created, dealNoContact: dealSync.noContact };
+			return {
+				ok: true,
+				repair: { id, name: String(raw['NAME'] ?? ''), ...data },
+				dealCreated: dealSync.created,
+				dealNoContact: dealSync.noContact,
+				syncWarning: dealSync.syncWarning,
+			};
 		} catch (err) {
 			app.log.error({}, `[api/repairs/request-price-approval] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	// Явный безопасный повтор для старых/частично синхронизированных ремонтных сделок.
+	app.post('/api/repairs/sync-deal', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		try {
+			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', {
+				ENTITY: REPAIRS_ENTITY,
+				FILTER: { ID: id },
+			});
+			const raw = (items ?? [])[0];
+			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
+			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+			if (data.kind === 'presale') {
+				return reply.code(400).send({ ok: false, error: 'у предпродажного ремонта нет клиентской сделки' });
+			}
+			const dealClient = systemClient() ?? client;
+			const dealSync = await syncRepairDeal(dealClient, data, app.log);
+			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
+			await client.call('entity.item.update', {
+				ENTITY: REPAIRS_ENTITY,
+				ID: id,
+				NAME: raw['NAME'],
+				DETAIL_TEXT: JSON.stringify(data),
+			});
+			app.log.info({
+				id,
+				dealId: dealSync.dealId,
+				coreSynced: dealSync.coreSynced,
+				b24Synced: dealSync.b24Synced,
+			}, '[api/repairs/sync-deal] completed');
+			return {
+				ok: true,
+				repair: { id, name: String(raw['NAME'] ?? ''), ...data },
+				dealCreated: dealSync.created,
+				dealNoContact: dealSync.noContact,
+				syncWarning: dealSync.syncWarning,
+			};
+		} catch (err) {
+			app.log.error({ id }, `[api/repairs/sync-deal] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
@@ -1157,9 +1300,20 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 				// «Выдано» — списываем аппарат со склада (Delivery Note ядра, цена 0, привязка к сделке).
 				if (status === 'issued') await writeOffRepairOnIssue(data, app.log);
 			}
+			const dealSync = kind === 'client'
+				? await syncRepairDeal(systemClient() ?? client, data, app.log)
+				: null;
+			if (dealSync) {
+				await attachRepairLinkToCreatedDeal(systemClient() ?? client, data, id, dealSync);
+			}
 			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
 			app.log.info({ id, status }, '[api/repairs/update-status] ok');
-			return { ok: true };
+			return {
+				ok: true,
+				dealCreated: dealSync?.created ?? false,
+				dealNoContact: dealSync?.noContact ?? false,
+				syncWarning: dealSync?.syncWarning ?? null,
+			};
 		} catch (err) {
 			app.log.error({}, `[api/repairs/update-status] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
