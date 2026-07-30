@@ -12,6 +12,7 @@ import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
 import {
 	applyCatalogContentEdits,
+	createCatalogContent,
 	parseCatalogContent,
 	renderCatalogDescription,
 	serializeFilterAttributes,
@@ -73,6 +74,8 @@ interface CatalogCandidate {
 	status?: string;
 	description?: string;
 	content?: CatalogProductContent;
+	filterCategory?: string;
+	photoPath?: string;
 	retail: number | null;
 	purchase: number | null;
 	total: number;
@@ -85,6 +88,32 @@ function cleanText(value: unknown): string {
 
 function cleanMultiline(value: unknown): string {
 	return String(value ?? '').replace(/\r\n/g, '\n').trim().slice(0, 10_000);
+}
+
+const CATALOG_PHOTO_MAX_BYTES = 800 * 1024;
+const CATALOG_PHOTO_TYPES = new Map([
+	['image/jpeg', { extension: 'jpg', signature: (bytes: Buffer) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff }],
+	['image/png', { extension: 'png', signature: (bytes: Buffer) => bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) }],
+	['image/webp', { extension: 'webp', signature: (bytes: Buffer) => bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP' }],
+] as const);
+
+function catalogPhoto(value: unknown): { fileName: string; mimeType: string; content: Buffer } | null {
+	if (value == null || value === '') return null;
+	if (!value || typeof value !== 'object') throw new Error('сервер получил неверное фото товара');
+	const row = value as Record<string, unknown>;
+	const mimeType = cleanText(row['mimeType']).toLocaleLowerCase('en-US');
+	const kind = CATALOG_PHOTO_TYPES.get(mimeType as 'image/jpeg' | 'image/png' | 'image/webp');
+	if (!kind) throw new Error('фото должно быть в формате JPEG, PNG или WebP');
+	const encoded = String(row['content'] ?? '').replace(/^data:[^,]*,/u, '').trim();
+	if (!encoded || !/^[a-z0-9+/]+={0,2}$/iu.test(encoded)) throw new Error('фото товара повреждено');
+	const content = Buffer.from(encoded, 'base64');
+	if (!content.length || !kind.signature(content)) throw new Error('содержимое фото не соответствует его формату');
+	if (content.length > CATALOG_PHOTO_MAX_BYTES) {
+		throw new Error(`фото после подготовки должно весить не больше ${Math.round(CATALOG_PHOTO_MAX_BYTES / 1024)} КБ`);
+	}
+	const original = cleanText(row['fileName']).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 70);
+	const stem = original.replace(/\.[^.]+$/u, '').trim() || 'product';
+	return { fileName: `${stem}.${kind.extension}`, mimeType, content };
 }
 
 function normalized(value: unknown): string {
@@ -134,6 +163,7 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 			status: item.status || known?.status,
 			description: item.description || known?.description,
 			...(item.content ? { content: item.content } : {}),
+			filterCategory: item.filterCategory,
 			retail: corePrices?.retail ?? known?.retail ?? null,
 			purchase: corePrices?.purchase ?? known?.purchase ?? null,
 			photoPath,
@@ -536,16 +566,38 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const productType = cleanText(body['productType']);
 		const manufacturer = cleanText(body['manufacturer']);
 		const model = cleanText(body['model']);
+		const article = cleanText(body['article']) || model;
 		const sectionId = Number(body['sectionId']);
 		const sectionNameInput = cleanText(body['sectionName']);
-		const description = cleanMultiline(body['description']);
+		const summary = cleanMultiline(body['summary'] ?? body['description']).slice(0, 4_000);
+		const category = cleanText(body['filterCategory']).slice(0, 120) || sectionNameInput;
+		const status = cleanText(body['status']);
 		const retail = Number(body['retail']);
+		const purchase = Number(body['purchase'] ?? 0);
 		const similarReviewed = body['similarReviewed'] === true;
+		let content: CatalogProductContent;
+		let photo: ReturnType<typeof catalogPhoto>;
+		try {
+			content = createCatalogContent(summary, body['attributes'] ?? []);
+			photo = catalogPhoto(body['photo']);
+		} catch (error) {
+			return reply.code(400).send({ ok: false, error: errInfo(error) });
+		}
 		if (productType.length < 3) return reply.code(400).send({ ok: false, error: 'укажи вид товара' });
 		if (manufacturer.length < 2) return reply.code(400).send({ ok: false, error: 'укажи производителя' });
 		if (model.length < 2) return reply.code(400).send({ ok: false, error: 'укажи полную модель или артикул' });
 		if (!Number.isInteger(sectionId) || sectionId <= 0) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
 		if (!(retail > 0)) return reply.code(400).send({ ok: false, error: 'цена продажи должна быть больше нуля' });
+		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		const allowedStatuses = new Set([
+			'После ремонта', 'Снят с производства', 'Недоступен к заказу', 'К удалению',
+			'Уценка', 'Витринный', 'Б/у', 'Распродажа', 'Повреждённый',
+			'Некондиция', 'Демо', 'Образец', 'Сток',
+		]);
+		const statuses = status.split(',').map(cleanText).filter(Boolean);
+		if (statuses.some((value) => !allowedStatuses.has(value)) || new Set(statuses).size !== statuses.length) {
+			return reply.code(400).send({ ok: false, error: 'выбран неизвестный или повторяющийся статус товара' });
+		}
 
 		const name = productTitle(productType, manufacturer, model);
 		const cacheKey = normalizeDomain(body.domain ?? '');
@@ -562,6 +614,9 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 				if (candidates.length && !similarReviewed) return { ok: true, status: 'review', name, candidates };
 
 				let productId = 0;
+				let coreCreated = false;
+				let uploadedFileName = '';
+				let photoPath = '';
 				try {
 					const created = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', {
 						fields: {
@@ -577,16 +632,34 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					});
 					productId = Number(created?.element?.id ?? 0) || 0;
 					if (!productId) throw new Error('catalog.product.add не вернул id');
-					await ensureCoreItem(erp, { productId, name, model, article: model, brand: manufacturer, section: sectionName, description });
-					const content = { version: 1 as const, summary: description, attributes: [] };
+					if (await erp.get('Item', String(productId))) throw new Error(`в ядре уже существует товар с новым ID ${productId}`);
+					await ensureCoreItem(erp, { productId, name, model, article, brand: manufacturer, section: sectionName, description: renderCatalogDescription(content) });
+					coreCreated = true;
 					await erp.update('Item', String(productId), {
+						b24_product_status: statuses.join(', '),
 						b24_catalog_content: JSON.stringify(content),
-						b24_filter_attributes: serializeFilterAttributes(content, ''),
+						b24_filter_category: category,
+						b24_filter_attributes: serializeFilterAttributes(content, category),
 						b24_filter_schema_version: '1',
 						b24_filter_updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
 					});
-					await updateCoreCatalogPrices(erp, { productId, retail, purchase: 0 });
+					if (photo) {
+						const uploaded = await erp.uploadPublicFile({
+							fileName: photo.fileName,
+							mimeType: photo.mimeType,
+							content: photo.content,
+							doctype: 'Item',
+							docname: String(productId),
+							fieldname: 'image',
+						});
+						uploadedFileName = uploaded.name;
+						photoPath = uploaded.fileUrl;
+						await erp.update('Item', String(productId), { image: uploaded.fileUrl });
+					}
+					await updateCoreCatalogPrices(erp, { productId, retail, purchase });
 				} catch (error) {
+					if (uploadedFileName) await erp.delete('File', uploadedFileName).catch(() => undefined);
+					if (coreCreated) await erp.delete('Item', String(productId)).catch(() => undefined);
 					if (productId) await client.call('catalog.product.delete', { id: productId }).catch(() => undefined);
 					throw error;
 				}
@@ -597,14 +670,18 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					iblockId: 24,
 					name,
 					isService: false,
+					article,
 					model,
 					manufacturer,
 					sectionId,
 					sectionName,
-					description,
-					content: { version: 1, summary: description, attributes: [] },
+					status: statuses.join(', '),
+					description: renderCatalogDescription(content),
+					content,
+					filterCategory: category,
 					retail,
-					purchase: null,
+					purchase,
+					...(photoPath ? { photoPath: `/api/inventory/erp-image?p=${encodeURIComponent(photoPath)}` } : {}),
 					total: 0,
 					stockByStore: {},
 				};

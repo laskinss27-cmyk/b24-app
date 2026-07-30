@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
 	applyCatalogContentEdits,
+	createCatalogContent,
 	parseCatalogContent,
 	renderCatalogDescription,
 	serializeFilterAttributes,
@@ -70,6 +71,42 @@ test('filterable attributes cannot be removed', () => {
 		() => applyCatalogContentEdits(parsed, '', [{ id: 'protection_rating:1', rawValue: 'IP67' }]),
 		/Нельзя удалить характеристику/u,
 	);
+});
+
+test('new catalog content normalizes filled template fields and skips empty ones', () => {
+	const content = createCatalogContent('Уличная камера', [
+		{
+			key: 'megapixels',
+			label: 'Разрешение матрицы',
+			group: 'Видео',
+			type: 'number',
+			rawValue: '4 Мп',
+			unit: 'Мп',
+			filterable: true,
+		},
+		{
+			key: 'wifi',
+			label: 'Wi-Fi',
+			group: 'Подключения',
+			type: 'boolean',
+			rawValue: 'Да',
+			filterable: true,
+		},
+		{
+			key: 'unused',
+			label: 'Не заполнено',
+			type: 'text',
+			rawValue: '',
+			filterable: true,
+		},
+	]);
+	assert.equal(content.summary, 'Уличная камера');
+	assert.equal(content.attributes.length, 2);
+	assert.equal(content.attributes[0]?.numberValue, 4);
+	assert.equal(content.attributes[1]?.booleanValue, true);
+	assert.match(renderCatalogDescription(content), /Разрешение матрицы: 4 Мп/u);
+	const filter = JSON.parse(serializeFilterAttributes(content, 'Камеры')) as { attributes: Array<{ key: string }> };
+	assert.deepEqual(filter.attributes.map((item) => item.key), ['megapixels', 'wifi']);
 });
 
 test('legacy stock marker is moved from the product name into status', () => {

@@ -28,6 +28,16 @@ export interface CatalogAttributeEdit {
 	label?: string;
 }
 
+export interface CatalogAttributeDefinitionInput {
+	key?: string;
+	label?: string;
+	group?: string;
+	type?: CatalogAttributeType;
+	rawValue?: string;
+	unit?: string;
+	filterable?: boolean;
+}
+
 const cleanLine = (value: unknown): string => String(value ?? '').replace(/\s+/gu, ' ').trim();
 const cleanMultiline = (value: unknown): string => String(value ?? '').replace(/\r\n?/gu, '\n').trim().slice(0, 10_000);
 const ALLOWED_TYPES = new Set<CatalogAttributeType>(['text', 'option', 'multi_option', 'number', 'range', 'boolean']);
@@ -124,6 +134,73 @@ function normalizeEditedAttribute(attribute: CatalogContentAttribute, rawValue: 
 		next.normalizedValue = boolean ? 'Да' : 'Нет';
 	}
 	return next;
+}
+
+function attributeKey(value: unknown, label: string): string {
+	const explicit = cleanLine(value).toLocaleLowerCase('ru-RU')
+		.replace(/[^a-z0-9_]+/gu, '_')
+		.replace(/^_+|_+$/gu, '')
+		.slice(0, 80);
+	if (explicit) return explicit;
+	const fromLabel = label.toLocaleLowerCase('ru-RU')
+		.replace(/[^a-zа-яё0-9]+/gu, '_')
+		.replace(/^_+|_+$/gu, '')
+		.slice(0, 70);
+	return fromLabel ? `custom_${fromLabel}` : 'additional_characteristic';
+}
+
+/**
+ * Создаёт структурированное содержимое новой карточки.
+ * Пустые необязательные поля не попадают в карточку; заполненные сразу нормализуются
+ * тем же кодом, что и последующее редактирование, поэтому готовы для будущих фильтров.
+ */
+export function createCatalogContent(
+	summaryInput: unknown,
+	definitionsInput: unknown,
+): CatalogProductContent {
+	const summary = cleanMultiline(summaryInput).slice(0, 4_000);
+	if (!Array.isArray(definitionsInput)) throw new Error('Сервер получил неверный список характеристик');
+	if (definitionsInput.length > 250) throw new Error('В одной карточке не может быть больше 250 характеристик');
+	const rows = definitionsInput.flatMap((raw): CatalogAttributeDefinitionInput[] => {
+		if (!raw || typeof raw !== 'object') throw new Error('Сервер получил неверную характеристику');
+		const row = raw as Record<string, unknown>;
+		const rawValue = cleanLine(row['rawValue']);
+		if (!rawValue) return [];
+		return [{
+			key: cleanLine(row['key']),
+			label: cleanLine(row['label']),
+			group: cleanLine(row['group']),
+			type: cleanLine(row['type']) as CatalogAttributeType,
+			rawValue,
+			unit: cleanLine(row['unit']),
+			filterable: row['filterable'] === true,
+		}];
+	});
+	const usedKeys = new Set<string>();
+	const attributes = rows.map((row, index): CatalogContentAttribute => {
+		const label = cleanLine(row.label).slice(0, 120);
+		if (label.length < 2) throw new Error('У характеристики должно быть понятное название');
+		const type = ALLOWED_TYPES.has(row.type as CatalogAttributeType) ? row.type as CatalogAttributeType : 'text';
+		const key = attributeKey(row.key, label);
+		if (usedKeys.has(key)) throw new Error(`В карточке повторяется характеристика «${label}»`);
+		usedKeys.add(key);
+		return normalizeEditedAttribute({
+			id: `${key}:${index + 1}`,
+			key,
+			label,
+			group: cleanLine(row.group).slice(0, 120) || 'Дополнительно',
+			type,
+			rawValue: row.rawValue ?? '',
+			normalizedValue: row.rawValue ?? '',
+			numberValue: null,
+			numberMin: null,
+			numberMax: null,
+			unit: cleanLine(row.unit).slice(0, 30),
+			booleanValue: null,
+			filterable: row.filterable === true,
+		}, row.rawValue ?? '');
+	});
+	return { version: 1, summary, attributes };
 }
 
 export function applyCatalogContentEdits(

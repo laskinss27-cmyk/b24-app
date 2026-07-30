@@ -69,6 +69,44 @@ export class ErpClient {
 		return { status: res.status, json };
 	}
 
+	/** Загрузить публичный файл в ERPNext и привязать его к полю документа. */
+	async uploadPublicFile(args: {
+		fileName: string;
+		mimeType: string;
+		content: Buffer;
+		doctype: string;
+		docname: string;
+		fieldname: string;
+	}): Promise<{ name: string; fileUrl: string }> {
+		const form = new FormData();
+		const arrayBuffer = new ArrayBuffer(args.content.byteLength);
+		new Uint8Array(arrayBuffer).set(args.content);
+		form.append('file', new Blob([arrayBuffer], { type: args.mimeType }), args.fileName);
+		form.append('is_private', '0');
+		form.append('doctype', args.doctype);
+		form.append('docname', args.docname);
+		form.append('fieldname', args.fieldname);
+		const path = '/api/method/upload_file';
+		const res = await fetch(`${this.cfg.url}${path}`, {
+			method: 'POST',
+			headers: { Authorization: this.cfg.token },
+			body: form,
+			signal: AbortSignal.timeout(25000),
+		});
+		const text = await res.text();
+		let json: Record<string, unknown>;
+		try { json = JSON.parse(text) as Record<string, unknown>; }
+		catch { json = { raw: text.slice(0, 300) }; }
+		if (res.status >= 300) throw new ErpApiError('POST', path, res.status, extractError(res.status, json));
+		const message = json['message'] && typeof json['message'] === 'object'
+			? json['message'] as Record<string, unknown>
+			: {};
+		const fileUrl = String(message['file_url'] ?? message['fileUrl'] ?? '').trim();
+		const name = String(message['name'] ?? '').trim();
+		if (!fileUrl) throw new ErpApiError('POST', path, res.status, 'ERPNext не вернул адрес загруженного файла');
+		return { name, fileUrl };
+	}
+
 	/** Список документов. fields/filters — как в Frappe REST. Без лимита (limit_page_length=0). */
 	async list<T = Record<string, unknown>>(doctype: string, fields: string[], filters?: unknown[], limit = 0, orderBy?: string): Promise<T[]> {
 		const q = new URLSearchParams({ fields: JSON.stringify(fields), limit_page_length: String(limit) });

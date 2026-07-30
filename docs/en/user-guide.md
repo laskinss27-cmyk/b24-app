@@ -93,7 +93,11 @@ It contains:
 - retail and purchase prices;
 - stock by warehouse.
 
-Users with the required permissions may edit a card and create a product. Before saving, make sure it is not a duplicate of an existing item.
+Users with the required permissions may edit a card and create a product. The `Новый товар`
+button is available in the products catalogue and under `Снаб → Остатки` for procurement users.
+The form accepts prices, status, a short description, and an image. Selecting a section loads a
+specification template derived from existing structured cards in that section; extra fields may be
+added manually. Before saving, make sure it is not a duplicate of an existing item.
 
 The text `Б24 productId=...` is a legacy catalogue technical reference, not a description.
 

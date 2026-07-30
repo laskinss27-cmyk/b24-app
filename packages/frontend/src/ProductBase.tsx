@@ -18,6 +18,7 @@ import {
 	type BaseRow,
 	type CatalogProductUpdateInput,
 	type CatalogProductCandidate,
+	type CatalogAttributeType,
 	type StoreInfo,
 } from './b24.js';
 import { SalesReport } from './SalesReport.js';
@@ -157,6 +158,111 @@ function localProductCandidates(rows: BaseRow[], args: { name: string; manufactu
 		.map(({ row, exact }) => ({ ...row, exact }));
 }
 
+interface NewCatalogAttributeDraft {
+	localId: string;
+	key: string;
+	label: string;
+	group: string;
+	type: CatalogAttributeType;
+	rawValue: string;
+	unit: string;
+	filterable: boolean;
+}
+
+interface PreparedCatalogPhoto {
+	fileName: string;
+	mimeType: 'image/jpeg';
+	content: string;
+	previewUrl: string;
+	size: number;
+}
+
+function catalogAttributeTemplate(rows: BaseRow[], sectionId: number): {
+	category: string;
+	attributes: NewCatalogAttributeDraft[];
+	sourceCount: number;
+} {
+	const sectionRows = rows.filter((row) => row.sectionId === sectionId && row.content?.attributes.length);
+	const categoryCounts = new Map<string, number>();
+	for (const row of sectionRows) {
+		const category = (row as BaseRow & { filterCategory?: string }).filterCategory?.trim() ?? '';
+		if (category) categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+	}
+	const category = [...categoryCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'))[0]?.[0] ?? '';
+	const sourceRows = category
+		? sectionRows.filter((row) => (row as BaseRow & { filterCategory?: string }).filterCategory === category)
+		: sectionRows;
+	const definitions = new Map<string, { attribute: NonNullable<BaseRow['content']>['attributes'][number]; count: number }>();
+	for (const row of sourceRows) {
+		for (const attribute of row.content?.attributes ?? []) {
+			const current = definitions.get(attribute.key);
+			if (!current) definitions.set(attribute.key, { attribute, count: 1 });
+			else current.count += 1;
+		}
+	}
+	const attributes = [...definitions.values()]
+		.filter(({ attribute, count }) => attribute.filterable || count >= Math.max(2, Math.ceil(sourceRows.length * 0.35)))
+		.sort((a, b) =>
+			a.attribute.group.localeCompare(b.attribute.group, 'ru')
+			|| a.attribute.label.localeCompare(b.attribute.label, 'ru'))
+		.slice(0, 80)
+		.map(({ attribute }, index): NewCatalogAttributeDraft => ({
+			localId: `template:${attribute.key}:${index}`,
+			key: attribute.key,
+			label: attribute.label,
+			group: attribute.group,
+			type: attribute.type,
+			rawValue: '',
+			unit: attribute.unit,
+			filterable: attribute.filterable,
+		}));
+	return { category, attributes, sourceCount: sourceRows.length };
+}
+
+function base64Bytes(content: string): number {
+	return Math.floor(content.length * 3 / 4) - (content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0);
+}
+
+async function prepareCatalogPhoto(file: File): Promise<PreparedCatalogPhoto> {
+	if (!file.type.startsWith('image/')) throw new Error('Выбери изображение JPEG, PNG или WebP.');
+	if (file.size > 15 * 1024 * 1024) throw new Error('Исходное фото должно весить не больше 15 МБ.');
+	const source = await new Promise<string>((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onerror = () => reject(new Error('Не удалось прочитать фото.'));
+		reader.onload = () => resolve(String(reader.result ?? ''));
+		reader.readAsDataURL(file);
+	});
+	const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+		const candidate = new Image();
+		candidate.onerror = () => reject(new Error('Файл не удалось открыть как изображение.'));
+		candidate.onload = () => resolve(candidate);
+		candidate.src = source;
+	});
+	for (const maxPx of [1400, 1200, 1000]) {
+		const scale = Math.min(1, maxPx / Math.max(image.width, image.height));
+		const width = Math.max(1, Math.round(image.width * scale));
+		const height = Math.max(1, Math.round(image.height * scale));
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const context = canvas.getContext('2d');
+		if (!context) throw new Error('Браузер не смог подготовить фото.');
+		context.fillStyle = '#ffffff';
+		context.fillRect(0, 0, width, height);
+		context.drawImage(image, 0, 0, width, height);
+		for (const quality of [0.82, 0.72, 0.62, 0.52]) {
+			const previewUrl = canvas.toDataURL('image/jpeg', quality);
+			const content = previewUrl.replace(/^data:[^,]*,/u, '');
+			const size = base64Bytes(content);
+			if (size <= 760 * 1024) {
+				const stem = file.name.replace(/\.[^.]+$/u, '').trim() || 'product';
+				return { fileName: `${stem}.jpg`, mimeType: 'image/jpeg', content, previewUrl, size };
+			}
+		}
+	}
+	throw new Error('Фото не удалось уменьшить до безопасного размера 760 КБ.');
+}
+
 function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	rows: BaseRow[];
 	initialQuery: string;
@@ -166,9 +272,17 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const [productType, setProductType] = useState('');
 	const [manufacturer, setManufacturer] = useState('');
 	const [model, setModel] = useState(initialQuery.trim());
+	const [article, setArticle] = useState(initialQuery.trim());
 	const [sectionId, setSectionId] = useState('');
 	const [retailText, setRetailText] = useState('');
-	const [description, setDescription] = useState('');
+	const [purchaseText, setPurchaseText] = useState('0');
+	const [summary, setSummary] = useState('');
+	const [statuses, setStatuses] = useState<string[]>([]);
+	const [attributes, setAttributes] = useState<NewCatalogAttributeDraft[]>([]);
+	const [filterCategory, setFilterCategory] = useState('');
+	const [templateSourceCount, setTemplateSourceCount] = useState(0);
+	const [photo, setPhoto] = useState<PreparedCatalogPhoto | null>(null);
+	const [photoBusy, setPhotoBusy] = useState(false);
 	const [reviewed, setReviewed] = useState(false);
 	const [serverCandidates, setServerCandidates] = useState<CatalogProductCandidate[] | null>(null);
 	const [duplicateBlocked, setDuplicateBlocked] = useState(false);
@@ -187,6 +301,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const candidates = serverCandidates ?? localCandidates;
 	const exactCandidate = duplicateBlocked || candidates.some((candidate) => candidate.exact);
 	const retail = Number(retailText);
+	const purchase = Number(purchaseText);
 	const section = sections.find((item) => item.id === Number(sectionId));
 	const validationError = (): string | null => {
 		if (productType.trim().length < 3) return 'Укажи вид товара.';
@@ -194,6 +309,9 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		if (model.trim().length < 2) return 'Укажи полную модель или артикул.';
 		if (!section) return 'Выбери раздел каталога.';
 		if (!(retail > 0)) return 'Цена продажи должна быть больше нуля.';
+		if (!Number.isFinite(purchase) || purchase < 0) return 'Закупочная цена должна быть 0 или больше.';
+		const filledAttributes = attributes.filter((attribute) => attribute.rawValue.trim());
+		if (filledAttributes.some((attribute) => attribute.label.trim().length < 2)) return 'У каждой заполненной характеристики должно быть название.';
 		if (exactCandidate) return 'Такая модель уже есть в каталоге. Выбери найденный товар.';
 		if (candidates.length && !reviewed) return 'Проверь найденные совпадения и отметь «Это другая модель».';
 		return null;
@@ -206,6 +324,54 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		setErr(null);
 	};
 
+	const changeSection = (nextSectionId: string): void => {
+		if (attributes.some((attribute) => attribute.rawValue.trim())
+			&& !window.confirm('Сменить раздел и очистить уже заполненные характеристики?')) return;
+		setSectionId(nextSectionId);
+		const template = catalogAttributeTemplate(rows, Number(nextSectionId));
+		setAttributes(template.attributes);
+		setFilterCategory(template.category);
+		setTemplateSourceCount(template.sourceCount);
+		resetReview();
+	};
+
+	const reloadTemplate = (): void => {
+		if (!section) return;
+		if (attributes.some((attribute) => attribute.rawValue.trim())
+			&& !window.confirm('Заново загрузить шаблон и очистить заполненные значения?')) return;
+		const template = catalogAttributeTemplate(rows, section.id);
+		setAttributes(template.attributes);
+		setFilterCategory(template.category);
+		setTemplateSourceCount(template.sourceCount);
+	};
+
+	const addAttribute = (): void => {
+		setAttributes((current) => [...current, {
+			localId: `new:${Date.now()}:${current.length}`,
+			key: '',
+			label: '',
+			group: 'Дополнительно',
+			type: 'text',
+			rawValue: '',
+			unit: '',
+			filterable: false,
+		}]);
+	};
+
+	const selectPhoto = async (file: File | undefined): Promise<void> => {
+		if (!file) return;
+		setPhotoBusy(true);
+		setErr(null);
+		try {
+			setPhoto(await prepareCatalogPhoto(file));
+		} catch (error) {
+			setPhoto(null);
+			setErr(String(error instanceof Error ? error.message : error));
+		} finally {
+			setPhotoBusy(false);
+		}
+	};
+
 	const create = async (): Promise<void> => {
 		const validationMessage = validationError();
 		if (validationMessage || !section) {
@@ -215,16 +381,32 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		setBusy(true);
 		setErr(null);
 		try {
-			const result = await createCatalogProduct({
+			const input = {
 				productType: productType.trim(),
 				manufacturer: manufacturer.trim(),
 				model: model.trim(),
+				article: article.trim() || model.trim(),
 				sectionId: section.id,
 				sectionName: section.name,
-				description: description.trim(),
+				description: summary.trim(),
+				status: statuses.join(', '),
+				summary: summary.trim(),
+				filterCategory: filterCategory.trim() || section.name,
+				attributes: attributes.map(({ key, label, group, type, rawValue, unit, filterable }) => ({
+					key,
+					label: label.trim(),
+					group,
+					type,
+					rawValue: rawValue.trim(),
+					unit,
+					filterable,
+				})),
 				retail,
+				purchase,
+				...(photo ? { photo: { fileName: photo.fileName, mimeType: photo.mimeType, content: photo.content } } : {}),
 				...(candidates.length && reviewed ? { similarReviewed: true } : {}),
-			});
+			};
+			const result = await createCatalogProduct(input);
 			if (result.status === 'created') {
 				onUse(result.product);
 				return;
@@ -250,12 +432,102 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 				<div className="new-product-fields">
 					<label>Вид товара<input autoFocus value={productType} placeholder="IP-камера" onChange={(event) => { setProductType(event.target.value); resetReview(); }} /></label>
 					<label>Производитель<input value={manufacturer} placeholder="Hikvision" onChange={(event) => { setManufacturer(event.target.value); resetReview(); }} /></label>
-					<label>Модель / артикул<input value={model} placeholder="DS-2CD2043G2-I" onChange={(event) => { setModel(event.target.value); resetReview(); }} /></label>
-					<label>Раздел<select value={sectionId} onChange={(event) => { setSectionId(event.target.value); resetReview(); }}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+					<label>Модель / артикул<input value={model} placeholder="DS-2CD2043G2-I" onChange={(event) => {
+						const nextModel = event.target.value;
+						setArticle((currentArticle) => currentArticle === model ? nextModel : currentArticle);
+						setModel(nextModel);
+						resetReview();
+					}} /></label>
+					<label>Артикул поставщика<input value={article} placeholder="если отличается от модели" onChange={(event) => setArticle(event.target.value)} /></label>
+					<label>Раздел<select value={sectionId} onChange={(event) => changeSection(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
 					<label>Цена продажи, ₽<input inputMode="decimal" value={retailText} placeholder="0" onChange={(event) => setRetailText(event.target.value.replace(',', '.'))} /></label>
-					<div className="new-product-name"><span>Название</span><b>{preview || '—'}</b></div>
-					<label className="wide">Описание и характеристики<textarea rows={5} maxLength={10000} value={description} placeholder="Назначение, комплектация, совместимость, размеры, технические особенности…" onChange={(event) => setDescription(event.target.value)} /></label>
+					<label>Закупочная цена, ₽<input inputMode="decimal" value={purchaseText} placeholder="0" onChange={(event) => setPurchaseText(event.target.value.replace(',', '.'))} /></label>
+					<div className="new-product-name wide"><span>Название</span><b>{preview || '—'}</b></div>
+					<fieldset className="wide new-product-statuses">
+						<legend>Статус товара</legend>
+						<div>{PRODUCT_STATUS_OPTIONS.map((status) => <label key={status}>
+							<input
+								type="checkbox"
+								checked={statuses.includes(status)}
+								onChange={(event) => setStatuses((current) => event.target.checked
+									? [...current, status]
+									: current.filter((value) => value !== status))}
+							/>
+							{status}
+						</label>)}</div>
+					</fieldset>
+					<label className="wide">Краткое описание<textarea rows={4} maxLength={4000} value={summary} placeholder="Что это за товар, для чего нужен, комплектация и совместимость" onChange={(event) => setSummary(event.target.value)} /></label>
 				</div>
+
+				<section className="new-product-photo-section">
+					<div className="new-product-section-head">
+						<div><b>Фото товара</b><span>Автоматически уменьшим до безопасного размера и сохраним в ядре.</span></div>
+						<label className="btn-secondary new-product-photo-button">
+							{photoBusy ? 'Подготавливаю…' : photo ? 'Заменить фото' : 'Выбрать фото'}
+							<input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoBusy || busy} onChange={(event) => void selectPhoto(event.target.files?.[0])} />
+						</label>
+					</div>
+					{photo ? <div className="new-product-photo-preview">
+						<img src={photo.previewUrl} alt="Предпросмотр товара" />
+						<div><b>{photo.fileName}</b><span>{Math.ceil(photo.size / 1024)} КБ · JPEG</span><button type="button" onClick={() => setPhoto(null)}>Убрать</button></div>
+					</div> : <div className="new-product-photo-empty">Фото необязательно при создании товара.</div>}
+				</section>
+
+				<section className="new-product-attributes">
+					<div className="new-product-section-head">
+						<div>
+							<b>Характеристики</b>
+							<span>{section
+								? templateSourceCount > 0
+									? `Шаблон «${filterCategory || section.name}» собран по ${templateSourceCount} карточкам этого раздела.`
+									: 'Для этого раздела готового шаблона пока нет — добавь нужные поля вручную.'
+								: 'Сначала выбери раздел — подставим совместимые поля для будущих фильтров.'}</span>
+						</div>
+						<div className="new-product-attribute-actions">
+							{section && templateSourceCount > 0 && <button type="button" className="btn-secondary" onClick={reloadTemplate}>Вернуть шаблон</button>}
+							<button type="button" className="btn-secondary" onClick={addAttribute}>+ Характеристика</button>
+						</div>
+					</div>
+					<div className="new-product-attribute-list">
+						{attributes.map((attribute, index) => (
+							<div className="new-product-attribute-row" key={attribute.localId}>
+								{attribute.localId.startsWith('new:')
+									? <input
+										aria-label="Название характеристики"
+										placeholder="Название характеристики"
+										value={attribute.label}
+										onChange={(event) => setAttributes((current) => current.map((item, itemIndex) =>
+											itemIndex === index ? { ...item, label: event.target.value } : item))}
+									/>
+									: <span title={`${attribute.group}${attribute.filterable ? ' · поле будущего фильтра' : ''}`}>
+										{attribute.label}{attribute.filterable ? ' 🔒' : ''}
+									</span>}
+								{attribute.type === 'boolean'
+									? <select
+										aria-label={`Значение: ${attribute.label}`}
+										value={attribute.rawValue}
+										onChange={(event) => setAttributes((current) => current.map((item, itemIndex) =>
+											itemIndex === index ? { ...item, rawValue: event.target.value } : item))}
+									>
+										<option value="">Не указано</option>
+										<option value="Да">Да</option>
+										<option value="Нет">Нет</option>
+									</select>
+									: <input
+										aria-label={`Значение: ${attribute.label}`}
+										placeholder={attribute.unit ? `Значение, ${attribute.unit}` : 'Значение'}
+										value={attribute.rawValue}
+										onChange={(event) => setAttributes((current) => current.map((item, itemIndex) =>
+											itemIndex === index ? { ...item, rawValue: event.target.value } : item))}
+									/>}
+								<small>{attribute.group}{attribute.unit ? ` · ${attribute.unit}` : ''}</small>
+								<button type="button" aria-label={`Убрать ${attribute.label || 'характеристику'}`} onClick={() =>
+									setAttributes((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+							</div>
+						))}
+						{attributes.length === 0 && <p>Характеристик пока нет.</p>}
+					</div>
+				</section>
 
 				{candidates.length > 0 && (
 					<div className={`new-product-matches${exactCandidate ? ' exact' : ''}`}>
@@ -272,7 +544,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 				{err && <div className="new-product-error">{err}</div>}
 				<div className="new-product-actions">
 					<button type="button" className="btn-secondary" onClick={onClose}>Отмена</button>
-					<button type="button" className="btn-primary" disabled={busy} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать товар'}</button>
+					<button type="button" className="btn-primary" disabled={busy || photoBusy} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать товар'}</button>
 				</div>
 			</div>
 		</div>

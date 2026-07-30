@@ -1367,7 +1367,7 @@ h2.inv-h2 {
 .catalog-price-fields input:focus { border-color: #2878d0; outline: 2px solid rgba(40, 120, 208, 0.14); }
 .new-product-modal {
 	box-sizing: border-box;
-	width: min(760px, calc(100vw - 40px));
+	width: min(1080px, calc(100vw - 40px));
 	padding: 20px;
 	border: 1px solid #d9e0e9;
 	border-radius: 8px;
@@ -1440,7 +1440,7 @@ h2.inv-h2 {
 	border-color: #2878d0;
 	outline: 2px solid rgba(40, 120, 208, 0.14);
 }
-.new-product-fields label.wide { grid-column: 1 / -1; }
+.new-product-fields > .wide { grid-column: 1 / -1; }
 .new-product-fields textarea { min-height: 105px; resize: vertical; line-height: 1.45; }
 .new-product-name {
 	align-self: end;
@@ -1453,6 +1453,172 @@ h2.inv-h2 {
 	display: block;
 	overflow-wrap: anywhere;
 	font-size: 14px;
+}
+.new-product-statuses {
+	margin: 0;
+	padding: 10px 12px 12px;
+	border: 1px solid #d7dfe9;
+	border-radius: 6px;
+}
+.new-product-statuses legend {
+	padding: 0 5px;
+	color: #596579;
+	font-size: 12px;
+}
+.new-product-statuses > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px 14px;
+}
+.new-product-statuses label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: #35445a;
+	font-size: 12px;
+}
+.new-product-statuses input {
+	width: 15px;
+	height: 15px;
+	margin: 0;
+	accent-color: #2878d0;
+}
+.new-product-photo-section,
+.new-product-attributes {
+	margin: 0 0 14px;
+	padding: 14px;
+	border: 1px solid #d8e0ea;
+	border-radius: 7px;
+	background: #fbfcfe;
+}
+.new-product-section-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 16px;
+}
+.new-product-section-head b,
+.new-product-section-head span {
+	display: block;
+}
+.new-product-section-head b {
+	color: #26354a;
+	font-size: 13px;
+}
+.new-product-section-head span {
+	margin-top: 3px;
+	color: #748196;
+	font-size: 11px;
+	line-height: 1.4;
+}
+.new-product-photo-button {
+	position: relative;
+	flex: 0 0 auto;
+	overflow: hidden;
+	cursor: pointer;
+}
+.new-product-photo-button input {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+.new-product-photo-preview {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin-top: 12px;
+}
+.new-product-photo-preview img {
+	width: 126px;
+	height: 96px;
+	object-fit: contain;
+	border: 1px solid #d9e1ea;
+	border-radius: 6px;
+	background: #fff;
+}
+.new-product-photo-preview b,
+.new-product-photo-preview span {
+	display: block;
+	font-size: 12px;
+}
+.new-product-photo-preview span { margin-top: 3px; color: #748196; }
+.new-product-photo-preview button {
+	margin-top: 8px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #b33b32;
+	font-size: 12px;
+	cursor: pointer;
+}
+.new-product-photo-empty {
+	margin-top: 10px;
+	color: #8a96a7;
+	font-size: 12px;
+}
+.new-product-attribute-actions {
+	display: flex;
+	gap: 7px;
+	flex: 0 0 auto;
+}
+.new-product-attribute-list {
+	display: grid;
+	gap: 7px;
+	max-height: 360px;
+	margin-top: 12px;
+	overflow: auto;
+}
+.new-product-attribute-row {
+	display: grid;
+	grid-template-columns: minmax(190px, .8fr) minmax(260px, 1.35fr) minmax(120px, .55fr) 28px;
+	align-items: center;
+	gap: 8px;
+}
+.new-product-attribute-row > span {
+	overflow: hidden;
+	color: #3d4b60;
+	font-size: 12px;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.new-product-attribute-row > input,
+.new-product-attribute-row > select {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	height: 34px;
+	padding: 7px 9px;
+	border: 1px solid #bdc8d7;
+	border-radius: 5px;
+	background: #fff;
+	color: #172033;
+	font: inherit;
+	font-size: 12px;
+}
+.new-product-attribute-row > small {
+	overflow: hidden;
+	color: #8490a1;
+	font-size: 10px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.new-product-attribute-row > button {
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #9b4750;
+	font-size: 19px;
+	cursor: pointer;
+}
+.new-product-attribute-list > p {
+	margin: 4px 0 0;
+	color: #8a96a7;
+	font-size: 12px;
 }
 .new-product-matches {
 	margin-bottom: 14px;

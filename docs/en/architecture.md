@@ -43,6 +43,7 @@ The frontend is built into `packages/frontend/dist`; the backend serves these fi
 | inventory catalogue, prices, warehouses, and stock levels | ERPNext |
 | receipts, sales, write-offs, transfers, and returns | ERPNext |
 | product names, models, statuses, and structured descriptions | ERPNext |
+| images of newly created product cards | ERPNext |
 | images and fallback metadata from the legacy catalogue | Bitrix24 when ERPNext has no value |
 | internal state for selected processes | Bitrix24 entity storage |
 
@@ -53,6 +54,11 @@ reader-facing text and as protected structured attributes. The UI cannot rename 
 reserved for future filters; users edit their values, and the backend normalizes them again and
 rebuilds the displayed description. New free-form attributes are stored as display-only values and
 do not become filters until they are explicitly mapped to the schema.
+
+When a product is created, the application first obtains a compatible numeric `productId` from a
+technical Bitrix24 catalogue record and then creates the full ERPNext item. Specifications,
+description, status, prices, and the new image are stored in ERPNext. The client resizes the image
+before upload, and the backend validates it again.
 
 ## Application entry points
 

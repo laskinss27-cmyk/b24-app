@@ -296,6 +296,7 @@ export interface CoreCatalogItem {
 	status: string;
 	description: string;
 	content?: CatalogProductContent;
+	filterCategory: string;
 	image: string;
 }
 
@@ -308,7 +309,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 	const rows = await erp.list('Item', [
 		'name', 'item_name', 'is_stock_item',
 		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status',
-		'b24_catalog_content', 'description', 'image',
+		'b24_catalog_content', 'b24_filter_category', 'description', 'image',
 	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
 	const out: CoreCatalogItem[] = [];
 	for (const row of rows) {
@@ -332,6 +333,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 				? ''
 				: String(row['description'] ?? '').trim(),
 			...(content ? { content } : {}),
+			filterCategory: String(row['b24_filter_category'] ?? '').trim(),
 			image: String(row['image'] ?? '').trim(),
 		});
 	}
