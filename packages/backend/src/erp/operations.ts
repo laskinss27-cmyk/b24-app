@@ -22,6 +22,7 @@ export const MARKETPLACE_NAME_FIELD = 'b24_marketplace';
 export const MARKETPLACE_TITLE_FIELD = 'b24_marketplace_title';
 export const MARKETPLACE_BUNDLE_SOURCE_FIELD = 'b24_bundle_source_product';
 export const MARKETPLACE_BUNDLE_UNITS_FIELD = 'b24_bundle_units';
+export const MARKETPLACE_OLD_ID_FIELD = 'b24_marketplace_old_id';
 /** Документы, которым нужно поле сделки. */
 const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
@@ -49,6 +50,7 @@ export interface ErpContext {
 let ctxCache: ErpContext | null = null;
 let setupDone = false;
 let marketplaceFieldsDone = false;
+let marketplaceOldIdFieldDone = false;
 
 /** Компания (не Demo) + аббревиатура. Кэш на процесс. */
 export async function erpContext(erp: ErpClient): Promise<ErpContext> {
@@ -122,6 +124,24 @@ async function ensureMarketplaceFields(erp: ErpClient): Promise<void> {
 		}
 	}
 	marketplaceFieldsDone = true;
+}
+
+/** Старый ID товара из dom-automation. Поле остаётся пустым до ручной проверки сотрудником маркетплейсов. */
+export async function ensureMarketplaceOldIdField(erp: ErpClient): Promise<void> {
+	if (marketplaceOldIdFieldDone) return;
+	const name = `Item-${MARKETPLACE_OLD_ID_FIELD}`;
+	if (!(await erp.get('Custom Field', name))) {
+		await erp.create('Custom Field', {
+			dt: 'Item',
+			fieldname: MARKETPLACE_OLD_ID_FIELD,
+			label: 'Старый ID',
+			fieldtype: 'Data',
+			insert_after: 'description',
+			in_standard_filter: 1,
+			in_list_view: 0,
+		});
+	}
+	marketplaceOldIdFieldDone = true;
 }
 
 /** Единица измерения по умолчанию (как в миграции каталога). */
@@ -298,6 +318,7 @@ export interface CoreCatalogItem {
 	content?: CatalogProductContent;
 	filterCategory: string;
 	image: string;
+	marketplaceOldId: string;
 }
 
 function isTechnicalCoreDescription(value: unknown): boolean {
@@ -306,10 +327,11 @@ function isTechnicalCoreDescription(value: unknown): boolean {
 
 /** Полный товарный справочник ядра. Складские экраны не должны зависеть от наличия строки в каталоге Б24. */
 export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
+	await ensureMarketplaceOldIdField(erp);
 	const rows = await erp.list('Item', [
 		'name', 'item_name', 'is_stock_item',
 		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status',
-		'b24_catalog_content', 'b24_filter_category', 'description', 'image',
+		'b24_catalog_content', 'b24_filter_category', 'description', 'image', MARKETPLACE_OLD_ID_FIELD,
 	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
 	const out: CoreCatalogItem[] = [];
 	for (const row of rows) {
@@ -335,9 +357,34 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 			...(content ? { content } : {}),
 			filterCategory: String(row['b24_filter_category'] ?? '').trim(),
 			image: String(row['image'] ?? '').trim(),
+			marketplaceOldId: String(row[MARKETPLACE_OLD_ID_FIELD] ?? '').trim(),
 		});
 	}
 	return out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+/** Сохранить вручную проверенный старый ID. Один старый ID нельзя назначить двум действующим товарам. */
+export async function updateMarketplaceOldId(
+	erp: ErpClient,
+	args: { productId: number; oldId: string },
+): Promise<string> {
+	await ensureMarketplaceOldIdField(erp);
+	const itemCode = String(args.productId);
+	if (!(await erp.get('Item', itemCode))) throw new Error(`товар #${args.productId} не найден в ядре`);
+	const oldId = String(args.oldId ?? '').trim();
+	if (oldId.length > 120) throw new Error('старый ID не должен быть длиннее 120 символов');
+	if (oldId) {
+		const matches = await erp.list('Item', ['name', 'item_name'], [
+			[MARKETPLACE_OLD_ID_FIELD, '=', oldId],
+			['disabled', '=', 0],
+		], 2);
+		const duplicate = matches.find((item) => String(item['name']) !== itemCode);
+		if (duplicate) {
+			throw new Error(`старый ID «${oldId}» уже указан у товара #${String(duplicate['name'])} ${String(duplicate['item_name'] ?? '')}`.trim());
+		}
+	}
+	await erp.update('Item', itemCode, { [MARKETPLACE_OLD_ID_FIELD]: oldId });
+	return oldId;
 }
 
 /** Справочные цены каталога ядра. Они не меняют складскую valuation_rate. */

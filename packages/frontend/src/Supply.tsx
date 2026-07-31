@@ -1463,6 +1463,8 @@ export function Supply(): JSX.Element {
 	const [documentBusy, setDocumentBusy] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState('');
 	const [canDeleteDocuments, setCanDeleteDocuments] = useState(Boolean(ctx.__mock));
+	const [marketplaceOnly, setMarketplaceOnly] = useState(false);
+	const [canOpenMarketplaces, setCanOpenMarketplaces] = useState(Boolean(ctx.__mock));
 	const [notice, setNotice] = useState<string | null>(null);
 	const [creationErrors, setCreationErrors] = useState<Record<string, string>>({});
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
@@ -1646,25 +1648,39 @@ export function Supply(): JSX.Element {
 		}
 		bx.init(() => {
 			void (async () => {
-				const [uid, access, appAccess] = await Promise.all([
+				const [uid, appAccess] = await Promise.all([
 					withTimeout(fetchCurrentUserId(), 15000, 'user.current'),
-					withTimeout(fetchStockFormData(), 15000, 'stock.form-data'),
 					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
 				]);
+				const supplyDecision = appAccess?.decisions['supply.view'] ?? 'inherit';
+				const marketplaceDecision = appAccess?.decisions['marketplaces.view'] ?? 'inherit';
+				const access = supplyDecision === 'deny'
+					? null
+					: await withTimeout(fetchStockFormData(), 15000, 'stock.form-data').catch(() => null);
 				setCurrentUserId(uid);
-				setStockForm(access);
+				if (access) setStockForm(access);
 				const deleteDecision = appAccess?.decisions['supply.delete_documents'] ?? 'inherit';
 				setCanDeleteDocuments(deleteDecision === 'allow' || (deleteDecision === 'inherit' && uid === '1858'));
 				const hasSmartLink = requestId > 0 || transferDeepLinkId > 0 || dealSupplyId > 0;
-				const managerLink = hasSmartLink && (linkTarget === 'manager' || (linkTarget !== 'supply' && !access.isSupply));
+				const managerLink = hasSmartLink && (linkTarget === 'manager' || (linkTarget !== 'supply' && !access?.isSupply));
 				if (managerLink) {
 					setLoading(false);
 					setPhase('manager-link');
 					return;
 				}
-				const supplyDecision = appAccess?.decisions['supply.view'] ?? 'inherit';
-				const canOpenSupply = supplyDecision === 'allow' || (supplyDecision === 'inherit' && access.canCreate);
-				if (!canOpenSupply) { setLoading(false); setPhase('denied'); return; }
+				const canOpenSupply = supplyDecision === 'allow' || (supplyDecision === 'inherit' && Boolean(access?.canCreate));
+				const canOpenMarketplace = marketplaceDecision === 'allow'
+					|| (marketplaceDecision === 'inherit' && canOpenSupply);
+				setCanOpenMarketplaces(canOpenMarketplace);
+				if (!canOpenSupply && !canOpenMarketplace) { setLoading(false); setPhase('denied'); return; }
+				if (!canOpenSupply && canOpenMarketplace) {
+					setMarketplaceOnly(true);
+					setView('marketplaces');
+					setLoading(false);
+					setPhase('ready');
+					return;
+				}
+				setMarketplaceOnly(false);
 				setPhase('ready');
 				try {
 					const [loaded, supplierList] = await Promise.all([fetchSupplyOrders(), fetchSupplySuppliers()]);
@@ -1797,47 +1813,49 @@ export function Supply(): JSX.Element {
 	if (phase === 'manager-link' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
 	if (phase === 'denied' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
 	if (phase === 'denied' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
-	if (phase === 'denied') return <div className="supply-proto-state">Раздел «Снаб» доступен сотрудникам снабжения.</div>;
+	if (phase === 'denied') return <div className="supply-proto-state">Нет доступа к разделам снабжения и маркетплейсов.</div>;
 
 	return (
 		<div className="supply-proto-shell">
 			<aside className="supply-proto-rail">
 				<div className="supply-proto-brand"><span>С</span><div><b>Снаб</b><small>рабочий сценарий</small></div></div>
 				<nav className="supply-proto-nav" aria-label="Разделы снабжения">
-					<div className="supply-proto-nav-group">
-						<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
-						<button className={view === 'incoming' ? 'active' : ''} type="button" onClick={() => setView('incoming')}>Входящие заявки ТТ</button>
-						<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
-						<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
-					</div>
-					<div className="supply-proto-nav-group">
-						<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
-						<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
-						<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
-						<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
-						<button className={view === 'inventory' ? 'active' : ''} type="button" onClick={() => setView('inventory')}>Инвентаризация</button>
-					</div>
-					<div className="supply-proto-nav-group">
-						<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
-						<button
-							className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' ? ' active' : ''}`}
-							type="button"
-							aria-expanded={reportsOpen}
-							aria-controls="supply-reports-menu"
-							onClick={() => setReportsOpen((current) => !current)}
-						>
-							<span>Отчёты</span><span aria-hidden="true">{reportsOpen ? '⌃' : '⌄'}</span>
-						</button>
-						{reportsOpen && (
-							<div id="supply-reports-menu" className="supply-proto-subnav">
-								<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
-								<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => setView('turnover')}>Оборачиваемость</button>
-							</div>
-						)}
-					</div>
-					<div className="supply-proto-nav-group">
+					{!marketplaceOnly && <>
+						<div className="supply-proto-nav-group">
+							<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
+							<button className={view === 'incoming' ? 'active' : ''} type="button" onClick={() => setView('incoming')}>Входящие заявки ТТ</button>
+							<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
+							<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
+						</div>
+						<div className="supply-proto-nav-group">
+							<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
+							<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
+							<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
+							<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
+							<button className={view === 'inventory' ? 'active' : ''} type="button" onClick={() => setView('inventory')}>Инвентаризация</button>
+						</div>
+						<div className="supply-proto-nav-group">
+							<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
+							<button
+								className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' ? ' active' : ''}`}
+								type="button"
+								aria-expanded={reportsOpen}
+								aria-controls="supply-reports-menu"
+								onClick={() => setReportsOpen((current) => !current)}
+							>
+								<span>Отчёты</span><span aria-hidden="true">{reportsOpen ? '⌃' : '⌄'}</span>
+							</button>
+							{reportsOpen && (
+								<div id="supply-reports-menu" className="supply-proto-subnav">
+									<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
+									<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => setView('turnover')}>Оборачиваемость</button>
+								</div>
+							)}
+						</div>
+					</>}
+					{canOpenMarketplaces && <div className="supply-proto-nav-group">
 						<button className={view === 'marketplaces' ? 'active' : ''} type="button" onClick={() => setView('marketplaces')}>Маркетплейсы</button>
-					</div>
+					</div>}
 				</nav>
 				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
 			</aside>

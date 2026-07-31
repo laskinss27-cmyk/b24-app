@@ -621,7 +621,7 @@ export function Marketplaces(): JSX.Element {
 		return (
 			<section className="marketplace-catalog">
 				<button type="button" className="marketplace-back" onClick={() => setCatalogOpen(false)}>← Назад в маркетплейсы</button>
-				<ProductBase readOnly allowCreateProduct />
+				<ProductBase readOnly allowCreateProduct marketplaceMode />
 			</section>
 		);
 	}

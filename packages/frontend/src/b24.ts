@@ -507,6 +507,8 @@ export interface BaseRow {
 	sectionName?: string | undefined;
 	/** Состояние товарной карточки, которое показывается отдельно от чистого названия. */
 	status?: string | undefined;
+	/** Старый ID из dom-automation; сервер отдаёт его только каталогу маркетплейсов. */
+	marketplaceOldId?: string | undefined;
 	description?: string | undefined;
 	content?: CatalogProductContent | undefined;
 	retail: number | null;
@@ -528,6 +530,8 @@ export interface ProductBaseResult {
 	canEditCard: boolean;
 	/** Право менять справочные цены: отдел снабжения или Константин Ласкин. */
 	canEditPrices: boolean;
+	/** Право видеть и менять старый ID в специальном режиме маркетплейсов. */
+	canEditMarketplaceOldId: boolean;
 }
 
 /**
@@ -535,13 +539,13 @@ export interface ProductBaseResult {
  * виснет на catalog.product.list). Дальше фронт фильтрует/ищет/сортирует локально.
  * Бэкенд кэширует сборку (TTL ~5 мин); force=true — принудительная пересборка.
  */
-export async function fetchProductBase(force = false): Promise<ProductBaseResult> {
+export async function fetchProductBase(force = false, marketplaceMode = false): Promise<ProductBaseResult> {
 	const res = await fetch('/api/catalog/browse', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), force }),
+		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditCard?: boolean; canEditPrices?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return {
 		rows: json.rows ?? [],
@@ -550,6 +554,7 @@ export async function fetchProductBase(force = false): Promise<ProductBaseResult
 		cached: Boolean(json.cached),
 		canEditCard: Boolean(json.canEditCard),
 		canEditPrices: Boolean(json.canEditPrices),
+		canEditMarketplaceOldId: Boolean(json.canEditMarketplaceOldId),
 	};
 }
 
@@ -618,6 +623,17 @@ export async function updateCatalogPrices(productId: number, retail: number, pur
 	const json = (await res.json()) as { ok: boolean; error?: string; retail?: number; purchase?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить цены');
 	return { retail: Number(json.retail ?? retail), purchase: Number(json.purchase ?? purchase) };
+}
+
+export async function updateMarketplaceOldId(productId: number, oldId: string): Promise<string> {
+	const res = await fetch('/api/catalog/update-marketplace-old-id', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), productId, oldId }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; marketplaceOldId?: string };
+	if (!json.ok || json.marketplaceOldId === undefined) throw new Error(json.error ?? 'не удалось сохранить старый ID');
+	return json.marketplaceOldId;
 }
 
 export interface CatalogProductUpdateInput {

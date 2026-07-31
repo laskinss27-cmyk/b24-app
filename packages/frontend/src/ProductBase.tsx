@@ -7,6 +7,7 @@ import {
 	createCatalogProduct,
 	updateCatalogProduct,
 	updateCatalogPrices,
+	updateMarketplaceOldId,
 	fetchCurrentUserId,
 	fetchCurrentAppAccess,
 	createQuickSale,
@@ -69,6 +70,7 @@ const MOCK_ROWS: BaseRow[] = [
 		article: 'RL-IP54P', model: 'RL-IP54P', manufacturer: 'Redline', sectionId: 101,
 		sectionName: 'Видеонаблюдение', status: 'Уценка, После ремонта',
 		description: 'Уличная IP-камера.\n\nХарактеристики:\n• Разрешение: 4 Мп\n• Степень защиты: IP67',
+		marketplaceOldId: '107790',
 		content: {
 			version: 1,
 			summary: 'Уличная IP-камера для системы видеонаблюдения.',
@@ -85,7 +87,7 @@ const MOCK_ROWS: BaseRow[] = [
 	{ id: 3001, iblockId: 24, name: 'Монтаж видеокамеры (работа)', isService: true, article: '', model: '', manufacturer: '', sectionId: 104, sectionName: 'Услуги', retail: 1500, purchase: null, total: 0, stockByStore: {} },
 ];
 
-type SortKey = 'id' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
+type SortKey = 'id' | 'marketplaceOldId' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
 type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number; qty: number }> };
 
 function productStatuses(status: string | undefined): string[] {
@@ -620,13 +622,27 @@ function CatalogPriceModal({ row, onSave, onClose }: {
 	);
 }
 
-function CatalogProductCard({ row, stores, sections, canEdit, canEditPrices, onSave, onClose }: {
+function CatalogProductCard({
+	row,
+	stores,
+	sections,
+	canEdit,
+	canEditPrices,
+	showMarketplaceOldId,
+	canEditMarketplaceOldId,
+	onSave,
+	onSaveMarketplaceOldId,
+	onClose,
+}: {
 	row: BaseRow;
 	stores: StoreInfo[];
 	sections: Array<{ id: number; name: string }>;
 	canEdit: boolean;
 	canEditPrices: boolean;
+	showMarketplaceOldId: boolean;
+	canEditMarketplaceOldId: boolean;
 	onSave: (input: CatalogProductUpdateInput) => Promise<void>;
+	onSaveMarketplaceOldId: (oldId: string) => Promise<void>;
 	onClose: () => void;
 }): JSX.Element {
 	const [editing, setEditing] = useState(false);
@@ -652,6 +668,9 @@ function CatalogProductCard({ row, stores, sections, canEdit, canEditPrices, onS
 	const [photoBusy, setPhotoBusy] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
+	const [marketplaceOldId, setMarketplaceOldId] = useState(row.marketplaceOldId ?? '');
+	const [marketplaceOldIdBusy, setMarketplaceOldIdBusy] = useState(false);
+	const [marketplaceOldIdNotice, setMarketplaceOldIdNotice] = useState('');
 	const currentPhoto = row.photoPath ? photoFullUrl(row.photoPath) : null;
 	const displayedPhoto = nextPhoto?.previewUrl ?? currentPhoto;
 	const stockRows = stores
@@ -735,6 +754,24 @@ function CatalogProductCard({ row, stores, sections, canEdit, canEditPrices, onS
 			setError(String(reason instanceof Error ? reason.message : reason));
 		} finally {
 			setBusy(false);
+		}
+	};
+	const saveMarketplaceOldId = async (): Promise<void> => {
+		const oldId = marketplaceOldId.trim();
+		if (oldId.length > 120) {
+			setMarketplaceOldIdNotice('Старый ID не должен быть длиннее 120 символов.');
+			return;
+		}
+		setMarketplaceOldIdBusy(true);
+		setMarketplaceOldIdNotice('');
+		try {
+			await onSaveMarketplaceOldId(oldId);
+			setMarketplaceOldId(oldId);
+			setMarketplaceOldIdNotice(oldId ? 'Старый ID сохранён.' : 'Старый ID очищен.');
+		} catch (reason) {
+			setMarketplaceOldIdNotice(String(reason instanceof Error ? reason.message : reason));
+		} finally {
+			setMarketplaceOldIdBusy(false);
 		}
 	};
 
@@ -860,6 +897,32 @@ function CatalogProductCard({ row, stores, sections, canEdit, canEditPrices, onS
 								</dl>
 							)}
 						</section>
+						{showMarketplaceOldId && <section className="catalog-marketplace-id-section">
+							<h3>Маркетплейсы</h3>
+							<div className="catalog-marketplace-id-editor">
+								<label>
+									<span>Старый ID</span>
+									<input
+										value={marketplaceOldId}
+										maxLength={120}
+										disabled={!canEditMarketplaceOldId || marketplaceOldIdBusy}
+										placeholder="Не заполнен"
+										onChange={(event) => {
+											setMarketplaceOldId(event.target.value);
+											setMarketplaceOldIdNotice('');
+										}}
+									/>
+								</label>
+								{canEditMarketplaceOldId && <button
+									type="button"
+									className="btn-secondary"
+									disabled={marketplaceOldIdBusy || marketplaceOldId.trim() === (row.marketplaceOldId ?? '')}
+									onClick={() => void saveMarketplaceOldId()}
+								>{marketplaceOldIdBusy ? 'Сохраняю…' : 'Сохранить ID'}</button>}
+							</div>
+							<p className="catalog-marketplace-id-help">Идентификатор товара из старой базы. Заполняется только после ручной проверки.</p>
+							{marketplaceOldIdNotice && <div className="catalog-marketplace-id-notice">{marketplaceOldIdNotice}</div>}
+						</section>}
 						{!editing && <section>
 							<h3>Описание и характеристики</h3>
 							{row.content ? <div className="catalog-structured-description">
@@ -918,7 +981,17 @@ export interface ProductPicker {
 	forceRefreshOnMount?: boolean;
 }
 
-export function ProductBase({ picker, readOnly = false, allowCreateProduct = false }: { picker?: ProductPicker; readOnly?: boolean; allowCreateProduct?: boolean } = {}): JSX.Element {
+export function ProductBase({
+	picker,
+	readOnly = false,
+	allowCreateProduct = false,
+	marketplaceMode = false,
+}: {
+	picker?: ProductPicker;
+	readOnly?: boolean;
+	allowCreateProduct?: boolean;
+	marketplaceMode?: boolean;
+} = {}): JSX.Element {
 	const pickMode = !!picker;
 	const [done, setDone] = useState(false);
 	const [ctx] = useState<B24Context>(() => getContext());
@@ -936,6 +1009,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
 	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
+	const [canEditMarketplaceOldId, setCanEditMarketplaceOldId] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
 	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
 	// Корзина быстрой продажи: productId → количество.
@@ -971,6 +1045,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
 			setCanEditCard(true);
 			setCanEditPrices(true);
+			setCanEditMarketplaceOldId(marketplaceMode);
 			setMode('base');
 			return;
 		}
@@ -988,7 +1063,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				setGate('ready');
 				setUid(uid);
 				const [base, appAccess] = await Promise.all([
-					withTimeout(fetchProductBase(forceInitialRefresh), 90000, 'catalog/browse'),
+					withTimeout(fetchProductBase(forceInitialRefresh, marketplaceMode), 90000, 'catalog/browse'),
 					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
 				]);
 				setRows(base.rows);
@@ -996,6 +1071,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setCanEditCard(base.canEditCard);
 				setCanEditPrices(base.canEditPrices);
+				setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 				setAppAccess(appAccess);
 				setMode('base');
 			})().catch((e: unknown) => {
@@ -1003,7 +1079,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				setErrMsg(String(e instanceof Error ? e.message : e));
 			});
 		});
-	}, [ctx, forceInitialRefresh]);
+	}, [ctx, forceInitialRefresh, marketplaceMode]);
 
 	const allowedStoreTitles = useMemo(
 		() => picker?.allowedStoreTitles?.map(normalizeStoreTitle) ?? [],
@@ -1027,12 +1103,12 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				visibleStoreIds.has(Number(storeId)) && qty > 0))
 		.map((d) => ({
 			d,
-			search: `${d.id} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''} ${d.status ?? ''}`.toLowerCase(),
+			search: `${d.id} ${marketplaceMode ? d.marketplaceOldId ?? '' : ''} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''} ${d.status ?? ''}`.toLowerCase(),
 			stockEntries: Object.entries(d.stockByStore)
 				.map(([s, n]) => ({ id: Number(s), qty: n }))
 				.filter((o) => o.qty > 0 && (!allowedStoreTitles.length || visibleStoreIds.has(o.id)))
 				.sort((a, b) => b.qty - a.qty),
-		})), [rows, allowedStoreTitles, visibleStoreIds]);
+		})), [rows, allowedStoreTitles, visibleStoreIds, marketplaceMode]);
 	const sections = useMemo(() => {
 		const byId = new Map<number, string>();
 		for (const row of rows) {
@@ -1062,6 +1138,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		const val = (r: { d: BaseRow; qty: number }): string | number => {
 			switch (sortKey) {
 				case 'id': return r.d.id;
+				case 'marketplaceOldId': return r.d.marketplaceOldId ?? '';
 				case 'name': return r.d.name;
 				case 'model': return r.d.model ?? r.d.article ?? '';
 				case 'manufacturer': return r.d.manufacturer ?? '';
@@ -1089,12 +1166,13 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		}
 		setRefreshing(true);
 		try {
-			const base = await withTimeout(fetchProductBase(true), 90000, 'catalog/browse');
+			const base = await withTimeout(fetchProductBase(true, marketplaceMode), 90000, 'catalog/browse');
 			setRows(base.rows);
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
 			setCanEditCard(base.canEditCard);
 			setCanEditPrices(base.canEditPrices);
+			setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 		} catch {
 			/* пересборка не удалась — оставляем текущие данные */
 		} finally {
@@ -1205,6 +1283,14 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 		setCardRow((current) => current?.id === input.productId ? { ...current, ...saved } : current);
 	}
 
+	async function saveMarketplaceOldId(oldId: string): Promise<void> {
+		if (!cardRow || !marketplaceMode) return;
+		const saved = ctx.__mock ? oldId : await updateMarketplaceOldId(cardRow.id, oldId);
+		setRows((current) => current.map((row) =>
+			row.id === cardRow.id ? { ...row, marketplaceOldId: saved } : row));
+		setCardRow((current) => current ? { ...current, marketplaceOldId: saved } : current);
+	}
+
 	async function createSale(): Promise<void> {
 		setSaleErr(null);
 		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty, discountPercent: discOf(c.row.id) }));
@@ -1313,7 +1399,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 						{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
 					</select>
 				</label>
-				<label className="tb-field tb-search">Поиск (ID · название · артикул · бренд · модель)
+				<label className="tb-field tb-search">Поиск ({marketplaceMode ? 'ID · Старый ID · название · артикул · бренд · модель' : 'ID · название · артикул · бренд · модель'})
 					<input type="search" value={q} placeholder="2050, камера, vizit, УКП…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
@@ -1348,6 +1434,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					<thead>
 						<tr>
 							<th className="num" onClick={() => toggleSort('id')}>ID{sortMark('id')}</th>
+							{marketplaceMode && <th onClick={() => toggleSort('marketplaceOldId')}>Старый ID{sortMark('marketplaceOldId')}</th>}
 							<th className="ph-col" />
 							<th onClick={() => toggleSort('name')}>Название{sortMark('name')}</th>
 							<th onClick={() => toggleSort('model')}>Модель{sortMark('model')}</th>
@@ -1367,6 +1454,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 							return (
 								<tr key={d.id} onClick={() => d.id !== CORE_ENGINEER_VISIT_SERVICE_ID && setCardRow(d)} title={d.id === CORE_ENGINEER_VISIT_SERVICE_ID ? undefined : 'Открыть нашу карточку товара'}>
 									<td className="num idcol">{d.id}</td>
+									{marketplaceMode && <td className="marketplace-old-id-col">{d.marketplaceOldId || <span className="muted">—</span>}</td>}
 									<td className="ph-col">
 										{photo
 											? <img className="ph" src={photo} loading="lazy" alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
@@ -1421,7 +1509,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 									)}
 								</tr>
 							);
-						}) : <tr><td colSpan={10 + ((canQuickSale || pickMode) ? 1 : 0) + (priceTagMode ? 1 : 0)} className="base-empty">Ничего не найдено</td></tr>}
+						}) : <tr><td colSpan={10 + (marketplaceMode ? 1 : 0) + ((canQuickSale || pickMode) ? 1 : 0) + (priceTagMode ? 1 : 0)} className="base-empty">Ничего не найдено</td></tr>}
 					</tbody>
 				</table>
 			</div>
@@ -1452,7 +1540,10 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				sections={sections}
 				canEdit={canEditCard && !pickMode}
 				canEditPrices={canEditPrices}
+				showMarketplaceOldId={marketplaceMode}
+				canEditMarketplaceOldId={canEditMarketplaceOldId}
 				onSave={saveCatalogProduct}
+				onSaveMarketplaceOldId={saveMarketplaceOldId}
 				onClose={() => setCardRow(null)}
 			/>}
 

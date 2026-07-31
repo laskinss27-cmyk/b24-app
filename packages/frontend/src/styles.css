@@ -1880,6 +1880,48 @@ h2.inv-h2 {
 }
 .catalog-product-info dt { margin-bottom: 3px; color: #778599; font-size: 11px; }
 .catalog-product-info dd { margin: 0; color: #1d2939; font-size: 14px; overflow-wrap: anywhere; }
+.catalog-marketplace-id-section {
+	padding: 13px 14px;
+	border: 1px solid #d7e4f2;
+	border-radius: 8px;
+	background: #f7fbff;
+}
+.catalog-marketplace-id-editor {
+	display: flex;
+	align-items: flex-end;
+	gap: 10px;
+}
+.catalog-marketplace-id-editor label {
+	display: grid;
+	flex: 1 1 260px;
+	gap: 5px;
+	color: #596579;
+	font-size: 12px;
+}
+.catalog-marketplace-id-editor input {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 9px 10px;
+	border: 1px solid #afbdce;
+	border-radius: 6px;
+	background: #fff;
+	color: #172033;
+	font: 14px ui-monospace, Menlo, monospace;
+}
+.catalog-marketplace-id-editor input:focus {
+	border-color: #2878d0;
+	outline: 2px solid rgba(40, 120, 208, 0.14);
+}
+.catalog-marketplace-id-help {
+	margin: 7px 0 0;
+	color: #778599;
+	font-size: 11px;
+}
+.catalog-marketplace-id-notice {
+	margin-top: 7px;
+	color: #1f5f3b;
+	font-size: 12px;
+}
 .catalog-product-form {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2780,6 +2822,12 @@ html, body, #root { height: 100%; }
 	color: #7a8699;
 	font-family: ui-monospace, Menlo, monospace;
 	font-size: 12.5px;
+}
+.base-table .marketplace-old-id-col {
+	color: #1a56db;
+	font-family: ui-monospace, Menlo, monospace;
+	font-size: 12.5px;
+	white-space: nowrap;
 }
 .base-table .ph-col {
 	width: 48px;

@@ -5,7 +5,7 @@ import { ErpClient } from '../erp/client.js';
 import {
 	ensureCoreItem, fetchErpStocks, fetchErpStocksFor, fetchErpPurchasing,
 	fetchCoreCatalogItems, fetchCoreCatalogPrices, listActiveStoreTitles,
-	coreStoreId, updateCoreCatalogPrices,
+	coreStoreId, updateCoreCatalogPrices, updateMarketplaceOldId,
 } from '../erp/operations.js';
 import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
 import { normalizeDomain } from '../security.js';
@@ -37,6 +37,7 @@ interface AuthBody {
 	domain?: string;
 	accessToken?: string;
 	force?: boolean;
+	marketplaceMode?: boolean;
 }
 
 function errInfo(err: unknown): string {
@@ -49,6 +50,7 @@ interface CatalogStore {
 	title: string;
 	active: boolean;
 }
+type CoreProductBaseRow = ProductBaseData['rows'][number] & { marketplaceOldId: string };
 interface CacheEntry {
 	data: ProductBaseData;
 	expires: number;
@@ -76,6 +78,7 @@ interface CatalogCandidate {
 	content?: CatalogProductContent;
 	filterCategory?: string;
 	photoPath?: string;
+	marketplaceOldId?: string;
 	retail: number | null;
 	purchase: number | null;
 	total: number;
@@ -128,7 +131,10 @@ function coreSectionId(title: string): number {
 	return Math.abs(coreStoreId(`section:${title}`));
 }
 
-async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): Promise<{ data: ProductBaseData; stores: CatalogStore[] }> {
+async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): Promise<{
+	data: { rows: CoreProductBaseRow[]; generatedAt: string };
+	stores: CatalogStore[];
+}> {
 	const [items, stocks, prices, storeTitles] = await Promise.all([
 		fetchCoreCatalogItems(erp),
 		fetchErpStocks(erp),
@@ -164,6 +170,7 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 			description: item.description || known?.description,
 			...(item.content ? { content: item.content } : {}),
 			filterCategory: item.filterCategory,
+			marketplaceOldId: item.marketplaceOldId,
 			retail: corePrices?.retail ?? known?.retail ?? null,
 			purchase: corePrices?.purchase ?? known?.purchase ?? null,
 			photoPath,
@@ -324,6 +331,11 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			&& appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
 		const canEditCard = appPermission(req, 'catalog.edit_card', legacyAccess.canEditCard);
 		const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
+		const marketplaceMode = body.marketplaceMode === true;
+		const canEditMarketplaceOldId = marketplaceMode && (
+			appPermission(req, 'supply.view', legacyAccess.canEditPrices)
+			|| appPermission(req, 'marketplaces.view', false)
+		);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		const now = Date.now();
 		const hit = baseCache.get(cacheKey);
@@ -344,10 +356,22 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			}
 			const { data, stores } = await buildCoreProductBase(erp, metadata);
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source: 'core' }, '[api/catalog/browse] ok');
-			const rows = canViewPurchasePrices
+			const pricedRows = canViewPurchasePrices
 				? data.rows
 				: data.rows.map((row) => ({ ...row, purchase: null }));
-			return { ok: true, rows, stores, generatedAt: data.generatedAt, cached, canEditCard, canEditPrices };
+			const rows = canEditMarketplaceOldId
+				? pricedRows
+				: pricedRows.map(({ marketplaceOldId: _marketplaceOldId, ...row }) => row);
+			return {
+				ok: true,
+				rows,
+				stores,
+				generatedAt: data.generatedAt,
+				cached,
+				canEditCard,
+				canEditPrices,
+				canEditMarketplaceOldId,
+			};
 		} catch (err) {
 			app.log.error({ ms: Date.now() - t0 }, `[api/catalog/browse] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -424,6 +448,31 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			return { ok: true, productId, retail, purchase };
 		} catch (error) {
 			app.log.error({ productId }, `[api/catalog/update-prices] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/catalog/update-marketplace-old-id', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const legacyAccess = await catalogAccess(client);
+		const canEdit = appPermission(req, 'supply.view', legacyAccess.canEditPrices)
+			|| appPermission(req, 'marketplaces.view', false);
+		if (!canEdit) {
+			return reply.code(403).send({ ok: false, error: 'поле «Старый ID» доступно только в разделе маркетплейсов' });
+		}
+		const productId = Number(body['productId']);
+		const oldId = String(body['oldId'] ?? '').trim();
+		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		try {
+			const marketplaceOldId = await updateMarketplaceOldId(erp, { productId, oldId });
+			app.log.info({ productId, marketplaceOldId }, '[api/catalog/update-marketplace-old-id] ok');
+			return { ok: true, productId, marketplaceOldId };
+		} catch (error) {
+			app.log.error({ productId }, `[api/catalog/update-marketplace-old-id] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});

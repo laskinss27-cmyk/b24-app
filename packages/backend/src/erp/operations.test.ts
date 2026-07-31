@@ -26,6 +26,7 @@ import {
 	syncDealRealizationPrices,
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
+	updateMarketplaceOldId,
 } from './operations.js';
 
 type Doc = Record<string, unknown> & {
@@ -636,4 +637,38 @@ test('marketplace return starts from a sale and returns several selected sold-ou
 	const remaining = await listMarketplaceReturnSales(erp.asClient());
 	assert.equal(remaining.length, 1);
 	assert.deepEqual(remaining[0]?.items.map((item) => [item.productId, item.availableQty]), [[302, 1]]);
+});
+
+test('marketplace old ID is editable, clearable and unique across active products', async () => {
+	const items = [
+		{ name: '101', item_name: 'Первый товар', disabled: 0, b24_marketplace_old_id: '' },
+		{ name: '202', item_name: 'Второй товар', disabled: 0, b24_marketplace_old_id: 'OLD-202' },
+	];
+	const client = {
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Custom Field') return { name };
+			if (doctype === 'Item') return items.find((item) => item.name === name) ?? null;
+			return null;
+		},
+		list: async (doctype: string, _fields: string[], filters: unknown[][]) => {
+			if (doctype !== 'Item') return [];
+			const oldId = String(filters.find((filter) => filter[0] === 'b24_marketplace_old_id')?.[2] ?? '');
+			return items.filter((item) => item.disabled === 0 && item.b24_marketplace_old_id === oldId);
+		},
+		update: async (_doctype: string, name: string, patch: Record<string, unknown>) => {
+			const item = items.find((candidate) => candidate.name === name);
+			if (!item) throw new Error(`missing ${name}`);
+			Object.assign(item, patch);
+			return item;
+		},
+	} as unknown as ErpClient;
+
+	assert.equal(await updateMarketplaceOldId(client, { productId: 101, oldId: ' OLD-101 ' }), 'OLD-101');
+	assert.equal(items[0]?.b24_marketplace_old_id, 'OLD-101');
+	await assert.rejects(
+		updateMarketplaceOldId(client, { productId: 101, oldId: 'OLD-202' }),
+		/уже указан у товара #202/,
+	);
+	assert.equal(await updateMarketplaceOldId(client, { productId: 101, oldId: '' }), '');
+	assert.equal(items[0]?.b24_marketplace_old_id, '');
 });
