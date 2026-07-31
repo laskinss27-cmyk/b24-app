@@ -3940,10 +3940,83 @@ body.deal-placement-body #root {
 }
 .deal-document-preview > footer {
 	display: flex;
+	gap: 8px;
 	justify-content: flex-end;
 	padding: 13px 20px;
 	border-top: 1px solid #e2e8f0;
 	background: #f8fafc;
+}
+.deal-contract-preview {
+	width: min(1120px, calc(100vw - 56px));
+}
+.deal-contract-preview-body {
+	min-height: 0;
+	flex: 1 1 auto;
+	overflow: auto;
+	background: #dfe3e8;
+}
+.deal-contract-preview-message {
+	margin: 0;
+	padding: 24px;
+	color: #586579;
+	font-size: 14px;
+	text-align: center;
+}
+.deal-contract-preview-message.error {
+	color: #a22f2f;
+}
+.deal-contract-docx:empty {
+	display: none;
+}
+.deal-contract-docx .docx-wrapper {
+	box-sizing: border-box;
+	padding: 24px !important;
+	background: #dfe3e8 !important;
+}
+.deal-contract-docx .docx {
+	box-shadow: 0 2px 12px rgba(15, 23, 42, .18) !important;
+}
+
+@media print {
+	body.deal-placement-body * {
+		visibility: hidden !important;
+	}
+	body.deal-placement-body .deal-contract-preview-overlay,
+	body.deal-placement-body .deal-contract-preview-overlay * {
+		visibility: visible !important;
+	}
+	body.deal-placement-body .deal-contract-preview-overlay {
+		position: absolute !important;
+		inset: 0 !important;
+		display: block !important;
+		width: 100% !important;
+		height: auto !important;
+		padding: 0 !important;
+		background: #fff !important;
+	}
+	body.deal-placement-body .deal-contract-preview {
+		width: 100% !important;
+		max-height: none !important;
+		overflow: visible !important;
+		border: 0 !important;
+		box-shadow: none !important;
+	}
+	body.deal-placement-body .deal-contract-preview > header,
+	body.deal-placement-body .deal-contract-preview > .deal-document-preview-facts,
+	body.deal-placement-body .deal-contract-preview > footer {
+		display: none !important;
+	}
+	body.deal-placement-body .deal-contract-preview-body {
+		overflow: visible !important;
+		background: #fff !important;
+	}
+	body.deal-placement-body .deal-contract-docx .docx-wrapper {
+		padding: 0 !important;
+		background: #fff !important;
+	}
+	body.deal-placement-body .deal-contract-docx .docx {
+		box-shadow: none !important;
+	}
 }
 
 @media (max-width: 720px) {
@@ -3953,6 +4026,9 @@ body.deal-placement-body #root {
 	.deal-document-preview {
 		width: calc(100vw - 20px);
 		max-height: 100%;
+	}
+	.deal-contract-preview {
+		width: calc(100vw - 20px);
 	}
 	.deal-document-preview-facts {
 		grid-template-columns: repeat(2, minmax(0, 1fr));

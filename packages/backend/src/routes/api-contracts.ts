@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { CONTRACT_TEMPLATES, generateDealContract, getContractContext } from '../deal-contract.js';
+import {
+	CONTRACT_TEMPLATES,
+	generateDealContract,
+	getContractContext,
+	listDealContractDocuments,
+	readDealContractDocument,
+} from '../deal-contract.js';
 import { normalizeDomain } from '../security.js';
 
 interface AuthBody {
@@ -30,6 +36,40 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 			return { ok: true, context };
 		} catch (error) {
 			app.log.error({ dealId }, `[api/contracts/context] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/contracts/list', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(body.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			return { ok: true, documents: await listDealContractDocuments(dealId) };
+		} catch (error) {
+			app.log.error({ dealId }, `[api/contracts/list] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/contracts/file', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; documentId?: unknown };
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(body.dealId);
+		const documentId = String(body.documentId ?? '');
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const stored = await readDealContractDocument(dealId, documentId);
+			return reply
+				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+				.header('Content-Disposition', `attachment; filename="${stored.document.filename}"`)
+				.header('Cache-Control', 'private, no-store')
+				.send(stored.file);
+		} catch (error) {
+			app.log.error({ dealId, documentId }, `[api/contracts/file] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});
@@ -79,12 +119,7 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 					: 'calendar',
 			});
 			app.log.info({ dealId, companyId, templateId, contractNumber: result.contractNumber }, '[api/contracts/generate] ok');
-			return reply
-				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-				.header('Content-Disposition', `attachment; filename="${result.filename}"`)
-				.header('X-Contract-Number', result.contractNumber)
-				.header('Cache-Control', 'no-store')
-				.send(result.file);
+			return reply.header('Cache-Control', 'no-store').send({ ok: true, document: result.document });
 		} catch (error) {
 			app.log.error({ dealId, companyId }, `[api/contracts/generate] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });

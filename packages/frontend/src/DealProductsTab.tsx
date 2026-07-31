@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState, type CSSProperties, type FocusEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type FocusEvent } from 'react';
+import { renderAsync as renderDocx } from 'docx-preview';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
@@ -26,7 +27,10 @@ import {
 	downloadDealKpDocx,
 	downloadDealXlsx,
 	fetchDealContractContext,
-	downloadDealContract,
+	fetchDealContracts,
+	createDealContract,
+	fetchDealContractFile,
+	downloadStoredDealContract,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	setupDealFulfillment,
@@ -47,6 +51,7 @@ import {
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type DealContractContext,
+	type StoredDealContractDocument,
 	type ContractTemplateId,
 	type ContractPartyKind,
 	type ContractDurationUnit,
@@ -77,6 +82,8 @@ interface TableData {
 	sourceStoreId: number | null;
 	/** Заявки снабжения сделки. */
 	supply: SupplyCard[];
+	/** Сохранённые версии договоров, сформированные нашим конструктором. */
+	contracts: StoredDealContractDocument[];
 	/** Активные склады каталога. */
 	stores: StoreInfo[];
 	/** Дополнительные этапы комплектации сделки. */
@@ -107,6 +114,7 @@ const MOCK_DATA: TableData = {
 	payment: { total: 103500, paid: 50000 },   // мок: частичная оплата для демонстрации баннера
 	sourceStoreId: 8,   // мок: склад-источник сделки = Дунайский (не первый) — проверить дефолт селектора
 	supply: [],
+	contracts: [],
 	stores: [
 		{ id: 4, title: 'Измайловский 18Д', active: true },
 		{ id: 8, title: 'Максидом Дунайский 64', active: true },
@@ -168,7 +176,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
 	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
 	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
-	const [stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants] = await Promise.all([
+	const [stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants, contracts] = await Promise.all([
 		withTimeout(fetchStores(), 20000, 'core stores').catch(() => [] as StoreInfo[]),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
@@ -179,6 +187,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 		withTimeout(fetchDealPlan(dealId), 25000, 'deal/plan').catch(() => [] as DealPlanItem[]),
 		withTimeout(fetchDealStages(dealId), 25000, 'deal/stages').catch(() => [] as DealStage[]),
 		withTimeout(fetchDealQuoteVariants(dealId), 25000, 'deal/variants').catch((): DealQuoteVariants => ({ enabled: false, selectedId: null, variants: [] })),
+		withTimeout(fetchDealContracts(dealId), 20000, 'contracts/list').catch(() => [] as StoredDealContractDocument[]),
 	]);
 	const rows: EnrichedRow[] = [];
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
@@ -254,7 +263,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 			purchasingPrice: item.isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
 		} satisfies EnrichedRow;
 	})]));
-	return { rows, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
+	return { rows, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
 }
 
 const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
@@ -429,6 +438,105 @@ function DealDocumentPreviewModal({
 					</table>
 				</div>
 				<footer><button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button></footer>
+			</section>
+		</div>
+	);
+}
+
+function DealContractDocumentModal({
+	preview,
+	onClose,
+}: {
+	preview: { document: StoredDealContractDocument; anchorY: number };
+	onClose: () => void;
+}): JSX.Element {
+	const hostRef = useRef<HTMLDivElement>(null);
+	const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
+	const [error, setError] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	const previewHeight = Math.min(900, Math.max(520, window.screen.availHeight - 100));
+	const overlayStyle: CSSProperties = {
+		top: Math.max(12, Math.round(preview.anchorY - previewHeight * 0.2)),
+		height: previewHeight,
+	};
+
+	useEffect(() => {
+		const closeOnEscape = (event: KeyboardEvent): void => {
+			if (event.key === 'Escape') onClose();
+		};
+		window.addEventListener('keydown', closeOnEscape);
+		return () => window.removeEventListener('keydown', closeOnEscape);
+	}, [onClose]);
+
+	useEffect(() => {
+		let alive = true;
+		const host = hostRef.current;
+		if (!host) return;
+		host.replaceChildren();
+		setPhase('loading');
+		setError(null);
+		void fetchDealContractFile(preview.document.dealId, preview.document.id)
+			.then(async (blob) => {
+				if (!alive) return;
+				await renderDocx(blob, host, undefined, {
+					inWrapper: true,
+					hideWrapperOnPrint: false,
+					ignoreWidth: false,
+					ignoreHeight: false,
+					breakPages: true,
+					renderHeaders: true,
+					renderFooters: true,
+					useBase64URL: true,
+				});
+				if (alive) setPhase('ready');
+			})
+			.catch((reason) => {
+				if (!alive) return;
+				setError(String(reason instanceof Error ? reason.message : reason));
+				setPhase('error');
+			});
+		return () => {
+			alive = false;
+			host.replaceChildren();
+		};
+	}, [preview.document.dealId, preview.document.id]);
+
+	const save = async (): Promise<void> => {
+		if (saving) return;
+		setSaving(true);
+		try {
+			await downloadStoredDealContract(preview.document);
+		} catch (reason) {
+			setError(String(reason instanceof Error ? reason.message : reason));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const document = preview.document;
+	return (
+		<div className="deal-document-preview-overlay deal-contract-preview-overlay" style={overlayStyle} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<section className="deal-document-preview deal-contract-preview" role="dialog" aria-modal="true" aria-label={`Договор № ${document.contractNumber}`}>
+				<header>
+					<div><span>{document.templateTitle}</span><h2>Договор № {document.contractNumber}</h2></div>
+					<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button>
+				</header>
+				<div className="deal-document-preview-facts">
+					<div><span>Дата</span><b>{document.contractDate}</b></div>
+					<div><span>Наша компания</span><b>{document.companyName}</b></div>
+					<div><span>Заказчик</span><b>{document.customerName}</b></div>
+					<div><span>Сумма</span><b>{rub(document.total)}</b></div>
+				</div>
+				<div className="deal-contract-preview-body">
+					{phase === 'loading' && <p className="deal-contract-preview-message">Открываю договор…</p>}
+					{phase === 'error' && <p className="deal-contract-preview-message error">{error ?? 'Не удалось открыть договор.'}</p>}
+					<div ref={hostRef} className="deal-contract-docx" aria-busy={phase === 'loading'} />
+				</div>
+				<footer>
+					<button type="button" className="btn-secondary" disabled={saving} onClick={() => void save()}>{saving ? 'Сохраняю…' : 'Скачать Word'}</button>
+					<button type="button" className="btn-secondary" disabled={phase !== 'ready'} onClick={() => window.print()}>Печать</button>
+					<button type="button" className="btn-primary" onClick={onClose}>Закрыть</button>
+				</footer>
 			</section>
 		</div>
 	);
@@ -806,6 +914,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const [showDealDocuments, setShowDealDocuments] = useState(false);
 	const [documentPreview, setDocumentPreview] = useState<DealDocumentPreview | null>(null);
+	const [contractPreview, setContractPreview] = useState<{ document: StoredDealContractDocument; anchorY: number } | null>(null);
 	const [summaryView, setSummaryView] = useState(false);
 	const segmentActionsBlocked = summaryView && data.stages.length > 0;
 	const rowEditable = (row: EnrichedRow): boolean =>
@@ -1142,7 +1251,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	};
 	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
-	const dealDocumentCount = data.coreReals.length + data.supply.length + dealTransfers.length;
+	const dealDocumentCount = data.contracts.length + data.coreReals.length + data.supply.length + dealTransfers.length;
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => {
 		const left = remaining(r);
@@ -1590,6 +1699,22 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			{workingMode && showDealDocuments && (
 				<section className="deal-documents-panel" aria-label="Документы по сделке">
 					<header><h2>Документы по сделке</h2><span>{dealDocumentCount || 'нет документов'}</span></header>
+					{data.contracts.length > 0 && (
+						<div className="deal-documents-group">
+							<h3>Договоры</h3>
+							{data.contracts.map((document) => (
+								<button
+									type="button"
+									className="deal-document-row clickable"
+									key={document.id}
+									onClick={(event) => setContractPreview({ document, anchorY: documentPreviewAnchorY(event.currentTarget) })}
+								>
+									<span><b>Договор № {document.contractNumber}</b><small>{document.templateTitle} · {document.companyName} · {document.contractDate}</small></span>
+									<span className="deal-document-status">{rub(document.total)}</span>
+								</button>
+							))}
+						</div>
+					)}
 					{realizationDocuments.length > 0 && (
 						<div className="deal-documents-group">
 							<h3>Реализации</h3>
@@ -1645,6 +1770,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				</section>
 			)}
 			{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={() => setDocumentPreview(null)} />}
+			{contractPreview && <DealContractDocumentModal preview={contractPreview} onClose={() => setContractPreview(null)} />}
 
 			<div className="table-wrap">
 			<table className="products-table">
@@ -1835,9 +1961,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				<ContractModal
 					dealId={dealId}
 					onClose={() => setShowContract(false)}
-					onDone={(message) => {
+					onDone={async (message) => {
 						setShowContract(false);
 						setNotice({ kind: 'ok', text: message });
+						await onReload();
 					}}
 				/>
 			)}
@@ -1874,7 +2001,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 function ContractModal({ dealId, onClose, onDone }: {
 	dealId: number;
 	onClose: () => void;
-	onDone: (message: string) => void;
+	onDone: (message: string) => Promise<void>;
 }): JSX.Element {
 	const [context, setContext] = useState<DealContractContext | null>(null);
 	const [companyId, setCompanyId] = useState(0);
@@ -1884,7 +2011,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 	const [objectAddress, setObjectAddress] = useState('');
 	const [objectName, setObjectName] = useState('');
 	const [workDuration, setWorkDuration] = useState(14);
-	const [workDurationUnit, setWorkDurationUnit] = useState<ContractDurationUnit>('calendar');
+	const [workDurationUnit, setWorkDurationUnit] = useState<ContractDurationUnit>('working');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -1924,7 +2051,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 		setBusy(true);
 		setError(null);
 		try {
-			const number = await downloadDealContract({
+			const document = await createDealContract({
 				dealId,
 				companyId,
 				templateId,
@@ -1935,7 +2062,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 				workDuration,
 				workDurationUnit,
 			});
-			onDone(`✅ Договор${number ? ` № ${number}` : ''} сформирован и скачан.`);
+			await onDone(`✅ Договор № ${document.contractNumber} сформирован и добавлен в документы сделки.`);
 		} catch (reason) {
 			setError(String(reason instanceof Error ? reason.message : reason));
 		} finally {
@@ -1954,7 +2081,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 						<label className="wide"><span>Шаблон договора</span><select value={templateId} disabled={busy} onChange={(event) => setTemplateId(event.target.value as ContractTemplateId)}>
 							{context.templates.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>{item.title}{item.available ? '' : ' — готовится'}</option>)}
 						</select></label>
-						<label><span>Наша компания</span><select value={companyId} disabled={busy || Boolean(context.contractNumber)} onChange={(event) => setCompanyId(Number(event.target.value))}>
+						<label><span>Наша компания</span><select value={companyId} disabled={busy} onChange={(event) => setCompanyId(Number(event.target.value))}>
 							{context.ownCompanies.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
 						</select></label>
 						<label><span>Заказчик</span><input value={context.customer?.title ?? 'Не указан'} readOnly /></label>
@@ -1965,13 +2092,13 @@ function ContractModal({ dealId, onClose, onDone }: {
 						</select></label>
 						<label><span>НДС автоматически</span><input value={`НДС ${vatRate}%`} readOnly /></label>
 						<label><span>Дата договора</span><input type="date" value={contractDate} disabled={busy} onChange={(event) => setContractDate(event.target.value)} /></label>
-						<label><span>Номер автоматически</span><input value={context.contractNumber ? `№ ${context.contractNumber}` : 'будет присвоен при создании'} readOnly /></label>
+						<label><span>Номер автоматически</span><input value="будет присвоен новый номер при создании" readOnly /></label>
 						{template?.usesObjectName && <label className="wide"><span>Наименование объекта</span><input value={objectName} disabled={busy} onChange={(event) => setObjectName(event.target.value)} /></label>}
 						{template?.usesWorkDuration && <>
 							<label><span>Срок работ</span><input type="number" min={1} max={3650} step={1} value={workDuration} disabled={busy} onChange={(event) => setWorkDuration(Number(event.target.value))} /></label>
 							<label><span>Единица срока</span><select value={workDurationUnit} disabled={busy} onChange={(event) => setWorkDurationUnit(event.target.value as ContractDurationUnit)}>
-								<option value="calendar">Календарные дни</option>
 								<option value="working">Рабочие дни</option>
+								<option value="calendar">Календарные дни</option>
 							</select></label>
 						</>}
 						{template?.usesObjectAddress && <label className="wide"><span>Адрес объекта</span><input value={objectAddress} disabled={busy} onChange={(event) => setObjectAddress(event.target.value)} /></label>}
@@ -1981,7 +2108,7 @@ function ContractModal({ dealId, onClose, onDone }: {
 				{error && <p style={{ color: '#c0392b', fontSize: 13 }}>⛔ {error}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
 					<button onClick={onClose} style={splitGhost} disabled={busy}>Отмена</button>
-					<button className="btn-primary" disabled={!context || !company || blockers.length > 0 || busy} onClick={() => void generate()}>{busy ? 'Формирую…' : 'Скачать Word'}</button>
+					<button className="btn-primary" disabled={!context || !company || blockers.length > 0 || busy} onClick={() => void generate()}>{busy ? 'Формирую…' : 'Сформировать договор'}</button>
 				</div>
 			</div>
 		</div>

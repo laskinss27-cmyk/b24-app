@@ -2133,6 +2133,23 @@ export interface DealContractContext {
 	workDurationUnit: ContractDurationUnit;
 }
 
+export interface StoredDealContractDocument {
+	id: string;
+	dealId: number;
+	contractNumber: string;
+	templateId: ContractTemplateId;
+	templateTitle: string;
+	companyId: number;
+	companyName: string;
+	customerName: string;
+	contractDate: string;
+	contractDateIso: string;
+	createdAt: string;
+	filename: string;
+	vatRate: 5 | 22;
+	total: number;
+}
+
 export async function fetchDealContractContext(dealId: number): Promise<DealContractContext> {
 	const res = await fetch('/api/contracts/context', {
 		method: 'POST',
@@ -2144,7 +2161,18 @@ export async function fetchDealContractContext(dealId: number): Promise<DealCont
 	return json.context;
 }
 
-export async function downloadDealContract(input: {
+export async function fetchDealContracts(dealId: number): Promise<StoredDealContractDocument[]> {
+	const res = await fetch('/api/contracts/list', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = (await res.json()) as { ok?: boolean; error?: string; documents?: StoredDealContractDocument[] };
+	if (!json.ok || !json.documents) throw new Error(json.error ?? 'не удалось загрузить договоры сделки');
+	return json.documents;
+}
+
+export async function createDealContract(input: {
 	dealId: number;
 	companyId: number;
 	templateId: ContractTemplateId;
@@ -2154,37 +2182,50 @@ export async function downloadDealContract(input: {
 	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
-}): Promise<string> {
+}): Promise<StoredDealContractDocument> {
 	const res = await fetch('/api/contracts/generate', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...input }),
 	});
+	const json = (await res.json()) as { ok?: boolean; error?: string; document?: StoredDealContractDocument };
+	if (!res.ok || !json.ok || !json.document) {
+		throw new Error(json.error ?? `не удалось сформировать договор (HTTP ${res.status})`);
+	}
+	return json.document;
+}
+
+export async function fetchDealContractFile(dealId: number, documentId: string): Promise<Blob> {
+	const res = await fetch('/api/contracts/file', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, documentId }),
+	});
 	const contentType = res.headers.get('content-type') ?? '';
 	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
-		let message = `не удалось сформировать договор (HTTP ${res.status})`;
+		let message = `не удалось открыть договор (HTTP ${res.status})`;
 		try {
 			const json = (await res.json()) as { error?: string };
 			if (json.error) message = json.error;
 		} catch { /* сервер вернул не-JSON ошибку */ }
 		throw new Error(message);
 	}
-	const blob = await res.blob();
-	const disposition = res.headers.get('content-disposition') ?? '';
-	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? `contract-${input.dealId}.docx`;
-	const contractNumber = res.headers.get('x-contract-number') ?? '';
+	return res.blob();
+}
+
+export async function downloadStoredDealContract(contract: StoredDealContractDocument): Promise<void> {
+	const blob = await fetchDealContractFile(contract.dealId, contract.id);
 	const url = URL.createObjectURL(blob);
 	try {
-		const link = document.createElement('a');
+		const link = globalThis.document.createElement('a');
 		link.href = url;
-		link.download = filename;
-		document.body.appendChild(link);
+		link.download = contract.filename;
+		globalThis.document.body.appendChild(link);
 		link.click();
 		link.remove();
 	} finally {
 		URL.revokeObjectURL(url);
 	}
-	return contractNumber;
 }
 
 /** Открыть карточку сделки в Б24 (слайдером). */

@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
@@ -15,6 +16,10 @@ const CONTRACT_SEQUENCE_PATH = process.env['CONTRACT_SEQUENCE_PATH']
 	?? (process.env['NODE_ENV'] === 'production'
 		? '/app/state/contract-sequences.json'
 		: resolve(process.cwd(), '.tmp', 'contract-sequences.json'));
+const CONTRACT_DOCUMENTS_PATH = process.env['CONTRACT_DOCUMENTS_PATH']
+	?? (process.env['NODE_ENV'] === 'production'
+		? '/app/state/contracts'
+		: resolve(process.cwd(), '.tmp', 'contracts'));
 const B24_COLLAPSE_PRODUCT_ID = 9814;
 const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
 const CONTRACT_FIELD_SPECS = [
@@ -247,7 +252,127 @@ export interface ContractLine {
 	total: number;
 }
 
+export interface StoredDealContractDocument {
+	id: string;
+	dealId: number;
+	contractNumber: string;
+	templateId: ContractTemplateId;
+	templateTitle: string;
+	companyId: number;
+	companyName: string;
+	customerName: string;
+	contractDate: string;
+	contractDateIso: string;
+	createdAt: string;
+	filename: string;
+	vatRate: 5 | 22;
+	total: number;
+}
+
 const clean = (value: unknown): string => String(value ?? '').trim();
+const isNotFound = (error: unknown): boolean =>
+	error instanceof Error && 'code' in error && error.code === 'ENOENT';
+const storedContractId = (value: string): string => {
+	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+		throw new Error('неверный идентификатор договора');
+	}
+	return value;
+};
+const storedContractDealDirectory = (dealId: number, basePath = CONTRACT_DOCUMENTS_PATH): string => {
+	if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('неверный ID сделки');
+	return resolve(basePath, String(dealId));
+};
+const storedContractMetadataPath = (dealId: number, id: string, basePath = CONTRACT_DOCUMENTS_PATH): string =>
+	resolve(storedContractDealDirectory(dealId, basePath), `${storedContractId(id)}.json`);
+const storedContractFilePath = (dealId: number, id: string, basePath = CONTRACT_DOCUMENTS_PATH): string =>
+	resolve(storedContractDealDirectory(dealId, basePath), `${storedContractId(id)}.docx`);
+
+function parseStoredContractDocument(value: unknown, dealId: number): StoredDealContractDocument {
+	const row = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+	const id = storedContractId(clean(row['id']));
+	const storedDealId = Number(row['dealId']);
+	if (storedDealId !== dealId) throw new Error('договор относится к другой сделке');
+	const templateId = clean(row['templateId']);
+	if (!CONTRACT_TEMPLATES.some((template) => template.id === templateId)) {
+		throw new Error('неизвестный шаблон сохранённого договора');
+	}
+	return {
+		id,
+		dealId: storedDealId,
+		contractNumber: clean(row['contractNumber']),
+		templateId: templateId as ContractTemplateId,
+		templateTitle: clean(row['templateTitle']),
+		companyId: Number(row['companyId']),
+		companyName: clean(row['companyName']),
+		customerName: clean(row['customerName']),
+		contractDate: clean(row['contractDate']),
+		contractDateIso: clean(row['contractDateIso']),
+		createdAt: clean(row['createdAt']),
+		filename: clean(row['filename']),
+		vatRate: Number(row['vatRate']) === 22 ? 22 : 5,
+		total: Number(row['total']) || 0,
+	};
+}
+
+export async function listDealContractDocuments(
+	dealId: number,
+	basePath = CONTRACT_DOCUMENTS_PATH,
+): Promise<StoredDealContractDocument[]> {
+	const directory = storedContractDealDirectory(dealId, basePath);
+	let entries;
+	try {
+		entries = await readdir(directory, { withFileTypes: true });
+	} catch (error) {
+		if (isNotFound(error)) return [];
+		throw error;
+	}
+	const documents = await Promise.all(entries
+		.filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+		.map(async (entry): Promise<StoredDealContractDocument | null> => {
+			try {
+				return parseStoredContractDocument(
+					JSON.parse(await readFile(resolve(directory, entry.name), 'utf8')),
+					dealId,
+				);
+			} catch {
+				return null;
+			}
+		}));
+	return documents
+		.filter((document): document is StoredDealContractDocument => document != null)
+		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function readDealContractDocument(
+	dealId: number,
+	id: string,
+	basePath = CONTRACT_DOCUMENTS_PATH,
+): Promise<{ document: StoredDealContractDocument; file: Buffer }> {
+	const document = parseStoredContractDocument(
+		JSON.parse(await readFile(storedContractMetadataPath(dealId, id, basePath), 'utf8')),
+		dealId,
+	);
+	const file = await readFile(storedContractFilePath(dealId, document.id, basePath));
+	return { document, file };
+}
+
+export async function saveDealContractDocument(
+	document: StoredDealContractDocument,
+	file: Buffer,
+	basePath = CONTRACT_DOCUMENTS_PATH,
+): Promise<void> {
+	const directory = storedContractDealDirectory(document.dealId, basePath);
+	await mkdir(directory, { recursive: true });
+	const filePath = storedContractFilePath(document.dealId, document.id, basePath);
+	const metadataPath = storedContractMetadataPath(document.dealId, document.id, basePath);
+	const temporaryFilePath = `${filePath}.${process.pid}.tmp`;
+	const temporaryMetadataPath = `${metadataPath}.${process.pid}.tmp`;
+	await writeFile(temporaryFilePath, file);
+	await rename(temporaryFilePath, filePath);
+	await writeFile(temporaryMetadataPath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+	await rename(temporaryMetadataPath, metadataPath);
+}
+
 const titleCase = (value: string): string => value.toLocaleLowerCase('ru-RU').replace(
 	/(^|[\s-])([\p{L}])/gu,
 	(_, prefix: string, letter: string) => `${prefix}${letter.toLocaleUpperCase('ru-RU')}`,
@@ -503,7 +628,7 @@ export async function getContractContext(client: B24Client, dealId: number): Pro
 		templates: CONTRACT_TEMPLATES,
 		selectedTemplateId: 'universal_work',
 		workDuration: 14,
-		workDurationUnit: 'calendar',
+		workDurationUnit: 'working',
 	};
 }
 
@@ -974,14 +1099,9 @@ export async function allocatePersistentContractNumber(args: {
 
 async function allocateContractNumber(
 	client: B24Client,
-	dealId: number,
 	companyId: number,
 	requested: string,
 ): Promise<string> {
-	const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
-	const savedNumber = clean(deal[CONTRACT_NUMBER_FIELD]);
-	const savedCompany = Number(deal[CONTRACT_COMPANY_FIELD] ?? 0);
-	if (savedNumber && savedCompany === companyId) return savedNumber;
 	const key = `contract_seq_${companyId}`;
 	const options = await client.call<Record<string, unknown>>('app.option.get', {});
 	const baseline = Number(options[key] ?? (companyId === 8 ? 514 : 0));
@@ -1039,7 +1159,12 @@ export async function generateDealContract(
 	client: B24Client,
 	dealId: number,
 	input: ContractGenerateInput,
-): Promise<{ file: Buffer; filename: string; contractNumber: string }> {
+): Promise<{
+	file: Buffer;
+	filename: string;
+	contractNumber: string;
+	document: StoredDealContractDocument;
+}> {
 	const context = await getContractContext(client, dealId);
 	const company = context.ownCompanies.find((item) => item.id === input.companyId);
 	if (!company) throw new Error('выбранная наша компания не найдена в Битрикс24');
@@ -1061,7 +1186,7 @@ export async function generateDealContract(
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
 	const lines = await loadContractLines(client, erp, dealId);
 	if (!lines.length) throw new Error('в сделке нет товаров или работ для сметы');
-	const contractNumber = await allocateContractNumber(client, dealId, company.id, '');
+	const contractNumber = await allocateContractNumber(client, company.id, '');
 	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
 	const contractDate = contractDateText(dateIso);
 	const file = await buildContractDocx({
@@ -1087,9 +1212,28 @@ export async function generateDealContract(
 			[CONTRACT_DATE_FIELD]: dateIso,
 		},
 	});
+	const filename = `contract-${input.templateId}-${company.id}-${contractNumber}.docx`;
+	const document: StoredDealContractDocument = {
+		id: randomUUID(),
+		dealId,
+		contractNumber,
+		templateId: input.templateId,
+		templateTitle: template.title,
+		companyId: company.id,
+		companyName: company.shortName || company.title,
+		customerName: customer.shortName || customer.fullName || customer.title,
+		contractDate,
+		contractDateIso: dateIso,
+		createdAt: new Date().toISOString(),
+		filename,
+		vatRate,
+		total: lines.reduce((sum, line) => sum + line.total, 0),
+	};
+	await saveDealContractDocument(document, file);
 	return {
 		file,
-		filename: `contract-${input.templateId}-${company.id}-${contractNumber}.docx`,
+		filename,
 		contractNumber,
+		document,
 	};
 }

@@ -42,6 +42,8 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/realizations/list': ['realizations.view'],
 	'/api/quicksale/create': ['realizations.create'],
 	'/api/contracts/context': ['deals.view'],
+	'/api/contracts/list': ['deals.view'],
+	'/api/contracts/file': ['deals.view'],
 	'/api/contracts/generate': ['deals.create_contract'],
 	'/api/reports/sales': ['reports.sales'],
 

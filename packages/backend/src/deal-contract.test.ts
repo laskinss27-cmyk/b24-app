@@ -14,7 +14,11 @@ import {
 	contractDateText,
 	contractVatRate,
 	contractWorkDuration,
+	listDealContractDocuments,
+	readDealContractDocument,
+	saveDealContractDocument,
 	type ContractParty,
+	type StoredDealContractDocument,
 } from './deal-contract.js';
 
 const company: ContractParty = {
@@ -224,6 +228,47 @@ test('contract numbers persist and concurrent allocations stay unique', async ()
 			'525',
 		);
 		assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { contract_seq_8: 525 });
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test('generated contracts are stored as independent deal documents', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'b24-deal-contracts-'));
+	const first: StoredDealContractDocument = {
+		id: 'e8d754a2-e203-4e62-a748-5da67ce56ae1',
+		dealId: 37494,
+		contractNumber: '515',
+		templateId: 'universal_work',
+		templateTitle: 'Универсальный договор подряда',
+		companyId: 8,
+		companyName: 'ИП Поляков Д.Ю.',
+		customerName: 'Иванов И.И.',
+		contractDate: '31 июля 2026г.',
+		contractDateIso: '2026-07-31',
+		createdAt: '2026-07-31T06:00:00.000Z',
+		filename: 'contract-universal_work-8-515.docx',
+		vatRate: 5,
+		total: 42_000,
+	};
+	const second: StoredDealContractDocument = {
+		...first,
+		id: '54080e24-9a86-466f-ac1a-d696514d599d',
+		contractNumber: '516',
+		createdAt: '2026-07-31T07:00:00.000Z',
+		filename: 'contract-universal_work-8-516.docx',
+	};
+	try {
+		await saveDealContractDocument(first, Buffer.from('first contract'), directory);
+		await saveDealContractDocument(second, Buffer.from('second contract'), directory);
+		assert.deepEqual(
+			(await listDealContractDocuments(37494, directory)).map((document) => document.contractNumber),
+			['516', '515'],
+		);
+		const stored = await readDealContractDocument(37494, first.id, directory);
+		assert.equal(stored.document.filename, first.filename);
+		assert.equal(stored.file.toString('utf8'), 'first contract');
+		await assert.rejects(() => readDealContractDocument(37495, first.id, directory));
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
