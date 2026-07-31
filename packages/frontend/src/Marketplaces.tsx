@@ -630,7 +630,7 @@ export function Marketplaces(): JSX.Element {
 		<section className="marketplace-page">
 			<div className="marketplace-actions">
 				<button type="button" className="marketplace-action primary" disabled={!form?.canCreate} onClick={() => setSaleOpen(true)}><span>↗</span><b>Реализация</b><small>Списать проданный товар</small></button>
-				<button type="button" className="marketplace-action" onClick={() => setCatalogOpen(true)}><span>＋</span><b>Добавить новый товар</b><small>Открыть базу товаров</small></button>
+				<button type="button" className="marketplace-action" onClick={() => setCatalogOpen(true)}><span>▦</span><b>База товаров маркетплейсов</b><small>Старые ID и карточки товаров</small></button>
 				<button type="button" className="marketplace-action" disabled={!form?.canCreate} onClick={() => setBundleOpen(true)}><span>▦</span><b>Сформировать комплект</b><small>Объединить несколько штук</small></button>
 				<button type="button" className="marketplace-action" disabled={!form?.canCreate} onClick={() => setReturnOpen(true)}><span>↩</span><b>Возврат товара</b><small>Вернуть из реализации</small></button>
 			</div>

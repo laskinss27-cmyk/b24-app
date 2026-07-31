@@ -333,8 +333,8 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 		const marketplaceMode = body.marketplaceMode === true;
 		const canEditMarketplaceOldId = marketplaceMode && (
-			appPermission(req, 'supply.view', legacyAccess.canEditPrices)
-			|| appPermission(req, 'marketplaces.view', false)
+			appPermission(req, 'supply.view', legacyAccess.canEditPrices || legacyAccess.canEditCard)
+			|| appPermission(req, 'marketplaces.view', legacyAccess.canEditCard)
 		);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		const now = Date.now();
@@ -359,7 +359,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			const pricedRows = canViewPurchasePrices
 				? data.rows
 				: data.rows.map((row) => ({ ...row, purchase: null }));
-			const rows = canEditMarketplaceOldId
+			const rows = marketplaceMode
 				? pricedRows
 				: pricedRows.map(({ marketplaceOldId: _marketplaceOldId, ...row }) => row);
 			return {
@@ -457,8 +457,8 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const legacyAccess = await catalogAccess(client);
-		const canEdit = appPermission(req, 'supply.view', legacyAccess.canEditPrices)
-			|| appPermission(req, 'marketplaces.view', false);
+		const canEdit = appPermission(req, 'supply.view', legacyAccess.canEditPrices || legacyAccess.canEditCard)
+			|| appPermission(req, 'marketplaces.view', legacyAccess.canEditCard);
 		if (!canEdit) {
 			return reply.code(403).send({ ok: false, error: 'поле «Старый ID» доступно только в разделе маркетплейсов' });
 		}
