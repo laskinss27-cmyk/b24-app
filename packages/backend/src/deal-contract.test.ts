@@ -72,6 +72,47 @@ const customer: ContractParty = {
 	missing: [],
 };
 
+const corporateCustomer: ContractParty = {
+	id: 101,
+	entityTypeId: 4,
+	title: 'ООО "Тестовый заказчик"',
+	kind: 'company',
+	fullName: 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "ТЕСТОВЫЙ ЗАКАЗЧИК"',
+	shortName: 'ООО "ТЕСТОВЫЙ ЗАКАЗЧИК"',
+	director: 'ПЕТРОВ ПЕТР ПЕТРОВИЧ',
+	email: 'customer-company@example.test',
+	nameParts: { last: '', first: '', patronymic: '' },
+	requisite: {
+		RQ_COMPANY_NAME: 'ООО "ТЕСТОВЫЙ ЗАКАЗЧИК"',
+		RQ_COMPANY_FULL_NAME: 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "ТЕСТОВЫЙ ЗАКАЗЧИК"',
+		RQ_DIRECTOR: 'ПЕТРОВ ПЕТР ПЕТРОВИЧ',
+		RQ_INN: '7800000000',
+		RQ_KPP: '780001001',
+		RQ_OGRN: '1000000000000',
+	},
+	address: { POSTAL_CODE: '190000', PROVINCE: 'г. Санкт-Петербург', ADDRESS_1: 'тестовый адрес' },
+	bank: {
+		RQ_BANK_NAME: 'Тестовый банк',
+		RQ_BIK: '040000000',
+		RQ_ACC_NUM: '40700000000000000000',
+		RQ_COR_ACC_NUM: '30100000000000000000',
+	},
+	certificate: '',
+	missing: [],
+};
+
+function plainDocumentText(xml: string): string {
+	return xml
+		.replace(/<w:br\s*\/>/g, '\n')
+		.replace(/<\/w:p>/g, '\n')
+		.replace(/<[^>]+>/g, '')
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&');
+}
+
 test('buildContractDocx fills markers and repeats both product tables', async () => {
 	const file = await buildContractDocx({
 		templateId: 'universal_work',
@@ -118,7 +159,7 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 	assert.match(xml, /2\.1\.1\. Выполнить свои обязательства в полном объеме в соответствии с Приложениями к Договору в сроки, указанные в п\. 3\.1\. Договора\./);
 	assert.doesNotMatch(xml, /согласно строительных норм и правил/);
 	assert.equal((xml.match(/<w:insideV w:val="single"/g) ?? []).length, 3);
-	assert.match(xml, /<w:t>Г\. Санкт-Петербург<\/w:t>/);
+	assert.match(xml, /<w:t>г\. Санкт-Петербург<\/w:t>/);
 	assert.equal((xml.match(/<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"\/>/g) ?? []).length, 1);
 });
 
@@ -145,7 +186,7 @@ test('new contract templates replace sample parties, dates, numbers and object d
 		const file = await buildContractDocx({
 			templateId,
 			contractNumber: '901',
-			contractDate: '29 июля 2026г.',
+			contractDate: '«29» июля 2026 г.',
 			company,
 			customer,
 			objectAddress: 'Санкт-Петербург, Невский проспект, 1',
@@ -167,7 +208,7 @@ test('new contract templates replace sample parties, dates, numbers and object d
 			`${templateId}: sample data leaked`,
 		);
 		assert.match(xml, /№ 901/, `${templateId}: contract number`);
-		assert.match(xml, /29 июля 2026г\./, `${templateId}: contract date`);
+		assert.match(xml, /«29» июля 2026 г\./, `${templateId}: contract date`);
 		assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/, `${templateId}: our company`);
 		assert.match(xml, /Иванов Иван Иванович/, `${templateId}: customer`);
 		assert.doesNotMatch(xml, /w:highlight/, `${templateId}: highlight`);
@@ -206,8 +247,60 @@ test('contract filename contains type, number, date and short own legal entity n
 });
 
 test('contract date is printed with a Russian month name', () => {
-	assert.equal(contractDateText('2026-07-29'), '29 июля 2026г.');
+	assert.equal(contractDateText('2026-07-29'), '«29» июля 2026 г.');
 	assert.equal(contractDateText('not-a-date'), 'not-a-date');
+});
+
+test('contract headers, annexes, emails and acts consistently use the selected legal entities', async () => {
+	const expectedReferences: Partial<Record<(typeof CONTRACT_TEMPLATES)[number]['id'], string>> = {
+		universal_work: 'к Договору подряда № 902',
+		design: 'к Договору на выполнение проектных работ № 902',
+		smart_home: 'к Договору подряда № 902',
+	};
+	for (const template of CONTRACT_TEMPLATES) {
+		const file = await buildContractDocx({
+			templateId: template.id,
+			contractNumber: '902',
+			contractDate: '«31» июля 2026 г.',
+			company,
+			customer: corporateCustomer,
+			objectAddress: 'г. Санкт-Петербург, Невский проспект, 1',
+			objectName: 'Жилой дом',
+			workDuration: 14,
+			workDurationUnit: 'working',
+			lines: [{ name: 'Тестовая позиция', price: 1_000, quantity: 1, total: 1_000 }],
+		});
+		const zip = await JSZip.loadAsync(file);
+		const xml = await zip.file('word/document.xml')?.async('string');
+		assert.ok(xml, `${template.id}: missing word/document.xml`);
+		const text = plainDocumentText(xml);
+		assert.match(text, /г\. Санкт-Петербург\s+«31» июля 2026 г\./, `${template.id}: city and date`);
+		assert.match(
+			text,
+			/Общество с ограниченной ответственностью "Новый Дом", именуемое/,
+			`${template.id}: our company full name`,
+		);
+		assert.match(
+			text,
+			/Общество с ограниченной ответственностью "Тестовый Заказчик", именуемое/,
+			`${template.id}: customer company full name`,
+		);
+		assert.doesNotMatch(text, /buh@umdim\.ru/, `${template.id}: another legal entity email`);
+		if (template.id === 'universal_work' || template.id === 'supply') {
+			assert.match(text, /buh@homelogicsoft\.com/, `${template.id}: selected legal entity email`);
+		}
+		const expectedReference = expectedReferences[template.id];
+		if (expectedReference) assert.ok(text.includes(expectedReference), `${template.id}: annex contract type`);
+		if (template.id === 'universal_work') {
+			assert.match(
+				text,
+				/Заказчик: Общество с ограниченной ответственностью "Тестовый Заказчик"/,
+				'universal_work: completion act customer',
+			);
+			assert.doesNotMatch(text, /Заказчик: Петров Петр Петрович/, 'universal_work: director shown as customer');
+		}
+		assert.doesNotMatch(text, /Генеральный директор\s+Забоев Григорий Анатольевич\s+_+/, `${template.id}: duplicated director name`);
+	}
 });
 
 test('VAT is derived from our legal entity type', () => {

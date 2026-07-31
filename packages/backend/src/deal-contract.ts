@@ -109,6 +109,12 @@ const CONTRACT_FILENAME_TITLES: Record<ContractTemplateId, string> = {
 	design: 'Договор на проектирование',
 	smart_home: 'Договор подряда',
 };
+const CONTRACT_REFERENCE_TITLES: Record<ContractTemplateId, string> = {
+	universal_work: 'Договору подряда',
+	supply: 'Договору поставки',
+	design: 'Договору на выполнение проектных работ',
+	smart_home: 'Договору подряда',
+};
 
 type Address = Record<string, unknown>;
 type Requisite = Record<string, unknown>;
@@ -429,7 +435,7 @@ export async function saveDealContractDocument(
 }
 
 const titleCase = (value: string): string => value.toLocaleLowerCase('ru-RU').replace(
-	/(^|[\s-])([\p{L}])/gu,
+	/(^|[\s«»"'“”„-])([\p{L}])/gu,
 	(_, prefix: string, letter: string) => `${prefix}${letter.toLocaleUpperCase('ru-RU')}`,
 );
 const firstEmail = (value: unknown): string => {
@@ -716,8 +722,19 @@ function partyPreamble(party: ContractParty, role: string): string {
 		return `Индивидуальный предприниматель ${name}, `
 			+ `(ОГРНИП ${clean(party.requisite?.['RQ_OGRNIP'])}), ${namedRole(name)} в дальнейшем «${role}»`;
 	}
-	return `${party.shortName}, именуемое в дальнейшем «${role}», в лице Генерального директора `
+	return `${companyLegalName(party)}, именуемое в дальнейшем «${role}», в лице Генерального директора `
 		+ `${personGenitive(party.director)}, действующего на основании Устава`;
+}
+
+function companyLegalName(party: ContractParty): string {
+	const rq = party.requisite ?? {};
+	const source = clean(rq['RQ_COMPANY_FULL_NAME']) || party.fullName || clean(rq['RQ_COMPANY_NAME']) || party.title;
+	const expanded = source.replace(/^\s*ООО(?=\s|[«"'])\s*/i, 'Общество с ограниченной ответственностью ');
+	if (/[a-zа-яё]/u.test(expanded)) return expanded;
+	return titleCase(expanded).replace(
+		/^Общество С Ограниченной Ответственностью/u,
+		'Общество с ограниченной ответственностью',
+	);
 }
 
 function partyRequisites(party: ContractParty): string {
@@ -748,13 +765,14 @@ function signature(party: ContractParty): string {
 		: clean(party.requisite?.['RQ_NAME']) || party.fullName);
 	const line = `_____________/ ${shortPersonName(fullName)} /`;
 	return party.kind === 'company'
-		? `Генеральный директор\n${fullName}\n${line}\nМ.П.`
+		? `Генеральный директор\n${line}\nМ.П.`
 		: line;
 }
 
 function completionActPartyName(party: ContractParty): string {
-	if (party.kind === 'company') return titleCase(party.director);
-	return titleCase(clean(party.requisite?.['RQ_NAME']) || party.fullName);
+	if (party.kind === 'company') return companyLegalName(party);
+	if (party.kind === 'ip') return `ИП ${titleCase(clean(party.requisite?.['RQ_NAME']) || party.fullName)}`;
+	return titleCase(party.fullName);
 }
 
 function contractorEmail(party: ContractParty): string {
@@ -844,7 +862,7 @@ export function contractDateText(dateIso: string): string {
 	const monthIndex = Number(match[2]) - 1;
 	const day = Number(match[3]);
 	if (!monthNames[monthIndex] || day < 1 || day > 31) return dateIso;
-	return `${day} ${monthNames[monthIndex]} ${match[1]}г.`;
+	return `«${day}» ${monthNames[monthIndex]} ${match[1]} г.`;
 }
 
 function formatMoney(value: number): string {
@@ -862,6 +880,60 @@ function escapeXml(value: string): string {
 
 function wordXmlText(value: string): string {
 	return escapeXml(value).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+}
+
+function decodeXmlText(value: string): string {
+	return value
+		.replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+		.replace(/&#(\d+);/g, (_match, decimal: string) => String.fromCodePoint(Number.parseInt(decimal, 10)))
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&');
+}
+
+function replaceTextAcrossRuns(xml: string, needle: string, replacement: string): string {
+	if (!needle || needle === replacement) return xml;
+	return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraph) => {
+		const textPattern = /(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/g;
+		const matches = [...paragraph.matchAll(textPattern)];
+		if (!matches.length) return paragraph;
+		const texts = matches.map((match) => decodeXmlText(match[2] ?? ''));
+		let combined = texts.join('');
+		if (!combined.includes(needle)) return paragraph;
+		let position = combined.indexOf(needle);
+		let replacements = 0;
+		while (position >= 0 && replacements < 100) {
+			const end = position + needle.length;
+			let offset = 0;
+			let first = -1;
+			let last = -1;
+			for (let index = 0; index < texts.length; index++) {
+				const next = offset + (texts[index]?.length ?? 0);
+				if (first < 0 && position < next) first = index;
+				if (end <= next) {
+					last = index;
+					break;
+				}
+				offset = next;
+			}
+			if (first < 0 || last < 0) break;
+			const firstStart = texts.slice(0, first).reduce((sum, value) => sum + value.length, 0);
+			const lastStart = texts.slice(0, last).reduce((sum, value) => sum + value.length, 0);
+			const prefix = (texts[first] ?? '').slice(0, position - firstStart);
+			const suffix = (texts[last] ?? '').slice(end - lastStart);
+			texts[first] = prefix + replacement + (first === last ? suffix : '');
+			for (let index = first + 1; index < last; index++) texts[index] = '';
+			if (last !== first) texts[last] = suffix;
+			combined = texts.join('');
+			position = combined.indexOf(needle, position + replacement.length);
+			replacements++;
+		}
+		let index = 0;
+		return paragraph.replace(textPattern, (_match, opening: string, _value: string, closing: string) =>
+			`${opening}${escapeXml(texts[index++] ?? '')}${closing}`);
+	});
 }
 
 function replaceToken(xml: string, token: string, value: string): string {
@@ -1039,8 +1111,31 @@ export async function buildContractDocx(data: {
 	const documentFile = zip.file('word/document.xml');
 	if (!documentFile) throw new Error('в шаблоне договора нет word/document.xml');
 	let xml = await documentFile.async('string');
+	const contractReference = CONTRACT_REFERENCE_TITLES[data.templateId];
+	for (const sourceReference of [
+		'договору подряда',
+		'Договору подряда',
+		'Договору поставки',
+		'Договору на выполнение проектных работ',
+		'Договору',
+	]) {
+		xml = replaceTextAcrossRuns(
+			xml,
+			`к ${sourceReference} № {{CONTRACT_NUMBER}}`,
+			`к ${contractReference} № {{CONTRACT_NUMBER}}`,
+		);
+	}
+	for (const templateEmail of [
+		'manager@umniydom.pro',
+		'buh@umdim.ru',
+		'buh@homelogicsoft.com',
+		'buh@dom-electro.ru',
+		'buh@umniydom.pro',
+		'buh@anemone.su',
+	]) {
+		xml = replaceTextAcrossRuns(xml, templateEmail, contractorEmail(data.company));
+	}
 	xml = xml
-		.split('buh@homelogicsoft.com').join(wordXmlText(contractorEmail(data.company)))
 		.split('Объект, адрес объекта, виды и объемы работ').join('Адрес объекта, виды и объемы работ')
 		.split('Всего работ').join('Всего')
 		.split('Итого работ').join('Всего')
@@ -1083,7 +1178,7 @@ export async function buildContractDocx(data: {
 	const values: Record<string, string> = {
 		CONTRACT_NUMBER: data.contractNumber,
 		CONTRACT_DATE: data.contractDate,
-		CITY: 'Г. Санкт-Петербург',
+		CITY: 'г. Санкт-Петербург',
 		CONTRACTOR_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
 		CUSTOMER_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, именуемые в дальнейшем по отдельности «Сторона», а при совместном упоминании «Стороны», заключили настоящий договор (далее – «Договор») о нижеследующем:`,
 		CONTRACTOR_AGREEMENT_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
