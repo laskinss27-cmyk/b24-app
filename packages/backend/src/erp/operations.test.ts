@@ -476,6 +476,15 @@ test('marketplace realization gets a human title, warehouse marker and is submit
 	assert.equal(journal[0]?.operation, 'sale');
 	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
 	assert.equal(journal[0]?.quantity, 2);
+	assert.deepEqual(journal[0]?.items, [{
+		productId: 101,
+		itemName: '#101',
+		quantity: 2,
+		rate: 1500,
+		amount: 3000,
+		direction: 'out',
+		storeTitle: 'Маркетплейс',
+	}]);
 });
 
 test('marketplace bundle repacks source units into finished bundle units on the same warehouse', async () => {
@@ -517,6 +526,13 @@ test('marketplace bundle repacks source units into finished bundle units on the 
 	assert.equal(journal[0]?.itemCount, 1);
 	assert.equal(journal[0]?.quantity, 4);
 	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
+	assert.deepEqual(
+		journal[0]?.items.map((line) => [line.productId, line.quantity, line.direction, line.storeTitle]),
+		[
+			[101, 12, 'out', 'Маркетплейс'],
+			[202, 4, 'in', 'Маркетплейс'],
+		],
+	);
 });
 
 test('marketplace return is linked to its sale and cannot exceed the quantity left to return', async () => {
@@ -579,6 +595,8 @@ test('marketplace return is linked to its sale and cannot exceed the quantity le
 	assert.equal(journal[0]?.operation, 'return');
 	assert.equal(journal[0]?.storeTitle, 'Shelly');
 	assert.equal(journal[0]?.quantity, 2);
+	assert.equal(journal[0]?.items[0]?.direction, 'in');
+	assert.equal(journal[0]?.items[0]?.quantity, 2);
 });
 
 test('marketplace return starts from a sale and returns several selected sold-out items together', async () => {

@@ -7383,6 +7383,25 @@ body.deal-placement-body #root {
 	font-size: 10px;
 }
 
+.marketplace-document-link {
+	display: block;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: #1f5fae;
+	cursor: pointer;
+	font: inherit;
+	text-align: left;
+}
+
+.marketplace-document-link:hover b {
+	text-decoration: underline;
+}
+
+.marketplace-document-link small {
+	color: #8b95a5;
+}
+
 .marketplace-kind,
 .marketplace-status {
 	display: inline-block;
@@ -7506,6 +7525,73 @@ body.deal-placement-body #root {
 
 .marketplace-modal h2 {
 	margin: 2px 0 0;
+	font-size: 20px;
+}
+
+.marketplace-document-modal {
+	width: min(1040px, 100%);
+}
+
+.marketplace-document-facts {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 1px;
+	background: #e7ebf0;
+	border-bottom: 1px solid #e7ebf0;
+}
+
+.marketplace-document-facts > div {
+	display: grid;
+	gap: 5px;
+	padding: 13px 16px;
+	background: #f8fafc;
+}
+
+.marketplace-document-facts span,
+.marketplace-document-total > span,
+.marketplace-document-total div span {
+	color: #7a8699;
+	font-size: 11px;
+}
+
+.marketplace-document-lines {
+	margin-top: 18px;
+}
+
+.marketplace-document-direction {
+	display: inline-block;
+	padding: 4px 8px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.marketplace-document-direction.out {
+	background: #fff1e5;
+	color: #a64d00;
+}
+
+.marketplace-document-direction.in {
+	background: #e5f7ed;
+	color: #16784a;
+}
+
+.marketplace-document-total {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 20px;
+	padding: 4px 22px 18px;
+}
+
+.marketplace-document-total div {
+	display: grid;
+	gap: 3px;
+	text-align: right;
+}
+
+.marketplace-document-total div b {
 	font-size: 20px;
 }
 
@@ -7782,6 +7868,16 @@ body.deal-placement-body #root {
 	}
 	.marketplace-return-summary {
 		grid-template-columns: repeat(2, minmax(120px, 1fr));
+	}
+	.marketplace-document-facts {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.marketplace-document-total {
+		align-items: stretch;
+		flex-direction: column;
+	}
+	.marketplace-document-total div {
+		text-align: left;
 	}
 	.marketplace-bundle-arrow {
 		transform: rotate(90deg);

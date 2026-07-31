@@ -57,6 +57,10 @@ const MOCK_ROWS: MarketplaceOperationRow[] = [{
 	total: 15990,
 	itemCount: 2,
 	quantity: 3,
+	items: [
+		{ productId: 101, itemName: 'Комплект CTV-M5702 W 2 шт', quantity: 1, rate: 9990, amount: 9990, direction: 'out', storeTitle: 'Маркетплейс' },
+		{ productId: 102, itemName: 'Реле Shelly Plus 1PM', quantity: 2, rate: 3000, amount: 6000, direction: 'out', storeTitle: 'Маркетплейс' },
+	],
 }];
 
 const money = (value: number): string =>
@@ -523,6 +527,57 @@ function MarketplaceReturnModal({
 	);
 }
 
+function MarketplaceDocumentModal({
+	row,
+	onClose,
+}: {
+	row: MarketplaceOperationRow;
+	onClose: () => void;
+}): JSX.Element {
+	const items = row.items ?? [];
+	return (
+		<div className="marketplace-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<section className="marketplace-modal marketplace-document-modal" role="dialog" aria-modal="true" aria-labelledby="marketplace-document-title">
+				<header>
+					<div>
+						<small>{OPERATION_LABELS[row.operation]} · {row.name}</small>
+						<h2 id="marketplace-document-title">{row.title}</h2>
+					</div>
+					<button type="button" className="marketplace-close" onClick={onClose} aria-label="Закрыть">×</button>
+				</header>
+				<div className="marketplace-document-facts">
+					<div><span>Дата</span><b>{row.date.split('-').reverse().join('.')}</b></div>
+					<div><span>Маркетплейс</span><b>{row.marketplace || '—'}</b></div>
+					<div><span>Склад</span><b>{row.storeTitle || '—'}</b></div>
+					<div><span>Статус</span><b>{row.submitted ? 'Проведено' : 'Черновик'}</b></div>
+				</div>
+				<div className="marketplace-lines marketplace-document-lines">
+					<table>
+						<thead><tr><th>Движение</th><th>Товар</th><th>Склад</th><th>Количество</th><th>Цена</th><th>Сумма</th></tr></thead>
+						<tbody>
+							{items.length
+								? items.map((item, index) => <tr key={`${item.productId}:${item.direction}:${index}`}>
+									<td><span className={`marketplace-document-direction ${item.direction}`}>{item.direction === 'in' ? 'Зачисление' : 'Списание'}</span></td>
+									<td><b>{item.itemName}</b><small>#{item.productId}</small></td>
+									<td>{item.storeTitle || row.storeTitle || '—'}</td>
+									<td>{item.quantity} шт.</td>
+									<td>{money(item.rate)}</td>
+									<td><b>{money(item.amount)}</b></td>
+								</tr>)
+								: <tr><td className="marketplace-empty" colSpan={6}>В документе нет товарных строк.</td></tr>}
+						</tbody>
+					</table>
+				</div>
+				<div className="marketplace-document-total">
+					<span>{items.length} поз. · {items.reduce((sum, item) => sum + item.quantity, 0)} шт.</span>
+					<div><span>Сумма документа</span><b>{money(row.total)}</b></div>
+				</div>
+				<footer><button type="button" className="primary" onClick={onClose}>Закрыть</button></footer>
+			</section>
+		</div>
+	);
+}
+
 export function Marketplaces(): JSX.Element {
 	const ctx = getContext();
 	const [form, setForm] = useState<MarketplaceFormData | null>(ctx.__mock ? MOCK_FORM : null);
@@ -537,6 +592,7 @@ export function Marketplaces(): JSX.Element {
 	const [bundleOpen, setBundleOpen] = useState(false);
 	const [returnOpen, setReturnOpen] = useState(false);
 	const [catalogOpen, setCatalogOpen] = useState(false);
+	const [openedDocument, setOpenedDocument] = useState<MarketplaceOperationRow | null>(null);
 
 	const load = async (): Promise<void> => {
 		if (ctx.__mock) return;
@@ -606,7 +662,7 @@ export function Marketplaces(): JSX.Element {
 									? <tr><td className="marketplace-empty" colSpan={7}>Операций пока нет.</td></tr>
 									: visibleRows.map((row) => <tr key={row.name}>
 										<td><span className={`marketplace-kind ${operationTone(row.operation)}`}>{OPERATION_LABELS[row.operation]}</span></td>
-										<td><b>{row.title}</b><small>{row.name}</small></td>
+										<td><button type="button" className="marketplace-document-link" onClick={() => setOpenedDocument(row)}><b>{row.title}</b><small>{row.name}</small></button></td>
 										<td>{row.marketplace || '—'}</td>
 										<td>{row.storeTitle || '—'}</td>
 										<td>{row.itemCount} поз. · {row.quantity} шт.</td>
@@ -617,9 +673,10 @@ export function Marketplaces(): JSX.Element {
 					</table>
 				</div>
 			</div>
-			{saleOpen && form && <MarketplaceSaleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setSaleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setSaleOpen(false); setNotice(`Реализация «${row.title}» проведена.`); }} />}
-			{bundleOpen && form && <MarketplaceBundleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setBundleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setBundleOpen(false); setNotice(`Комплект сформирован. Операция «${row.title}» проведена.`); }} />}
-			{returnOpen && form && <MarketplaceReturnModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setReturnOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setReturnOpen(false); setNotice(`Возврат «${row.title}» проведён.`); }} />}
+			{saleOpen && form && <MarketplaceSaleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setSaleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setSaleOpen(false); setNotice(`Реализация «${row.title}» проведена.`); void load(); }} />}
+			{bundleOpen && form && <MarketplaceBundleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setBundleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setBundleOpen(false); setNotice(`Комплект сформирован. Операция «${row.title}» проведена.`); void load(); }} />}
+			{returnOpen && form && <MarketplaceReturnModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setReturnOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setReturnOpen(false); setNotice(`Возврат «${row.title}» проведён.`); void load(); }} />}
+			{openedDocument && <MarketplaceDocumentModal row={openedDocument} onClose={() => setOpenedDocument(null)} />}
 		</section>
 	);
 }

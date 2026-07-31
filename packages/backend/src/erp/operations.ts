@@ -1020,6 +1020,16 @@ export async function submitRealization(erp: ErpClient, name: string): Promise<v
 
 export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff' | 'receipt';
 
+export interface MarketplaceOperationItem {
+	productId: number;
+	itemName: string;
+	quantity: number;
+	rate: number;
+	amount: number;
+	direction: 'out' | 'in';
+	storeTitle: string;
+}
+
 export interface MarketplaceOperation {
 	name: string;
 	title: string;
@@ -1031,6 +1041,7 @@ export interface MarketplaceOperation {
 	total: number;
 	itemCount: number;
 	quantity: number;
+	items: MarketplaceOperationItem[];
 }
 
 export interface MarketplaceReturnOption {
@@ -1498,6 +1509,31 @@ export async function listMarketplaceOperations(
 				?? operationItems[0]?.['t_warehouse']
 				?? operationItems[0]?.['s_warehouse']
 				?? '');
+			const documentItems: MarketplaceOperationItem[] = items.map((item) => {
+				const sourceWarehouse = String(item['s_warehouse'] ?? '');
+				const targetWarehouse = String(item['t_warehouse'] ?? '');
+				const warehouse = String(item['warehouse'] ?? '') || targetWarehouse || sourceWarehouse;
+				const direction: MarketplaceOperationItem['direction'] = targetWarehouse
+					? 'in'
+					: sourceWarehouse
+						? 'out'
+						: operation === 'return' || operation === 'receipt'
+							? 'in'
+							: 'out';
+				const quantity = Math.abs(Number(item['qty'] ?? 0));
+				const rate = Math.abs(Number(item['rate'] ?? item['basic_rate'] ?? item['valuation_rate'] ?? 0));
+				const explicitAmount = Number(item['amount'] ?? item['basic_amount']);
+				return {
+					productId: Number(item['item_code'] ?? 0),
+					itemName: String(item['item_name'] ?? item['description'] ?? '').trim()
+						|| `#${String(item['item_code'] ?? '')}`,
+					quantity,
+					rate,
+					amount: Math.abs(Number.isFinite(explicitAmount) ? explicitAmount : quantity * rate),
+					direction,
+					storeTitle: warehouse ? b24StoreTitle(ctx, warehouse) : '',
+				};
+			});
 			rows.push({
 				name,
 				title: String(doc[MARKETPLACE_TITLE_FIELD] ?? head[MARKETPLACE_TITLE_FIELD] ?? '') || `${date}_${marketplace}`,
@@ -1509,6 +1545,7 @@ export async function listMarketplaceOperations(
 				total: Number(doc['grand_total'] ?? head['grand_total'] ?? 0),
 				itemCount: operationItems.length,
 				quantity: operationItems.reduce((sum, item) => sum + Math.abs(Number(item['qty'] ?? 0)), 0),
+				items: documentItems,
 			});
 		}
 	}

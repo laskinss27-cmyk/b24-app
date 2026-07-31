@@ -1691,6 +1691,16 @@ export async function submitStockDoc(kind: 'receipt' | 'issue', name: string): P
 /** Создать перемещение вручную из окна (без сделки) → документ «Запрошено». */
 export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff' | 'receipt';
 
+export interface MarketplaceOperationItem {
+	productId: number;
+	itemName: string;
+	quantity: number;
+	rate: number;
+	amount: number;
+	direction: 'out' | 'in';
+	storeTitle: string;
+}
+
 export interface MarketplaceOperationRow {
 	name: string;
 	title: string;
@@ -1702,6 +1712,7 @@ export interface MarketplaceOperationRow {
 	total: number;
 	itemCount: number;
 	quantity: number;
+	items?: MarketplaceOperationItem[];
 }
 
 export interface MarketplaceFormData {
