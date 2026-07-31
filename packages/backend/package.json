@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test src/erp/operations.test.ts src/erp/turnover-report.test.ts src/erp/turnover-report-xlsx.test.ts src/catalog-content.test.ts src/deal-service.test.ts src/repair-deal-sync.test.ts src/deal-kp-docx.test.ts src/deal-kp-xlsx.test.ts src/deal-contract.test.ts src/routes/api-marketplaces.test.ts src/transfers/chats.test.ts src/supply/line-sync.test.ts",
+    "test": "tsx --test src/erp/operations.test.ts src/erp/turnover-report.test.ts src/erp/turnover-report-xlsx.test.ts src/catalog-content.test.ts src/marketplace-catalog-xlsx.test.ts src/deal-service.test.ts src/repair-deal-sync.test.ts src/deal-kp-docx.test.ts src/deal-kp-xlsx.test.ts src/deal-contract.test.ts src/routes/api-marketplaces.test.ts src/transfers/chats.test.ts src/supply/line-sync.test.ts",
     "typecheck": "tsc --noEmit",
     "start": "node dist/server.js"
   },

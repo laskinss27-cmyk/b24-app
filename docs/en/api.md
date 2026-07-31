@@ -34,7 +34,7 @@ All placement routes accept a Bitrix24 POST and return the same built frontend w
 |---|---|
 | `/api/deal/*` | deal items, phases, variants, proposals in Word/Excel/PDF, sales receipt, requests, and sales |
 | `/api/contracts/*` | contract context and generation |
-| `/api/catalog/*` | catalogue, product cards, prices, stock, and comparison |
+| `/api/catalog/*` | catalogue, product cards, prices, stock, comparison, and marketplace-selection Excel export |
 | `/api/inventory/*` | stocktakes and adjustment documents |
 | `/api/stock/*` | inventory documents and product movement |
 | `/api/transfer-requests/*` | transfer requests and orders |

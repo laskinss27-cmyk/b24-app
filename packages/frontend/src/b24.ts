@@ -500,6 +500,8 @@ export interface BaseRow {
 	name: string;
 	/** Услуга/работа (catalog type 7), а не товар — для фильтра «товары/услуги» в пикере. */
 	isService: boolean;
+	/** Комплект, сформированный в разделе маркетплейсов, а не обычный товар. */
+	isMarketplaceBundle?: boolean | undefined;
 	article?: string | undefined;
 	model?: string | undefined;
 	manufacturer?: string | undefined;
@@ -601,6 +603,44 @@ export async function downloadCatalogComparison(): Promise<void> {
 	const blob = await res.blob();
 	const disposition = res.headers.get('content-disposition') ?? '';
 	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? 'catalog-comparison.xlsx';
+	const url = URL.createObjectURL(blob);
+	try {
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+}
+
+export async function downloadMarketplaceCatalogSelection(input: {
+	productIds: number[];
+	storeIds: number[];
+	selectedStoreLabel: string;
+	selectedSectionLabel: string;
+	search: string;
+	onlyStock: boolean;
+}): Promise<void> {
+	const res = await fetch('/api/catalog/export-marketplace-selection', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), marketplaceMode: true, ...input }),
+	});
+	const contentType = res.headers.get('content-type') ?? '';
+	if (!res.ok || !contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+		let message = `не удалось сформировать Excel (HTTP ${res.status})`;
+		try {
+			const json = (await res.json()) as { error?: string };
+			if (json.error) message = json.error;
+		} catch { /* сервер вернул не-JSON ошибку */ }
+		throw new Error(message);
+	}
+	const blob = await res.blob();
+	const disposition = res.headers.get('content-disposition') ?? '';
+	const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? 'marketplace-products.xlsx';
 	const url = URL.createObjectURL(blob);
 	try {
 		const link = document.createElement('a');
@@ -1711,6 +1751,8 @@ export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff'
 export interface MarketplaceOperationItem {
 	productId: number;
 	itemName: string;
+	marketplaceOldId?: string;
+	isMarketplaceBundle?: boolean;
 	quantity: number;
 	rate: number;
 	amount: number;
@@ -1742,6 +1784,8 @@ export interface MarketplaceFormData {
 export interface MarketplaceReturnSaleItem {
 	productId: number;
 	itemName: string;
+	marketplaceOldId?: string;
+	isMarketplaceBundle?: boolean;
 	soldQty: number;
 	returnedQty: number;
 	availableQty: number;

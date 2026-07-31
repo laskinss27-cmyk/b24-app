@@ -134,6 +134,8 @@ Create a document, verify its contents, and only then submit it.
 
 Products with positive stock in the `Shelly` and `Маркетплейс` warehouses are available for marketplace sales.
 
+The `Legacy ID` is shown in every product list and card inside the marketplace section. `Export to Excel` downloads the current warehouse/group-filtered selection, with ordinary products and generated bundles identified as different item types.
+
 Return flow:
 
 1. select the original sale;

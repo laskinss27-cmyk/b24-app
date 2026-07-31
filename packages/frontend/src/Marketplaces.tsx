@@ -19,6 +19,8 @@ type OperationFilter = 'all' | MarketplaceOperationKind;
 interface SaleLine {
 	productId: number;
 	itemName: string;
+	marketplaceOldId: string;
+	isMarketplaceBundle: boolean;
 	qty: number;
 	rate: number;
 	stocks: Record<string, number>;
@@ -105,6 +107,8 @@ function MarketplaceSaleModal({
 				next.set(item.productId, {
 					productId: item.productId,
 					itemName: item.name,
+					marketplaceOldId: item.marketplaceOldId ?? existing?.marketplaceOldId ?? '',
+					isMarketplaceBundle: Boolean(item.isMarketplaceBundle ?? existing?.isMarketplaceBundle),
 					qty: (existing?.qty ?? 0) + Math.max(Number(item.quantity || 1), 1),
 					rate: existing?.rate ?? Math.max(Number(item.price || 0), 0),
 					stocks: item.stocks ?? existing?.stocks ?? {},
@@ -161,7 +165,7 @@ function MarketplaceSaleModal({
 	if (picking) {
 		return (
 			<div className="marketplace-picker">
-				<ProductBase picker={{
+				<ProductBase marketplaceMode picker={{
 					title: 'Товары для реализации на маркетплейсе',
 					kindFilter: 'goods',
 					onlyStockDefault: true,
@@ -197,7 +201,7 @@ function MarketplaceSaleModal({
 							{lines.length === 0
 								? <tr><td className="marketplace-empty" colSpan={6}>Подберите товары из базы.</td></tr>
 								: lines.map((line) => <tr key={line.productId}>
-									<td><b>{line.itemName}</b><small>#{line.productId}</small></td>
+									<td><b>{line.itemName}</b><small>{line.isMarketplaceBundle ? 'Комплект' : 'Товар'} · Старый ID: {line.marketplaceOldId || '—'} · #{line.productId}</small></td>
 									<td>{storeTitle ? Number(line.stocks[storeTitle] ?? 0) : '—'}</td>
 									<td><input type="number" min="0.001" step="any" value={line.qty} onChange={(event) => patchLine(line.productId, { qty: Number(event.target.value) })} /></td>
 									<td><input type="number" min="0" step="any" value={line.rate} onChange={(event) => patchLine(line.productId, { rate: Number(event.target.value) })} /></td>
@@ -290,7 +294,7 @@ function MarketplaceBundleModal({
 	if (picking) {
 		return (
 			<div className="marketplace-picker">
-				<ProductBase picker={{
+				<ProductBase marketplaceMode picker={{
 					title: 'Товар для формирования комплекта',
 					kindFilter: 'goods',
 					onlyStockDefault: true,
@@ -319,7 +323,7 @@ function MarketplaceBundleModal({
 						<div>
 							<span>Исходный товар</span>
 							{source
-								? <><b>{source.name}</b><small>#{source.productId} · модель: {sourceModel || 'не заполнена'} · на складе «Маркетплейс»: {available} шт.</small></>
+								? <><b>{source.name}</b><small>{source.isMarketplaceBundle ? 'Комплект' : 'Товар'} · Старый ID: {source.marketplaceOldId || '—'} · #{source.productId} · модель: {sourceModel || 'не заполнена'} · на складе «Маркетплейс»: {available} шт.</small></>
 								: <b>Товар не выбран</b>}
 						</div>
 						<button type="button" onClick={() => setPicking(true)}>{source ? 'Заменить' : 'Выбрать товар'}</button>
@@ -501,7 +505,7 @@ function MarketplaceReturnModal({
 								<thead><tr><th>Вернуть</th><th>Товар</th><th>Продано</th><th>Уже возвращено</th><th>Можно вернуть</th><th>Количество</th></tr></thead>
 								<tbody>{selectedSale.items.map((item) => <tr key={item.productId}>
 									<td><input type="checkbox" checked={Boolean(checked[item.productId])} onChange={(event) => toggleItem(item.productId, item.availableQty, event.target.checked)} /></td>
-									<td><b>{item.itemName}</b><small>#{item.productId}</small></td>
+									<td><b>{item.itemName}</b><small>{item.isMarketplaceBundle ? 'Комплект' : 'Товар'} · Старый ID: {item.marketplaceOldId || '—'} · #{item.productId}</small></td>
 									<td>{item.soldQty}</td>
 									<td>{item.returnedQty}</td>
 									<td>{item.availableQty}</td>
@@ -558,7 +562,7 @@ function MarketplaceDocumentModal({
 							{items.length
 								? items.map((item, index) => <tr key={`${item.productId}:${item.direction}:${index}`}>
 									<td><span className={`marketplace-document-direction ${item.direction}`}>{item.direction === 'in' ? 'Зачисление' : 'Списание'}</span></td>
-									<td><b>{item.itemName}</b><small>#{item.productId}</small></td>
+									<td><b>{item.itemName}</b><small>{item.isMarketplaceBundle ? 'Комплект' : 'Товар'} · Старый ID: {item.marketplaceOldId || '—'} · #{item.productId}</small></td>
 									<td>{item.storeTitle || row.storeTitle || '—'}</td>
 									<td>{item.quantity} шт.</td>
 									<td>{money(item.rate)}</td>

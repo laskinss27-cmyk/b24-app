@@ -70,6 +70,8 @@ The left menu is organised into four groups.
 
 Marketplace sales include items with positive stock in the `Shelly` and `Маркетплейс` warehouses. A return starts by selecting a submitted sale and may include several of its rows and quantities; current stock does not hide items that have already been sold.
 
+The `Legacy ID` is visible in the marketplace catalog, pickers, product card, selected lines, returns, and document contents. The current filtered catalog view can be exported to Excel using the selected warehouse, group, search text, and stock filter; the core marks each row as either `Product` or `Bundle`.
+
 ## Inventory management
 
 - retail-location requests;

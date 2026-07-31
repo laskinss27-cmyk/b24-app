@@ -309,6 +309,7 @@ export interface CoreCatalogItem {
 	productId: number;
 	name: string;
 	isService: boolean;
+	isMarketplaceBundle: boolean;
 	article: string;
 	model: string;
 	manufacturer: string;
@@ -327,11 +328,13 @@ function isTechnicalCoreDescription(value: unknown): boolean {
 
 /** Полный товарный справочник ядра. Складские экраны не должны зависеть от наличия строки в каталоге Б24. */
 export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
+	await ensureMarketplaceFields(erp);
 	await ensureMarketplaceOldIdField(erp);
 	const rows = await erp.list('Item', [
 		'name', 'item_name', 'is_stock_item',
 		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status',
-		'b24_catalog_content', 'b24_filter_category', 'description', 'image', MARKETPLACE_OLD_ID_FIELD,
+		'b24_catalog_content', 'b24_filter_category', 'description', 'image',
+		MARKETPLACE_BUNDLE_SOURCE_FIELD, MARKETPLACE_OLD_ID_FIELD,
 	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
 	const out: CoreCatalogItem[] = [];
 	for (const row of rows) {
@@ -346,6 +349,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 			productId,
 			name: normalizedIdentity.name || `#${productId}`,
 			isService: Number(row['is_stock_item'] ?? 1) === 0,
+			isMarketplaceBundle: Boolean(String(row[MARKETPLACE_BUNDLE_SOURCE_FIELD] ?? '').trim()),
 			article: String(row['b24_article'] ?? '').trim(),
 			model: String(row['b24_model'] ?? '').trim(),
 			manufacturer: String(row['b24_brand'] ?? '').trim(),
@@ -1070,6 +1074,8 @@ export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff'
 export interface MarketplaceOperationItem {
 	productId: number;
 	itemName: string;
+	marketplaceOldId?: string;
+	isMarketplaceBundle?: boolean;
 	quantity: number;
 	rate: number;
 	amount: number;
@@ -1106,6 +1112,8 @@ export interface MarketplaceReturnOption {
 export interface MarketplaceReturnSaleItem {
 	productId: number;
 	itemName: string;
+	marketplaceOldId?: string;
+	isMarketplaceBundle?: boolean;
 	soldQty: number;
 	returnedQty: number;
 	availableQty: number;

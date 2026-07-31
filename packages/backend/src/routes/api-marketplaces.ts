@@ -5,6 +5,7 @@ import {
 	createMarketplaceBundle,
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
+	fetchCoreCatalogItems,
 	listActiveStoreTitles,
 	listMarketplaceOperations,
 	listMarketplaceReturnSales,
@@ -124,7 +125,19 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		if (typeof body.from === 'string' && DATE_RE.test(body.from)) opts.from = body.from;
 		if (typeof body.to === 'string' && DATE_RE.test(body.to)) opts.to = body.to;
 		try {
-			return { ok: true, rows: await listMarketplaceOperations(erp, opts) };
+			const rows = await listMarketplaceOperations(erp, opts);
+			const catalog = new Map((await fetchCoreCatalogItems(erp)).map((item) => [item.productId, item]));
+			return {
+				ok: true,
+				rows: rows.map((row) => ({
+					...row,
+					items: row.items.map((item) => ({
+						...item,
+						marketplaceOldId: catalog.get(item.productId)?.marketplaceOldId ?? '',
+						isMarketplaceBundle: Boolean(catalog.get(item.productId)?.isMarketplaceBundle),
+					})),
+				})),
+			};
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/list] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
@@ -138,7 +151,19 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			return { ok: true, sales: await listMarketplaceReturnSales(erp) };
+			const sales = await listMarketplaceReturnSales(erp);
+			const catalog = new Map((await fetchCoreCatalogItems(erp)).map((item) => [item.productId, item]));
+			return {
+				ok: true,
+				sales: sales.map((sale) => ({
+					...sale,
+					items: sale.items.map((item) => ({
+						...item,
+						marketplaceOldId: catalog.get(item.productId)?.marketplaceOldId ?? '',
+						isMarketplaceBundle: Boolean(catalog.get(item.productId)?.isMarketplaceBundle),
+					})),
+				})),
+			};
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/return-options] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });

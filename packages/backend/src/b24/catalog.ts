@@ -48,6 +48,10 @@ export interface BaseRow {
 	name: string;
 	/** Услуга/работа (catalog type 7), а не товар. Для фильтра «товары/услуги» в пикере. */
 	isService: boolean;
+	/** Комплект, сформированный операцией маркетплейса, а не обычная товарная позиция. */
+	isMarketplaceBundle?: boolean | undefined;
+	/** Старый идентификатор из прежней базы маркетплейсов. */
+	marketplaceOldId?: string | undefined;
 	article?: string | undefined;
 	model?: string | undefined;
 	manufacturer?: string | undefined;

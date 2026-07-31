@@ -8,6 +8,7 @@ import {
 	coreStoreId, updateCoreCatalogPrices, updateMarketplaceOldId,
 } from '../erp/operations.js';
 import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
+import { createMarketplaceCatalogWorkbook } from '../marketplace-catalog-xlsx.js';
 import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
 import {
@@ -50,7 +51,10 @@ interface CatalogStore {
 	title: string;
 	active: boolean;
 }
-type CoreProductBaseRow = ProductBaseData['rows'][number] & { marketplaceOldId: string };
+type CoreProductBaseRow = ProductBaseData['rows'][number] & {
+	marketplaceOldId: string;
+	isMarketplaceBundle: boolean;
+};
 interface CacheEntry {
 	data: ProductBaseData;
 	expires: number;
@@ -161,6 +165,7 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 			iblockId: known?.iblockId ?? 24,
 			name: item.name || known?.name || `#${item.productId}`,
 			isService: item.isService,
+			isMarketplaceBundle: item.isMarketplaceBundle,
 			article: item.article || known?.article,
 			model: item.model || known?.model,
 			manufacturer: item.manufacturer || known?.manufacturer,
@@ -418,6 +423,64 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 				.send(Buffer.from(xlsx));
 		} catch (error) {
 			app.log.error({ ms: Date.now() - startedAt }, `[api/catalog/export-comparison] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/catalog/export-marketplace-selection', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const legacyAccess = await catalogAccess(client);
+		const canExport = body.marketplaceMode === true && (
+			appPermission(req, 'supply.view', legacyAccess.canEditPrices || legacyAccess.canEditCard)
+			|| appPermission(req, 'marketplaces.view', legacyAccess.canEditCard)
+		);
+		if (!canExport) {
+			return reply.code(403).send({ ok: false, error: 'выгрузка доступна только в разделе маркетплейсов' });
+		}
+		const productIds = [...new Set((Array.isArray(body['productIds']) ? body['productIds'] : [])
+			.map(Number)
+			.filter((value) => Number.isInteger(value) && value > 0))]
+			.slice(0, 10_000);
+		const storeIds = new Set((Array.isArray(body['storeIds']) ? body['storeIds'] : [])
+			.map(Number)
+			.filter((value) => Number.isInteger(value) && value > 0));
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
+		const startedAt = Date.now();
+		try {
+			const { data, stores } = await buildCoreProductBase(erp, { rows: [], generatedAt: '' });
+			const byId = new Map(data.rows.map((row) => [row.id, row]));
+			const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
+			const rows = productIds
+				.map((id) => byId.get(id))
+				.filter((row): row is CoreProductBaseRow => Boolean(row))
+				.map((row) => canViewPurchasePrices ? row : { ...row, purchase: null });
+			const selectedStores = stores.filter((store) => storeIds.has(store.id));
+			const createdAt = new Date();
+			const workbook = createMarketplaceCatalogWorkbook({
+				rows,
+				stores: selectedStores,
+				selectedStoreLabel: cleanText(body['selectedStoreLabel']).slice(0, 500),
+				selectedSectionLabel: cleanText(body['selectedSectionLabel']).slice(0, 500),
+				search: cleanText(body['search']).slice(0, 500),
+				onlyStock: body['onlyStock'] === true,
+				createdAt,
+			});
+			const xlsx = await workbook.xlsx.writeBuffer();
+			const date = createdAt.toISOString().slice(0, 10);
+			app.log.info({
+				rows: rows.length,
+				stores: selectedStores.length,
+				ms: Date.now() - startedAt,
+			}, '[api/catalog/export-marketplace-selection] ok');
+			return reply
+				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+				.header('Content-Disposition', `attachment; filename="marketplace-products-${date}.xlsx"`)
+				.send(Buffer.from(xlsx));
+		} catch (error) {
+			app.log.error({ ms: Date.now() - startedAt }, `[api/catalog/export-marketplace-selection] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});

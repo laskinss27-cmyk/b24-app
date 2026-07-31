@@ -4,6 +4,7 @@ import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
 	downloadCatalogComparison,
+	downloadMarketplaceCatalogSelection,
 	createCatalogProduct,
 	updateCatalogProduct,
 	updateCatalogPrices,
@@ -963,6 +964,8 @@ export interface ProductPickItem {
 	productId: number;
 	name: string;
 	model?: string;
+	marketplaceOldId?: string;
+	isMarketplaceBundle?: boolean;
 	quantity: number;
 	price: number;
 	purchasePrice?: number;
@@ -1005,6 +1008,8 @@ export function ProductBase({
 	const [refreshing, setRefreshing] = useState(false);
 	const [exportingComparison, setExportingComparison] = useState(false);
 	const [comparisonError, setComparisonError] = useState('');
+	const [exportingMarketplaceCatalog, setExportingMarketplaceCatalog] = useState(false);
+	const [marketplaceExportError, setMarketplaceExportError] = useState('');
 	const [uid, setUid] = useState('');
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
 	const [canEditCard, setCanEditCard] = useState(false);
@@ -1267,6 +1272,31 @@ export function ProductBase({
 		}
 	}
 
+	async function exportMarketplaceCatalog(): Promise<void> {
+		setMarketplaceExportError('');
+		setExportingMarketplaceCatalog(true);
+		try {
+			const exportStores = isAll
+				? visibleStores
+				: visibleStores.filter((item) => item.id === sid);
+			const selectedSection = sections.find((item) => item.id === Number(section));
+			await withTimeout(downloadMarketplaceCatalogSelection({
+				productIds: view.filter((item) => !item.d.isService).map((item) => item.d.id),
+				storeIds: exportStores.map((item) => item.id),
+				selectedStoreLabel: isAll
+					? exportStores.map((item) => item.title).join(', ')
+					: exportStores[0]?.title ?? 'Склад не выбран',
+				selectedSectionLabel: section === ALL ? 'Все группы' : selectedSection?.name ?? 'Группа не выбрана',
+				search: q.trim(),
+				onlyStock,
+			}), 120000, 'catalog/export-marketplace-selection');
+		} catch (error) {
+			setMarketplaceExportError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setExportingMarketplaceCatalog(false);
+		}
+	}
+
 	async function saveCatalogPrices(retail: number, purchase: number): Promise<void> {
 		if (!priceRow) return;
 		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase);
@@ -1327,6 +1357,8 @@ export function ProductBase({
 				productId: c.row.id,
 				name: c.row.name,
 				...(c.row.model ? { model: c.row.model } : {}),
+				...(c.row.marketplaceOldId ? { marketplaceOldId: c.row.marketplaceOldId } : {}),
+				isMarketplaceBundle: Boolean(c.row.isMarketplaceBundle),
 				quantity: c.qty,
 				price: c.row.retail ?? 0,
 				purchasePrice: c.row.purchase ?? 0,
@@ -1419,6 +1451,11 @@ export function ProductBase({
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
 				{canCreateCatalogProduct && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новая позиция</button>}
+				{marketplaceMode && (
+					<button className="btn-secondary" type="button" onClick={() => void exportMarketplaceCatalog()} disabled={exportingMarketplaceCatalog}>
+						{exportingMarketplaceCatalog ? 'Готовлю Excel…' : 'Выгрузить Excel'}
+					</button>
+				)}
 				{!pickMode && canExportComparison && (
 					<button className="btn-secondary" type="button" onClick={() => void exportComparison()} disabled={exportingComparison}>
 						{exportingComparison ? 'Готовлю сверку…' : 'Сверка с Битрикс'}
@@ -1428,6 +1465,7 @@ export function ProductBase({
 				{!pickMode && canViewSalesReport && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 			</div>
 			{comparisonError && <p className="cart-err">{comparisonError}</p>}
+			{marketplaceExportError && <p className="cart-err">{marketplaceExportError}</p>}
 
 			<div className="base-tablewrap">
 				<table className={`base-table${isAll ? ' hide-store' : ''}`}>
