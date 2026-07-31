@@ -188,7 +188,11 @@ export function InventoryHome(): JSX.Element {
 				const legacyInitiator = isPortalAdmin() || initiators.includes(uid);
 				const appAccess = await withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null);
 				const manageDecision = appAccess?.decisions['inventory.manage'] ?? 'inherit';
-				const init = manageDecision === 'allow' ? true : manageDecision === 'deny' ? false : legacyInitiator;
+				// Внутрь рабочего места «Снаб» уже допускает его собственная внешняя проверка.
+				// Поэтому любой сотрудник снабжения может полноценно работать с инвентаризацией.
+				const init = ctx.view === 'supply'
+					? true
+					: manageDecision === 'allow' ? true : manageDecision === 'deny' ? false : legacyInitiator;
 				setIsInitiator(init);
 
 				const sts = await withTimeout(fetchStores(), 15000, 'core stores');

@@ -1816,11 +1816,12 @@ export function Supply(): JSX.Element {
 						<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
 						<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
 						<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
+						<button className={view === 'inventory' ? 'active' : ''} type="button" onClick={() => setView('inventory')}>Инвентаризация</button>
 					</div>
 					<div className="supply-proto-nav-group">
 						<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
 						<button
-							className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' || view === 'inventory' ? ' active' : ''}`}
+							className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' ? ' active' : ''}`}
 							type="button"
 							aria-expanded={reportsOpen}
 							aria-controls="supply-reports-menu"
@@ -1832,7 +1833,6 @@ export function Supply(): JSX.Element {
 							<div id="supply-reports-menu" className="supply-proto-subnav">
 								<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
 								<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => setView('turnover')}>Оборачиваемость</button>
-								<button className={view === 'inventory' ? 'active' : ''} type="button" onClick={() => setView('inventory')}>Инвентаризация</button>
 							</div>
 						)}
 					</div>

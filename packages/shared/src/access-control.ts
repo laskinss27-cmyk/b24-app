@@ -167,7 +167,7 @@ export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 		label: 'Снабжение',
 		description: 'Полная рабочая зона каталога, склада, перемещений и закупок без административных настроек.',
 		decisions: allow(
-			...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение'),
+			...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение', 'Инвентаризация'),
 			'reports.stock_movements', 'reports.export',
 		),
 	},
