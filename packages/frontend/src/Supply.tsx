@@ -859,7 +859,6 @@ function DecisionRows({
 							<>
 								<td className="supply-order-line-main" rowSpan={decisions.length}>
 									<b>{item.itemName || `#${item.productId}`}</b> <SupplyRequestLineEditor order={order} item={originalItem} onSaved={onEditLine} />
-									<small>{item.note || `строка ${index + 1}`}</small>
 									<div className={`supply-allocation-progress${covered >= item.qty ? ' complete' : ''}`}>
 										<span>Распределено {covered} из {item.qty}</span>
 										{surplus > 0 && <span className="surplus">запас +{surplus}</span>}
