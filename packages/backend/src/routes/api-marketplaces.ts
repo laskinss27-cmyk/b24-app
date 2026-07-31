@@ -11,6 +11,7 @@ import {
 	listMarketplaceReturnSales,
 } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
+import { appPermission } from '../access-policy.js';
 import { invalidateCatalogCache } from './api-catalog.js';
 import { canManageStock, validateFreeStock } from './api-stock.js';
 
@@ -97,10 +98,13 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			const [stores, canCreate] = await Promise.all([
+			const [stores, legacyCanCreate] = await Promise.all([
 				listActiveStoreTitles(erp),
 				canManageStock(client),
 			]);
+			const canCreate = appPermission(req, 'marketplaces.create_sale', legacyCanCreate)
+				|| appPermission(req, 'marketplaces.create_return', legacyCanCreate)
+				|| appPermission(req, 'marketplaces.create_bundle', legacyCanCreate);
 			return {
 				ok: true,
 				marketplaces: MARKETPLACES,
@@ -177,8 +181,12 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			if (!(await canManageStock(client))) {
-				return reply.code(403).send({ ok: false, error: 'проводить реализации может только снабжение' });
+			const legacyCanManage = await canManageStock(client);
+			if (
+				!appPermission(req, 'marketplaces.create_sale', legacyCanManage)
+				|| !appPermission(req, 'marketplaces.post_sale', legacyCanManage)
+			) {
+				return reply.code(403).send({ ok: false, error: 'нет доступа к реализации маркетплейса' });
 			}
 			const marketplace = String(body['marketplace'] ?? '').trim();
 			if (!(MARKETPLACES as readonly string[]).includes(marketplace)) {
@@ -235,8 +243,12 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			if (!(await canManageStock(client))) {
-				return reply.code(403).send({ ok: false, error: 'проводить возвраты может только снабжение' });
+			const legacyCanManage = await canManageStock(client);
+			if (
+				!appPermission(req, 'marketplaces.create_return', legacyCanManage)
+				|| !appPermission(req, 'marketplaces.post_return', legacyCanManage)
+			) {
+				return reply.code(403).send({ ok: false, error: 'нет доступа к возврату маркетплейса' });
 			}
 			const saleName = String(body['saleName'] ?? '').trim();
 			const lines = (Array.isArray(body['lines']) ? body['lines'] as Array<Record<string, unknown>> : [])
@@ -289,8 +301,9 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			if (!(await canManageStock(client))) {
-				return reply.code(403).send({ ok: false, error: 'формировать комплекты может только снабжение' });
+			const legacyCanManage = await canManageStock(client);
+			if (!appPermission(req, 'marketplaces.create_bundle', legacyCanManage)) {
+				return reply.code(403).send({ ok: false, error: 'нет доступа к формированию комплектов маркетплейса' });
 			}
 			const sourceProductId = Number(body['sourceProductId']);
 			const unitsPerBundle = Number(body['unitsPerBundle']);

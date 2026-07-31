@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
 	effectiveAccessDecision,
 	effectiveDraftDecision,
+	hasDirectMarketplaceAccess,
 	type AccessSubjectRule,
 } from '@b24-app/shared';
 import { parseStoredAccessPolicy } from './access-policy.js';
@@ -14,6 +15,13 @@ const rule = (
 
 test('ненастроенный сотрудник сохраняет прежние права', () => {
 	assert.equal(effectiveAccessDecision(undefined, [], 'catalog.view'), 'inherit');
+});
+
+test('точечный доступ к маркетплейсам выдан только двум сотрудникам', () => {
+	assert.equal(hasDirectMarketplaceAccess('760'), true);
+	assert.equal(hasDirectMarketplaceAccess(3608), true);
+	assert.equal(hasDirectMarketplaceAccess('1858'), false);
+	assert.equal(hasDirectMarketplaceAccess(''), false);
 });
 
 test('сотрудник наследует разрешение отдела', () => {

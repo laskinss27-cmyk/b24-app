@@ -7,6 +7,16 @@
  */
 export type AccessDecision = 'inherit' | 'allow' | 'deny';
 
+/**
+ * Персональный доступ к рабочему месту маркетплейсов без открытия остального Снаба.
+ * Это аварийно-простой слой до повторного включения редактора общей политики доступа.
+ */
+export const DIRECT_MARKETPLACE_USER_IDS = ['760', '3608'] as const;
+
+export function hasDirectMarketplaceAccess(userId: unknown): boolean {
+	return (DIRECT_MARKETPLACE_USER_IDS as readonly string[]).includes(String(userId ?? '').trim());
+}
+
 export interface AccessPermissionDefinition {
 	id: string;
 	group: string;

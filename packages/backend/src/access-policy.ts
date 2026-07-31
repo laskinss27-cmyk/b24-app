@@ -3,6 +3,7 @@ import {
 	ACCESS_PERMISSIONS,
 	effectiveAccessDecision,
 	emptyAccessControlDraft,
+	hasDirectMarketplaceAccess,
 	type AccessControlDraft,
 	type AccessPermissionId,
 	type AccessProfileId,
@@ -174,9 +175,12 @@ export async function resolveCurrentAccess(
 		loadAccessPolicy(client, domain, forcePolicy),
 	]);
 	const departmentRules = user.departments.map((id) => policy.departments[String(id)]);
+	const directMarketplaceAccess = hasDirectMarketplaceAccess(user.id);
 	const decisions = Object.fromEntries(ACCESS_PERMISSIONS.map((permission) => [
 		permission.id,
-		ACCESS_POLICY_ENFORCEMENT_ENABLED && policy.policyMode === 'active'
+		directMarketplaceAccess && permission.id.startsWith('marketplaces.')
+			? 'allow'
+			: ACCESS_POLICY_ENFORCEMENT_ENABLED && policy.policyMode === 'active'
 			? effectiveAccessDecision(policy.employees[user.id], departmentRules, permission.id)
 			: 'inherit',
 	])) as Record<AccessPermissionId, 'inherit' | 'allow' | 'deny'>;
