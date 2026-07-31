@@ -22,6 +22,17 @@ const CONTRACT_DOCUMENTS_PATH = process.env['CONTRACT_DOCUMENTS_PATH']
 		: resolve(process.cwd(), '.tmp', 'contracts'));
 const B24_COLLAPSE_PRODUCT_ID = 9814;
 const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
+const CONTRACT_NUMBER_START_BY_INN: Readonly<Record<string, number>> = {
+	'780525373242': 520, // ИП Поляков Д. Ю.
+	'7816473082': 250, // ООО «Дом Бизнес Строй»
+	'470379634080': 120, // ИП Нагайцев О. А.
+	'7816287495': 450, // ООО «Новый Дом»
+	'7816268460': 200, // ООО «РА Анемоне»
+	'7842177523': 450, // ООО «И-ОН»
+};
+export function contractNumberStartByInn(inn: string): number {
+	return CONTRACT_NUMBER_START_BY_INN[clean(inn)] ?? 1;
+}
 const CONTRACT_FIELD_SPECS = [
 	{ fieldName: CONTRACT_NUMBER_FIELD, name: 'CONTRACT_NUMBER', xmlId: 'B24_APP_CONTRACT_NUMBER', label: 'Номер договора' },
 	{ fieldName: CONTRACT_COMPANY_FIELD, name: 'CONTRACT_COMPANY', xmlId: 'B24_APP_CONTRACT_COMPANY', label: 'Юрлицо договора' },
@@ -91,6 +102,12 @@ const CONTRACT_TEMPLATE_PATHS: Record<ContractTemplateId, string> = {
 	supply: resolve(ASSETS_PATH, 'contract-supply.docx'),
 	design: resolve(ASSETS_PATH, 'contract-design.docx'),
 	smart_home: resolve(ASSETS_PATH, 'contract-smart-home.docx'),
+};
+const CONTRACT_FILENAME_TITLES: Record<ContractTemplateId, string> = {
+	universal_work: 'Договор подряда',
+	supply: 'Договор поставки',
+	design: 'Договор на проектирование',
+	smart_home: 'Договор подряда',
 };
 
 type Address = Record<string, unknown>;
@@ -314,6 +331,42 @@ function parseStoredContractDocument(value: unknown, dealId: number): StoredDeal
 	};
 }
 
+function contractFilenameFromCompanyName(
+	templateId: ContractTemplateId,
+	contractNumber: string,
+	contractDateIso: string,
+	companyName: string,
+): string {
+	const ipMatch = clean(companyName).match(/^ИП\s+([^\s.]+)/i);
+	const shortCompanyName = (ipMatch ? `ИП ${ipMatch[1]}` : clean(companyName))
+		.replace(/[«»"'“”„]/g, '')
+		.replace(/[<>:/\\|?*\u0000-\u001f]/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+	const [year, month, day] = contractDateIso.split('-');
+	const date = year && month && day ? `${day}.${month}.${year}` : contractDateIso;
+	return `${CONTRACT_FILENAME_TITLES[templateId]} № ${contractNumber} от ${date} г. ${shortCompanyName}.docx`;
+}
+
+async function migrateStoredContractFilename(
+	document: StoredDealContractDocument,
+	basePath = CONTRACT_DOCUMENTS_PATH,
+): Promise<StoredDealContractDocument> {
+	const filename = contractFilenameFromCompanyName(
+		document.templateId,
+		document.contractNumber,
+		document.contractDateIso,
+		document.companyName,
+	);
+	if (document.filename === filename) return document;
+	const migrated = { ...document, filename };
+	const metadataPath = storedContractMetadataPath(document.dealId, document.id, basePath);
+	const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
+	await writeFile(temporaryPath, `${JSON.stringify(migrated, null, 2)}\n`, 'utf8');
+	await rename(temporaryPath, metadataPath);
+	return migrated;
+}
+
 export async function listDealContractDocuments(
 	dealId: number,
 	basePath = CONTRACT_DOCUMENTS_PATH,
@@ -330,10 +383,11 @@ export async function listDealContractDocuments(
 		.filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
 		.map(async (entry): Promise<StoredDealContractDocument | null> => {
 			try {
-				return parseStoredContractDocument(
+				const document = parseStoredContractDocument(
 					JSON.parse(await readFile(resolve(directory, entry.name), 'utf8')),
 					dealId,
 				);
+				return migrateStoredContractFilename(document, basePath);
 			} catch {
 				return null;
 			}
@@ -348,10 +402,11 @@ export async function readDealContractDocument(
 	id: string,
 	basePath = CONTRACT_DOCUMENTS_PATH,
 ): Promise<{ document: StoredDealContractDocument; file: Buffer }> {
-	const document = parseStoredContractDocument(
+	const parsedDocument = parseStoredContractDocument(
 		JSON.parse(await readFile(storedContractMetadataPath(dealId, id, basePath), 'utf8')),
 		dealId,
 	);
+	const document = await migrateStoredContractFilename(parsedDocument, basePath);
 	const file = await readFile(storedContractFilePath(dealId, document.id, basePath));
 	return { document, file };
 }
@@ -597,6 +652,26 @@ export function contractPartyAsKind(party: ContractParty, kind: ContractPartyKin
 
 export function contractVatRate(party: Pick<ContractParty, 'kind'>): 5 | 22 {
 	return party.kind === 'ip' ? 5 : 22;
+}
+
+function contractFilenameCompany(party: ContractParty): string {
+	return party.kind === 'ip'
+		? `ИП ${clean(party.requisite?.['RQ_NAME']).split(/\s+/)[0] || party.shortName.replace(/^ИП\s+/i, '').split(/\s+/)[0]}`
+		: (party.shortName || party.title);
+}
+
+export function contractFilename(
+	templateId: ContractTemplateId,
+	contractNumber: string,
+	contractDateIso: string,
+	company: ContractParty,
+): string {
+	return contractFilenameFromCompanyName(
+		templateId,
+		contractNumber,
+		contractDateIso,
+		contractFilenameCompany(company),
+	);
 }
 
 export async function getContractContext(client: B24Client, dealId: number): Promise<ContractContext> {
@@ -967,6 +1042,8 @@ export async function buildContractDocx(data: {
 	xml = xml
 		.split('buh@homelogicsoft.com').join(wordXmlText(contractorEmail(data.company)))
 		.split('Объект, адрес объекта, виды и объемы работ').join('Адрес объекта, виды и объемы работ')
+		.split('Всего работ').join('Всего')
+		.split('Итого работ').join('Всего')
 		.split('2.1.1. Выполнить свои обязательства в полном объеме согласно строительных норм и правил, действующего законодательства, и в соответствии с Приложениями к Договору в сроки, указанные в п. 3.1. Договора.')
 		.join('2.1.1. Выполнить свои обязательства в полном объеме в соответствии с Приложениями к Договору в сроки, указанные в п. 3.1. Договора.')
 		.replace(/<w:highlight\b[^>]*\/>/g, '');
@@ -1070,6 +1147,7 @@ export async function allocatePersistentContractNumber(args: {
 	path: string;
 	key: string;
 	baseline: number;
+	previousKeys?: string[];
 	requested?: string;
 }): Promise<string> {
 	let release!: () => void;
@@ -1083,7 +1161,10 @@ export async function allocatePersistentContractNumber(args: {
 		} catch (error) {
 			if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 		}
-		const current = Math.max(Number(state[args.key] ?? 0), args.baseline);
+		const previousValues = (args.previousKeys ?? [])
+			.map((key) => Number(state[key] ?? 0))
+			.filter(Number.isFinite);
+		const current = Math.max(Number(state[args.key] ?? 0), args.baseline, ...previousValues);
 		const requested = Number.parseInt(args.requested ?? '', 10);
 		const next = Number.isInteger(requested) && requested > current ? requested : current + 1;
 		state[args.key] = next;
@@ -1099,16 +1180,23 @@ export async function allocatePersistentContractNumber(args: {
 
 async function allocateContractNumber(
 	client: B24Client,
-	companyId: number,
+	company: ContractParty,
 	requested: string,
 ): Promise<string> {
-	const key = `contract_seq_${companyId}`;
+	const inn = clean(company.requisite?.['RQ_INN']);
+	const key = inn ? `contract_seq_inn_${inn}` : `contract_seq_${company.id}`;
+	const legacyKey = `contract_seq_${company.id}`;
+	const startingNumber = contractNumberStartByInn(inn);
 	const options = await client.call<Record<string, unknown>>('app.option.get', {});
-	const baseline = Number(options[key] ?? (companyId === 8 ? 514 : 0));
+	const configuredValues = [options[key], options[legacyKey]]
+		.map(Number)
+		.filter(Number.isFinite);
+	const baseline = Math.max(startingNumber - 1, ...configuredValues);
 	return allocatePersistentContractNumber({
 		path: CONTRACT_SEQUENCE_PATH,
 		key,
-		baseline: Number.isFinite(baseline) ? baseline : 0,
+		baseline,
+		previousKeys: key === legacyKey ? [] : [legacyKey],
 		requested,
 	});
 }
@@ -1186,7 +1274,7 @@ export async function generateDealContract(
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
 	const lines = await loadContractLines(client, erp, dealId);
 	if (!lines.length) throw new Error('в сделке нет товаров или работ для сметы');
-	const contractNumber = await allocateContractNumber(client, company.id, '');
+	const contractNumber = await allocateContractNumber(client, company, '');
 	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
 	const contractDate = contractDateText(dateIso);
 	const file = await buildContractDocx({
@@ -1212,7 +1300,7 @@ export async function generateDealContract(
 			[CONTRACT_DATE_FIELD]: dateIso,
 		},
 	});
-	const filename = `contract-${input.templateId}-${company.id}-${contractNumber}.docx`;
+	const filename = contractFilename(input.templateId, contractNumber, dateIso, company);
 	const document: StoredDealContractDocument = {
 		id: randomUUID(),
 		dealId,

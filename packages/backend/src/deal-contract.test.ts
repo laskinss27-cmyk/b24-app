@@ -8,10 +8,12 @@ import {
 	CONTRACT_TEMPLATES,
 	allocatePersistentContractNumber,
 	buildContractDocx,
+	contractFilename,
 	contractLinesFromB24ProductRows,
 	contractObjectAddress,
 	contractPartyAsKind,
 	contractDateText,
+	contractNumberStartByInn,
 	contractVatRate,
 	contractWorkDuration,
 	listDealContractDocuments,
@@ -111,6 +113,8 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 	assert.doesNotMatch(xml, /путем безналичных платежей платежными поручениями/);
 	assert.doesNotMatch(xml, /именуемый\(ая\)/);
 	assert.doesNotMatch(xml, /w:highlight/);
+	assert.doesNotMatch(xml, /(?:Итого|Всего) работ/);
+	assert.match(xml, /Всего/);
 	assert.match(xml, /2\.1\.1\. Выполнить свои обязательства в полном объеме в соответствии с Приложениями к Договору в сроки, указанные в п\. 3\.1\. Договора\./);
 	assert.doesNotMatch(xml, /согласно строительных норм и правил/);
 	assert.equal((xml.match(/<w:insideV w:val="single"/g) ?? []).length, 3);
@@ -167,9 +171,38 @@ test('new contract templates replace sample parties, dates, numbers and object d
 		assert.match(xml, /ООО &quot;НОВЫЙ ДОМ&quot;/, `${templateId}: our company`);
 		assert.match(xml, /Иванов Иван Иванович/, `${templateId}: customer`);
 		assert.doesNotMatch(xml, /w:highlight/, `${templateId}: highlight`);
+		if (templateId === 'smart_home') {
+			assert.doesNotMatch(xml, /(?:Итого|Всего) работ/, `${templateId}: total row wording`);
+			assert.match(xml, /Всего/, `${templateId}: total row`);
+		}
 		const headerSpacers = (xml.match(/<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"\/>/g) ?? []).length;
 		assert.equal(headerSpacers, templateId === 'smart_home' ? 1 : 0, `${templateId}: top header spacer`);
 	}
+});
+
+test('contract filename contains type, number, date and short own legal entity name', () => {
+	const ipCompany: ContractParty = {
+		...company,
+		id: 8,
+		title: 'ИП Поляков Дмитрий Юрьевич',
+		kind: 'ip',
+		fullName: 'Поляков Дмитрий Юрьевич',
+		shortName: 'ИП Поляков Д.Ю.',
+		director: '',
+		requisite: {
+			RQ_NAME: 'Поляков Дмитрий Юрьевич',
+			RQ_INN: '780525373242',
+			RQ_OGRNIP: '310784730600340',
+		},
+	};
+	assert.equal(
+		contractFilename('universal_work', '521', '2026-07-29', ipCompany),
+		'Договор подряда № 521 от 29.07.2026 г. ИП Поляков.docx',
+	);
+	assert.equal(
+		contractFilename('supply', '250', '2026-07-31', company),
+		'Договор поставки № 250 от 31.07.2026 г. ООО НОВЫЙ ДОМ.docx',
+	);
 });
 
 test('contract date is printed with a Russian month name', () => {
@@ -233,6 +266,65 @@ test('contract numbers persist and concurrent allocations stay unique', async ()
 	}
 });
 
+test('each own legal entity has its configured contract sequence start', () => {
+	assert.deepEqual(
+		[
+			'780525373242',
+			'7816473082',
+			'470379634080',
+			'7816287495',
+			'7816268460',
+			'7842177523',
+		].map(contractNumberStartByInn),
+		[520, 250, 120, 450, 200, 450],
+	);
+});
+
+test('contract number sequence migrates the old company-id counter without going backwards', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'b24-contract-sequence-migration-'));
+	const path = join(directory, 'sequences.json');
+	try {
+		await allocatePersistentContractNumber({
+			path,
+			key: 'contract_seq_8',
+			baseline: 519,
+			requested: '524',
+		});
+		assert.equal(
+			await allocatePersistentContractNumber({
+				path,
+				key: 'contract_seq_inn_780525373242',
+				previousKeys: ['contract_seq_8'],
+				baseline: 519,
+			}),
+			'525',
+		);
+		assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), {
+			contract_seq_8: 524,
+			contract_seq_inn_780525373242: 525,
+		});
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test('the first contract number equals the configured start of its legal entity series', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'b24-contract-sequence-start-'));
+	const path = join(directory, 'sequences.json');
+	try {
+		assert.equal(
+			await allocatePersistentContractNumber({
+				path,
+				key: 'contract_seq_inn_7816473082',
+				baseline: 249,
+			}),
+			'250',
+		);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 test('generated contracts are stored as independent deal documents', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'b24-deal-contracts-'));
 	const first: StoredDealContractDocument = {
@@ -261,12 +353,21 @@ test('generated contracts are stored as independent deal documents', async () =>
 	try {
 		await saveDealContractDocument(first, Buffer.from('first contract'), directory);
 		await saveDealContractDocument(second, Buffer.from('second contract'), directory);
+		const listed = await listDealContractDocuments(37494, directory);
+		assert.deepEqual(listed.map((document) => document.contractNumber), ['516', '515']);
 		assert.deepEqual(
-			(await listDealContractDocuments(37494, directory)).map((document) => document.contractNumber),
-			['516', '515'],
+			listed.map((document) => document.filename),
+			[
+				'Договор подряда № 516 от 31.07.2026 г. ИП Поляков.docx',
+				'Договор подряда № 515 от 31.07.2026 г. ИП Поляков.docx',
+			],
 		);
 		const stored = await readDealContractDocument(37494, first.id, directory);
-		assert.equal(stored.document.filename, first.filename);
+		assert.equal(stored.document.filename, 'Договор подряда № 515 от 31.07.2026 г. ИП Поляков.docx');
+		assert.equal(
+			JSON.parse(await readFile(join(directory, '37494', `${first.id}.json`), 'utf8')).filename,
+			stored.document.filename,
+		);
 		assert.equal(stored.file.toString('utf8'), 'first contract');
 		await assert.rejects(() => readDealContractDocument(37495, first.id, directory));
 	} finally {

@@ -65,7 +65,7 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 			const stored = await readDealContractDocument(dealId, documentId);
 			return reply
 				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-				.header('Content-Disposition', `attachment; filename="${stored.document.filename}"`)
+				.header('Content-Disposition', `attachment; filename="contract.docx"; filename*=UTF-8''${encodeURIComponent(stored.document.filename)}`)
 				.header('Cache-Control', 'private, no-store')
 				.send(stored.file);
 		} catch (error) {
