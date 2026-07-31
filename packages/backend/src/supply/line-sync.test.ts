@@ -13,6 +13,17 @@ test('количество сделки нельзя уменьшить ниже
 	);
 });
 
+test('полностью распределённая частичная заявка не блокирует необработанный остаток сделки', () => {
+	assert.equal(
+		quantityFromDealChange({ requestQty: 1, dealQtyAtSync: 4, nextDealQty: 2, allocatedQty: 1 }),
+		1,
+	);
+	assert.throws(
+		() => quantityFromDealChange({ requestQty: 1, dealQtyAtSync: 4, nextDealQty: 0.5, allocatedQty: 1 }),
+		/ниже уже распределённого/,
+	);
+});
+
 test('полностью распределённую позицию нельзя ни уменьшить, ни увеличить', () => {
 	assert.throws(
 		() => quantityFromDealChange({ requestQty: 4, dealQtyAtSync: 4, nextDealQty: 5, allocatedQty: 4 }),

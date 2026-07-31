@@ -16,10 +16,15 @@ export function quantityFromDealChange(args: {
 	nextDealQty: number;
 	allocatedQty: number;
 }): number {
-	if (args.allocatedQty + EPSILON >= args.requestQty && Math.abs(args.nextDealQty - args.dealQtyAtSync) > EPSILON) {
+	const tracksWholeDealLine = args.requestQty + EPSILON >= args.dealQtyAtSync;
+	if (tracksWholeDealLine && args.allocatedQty + EPSILON >= args.requestQty && Math.abs(args.nextDealQty - args.dealQtyAtSync) > EPSILON) {
 		throw new Error('позиция уже полностью распределена; её количество зафиксировано');
 	}
-	const next = args.requestQty + (args.nextDealQty - args.dealQtyAtSync);
+	// Частичная заявка покрывает только часть строки сделки. Изменения оставшегося,
+	// ещё не заказанного количества не должны переписывать уже распределённую заявку.
+	const next = tracksWholeDealLine
+		? args.requestQty + (args.nextDealQty - args.dealQtyAtSync)
+		: Math.min(args.requestQty, args.nextDealQty);
 	if (next + EPSILON < args.allocatedQty) {
 		throw new Error(`количество нельзя уменьшить ниже уже распределённого (${args.allocatedQty})`);
 	}
