@@ -2585,6 +2585,7 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 			item_code: String(l.productId),
 			qty: l.qty,
 			schedule_date: args.scheduleDate,
+			...(args.toStore ? { warehouse: erpWarehouse(ctx, args.toStore) } : {}),
 			[SUPPLY_DEAL_LINE_KEY_FIELD]: l.dealLineKey?.trim() || planByProduct.get(l.productId)?.lineKey || '',
 			[SUPPLY_DEAL_QTY_FIELD]: Number.isFinite(l.dealQty) ? l.dealQty : (planByProduct.get(l.productId)?.qty ?? l.qty),
 			...(l.note ? { description: l.note } : {}),
@@ -2695,6 +2696,43 @@ export async function updateSupplyRequestNote(erp: ErpClient, name: string, note
 	return value;
 }
 
+const SUPPLY_REQUEST_DONE_STATUSES = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
+
+/**
+ * Изменить конечный склад ещё не исполненной заявки снабжения.
+ * Дублируем значение в шапке и строках: шапку читает наше приложение,
+ * а строки показывает и использует нативный интерфейс ERPNext.
+ */
+export async function updateSupplyRequestStore(
+	erp: ErpClient,
+	args: { requestName: string; requestKey: string; toStore: string },
+): Promise<string> {
+	await ensureMrField(erp);
+	const request = await erp.get<Record<string, unknown>>('Material Request', args.requestName);
+	if (!request || Number(request['docstatus'] ?? 0) === 2) throw new Error('заявка снабжения не найдена');
+	if (materialRequestKey(args.requestName, request['creation']) !== args.requestKey) {
+		throw new Error('заявка была изменена; обновите список');
+	}
+	if (SUPPLY_REQUEST_DONE_STATUSES.has(String(request['status'] ?? ''))) {
+		throw new Error('у выполненной заявки нельзя менять склад');
+	}
+	const toStore = args.toStore.trim();
+	if (!toStore) throw new Error('выберите конечный склад');
+	const ctx = await erpContext(erp);
+	const warehouse = erpWarehouse(ctx, toStore);
+	const warehouseDoc = await erp.get<Record<string, unknown>>('Warehouse', warehouse);
+	if (!warehouseDoc || Number(warehouseDoc['disabled'] ?? 0) === 1 || Number(warehouseDoc['is_group'] ?? 0) === 1) {
+		throw new Error(`склад «${toStore}» не найден или недоступен`);
+	}
+	const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
+	const items = rawItems.map((item) => requestItemPayload(item, { warehouse }));
+	await erp.update('Material Request', args.requestName, {
+		[MR_TO_STORE_FIELD]: toStore,
+		items,
+	});
+	return toStore;
+}
+
 type SupplyAllocationMap = ReadonlyMap<string, ReadonlyMap<number, number>>;
 
 async function purchaseAllocationForRequest(
@@ -2733,7 +2771,7 @@ function requestItemPayload(item: Record<string, unknown>, patch: Record<string,
 		qty: Number(patch['qty'] ?? item['qty'] ?? 0),
 		schedule_date: String(item['schedule_date'] ?? ''),
 		description: String(item['description'] ?? ''),
-		warehouse: String(item['warehouse'] ?? ''),
+		warehouse: String(patch['warehouse'] ?? item['warehouse'] ?? ''),
 		[SUPPLY_DEAL_LINE_KEY_FIELD]: String(patch[SUPPLY_DEAL_LINE_KEY_FIELD] ?? item[SUPPLY_DEAL_LINE_KEY_FIELD] ?? ''),
 		[SUPPLY_DEAL_QTY_FIELD]: Number(patch[SUPPLY_DEAL_QTY_FIELD] ?? item[SUPPLY_DEAL_QTY_FIELD] ?? item['qty'] ?? 0),
 	};

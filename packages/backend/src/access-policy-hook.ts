@@ -79,6 +79,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/supply/orders': ['supply.view', 'supply.view_all_requests'],
 	'/api/supply/request': ['deals.create_supply_request'],
 	'/api/supply/request-note': ['supply.edit_request_note'],
+	'/api/supply/request-store': ['supply.edit_request_store'],
 	'/api/supply/create-documents': ['supply.manage_requests'],
 	'/api/supply/suppliers': ['supply.view'],
 	'/api/supply/supplier/create': ['supply.create_supplier'],

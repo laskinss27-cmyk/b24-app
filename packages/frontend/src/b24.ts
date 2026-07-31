@@ -889,6 +889,17 @@ export async function updateSupplyOrderNote(requestName: string, note: string): 
 	return json.note ?? '';
 }
 
+export async function updateSupplyOrderStore(requestName: string, requestKey: string, toStore: string): Promise<string> {
+	const res = await fetch('/api/supply/request-store', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), requestName, requestKey, toStore }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; toStore?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось изменить конечный склад заявки');
+	return json.toStore ?? toStore;
+}
+
 export async function updateSupplyRequestLine(input: {
 	dealId: number;
 	requestName: string;

@@ -26,6 +26,7 @@ test('точечный доступ к маркетплейсам выдан т�
 
 test('сотрудник наследует разрешение отдела', () => {
 	assert.equal(effectiveAccessDecision(undefined, [rule('supply')], 'supply.manage_requests'), 'allow');
+	assert.equal(effectiveAccessDecision(undefined, [rule('supply')], 'supply.edit_request_store'), 'allow');
 });
 
 test('между отделами запрет сильнее разрешения', () => {
@@ -46,6 +47,7 @@ test('персональное разрешение сильнее запрет�
 
 test('профиль запрещает не входящие в него действия', () => {
 	assert.equal(effectiveDraftDecision(rule('manager'), 'supply.manage_requests'), 'deny');
+	assert.equal(effectiveDraftDecision(rule('manager'), 'supply.edit_request_store'), 'deny');
 	assert.equal(effectiveDraftDecision(rule('manager'), 'catalog.view'), 'allow');
 });
 

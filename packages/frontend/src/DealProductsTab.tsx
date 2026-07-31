@@ -1882,8 +1882,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					</button>
 					{!hasPendingDrafts && supplyGoods.length > 0 && (
 						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => {
-							const first = supplyGoods[0];
-							setSupplyToStore(first ? storeName(storeOf(first)) : '');
+							setSupplyToStore('');
 							setSupplyDeadline('');
 							setSupplyOrderNote('');
 							setSupplyQty(Object.fromEntries(supplyGoods.map((row) => [row.id, String(remaining(row))])));
@@ -1906,6 +1905,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 							<label><span>Конечный склад</span><select value={supplyToStore} disabled={supplyBusy} onChange={(e) => { setSupplyToStore(e.target.value); setSupplyFormError(null); }}><option value="">Выберите склад</option>{data.stores.map((store) => <option key={store.id} value={store.title}>{store.title}</option>)}</select></label>
 							<label><span>Привезти не позднее</span><input type="date" min={todayYmd()} value={supplyDeadline} disabled={supplyBusy} onChange={(e) => { setSupplyDeadline(e.target.value); setSupplyFormError(null); }} /></label>
 							<label className="wide"><span>Общий комментарий</span><textarea rows={2} maxLength={500} value={supplyOrderNote} disabled={supplyBusy} placeholder="Комментарий ко всему заказу" onChange={(e) => setSupplyOrderNote(e.target.value)} /></label>
+						</div>
+						<div className={`deal-supply-order-destination${supplyToStore ? '' : ' is-empty'}`}>
+							{supplyToStore ? <>Заказ будет доставлен на склад <b>{supplyToStore}</b>.</> : 'Выберите конечный склад вручную — он не берётся из отмеченных строк.'}
 						</div>
 						{supplyFormError && <div className="deal-supply-order-error">{supplyFormError}</div>}
 						<div className="deal-supply-order-lines">
@@ -1933,7 +1935,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						</div>
 						<footer>
 							<button type="button" disabled={supplyBusy} onClick={() => setShowSupplyOrder(false)}>Отмена</button>
-							<button className="primary" type="button" disabled={supplyBusy} onClick={() => void doCreateSupply()}>{supplyBusy ? 'Создаю…' : 'Создать заказ'}</button>
+							<button className="primary" type="button" disabled={supplyBusy || !supplyToStore || !supplyDeadline} onClick={() => void doCreateSupply()}>{supplyBusy ? 'Создаю…' : 'Создать заказ'}</button>
 						</footer>
 					</section>
 				</div>

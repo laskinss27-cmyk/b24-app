@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, updateSupplyRequestLineAndDeal, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, calculateDealPlanTotal, b24StoreTitle, erpContext, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
+import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, updateSupplyRequestStore, updateSupplyRequestLineAndDeal, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, calculateDealPlanTotal, b24StoreTitle, erpContext, SUPPLY_PURCHASE_EXPECTED_AT_FIELD, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_ORDERED_AT_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_PURCHASE_STAGE_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
 import { canManageStock } from './api-stock.js';
 import { appPermission } from '../access-policy.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
@@ -456,6 +456,51 @@ export function registerApiSupplyRoute(app: FastifyInstance): void {
 		} catch (err) {
 			app.log.error({ requestName }, `[api/supply/request-note] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
+	app.post('/api/supply/request-store', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { requestName?: unknown; requestKey?: unknown; toStore?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (!appPermission(req, 'supply.edit_request_store', await canManageStock(client))) {
+			return reply.code(403).send({ ok: false, error: 'изменение склада доступно снабжению' });
+		}
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
+		const requestName = String(b.requestName ?? '').trim();
+		const requestKey = String(b.requestKey ?? '').trim();
+		const toStore = String(b.toStore ?? '').trim();
+		if (!requestName || !requestKey || !toStore || requestName === STANDALONE_SUPPLY_REQUEST) {
+			return reply.code(400).send({ ok: false, error: 'неверные данные заявки или склада' });
+		}
+		const lockKey = `${normalizeDomain(b.domain ?? '')}:${requestKey}`;
+		if (supplyCreationLocks.has(lockKey)) {
+			return reply.code(200).send({ ok: false, error: 'Заявка сейчас изменяется. Дождись завершения операции и повтори.' });
+		}
+		supplyCreationLocks.add(lockKey);
+		try {
+			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
+			if (MR_DONE.has(request.status)) throw new Error('у выполненной заявки нельзя менять склад');
+			await ensureTransfersEntity(client);
+			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+			const linkedTransfer = (transferItems ?? [])
+				.map(parseTransferProgress)
+				.find((transfer) => transfer && transfer.status !== 'canceled' && transferBelongsToRequest(transfer, request));
+			if (linkedTransfer) throw new Error('склад уже закреплён в перемещении; сначала измени или отмени перемещение');
+			const purchases = (await listPurchaseChildren(erp, [request])).get(request.requestKey) ?? [];
+			const hasSubmittedReceipt = purchases.some((purchase) => purchase.receipts.some((receipt) => receipt.docstatus === 1));
+			if (hasSubmittedReceipt) throw new Error('по заявке уже проведён приход; склад заявки менять нельзя');
+			const previousStore = request.toStore;
+			const saved = await updateSupplyRequestStore(erp, { requestName, requestKey, toStore });
+			const me = await currentUser(client);
+			app.log.info({ requestName, dealId: request.dealId, previousStore, toStore: saved, userId: me.id, userName: me.name }, '[api/supply/request-store] updated');
+			return { ok: true, toStore: saved };
+		} catch (err) {
+			app.log.error({ requestName, toStore }, `[api/supply/request-store] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			supplyCreationLocks.delete(lockKey);
 		}
 	});
 

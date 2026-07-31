@@ -88,6 +88,7 @@ export const ACCESS_PERMISSIONS = [
 	{ id: 'supply.view', group: 'Снабжение', label: 'Открывать рабочее место снабжения' },
 	{ id: 'supply.view_all_requests', group: 'Снабжение', label: 'Просматривать все заявки' },
 	{ id: 'supply.edit_request_note', group: 'Снабжение', label: 'Редактировать комментарий к заявке' },
+	{ id: 'supply.edit_request_store', group: 'Снабжение', label: 'Менять конечный склад заявки', dangerous: true },
 	{ id: 'supply.manage_requests', group: 'Снабжение', label: 'Обрабатывать и закрывать заявки', dangerous: true },
 	{ id: 'supply.create_purchase', group: 'Снабжение', label: 'Создавать закупку', dangerous: true },
 	{ id: 'supply.edit_purchase', group: 'Снабжение', label: 'Редактировать закупку', dangerous: true },
