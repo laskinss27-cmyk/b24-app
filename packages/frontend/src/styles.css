@@ -9,11 +9,17 @@ body {
 	padding: 0;
 }
 
+.low-vision-toolbar {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	box-sizing: border-box;
+	width: 100%;
+	padding: 8px 18px 0;
+}
+
 .low-vision-toggle {
-	position: fixed;
-	right: 18px;
-	bottom: 18px;
-	z-index: 100000;
+	position: static;
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
@@ -43,7 +49,6 @@ body {
 
 @media screen {
 	html.low-vision-mode body {
-		padding-bottom: 86px;
 		background: #fff;
 		color: #000;
 		font-size: 18px;
@@ -137,9 +142,8 @@ body {
 }
 
 @media (max-width: 620px) {
-	.low-vision-toggle {
-		right: 10px;
-		bottom: 10px;
+	.low-vision-toolbar {
+		padding: 6px 10px 0;
 	}
 	.low-vision-toggle span:last-child {
 		display: none;
@@ -147,7 +151,7 @@ body {
 }
 
 @media print {
-	.low-vision-toggle {
+	.low-vision-toolbar {
 		display: none !important;
 	}
 }

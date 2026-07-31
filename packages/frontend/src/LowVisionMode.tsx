@@ -34,16 +34,18 @@ export function LowVisionMode({ initialEnabled }: { initialEnabled: boolean }): 
 	};
 
 	return (
-		<button
-			type="button"
-			className={`low-vision-toggle${enabled ? ' active' : ''}`}
-			aria-pressed={enabled}
-			aria-label={enabled ? 'Выключить режим для слабовидящих' : 'Включить режим для слабовидящих'}
-			title={enabled ? 'Вернуть обычный размер интерфейса' : 'Увеличить текст, кнопки и контраст'}
-			onClick={toggle}
-		>
-			<span className="low-vision-toggle-aa" aria-hidden="true">АА</span>
-			<span>{enabled ? 'Обычный вид' : 'Крупный вид'}</span>
-		</button>
+		<div className="low-vision-toolbar">
+			<button
+				type="button"
+				className={`low-vision-toggle${enabled ? ' active' : ''}`}
+				aria-pressed={enabled}
+				aria-label={enabled ? 'Выключить режим для слабовидящих' : 'Включить режим для слабовидящих'}
+				title={enabled ? 'Вернуть обычный размер интерфейса' : 'Увеличить текст, кнопки и контраст'}
+				onClick={toggle}
+			>
+				<span className="low-vision-toggle-aa" aria-hidden="true">АА</span>
+				<span>{enabled ? 'Обычный вид' : 'Крупный вид'}</span>
+			</button>
+		</div>
 	);
 }
