@@ -1,4 +1,4 @@
-import type { B24Client } from './b24/client.js';
+import { B24ApiError, type B24Client } from './b24/client.js';
 
 /** Единственная служебная строка, которую Битрикс показывает вместо состава сделки из ядра. */
 export const B24_COLLAPSE_SERVICE_PRODUCT_ID = 9814;
@@ -43,16 +43,34 @@ export function mergeRepairServiceLine(
 
 /** Показать в сделке Битрикса только одну служебную строку с общей суммой из ядра. */
 export async function setDealB24CollapsedService(client: B24Client, dealId: number, total: number): Promise<void> {
-	await client.call('crm.deal.productrows.set', {
-		id: dealId,
-		rows: total > 0
-			? [{
-				PRODUCT_ID: B24_COLLAPSE_SERVICE_PRODUCT_ID,
-				PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME,
-				PRICE: total,
-				QUANTITY: 1,
-				MEASURE_CODE: 796,
-			}]
-			: [],
-	});
+	try {
+		await client.call('crm.deal.productrows.set', {
+			id: dealId,
+			rows: total > 0
+				? [{
+					PRODUCT_ID: B24_COLLAPSE_SERVICE_PRODUCT_ID,
+					PRODUCT_NAME: B24_COLLAPSE_SERVICE_NAME,
+					PRICE: total,
+					QUANTITY: 1,
+					MEASURE_CODE: 796,
+				}]
+				: [],
+		});
+	} catch (error) {
+		const immutableLegacyShipment = error instanceof B24ApiError
+			&& error.code === 'ERROR_CORE'
+			&& /невозможно удалить отгруженный товар/i.test(error.description ?? '');
+		if (!immutableLegacyShipment) throw error;
+
+		// Старые сделки могли быть отгружены через нативный склад Б24 до перехода
+		// на ядро. Такие строки Битрикс удалить уже не разрешает. Оставляем их как
+		// историю, но сумму сделки синхронизируем с актуальным планом ядра.
+		await client.call('crm.deal.update', {
+			id: dealId,
+			fields: {
+				IS_MANUAL_OPPORTUNITY: 'Y',
+				OPPORTUNITY: total,
+			},
+		});
+	}
 }
