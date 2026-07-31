@@ -23,6 +23,20 @@ test('normalizes КП totals from document rows', () => {
 	assert.equal(normalized.total, 30_000);
 });
 
+test('removes stages from print data and merges equal-priced duplicate rows', () => {
+	const normalized = normalizeDealKpDocument({
+		...sample,
+		goods: [
+			{ ...sample.goods[0], qty: 1, sum: 12_500, stage: 'Первый этаж' },
+			{ ...sample.goods[0], qty: 2, sum: 25_000, stage: 'Второй этаж' },
+		],
+	});
+	assert.equal(normalized.goods.length, 1);
+	assert.equal(normalized.goods[0]?.qty, 3);
+	assert.equal(normalized.goods[0]?.sum, 37_500);
+	assert.equal('stage' in (normalized.goods[0] ?? {}), false);
+});
+
 test('builds a readable Word package with escaped deal data', async () => {
 	const file = await buildDealKpDocx(sample);
 	const zip = await JSZip.loadAsync(file);
@@ -31,7 +45,7 @@ test('builds a readable Word package with escaped deal data', async () => {
 	assert.ok(document?.includes('Иванов &amp; Партнёры'));
 	assert.ok(document?.includes('IP-камера &lt;уличная&gt;'));
 	assert.ok(document?.includes('30 000'));
-	assert.ok(document?.includes('Этап 1'));
+	assert.equal(document?.includes('Этап 1'), false);
 	assert.ok(await zip.file('word/styles.xml')?.async('string'));
 	assert.ok(await zip.file('docProps/core.xml')?.async('string'));
 });

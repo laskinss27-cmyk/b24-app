@@ -20,6 +20,7 @@ test('builds a compact customer-facing proposal workbook', async () => {
 	assert.equal(sheet?.getCell('A1').value, 'УМНЫЙ ДОМ');
 	assert.equal(sheet?.getCell('A3').value, 'Коммерческое предложение № 37124');
 	assert.match(String(sheet?.pageSetup.printArea), /^A1:E/);
+	assert.doesNotMatch(JSON.stringify(sheet?.getSheetValues()), /Первый этаж/);
 	const file = await buildDealKpXlsx(sample);
 	assert.ok(file.byteLength > 5_000);
 });

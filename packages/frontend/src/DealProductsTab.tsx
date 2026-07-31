@@ -1208,7 +1208,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const sumGoods = pricedGoods.reduce((a, r) => a + line(r), 0);
 	const sumWorks = sumRealWorks;
 
-	const discount = data.planRows.reduce((a, r) => a + r.discountSum, 0);
 	const total = sumGoods + sumWorks;
 	const profitWorks = sumWorks * coef;
 	let profitGoods = 0;
@@ -1217,6 +1216,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		if (r.purchasingPrice == null) unknownGoods++;
 		else profitGoods += (r.price - r.purchasingPrice) * r.quantity;
 	}
+	const profitability = profitGoods + profitWorks;
 
 	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
 	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
@@ -1602,10 +1602,13 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					<p className="subtitle">Сделка #{dealId ?? '—'} · {goods.length + realWorks.length} {plural(goods.length + realWorks.length, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
 				</div>
 				<div className="deal-head-stats">
-					<div><span>Товары</span><b>{goods.length}</b></div>
-					<div><span>Работы</span><b>{realWorks.length}</b></div>
-					<div><span>{workingMode ? 'К реализации' : 'В варианте'}</span><b>{workingMode ? readyRows.length : goods.length + realWorks.length}</b></div>
-					<div><span>Сумма</span><b>{rub(sumGoods + sumRealWorks)}</b></div>
+					<div><span>Сумма товаров</span><b>{rub(sumGoods)}</b></div>
+					<div><span>Сумма работ</span><b>{rub(sumWorks)}</b></div>
+					<div><span>Общая сумма</span><b>{rub(total)}</b></div>
+					<div title={unknownGoods ? `Прибыль товаров рассчитана без ${unknownGoods} из ${pricedGoods.length}: не заполнена закупочная цена.` : 'Прибыль товаров плюс прибыль работ.'}>
+						<span>Прибыльность</span>
+						<b className={`deal-profit-value${profitability > 0 ? ' positive' : profitability < 0 ? ' negative' : ''}`}>{unknownGoods ? '≈ ' : ''}{rub(profitability)}</b>
+					</div>
 				</div>
 			</header>
 
@@ -1838,19 +1841,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			{workingMode && <div className="deal-stage-addbar">
 				<button className="btn-secondary" onClick={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}>Добавить этап</button>
 			</div>}
-
-			<div className="totals">
-				<div className="trow"><span>Сумма товаров</span><span>{rub(sumGoods)}</span></div>
-				<div className="trow">
-					<span className="approx" title={unknownGoods ? `≈: у ${unknownGoods} из ${goods.length} товаров не заполнена закупочная цена.` : 'Считается по закупочной цене из ядра.'}>
-						Прибыль товаров ≈{unknownGoods ? ` (без ${unknownGoods})` : ''}
-					</span>
-					<span>{rub(profitGoods)}</span>
-				</div>
-				{sumRealWorks > 0 && <div className="trow"><span>Сумма работ</span><span>{rub(sumRealWorks)}</span></div>}
-				{sumRealWorks > 0 && <div className="trow"><span>Прибыль работ (×{coef})</span><span>{rub(sumRealWorks * coef)}</span></div>}
-				<div className="trow grand"><span>Итого</span><span>{rub(sumGoods + sumRealWorks)}</span></div>
-			</div>
 
 			{workingMode && <div className="realize-bar">
 				{hasPendingDrafts ? (

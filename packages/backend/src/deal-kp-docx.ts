@@ -7,7 +7,6 @@ export interface DealKpDocumentRow {
 	price: number;
 	sum: number;
 	isWork: boolean;
-	stage?: string;
 }
 
 export interface DealKpDocumentData {
@@ -64,18 +63,36 @@ function normalizeRow(value: unknown, isWork: boolean): DealKpDocumentRow | null
 		price,
 		sum: finite(row.sum) || price * qty,
 		isWork,
-		...(clean(row.stage, 160) ? { stage: clean(row.stage, 160) } : {}),
 	};
+}
+
+/**
+ * Этапы — внутренняя структура сделки и в клиентские документы не попадают.
+ * Одинаковые позиции из разных этапов объединяем, если совпадает цена.
+ */
+function mergeDocumentRows(rows: DealKpDocumentRow[]): DealKpDocumentRow[] {
+	const merged = new Map<string, DealKpDocumentRow>();
+	for (const row of rows) {
+		const key = [row.isWork ? 'work' : 'goods', row.name, row.article, row.price].join('\u0000');
+		const current = merged.get(key);
+		if (current) {
+			current.qty += row.qty;
+			current.sum += row.sum;
+		} else {
+			merged.set(key, { ...row });
+		}
+	}
+	return [...merged.values()];
 }
 
 export function normalizeDealKpDocument(value: unknown): DealKpDocumentData {
 	if (!value || typeof value !== 'object') throw new Error('нет данных коммерческого предложения');
 	const input = value as Record<string, unknown>;
 	const rows = (key: 'goods' | 'works', isWork: boolean): DealKpDocumentRow[] =>
-		(Array.isArray(input[key]) ? input[key] : [])
+		mergeDocumentRows((Array.isArray(input[key]) ? input[key] : [])
 			.slice(0, 500)
 			.map((row) => normalizeRow(row, isWork))
-			.filter((row): row is DealKpDocumentRow => Boolean(row));
+			.filter((row): row is DealKpDocumentRow => Boolean(row)));
 	const goods = rows('goods', false);
 	const works = rows('works', true);
 	if (!goods.length && !works.length) throw new Error('в сделке нет товаров и услуг');
@@ -98,26 +115,7 @@ export function normalizeDealKpDocument(value: unknown): DealKpDocumentData {
 }
 
 export function groupDealKpRows(data: DealKpDocumentData): DealKpGroup[] {
-	const stageName = (row: DealKpDocumentRow): string => row.stage === 'Основная сделка' ? '' : (row.stage ?? '');
-	const all = [...data.goods, ...data.works];
-	const namedStages = [...new Set(all.map(stageName).filter(Boolean))];
-	if (!namedStages.length) return [{ name: '', goods: data.goods, works: data.works }];
-	const groups: DealKpGroup[] = [];
-	if (all.some((row) => !stageName(row))) {
-		groups.push({
-			name: '',
-			goods: data.goods.filter((row) => !stageName(row)),
-			works: data.works.filter((row) => !stageName(row)),
-		});
-	}
-	for (const name of namedStages) {
-		groups.push({
-			name,
-			goods: data.goods.filter((row) => stageName(row) === name),
-			works: data.works.filter((row) => stageName(row) === name),
-		});
-	}
-	return groups;
+	return [{ name: '', goods: data.goods, works: data.works }];
 }
 
 type ParagraphOptions = {

@@ -1303,15 +1303,34 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 					stage: r.stage,
 				}));
 			}
+			// Этапы остаются только внутри карточки сделки. Для клиентского КП
+			// одинаковые позиции с одинаковой ценой объединяем в одну строку.
+			const flattened = new Map<string, KpRawRow>();
+			for (const row of raw) {
+				if (!Number.isFinite(row.qty) || row.qty <= 0) continue;
+				const key = [row.productId, row.type, row.name, row.price].join('\u0000');
+				const current = flattened.get(key);
+				if (current) current.qty += row.qty;
+				else {
+					flattened.set(key, {
+						productId: row.productId,
+						name: row.name,
+						type: row.type,
+						qty: row.qty,
+						price: row.price,
+					});
+				}
+			}
+			const printRows = [...flattened.values()];
 			const catalogInfo = await enrichCatalogProducts(
 				client,
-				raw.filter((row) => row.type !== 7).map((row) => row.productId),
+				printRows.filter((row) => row.type !== 7).map((row) => row.productId),
 			).catch((err) => {
 				app.log.warn({ dealId }, `[api/deal/kp] catalog images failed — ${errInfo(err)}`);
 				return new Map();
 			});
-			const rows = raw
-				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price), ...(r.stage ? { stage: r.stage } : {}) }))
+			const rows = printRows
+				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price) }))
 				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
 				.map((r) => {
 					const info = catalogInfo.get(r.productId);
@@ -1323,7 +1342,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 						price: r.price,
 						sum: r.price * r.qty,
 						isWork: r.type === 7,
-						...(r.stage && r.stage !== 'Основная сделка' ? { stage: r.stage } : {}),
 						...(info?.photoPath ? { photoPath: info.photoPath } : {}),
 					};
 				});

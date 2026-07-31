@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchDealKp, photoFullUrl, withTimeout, type KpData, type KpRow } from './b24.js';
 import { REPAIR_LOGO } from './repair-logo.js';
 
@@ -27,8 +27,8 @@ const MOCK_KP: KpData = {
 		{ productId: 103, name: 'Монитор видеодомофона 7"', article: 'CTV-M5702', qty: 2, price: 3500, sum: 7000, isWork: false },
 	],
 	works: [
-		{ productId: 0, name: 'Монтаж и настройка камер', article: '', qty: 4, price: 2500, sum: 10000, isWork: true, stage: 'Монтаж первого этажа' },
-		{ productId: 0, name: 'Пусконаладка системы', article: '', qty: 1, price: 8000, sum: 8000, isWork: true, stage: 'Пусконаладка' },
+		{ productId: 0, name: 'Монтаж и настройка камер', article: '', qty: 4, price: 2500, sum: 10000, isWork: true },
+		{ productId: 0, name: 'Пусконаладка системы', article: '', qty: 1, price: 8000, sum: 8000, isWork: true },
 	],
 	sumGoods: 25500, sumWorks: 18000, total: 43500,
 };
@@ -52,7 +52,7 @@ function ReceiptDocument({ kp }: { kp: KpData }): JSX.Element {
 				<tbody>{rows.map((row, index) => (
 					<tr key={`${row.isWork ? 'w' : 'g'}-${row.productId}-${index}`}>
 						<td>{index + 1}</td>
-						<td>{row.name}{row.article && <small>{row.article}</small>}{row.stage && <small>{row.stage}</small>}</td>
+						<td>{row.name}{row.article && <small>{row.article}</small>}</td>
 						<td className="num">{row.qty}</td>
 						<td className="num">{money(row.price)}</td>
 						<td className="num">{money(row.sum)}</td>
@@ -125,18 +125,6 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 			<td className="kp-num">{money(r.sum)}</td>
 		</tr>
 	);
-	const allCompositionRows = kp ? [...kp.goods, ...kp.works] : [];
-	const stageName = (row: KpRow): string => row.stage?.trim() === 'Основная сделка' ? '' : (row.stage?.trim() ?? '');
-	const namedStages = [...new Set(allCompositionRows.map(stageName).filter(Boolean))];
-	const compositionGroups = kp
-		? (namedStages.length
-			? [
-				...(allCompositionRows.some((row) => !stageName(row)) ? [{ key: '__base', name: '', goods: kp.goods.filter((row) => !stageName(row)), works: kp.works.filter((row) => !stageName(row)) }] : []),
-				...namedStages.map((name) => ({ key: `stage:${name}`, name, goods: kp.goods.filter((row) => stageName(row) === name), works: kp.works.filter((row) => stageName(row) === name) })),
-			]
-			: [{ key: '__all', name: '', goods: kp.goods, works: kp.works }])
-		: [];
-
 	return (
 		<div className="kp-wrap">
 			<div className="blank-toolbar no-print">
@@ -157,30 +145,25 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 					<div className="kp-meta">от {ruDate(kp.date)}{kp.manager.name ? ` · менеджер: ${kp.manager.name}` : ''}{kp.manager.phone ? ` · ${kp.manager.phone}` : ''}</div>
 					<div className="kp-client">Клиент: <b>{kp.client.name || '—'}</b>{kp.client.phone && <> · {kp.client.phone}</>}</div>
 
-					{compositionGroups.map((group) => (
-						<Fragment key={group.key}>
-							{group.name && <div className="kp-stage-title">{group.name}</div>}
-							{group.goods.length > 0 && (
-								<>
-									<div className="kp-section">Оборудование</div>
-									<table className="kp-table">
-										{renderCols()}
-										<thead><tr><th colSpan={2}>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
-										<tbody>{group.goods.map(goodsRow)}</tbody>
-									</table>
-								</>
-							)}
-							{group.works.length > 0 && (
-								<>
-									<div className="kp-section">Работы</div>
-									<table className="kp-table">
-										{renderCols()}
-										<tbody>{group.works.map(workRow)}</tbody>
-									</table>
-								</>
-							)}
-						</Fragment>
-					))}
+					{kp.goods.length > 0 && (
+						<>
+							<div className="kp-section">Оборудование</div>
+							<table className="kp-table">
+								{renderCols()}
+								<thead><tr><th colSpan={2}>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
+								<tbody>{kp.goods.map(goodsRow)}</tbody>
+							</table>
+						</>
+					)}
+					{kp.works.length > 0 && (
+						<>
+							<div className="kp-section">Работы</div>
+							<table className="kp-table">
+								{renderCols()}
+								<tbody>{kp.works.map(workRow)}</tbody>
+							</table>
+						</>
+					)}
 
 					<div className="kp-totals">
 						{kp.goods.length > 0 && <div className="kp-trow"><span>Оборудование</span><span>{money(kp.sumGoods)}</span></div>}
