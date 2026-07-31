@@ -135,12 +135,12 @@ function productNamePreview(productType: string, manufacturer: string, model: st
 	return [productType, manufacturer, model].map((value) => value.trim().replace(/\s+/g, ' ')).filter(Boolean).join(' ');
 }
 
-function localProductCandidates(rows: BaseRow[], args: { name: string; manufacturer: string; model: string }): CatalogProductCandidate[] {
+function localProductCandidates(rows: BaseRow[], args: { name: string; manufacturer: string; model: string; isService: boolean }): CatalogProductCandidate[] {
 	const wantedModel = productKey(args.model);
 	const wantedBrand = productKey(args.manufacturer);
 	const wantedName = productKey(args.name);
 	return rows
-		.filter((row) => !row.isService)
+		.filter((row) => row.isService === args.isService)
 		.map((row) => {
 			const rowModel = productKey(row.article || row.model);
 			const rowBrand = productKey(row.manufacturer);
@@ -269,6 +269,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	onUse: (row: BaseRow) => void;
 	onClose: () => void;
 }): JSX.Element {
+	const [isService, setIsService] = useState(false);
 	const [productType, setProductType] = useState('');
 	const [manufacturer, setManufacturer] = useState('');
 	const [model, setModel] = useState(initialQuery.trim());
@@ -290,13 +291,18 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const [err, setErr] = useState<string | null>(null);
 	const sections = useMemo(() => {
 		const byId = new Map<number, string>();
-		for (const row of rows) if (row.sectionId && row.sectionName && !row.isService) byId.set(row.sectionId, row.sectionName);
+		for (const row of rows) {
+			if (row.sectionId && row.sectionName && row.isService === isService) byId.set(row.sectionId, row.sectionName);
+		}
+		if (!byId.size) {
+			for (const row of rows) if (row.sectionId && row.sectionName) byId.set(row.sectionId, row.sectionName);
+		}
 		return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-	}, [rows]);
-	const preview = productNamePreview(productType, manufacturer, model);
+	}, [isService, rows]);
+	const preview = isService ? productType.trim().replace(/\s+/g, ' ') : productNamePreview(productType, manufacturer, model);
 	const localCandidates = useMemo(
-		() => localProductCandidates(rows, { name: preview, manufacturer, model }),
-		[rows, preview, manufacturer, model],
+		() => localProductCandidates(rows, { name: preview, manufacturer, model, isService }),
+		[rows, preview, manufacturer, model, isService],
 	);
 	const candidates = serverCandidates ?? localCandidates;
 	const exactCandidate = duplicateBlocked || candidates.some((candidate) => candidate.exact);
@@ -304,12 +310,12 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const purchase = Number(purchaseText);
 	const section = sections.find((item) => item.id === Number(sectionId));
 	const validationError = (): string | null => {
-		if (productType.trim().length < 3) return 'Укажи вид товара.';
-		if (manufacturer.trim().length < 2) return 'Укажи производителя.';
-		if (model.trim().length < 2) return 'Укажи полную модель или артикул.';
+		if (productType.trim().length < 3) return isService ? 'Укажи название услуги.' : 'Укажи вид товара.';
+		if (!isService && manufacturer.trim().length < 2) return 'Укажи производителя.';
+		if (!isService && model.trim().length < 2) return 'Укажи полную модель или артикул.';
 		if (!section) return 'Выбери раздел каталога.';
 		if (!(retail > 0)) return 'Цена продажи должна быть больше нуля.';
-		if (!Number.isFinite(purchase) || purchase < 0) return 'Закупочная цена должна быть 0 или больше.';
+		if (!isService && (!Number.isFinite(purchase) || purchase < 0)) return 'Закупочная цена должна быть 0 или больше.';
 		const filledAttributes = attributes.filter((attribute) => attribute.rawValue.trim());
 		if (filledAttributes.some((attribute) => attribute.label.trim().length < 2)) return 'У каждой заполненной характеристики должно быть название.';
 		if (exactCandidate) return 'Такая модель уже есть в каталоге. Выбери найденный товар.';
@@ -322,6 +328,17 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		setServerCandidates(null);
 		setDuplicateBlocked(false);
 		setErr(null);
+	};
+
+	const changeKind = (service: boolean): void => {
+		setIsService(service);
+		setSectionId('');
+		setAttributes([]);
+		setFilterCategory('');
+		setTemplateSourceCount(0);
+		setStatuses([]);
+		setPhoto(null);
+		resetReview();
 	};
 
 	const changeSection = (nextSectionId: string): void => {
@@ -382,17 +399,18 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		setErr(null);
 		try {
 			const input = {
+				isService,
 				productType: productType.trim(),
-				manufacturer: manufacturer.trim(),
-				model: model.trim(),
-				article: article.trim() || model.trim(),
+				manufacturer: isService ? '' : manufacturer.trim(),
+				model: isService ? '' : model.trim(),
+				article: isService ? '' : article.trim() || model.trim(),
 				sectionId: section.id,
 				sectionName: section.name,
 				description: summary.trim(),
-				status: statuses.join(', '),
+				status: isService ? '' : statuses.join(', '),
 				summary: summary.trim(),
 				filterCategory: filterCategory.trim() || section.name,
-				attributes: attributes.map(({ key, label, group, type, rawValue, unit, filterable }) => ({
+				attributes: (isService ? [] : attributes).map(({ key, label, group, type, rawValue, unit, filterable }) => ({
 					key,
 					label: label.trim(),
 					group,
@@ -402,8 +420,8 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 					filterable,
 				})),
 				retail,
-				purchase,
-				...(photo ? { photo: { fileName: photo.fileName, mimeType: photo.mimeType, content: photo.content } } : {}),
+				purchase: isService ? 0 : purchase,
+				...(!isService && photo ? { photo: { fileName: photo.fileName, mimeType: photo.mimeType, content: photo.content } } : {}),
 				...(candidates.length && reviewed ? { similarReviewed: true } : {}),
 			};
 			const result = await createCatalogProduct(input);
@@ -426,24 +444,28 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		<div className="new-product-overlay" onClick={onClose}>
 			<div className="new-product-modal" onClick={(event) => event.stopPropagation()}>
 				<div className="new-product-head">
-					<div><span>Новая позиция каталога</span><h2>{preview || 'Новый товар'}</h2></div>
+					<div><span>Новая позиция каталога</span><h2>{preview || (isService ? 'Новая услуга' : 'Новый товар')}</h2></div>
 					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
 				</div>
 				<div className="new-product-fields">
-					<label>Вид товара<input autoFocus value={productType} placeholder="IP-камера" onChange={(event) => { setProductType(event.target.value); resetReview(); }} /></label>
-					<label>Производитель<input value={manufacturer} placeholder="Hikvision" onChange={(event) => { setManufacturer(event.target.value); resetReview(); }} /></label>
-					<label>Модель / артикул<input value={model} placeholder="DS-2CD2043G2-I" onChange={(event) => {
+					<label className="wide new-product-service-toggle">
+						<input type="checkbox" checked={isService} onChange={(event) => changeKind(event.target.checked)} />
+						<span><b>Услуга</b><small>Нескладская позиция: без остатков, закупки и товарных характеристик.</small></span>
+					</label>
+					<label>{isService ? 'Название услуги' : 'Вид товара'}<input autoFocus value={productType} placeholder={isService ? 'Монтаж видеокамеры' : 'IP-камера'} onChange={(event) => { setProductType(event.target.value); resetReview(); }} /></label>
+					{!isService && <label>Производитель<input value={manufacturer} placeholder="Hikvision" onChange={(event) => { setManufacturer(event.target.value); resetReview(); }} /></label>}
+					{!isService && <label>Модель / артикул<input value={model} placeholder="DS-2CD2043G2-I" onChange={(event) => {
 						const nextModel = event.target.value;
 						setArticle((currentArticle) => currentArticle === model ? nextModel : currentArticle);
 						setModel(nextModel);
 						resetReview();
-					}} /></label>
-					<label>Артикул поставщика<input value={article} placeholder="если отличается от модели" onChange={(event) => setArticle(event.target.value)} /></label>
+					}} /></label>}
+					{!isService && <label>Артикул поставщика<input value={article} placeholder="если отличается от модели" onChange={(event) => setArticle(event.target.value)} /></label>}
 					<label>Раздел<select value={sectionId} onChange={(event) => changeSection(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
 					<label>Цена продажи, ₽<input inputMode="decimal" value={retailText} placeholder="0" onChange={(event) => setRetailText(event.target.value.replace(',', '.'))} /></label>
-					<label>Закупочная цена, ₽<input inputMode="decimal" value={purchaseText} placeholder="0" onChange={(event) => setPurchaseText(event.target.value.replace(',', '.'))} /></label>
+					{!isService && <label>Закупочная цена, ₽<input inputMode="decimal" value={purchaseText} placeholder="0" onChange={(event) => setPurchaseText(event.target.value.replace(',', '.'))} /></label>}
 					<div className="new-product-name wide"><span>Название</span><b>{preview || '—'}</b></div>
-					<fieldset className="wide new-product-statuses">
+					{!isService && <fieldset className="wide new-product-statuses">
 						<legend>Статус товара</legend>
 						<div>{PRODUCT_STATUS_OPTIONS.map((status) => <label key={status}>
 							<input
@@ -455,11 +477,11 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 							/>
 							{status}
 						</label>)}</div>
-					</fieldset>
-					<label className="wide">Краткое описание<textarea rows={4} maxLength={4000} value={summary} placeholder="Что это за товар, для чего нужен, комплектация и совместимость" onChange={(event) => setSummary(event.target.value)} /></label>
+					</fieldset>}
+					<label className="wide">Краткое описание<textarea rows={4} maxLength={4000} value={summary} placeholder={isService ? 'Что входит в услугу, условия и ограничения' : 'Что это за товар, для чего нужен, комплектация и совместимость'} onChange={(event) => setSummary(event.target.value)} /></label>
 				</div>
 
-				<section className="new-product-photo-section">
+				{!isService && <section className="new-product-photo-section">
 					<div className="new-product-section-head">
 						<div><b>Фото товара</b><span>Автоматически уменьшим до безопасного размера и сохраним в ядре.</span></div>
 						<label className="btn-secondary new-product-photo-button">
@@ -471,9 +493,9 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 						<img src={photo.previewUrl} alt="Предпросмотр товара" />
 						<div><b>{photo.fileName}</b><span>{Math.ceil(photo.size / 1024)} КБ · JPEG</span><button type="button" onClick={() => setPhoto(null)}>Убрать</button></div>
 					</div> : <div className="new-product-photo-empty">Фото необязательно при создании товара.</div>}
-				</section>
+				</section>}
 
-				<section className="new-product-attributes">
+				{!isService && <section className="new-product-attributes">
 					<div className="new-product-section-head">
 						<div>
 							<b>Характеристики</b>
@@ -527,7 +549,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 						))}
 						{attributes.length === 0 && <p>Характеристик пока нет.</p>}
 					</div>
-				</section>
+				</section>}
 
 				{candidates.length > 0 && (
 					<div className={`new-product-matches${exactCandidate ? ' exact' : ''}`}>
@@ -544,7 +566,7 @@ function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 				{err && <div className="new-product-error">{err}</div>}
 				<div className="new-product-actions">
 					<button type="button" className="btn-secondary" onClick={onClose}>Отмена</button>
-					<button type="button" className="btn-primary" disabled={busy || photoBusy} onClick={() => void create()}>{busy ? 'Создаю…' : 'Создать товар'}</button>
+					<button type="button" className="btn-primary" disabled={busy || photoBusy} onClick={() => void create()}>{busy ? 'Создаю…' : isService ? 'Создать услугу' : 'Создать товар'}</button>
 				</div>
 			</div>
 		</div>
@@ -1310,7 +1332,7 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 				{!pickMode && canQuickSale && cart.size > 0 && (
 					<button className="btn-primary base-cart-btn" onClick={() => setShowCart(true)}>🛒 Быстрая продажа ({cart.size}) · {fmt(cartFinal)} ₽</button>
 				)}
-				{canCreateCatalogProduct && kind !== 'services' && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новый товар</button>}
+				{canCreateCatalogProduct && <button className="btn-secondary" onClick={() => setShowNewProduct(true)}>Новая позиция</button>}
 				{!pickMode && canExportComparison && (
 					<button className="btn-secondary" type="button" onClick={() => void exportComparison()} disabled={exportingComparison}>
 						{exportingComparison ? 'Готовлю сверку…' : 'Сверка с Битрикс'}

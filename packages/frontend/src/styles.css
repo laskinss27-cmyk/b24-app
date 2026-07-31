@@ -1446,6 +1446,31 @@ h2.inv-h2 {
 }
 .new-product-fields > .wide { grid-column: 1 / -1; }
 .new-product-fields textarea { min-height: 105px; resize: vertical; line-height: 1.45; }
+.new-product-fields > .new-product-service-toggle {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: fit-content;
+	padding: 9px 12px;
+	border: 1px solid #bdc8d7;
+	border-radius: 6px;
+	background: #f7f9fc;
+	cursor: pointer;
+}
+.new-product-fields > .new-product-service-toggle input {
+	flex: 0 0 auto;
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	accent-color: #2878d0;
+}
+.new-product-service-toggle span,
+.new-product-service-toggle b,
+.new-product-service-toggle small {
+	display: block;
+}
+.new-product-service-toggle b { color: #26354a; font-size: 14px; }
+.new-product-service-toggle small { margin-top: 2px; color: #748196; font-size: 11px; }
 .new-product-name {
 	align-self: end;
 	min-width: 0;

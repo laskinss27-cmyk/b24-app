@@ -654,6 +654,7 @@ export async function updateCatalogProduct(input: CatalogProductUpdateInput): Pr
 }
 
 export interface NewCatalogProductInput {
+	isService: boolean;
 	productType: string;
 	manufacturer: string;
 	model: string;

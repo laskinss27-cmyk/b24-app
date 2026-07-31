@@ -225,9 +225,9 @@ function candidateScore(row: CatalogCandidate, args: { name: string; model: stri
 	return { score, exact: false };
 }
 
-function rankedCandidates(rows: CatalogCandidate[], args: { name: string; model: string; manufacturer: string }): Array<CatalogCandidate & { exact: boolean }> {
+function rankedCandidates(rows: CatalogCandidate[], args: { name: string; model: string; manufacturer: string; isService: boolean }): Array<CatalogCandidate & { exact: boolean }> {
 	return rows
-		.filter((row) => !row.isService)
+		.filter((row) => row.isService === args.isService)
 		.map((row) => ({ row, ...candidateScore(row, args) }))
 		.filter((entry) => entry.score >= 45)
 		.sort((a, b) => b.score - a.score || a.row.name.localeCompare(b.row.name, 'ru'))
@@ -237,10 +237,11 @@ function rankedCandidates(rows: CatalogCandidate[], args: { name: string; model:
 
 async function freshExactCandidates(client: B24Client, args: { name: string; model: string }): Promise<CatalogCandidate[]> {
 	const select = ['id', 'iblockId', 'name', 'type', 'property334', 'property330', 'iblockSectionId', 'purchasingPrice'];
-	const attempts = await Promise.allSettled([
+	const requests = [
 		client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', { filter: { iblockId: 24, name: args.name }, select }),
-		client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', { filter: { iblockId: 24, property330: args.model }, select }),
-	]);
+		...(args.model ? [client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', { filter: { iblockId: 24, property330: args.model }, select })] : []),
+	];
+	const attempts = await Promise.allSettled(requests);
 	const byId = new Map<number, CatalogCandidate>();
 	for (const attempt of attempts) {
 		if (attempt.status !== 'fulfilled') continue;
@@ -603,6 +604,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		const status = cleanText(body['status']);
 		const retail = Number(body['retail']);
 		const purchase = Number(body['purchase'] ?? 0);
+		const isService = body['isService'] === true;
 		const similarReviewed = body['similarReviewed'] === true;
 		let content: CatalogProductContent;
 		let photo: ReturnType<typeof catalogPhoto>;
@@ -612,12 +614,12 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 		} catch (error) {
 			return reply.code(400).send({ ok: false, error: errInfo(error) });
 		}
-		if (productType.length < 3) return reply.code(400).send({ ok: false, error: 'укажи вид товара' });
-		if (manufacturer.length < 2) return reply.code(400).send({ ok: false, error: 'укажи производителя' });
-		if (model.length < 2) return reply.code(400).send({ ok: false, error: 'укажи полную модель или артикул' });
+		if (productType.length < 3) return reply.code(400).send({ ok: false, error: isService ? 'укажи название услуги' : 'укажи вид товара' });
+		if (!isService && manufacturer.length < 2) return reply.code(400).send({ ok: false, error: 'укажи производителя' });
+		if (!isService && model.length < 2) return reply.code(400).send({ ok: false, error: 'укажи полную модель или артикул' });
 		if (!Number.isInteger(sectionId) || sectionId <= 0) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
 		if (!(retail > 0)) return reply.code(400).send({ ok: false, error: 'цена продажи должна быть больше нуля' });
-		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		if (!isService && (!Number.isFinite(purchase) || purchase < 0)) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
 		const allowedStatuses = new Set([
 			'После ремонта', 'Снят с производства', 'Недоступен к заказу', 'К удалению',
 			'Уценка', 'Витринный', 'Б/у', 'Распродажа', 'Повреждённый',
@@ -628,7 +630,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 			return reply.code(400).send({ ok: false, error: 'выбран неизвестный или повторяющийся статус товара' });
 		}
 
-		const name = productTitle(productType, manufacturer, model);
+		const name = isService ? productType : productTitle(productType, manufacturer, model);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		try {
 			return await serializeProductCreate(async () => {
@@ -637,7 +639,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 				const fresh = await freshExactCandidates(client, { name, model });
 				const merged = new Map<number, CatalogCandidate>();
 				for (const row of [...cachedRows, ...fresh]) merged.set(row.id, row);
-				const candidates = rankedCandidates([...merged.values()], { name, model, manufacturer });
+				const candidates = rankedCandidates([...merged.values()], { name, model, manufacturer, isService });
 				const exact = candidates.filter((candidate) => candidate.exact);
 				if (exact.length) return { ok: true, status: 'duplicate', name, candidates: exact };
 				if (candidates.length && !similarReviewed) return { ok: true, status: 'review', name, candidates };
@@ -651,18 +653,26 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 						fields: {
 							iblockId: 24,
 							name,
-							type: 1,
+							type: isService ? 7 : 1,
 							measure: 9,
 							active: 'Y',
 							iblockSectionId: sectionId,
-							property334: manufacturer,
-							property330: model,
+							...(!isService ? {
+								property334: manufacturer,
+								property330: model,
+							} : {}),
 						},
 					});
 					productId = Number(created?.element?.id ?? 0) || 0;
 					if (!productId) throw new Error('catalog.product.add не вернул id');
 					if (await erp.get('Item', String(productId))) throw new Error(`в ядре уже существует товар с новым ID ${productId}`);
-					await ensureCoreItem(erp, { productId, name, model, article, brand: manufacturer, section: sectionName, description: renderCatalogDescription(content) });
+					await ensureCoreItem(erp, {
+						productId,
+						name,
+						...(isService ? { isService: true } : { model, article, brand: manufacturer }),
+						section: sectionName,
+						description: renderCatalogDescription(content),
+					});
 					coreCreated = true;
 					await erp.update('Item', String(productId), {
 						b24_product_status: statuses.join(', '),
@@ -685,7 +695,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 						photoPath = uploaded.fileUrl;
 						await erp.update('Item', String(productId), { image: uploaded.fileUrl });
 					}
-					await updateCoreCatalogPrices(erp, { productId, retail, purchase });
+					await updateCoreCatalogPrices(erp, { productId, retail, purchase: isService ? 0 : purchase });
 				} catch (error) {
 					if (uploadedFileName) await erp.delete('File', uploadedFileName).catch(() => undefined);
 					if (coreCreated) await erp.delete('Item', String(productId)).catch(() => undefined);
@@ -698,10 +708,10 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					id: productId,
 					iblockId: 24,
 					name,
-					isService: false,
-					article,
-					model,
-					manufacturer,
+					isService,
+					article: isService ? '' : article,
+					model: isService ? '' : model,
+					manufacturer: isService ? '' : manufacturer,
 					sectionId,
 					sectionName,
 					status: statuses.join(', '),
@@ -709,7 +719,7 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 					content,
 					filterCategory: category,
 					retail,
-					purchase,
+					purchase: isService ? 0 : purchase,
 					...(photoPath ? { photoPath: `/api/inventory/erp-image?p=${encodeURIComponent(photoPath)}` } : {}),
 					total: 0,
 					stockByStore: {},
