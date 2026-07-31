@@ -45,11 +45,24 @@ function marketplaceStores(stores: string[]): string[] {
 
 const cleanItemName = (value: string): string => value.trim().replace(/\s+/g, ' ');
 
-async function sourceProductName(client: B24Client, productId: number): Promise<string> {
-	const result = await client.call<{ product?: Record<string, unknown> }>('catalog.product.get', { id: productId });
+export function marketplaceBundleItemName(model: string, unitsPerBundle: number): string {
+	return `Комплект ${cleanItemName(model)} ${unitsPerBundle} шт`;
+}
+
+async function sourceProductIdentity(
+	client: B24Client,
+	erp: ErpClient,
+	productId: number,
+): Promise<{ name: string; model: string }> {
+	const [result, coreItem] = await Promise.all([
+		client.call<{ product?: Record<string, unknown> }>('catalog.product.get', { id: productId }),
+		erp.get<Record<string, unknown>>('Item', String(productId)),
+	]);
 	const name = cleanItemName(String(result?.product?.['name'] ?? ''));
 	if (!name) throw new Error(`товар #${productId} не найден в каталоге`);
-	return name;
+	const model = cleanItemName(String(coreItem?.['b24_model'] ?? ''));
+	if (!model) throw new Error(`у товара «${name}» не заполнена модель — сначала укажите её в карточке товара`);
+	return { name, model };
 }
 
 async function ensureBundleProduct(client: B24Client, title: string): Promise<number> {
@@ -275,8 +288,9 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			if (!storeTitle) {
 				return reply.code(400).send({ ok: false, error: 'склад Маркетплейс не найден' });
 			}
-			const sourceItemName = await sourceProductName(client, sourceProductId);
-			const bundleItemName = `Комплект ${sourceItemName} ${unitsPerBundle} шт`;
+			const source = await sourceProductIdentity(client, erp, sourceProductId);
+			const sourceItemName = source.name;
+			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
 			const sourceQty = unitsPerBundle * bundleQty;
 			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }]);
 			const bundleProductId = await ensureBundleProduct(client, bundleItemName);

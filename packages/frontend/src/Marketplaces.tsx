@@ -235,11 +235,13 @@ function MarketplaceBundleModal({
 	const marketplaceStore = form.stores.find((store) => store.toLocaleLowerCase('ru-RU') === 'маркетплейс') ?? '';
 	const sourceQty = unitsPerBundle * bundleQty;
 	const available = source && marketplaceStore ? Number(source.stocks?.[marketplaceStore] ?? 0) : 0;
-	const bundleItemName = source ? `Комплект ${source.name} ${unitsPerBundle} шт` : '';
+	const sourceModel = source?.model?.trim() ?? '';
+	const bundleItemName = sourceModel ? `Комплект ${sourceModel} ${unitsPerBundle} шт` : '';
 
 	const submit = async (): Promise<void> => {
 		setError('');
 		if (!source) return setError('Выберите исходный товар.');
+		if (!sourceModel) return setError('У исходного товара не заполнена модель. Сначала укажите её в карточке товара.');
 		if (!marketplaceStore) return setError('Склад «Маркетплейс» не найден.');
 		if (!Number.isInteger(unitsPerBundle) || unitsPerBundle < 2) return setError('В комплекте должно быть не меньше двух штук.');
 		if (!Number.isInteger(bundleQty) || bundleQty < 1) return setError('Количество комплектов должно быть целым и больше нуля.');
@@ -313,7 +315,7 @@ function MarketplaceBundleModal({
 						<div>
 							<span>Исходный товар</span>
 							{source
-								? <><b>{source.name}</b><small>#{source.productId} · на складе «Маркетплейс»: {available} шт.</small></>
+								? <><b>{source.name}</b><small>#{source.productId} · модель: {sourceModel || 'не заполнена'} · на складе «Маркетплейс»: {available} шт.</small></>
 								: <b>Товар не выбран</b>}
 						</div>
 						<button type="button" onClick={() => setPicking(true)}>{source ? 'Заменить' : 'Выбрать товар'}</button>
@@ -326,7 +328,7 @@ function MarketplaceBundleModal({
 					<div className="marketplace-bundle-result">
 						<div><span>Будет списано</span><b>{source ? `${sourceQty} шт. · ${source.name}` : '—'}</b></div>
 						<div className="marketplace-bundle-arrow">→</div>
-						<div><span>Будет зачислено</span><b>{source ? `${bundleQty} шт. · ${bundleItemName}` : '—'}</b></div>
+						<div><span>Будет зачислено</span><b>{source ? (bundleItemName ? `${bundleQty} шт. · ${bundleItemName}` : 'Модель не заполнена') : '—'}</b></div>
 					</div>
 				</div>
 				{error && <div className="marketplace-error">{error}</div>}

@@ -877,6 +877,7 @@ function CatalogProductCard({ row, stores, sections, canEdit, canEditPrices, onS
 export interface ProductPickItem {
 	productId: number;
 	name: string;
+	model?: string;
 	quantity: number;
 	price: number;
 	purchasePrice?: number;
@@ -1214,7 +1215,16 @@ export function ProductBase({ picker, readOnly = false, allowCreateProduct = fal
 					.map(([storeId, qty]) => [visibleStores.find((store) => store.id === Number(storeId))?.title ?? '', qty] as const)
 					.filter(([storeTitle]) => Boolean(storeTitle)),
 			);
-			return { productId: c.row.id, name: c.row.name, quantity: c.qty, price: c.row.retail ?? 0, purchasePrice: c.row.purchase ?? 0, isService: c.row.isService, stocks };
+			return {
+				productId: c.row.id,
+				name: c.row.name,
+				...(c.row.model ? { model: c.row.model } : {}),
+				quantity: c.qty,
+				price: c.row.retail ?? 0,
+				purchasePrice: c.row.purchase ?? 0,
+				isService: c.row.isService,
+				stocks,
+			};
 		});
 		if (!items.length) { picker.onCancel(); return; }
 		setDone(true);
