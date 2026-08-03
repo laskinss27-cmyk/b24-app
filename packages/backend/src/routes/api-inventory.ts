@@ -33,58 +33,28 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-type InvDocRef = { type: string; id: number; lines: number };
-
 /**
- * ЗЕРКАЛА в Б24: черновики списания (D) / оприходования (S) по расхождениям точки
- * (catalog.document.add, status N — проводятся вручную в Б24, живые остатки не трогаем).
- * Перед созданием ищем уже существующий черновик с тем же заголовком — entity-запись
- * может опоздать за таймаутом фронта, и повторное «Провести» не должно плодить дубли
- * (живой случай 2026-06-12: черновики 676+678 от двойного клика).
+ * ctv_inv хранит все точки одной инвентаризации в одной JSON-записи. Поэтому
+ * параллельные read-modify-write двух складов обязаны идти последовательно,
+ * иначе более поздний entity.item.update может вернуть старую версию соседней точки.
+ * Production работает одним backend-контейнером, так что очередь на процесс надёжно
+ * закрывает конкурентные автосохранения внутри текущей архитектуры хранения.
  */
-async function createB24MirrorDocs(
-	client: B24Client,
-	args: { storeId: number; storeName: string; invTitle: string; responsibleId?: number | undefined; lines: Array<{ productId: number; diff: number }> },
-): Promise<InvDocRef[]> {
-	const shortages = args.lines.filter((l) => Number(l.diff) < 0);
-	const surpluses = args.lines.filter((l) => Number(l.diff) > 0);
-	const docs: InvDocRef[] = [];
-	const buildDoc = async (docType: 'D' | 'S', group: Array<{ productId: number; diff: number }>, label: string): Promise<void> => {
-		if (!group.length) return;
-		const title = `Инвентаризация «${args.invTitle}»: ${label} — ${args.storeName}`;
-		const existing = await client.call<{ documents?: Array<{ id?: number }> }>('catalog.document.list', {
-			filter: { docType, status: 'N', title },
-			select: ['id'],
-			order: { id: 'DESC' },
-		}).catch(() => null);
-		const existingId = Number(existing?.documents?.[0]?.id ?? 0);
-		if (existingId) { docs.push({ type: docType, id: existingId, lines: group.length }); return; }
-		const add = await client.call<{ document?: { id?: number }; id?: number }>('catalog.document.add', {
-			fields: {
-				docType,
-				currency: 'RUB',
-				title,
-				...(args.responsibleId ? { responsibleId: args.responsibleId } : {}),
-			},
-		});
-		const docId = Number(add?.document?.id ?? add?.id ?? 0);
-		if (!docId) throw new Error('catalog.document.add: документ не создан (нет id)');
-		for (const l of group) {
-			await client.call('catalog.document.element.add', {
-				fields: {
-					docId,
-					elementId: Number(l.productId),
-					amount: Math.abs(Number(l.diff)),
-					purchasingPrice: 0,
-					...(docType === 'D' ? { storeFrom: args.storeId } : { storeTo: args.storeId }),
-				},
-			});
-		}
-		docs.push({ type: docType, id: docId, lines: group.length });
-	};
-	await buildDoc('D', shortages, 'списание');
-	await buildDoc('S', surpluses, 'оприходование');
-	return docs;
+const inventoryUpdateLocks = new Map<string, Promise<void>>();
+
+export async function withInventoryUpdateLock<T>(inventoryId: string, work: () => Promise<T>): Promise<T> {
+	const previous = inventoryUpdateLocks.get(inventoryId) ?? Promise.resolve();
+	let release = (): void => undefined;
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	const tail = previous.catch(() => undefined).then(() => gate);
+	inventoryUpdateLocks.set(inventoryId, tail);
+	await previous.catch(() => undefined);
+	try {
+		return await work();
+	} finally {
+		release();
+		if (inventoryUpdateLocks.get(inventoryId) === tail) inventoryUpdateLocks.delete(inventoryId);
+	}
 }
 
 export function registerApiInventoryRoute(app: FastifyInstance): void {
@@ -260,8 +230,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 
 	// Обновить ОДНУ точку инвентаризации: claim / saveDraft / submit.
 	// Read-modify-write: перечитываем свежий элемент и мержим ТОЛЬКО свою точку (по storeId),
-	// чтобы параллельная работа на других точках не затиралась. (Узкое окно гонки на одну и ту же
-	// точку остаётся — для нашего трафика приемлемо; TODO: версионирование/оптимистичная блокировка.)
+	// а очередь withInventoryUpdateLock последовательно проводит изменения разных точек одной записи.
 	app.post('/api/inventory/update', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & {
 			inventoryId?: string;
@@ -273,6 +242,8 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			comments?: Record<string, unknown>;
 			facts?: Record<string, number>;
 			result?: unknown;
+			draftSessionId?: string;
+			draftSequence?: number;
 		};
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
@@ -281,6 +252,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 		}
 
 		await ensureInventoryEntity(client);
+		return withInventoryUpdateLock(b.inventoryId, async () => {
 		try {
 			// read: берём свежий элемент (инвентаризаций единицы — выбираем по ID из общего списка)
 			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
@@ -318,8 +290,28 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				pt['status'] = 'in_progress';
 				pt['startedAt'] = now;
 			} else if (b.action === 'saveDraft') {
+				const sessionId = String(b.draftSessionId ?? '').trim().slice(0, 80);
+				const sequence = Number(b.draftSequence ?? 0);
+				const storedSessionId = String(pt['draftSessionId'] ?? '');
+				const storedSequence = Number(pt['draftSequence'] ?? 0);
+				// pagehide/keepalive может догнать более свежий запрос. В пределах одного
+				// открытия формы старый пакет никогда не должен затереть новый.
+				if (sessionId && sessionId === storedSessionId && Number.isInteger(sequence) && sequence <= storedSequence) {
+					return { ok: true, ignored: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
+				}
+				// После отправки/сверки опоздавшее фоновое автосохранение уже не меняет точку.
+				if (status === 'submitted' || status === 'reconciled') {
+					return { ok: true, ignored: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
+				}
 				pt['draft'] = b.draft ?? {};
 				if (comments) pt['comments'] = comments;
+				pt['draftUpdatedAt'] = now;
+				pt['draftUpdatedById'] = meId;
+				pt['draftUpdatedByName'] = String(b.userName ?? '');
+				if (sessionId && Number.isInteger(sequence) && sequence > 0) {
+					pt['draftSessionId'] = sessionId;
+					pt['draftSequence'] = sequence;
+				}
 				if (status === 'idle') {
 					pt['status'] = 'in_progress';
 					if (!pt['responsibleId']) {
@@ -363,74 +355,17 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				DETAIL_TEXT: JSON.stringify(data),
 			});
 			app.log.info({ action: b.action, storeId: b.storeId }, '[api/inventory/update] ok');
-			return { ok: true };
+			return { ok: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
 		} catch (err) {
 			app.log.error({ action: b.action }, `[api/inventory/update] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
-	});
-
-	// Удалить инвентаризацию целиком (entity.item.delete). Только наша сущность ctv_inv.
-	app.post('/api/inventory/build-documents', async (req, reply) => {
-			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number; userId?: string };
-			const client = clientFrom(b);
-			if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-			if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
-
-			await ensureInventoryEntity(client);
-			try {
-				const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
-				const item = (items ?? []).find((it) => String(it['ID']) === String(b.inventoryId));
-				if (!item) return reply.code(200).send({ ok: false, error: 'инвентаризация не найдена' });
-				let data: Record<string, unknown> = {};
-				try {
-					data = item['DETAIL_TEXT'] ? (JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown>) : {};
-				} catch {
-					return reply.code(200).send({ ok: false, error: 'битый JSON хранилища' });
-				}
-				const points = Array.isArray(data['points']) ? (data['points'] as Array<Record<string, unknown>>) : [];
-				const pt = points.find((p) => Number(p['storeId']) === Number(b.storeId));
-				if (!pt) return reply.code(200).send({ ok: false, error: 'точка не найдена' });
-				if (String(pt['status']) !== 'reconciled') {
-					return reply.code(200).send({ ok: false, error: 'документы формируются только по сверённой точке' });
-				}
-				// защита от дублей: если уже формировали — не плодим черновики
-				if (Array.isArray(pt['documents']) && (pt['documents'] as unknown[]).length) {
-					return reply.code(200).send({ ok: false, error: 'документы уже сформированы — удали черновики в Б24, чтобы пересоздать', docs: pt['documents'] });
-				}
-
-				const result = (pt['result'] ?? {}) as { lines?: Array<{ productId: number; diff: number }> };
-				const lines = Array.isArray(result.lines) ? result.lines : [];
-				const shortages = lines.filter((l) => Number(l.diff) < 0); // недостача → списание D
-				const surpluses = lines.filter((l) => Number(l.diff) > 0); // излишек → оприходование S
-				if (!shortages.length && !surpluses.length) {
-					return { ok: true, docs: [] as Array<{ type: string; id: number; lines: number }>, message: 'расхождений нет — документы не нужны' };
-				}
-
-				const docs = await createB24MirrorDocs(client, {
-					storeId: Number(b.storeId),
-					storeName: String(pt['storeName'] ?? `склад ${b.storeId}`),
-					invTitle: String(item['NAME'] ?? ''),
-					responsibleId: Number(b.userId ?? pt['responsibleId'] ?? 0) || undefined,
-					lines: [...shortages, ...surpluses],
-				});
-
-				// ссылки на документы — в точку (защита от дублей + видно в сводке)
-				pt['documents'] = docs;
-				data['points'] = points;
-				await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
-
-				app.log.info({ storeId: b.storeId, docs: docs.map((d) => `${d.type}#${d.id}`).join(',') }, '[api/inventory/build-documents] ok');
-				return { ok: true, docs };
-			} catch (err) {
-				app.log.error({ storeId: b.storeId }, `[api/inventory/build-documents] failed — ${errInfo(err)}`);
-				return reply.code(200).send({ ok: false, error: errInfo(err) });
-			}
 		});
+	});
 
 		// ── ДОКУМЕНТ ЯДРА (Stock Reconciliation, 1С-модель «на основании») ──────────
 		// Болванка (preview, ничего не пишет) → «Записать» (черновик в ERPNext) →
-		// «Провести» (submit ядра + ЗЕРКАЛА D/S в Б24 черновиками). Гейт: env ERPNEXT_URL.
+		// «Провести» (submit ядра). Гейт: env ERPNEXT_URL.
 		// Книга для документа ядра = остатки ЯДРА (факты выравнивают ERPNext, не Б24).
 
 		/** Точка инвентаризации по id+storeId (свежее чтение entity). */
@@ -484,7 +419,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
 				const { lines, storeName } = await computeRecoLines(erp, pt);
 				app.log.info({ storeId: b.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
-				return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null, docs: Array.isArray(pt['documents']) ? pt['documents'] : [] };
+				return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null };
 			} catch (err) {
 				app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-preview] failed — ${errInfo(err)}`);
 				return reply.code(200).send({ ok: false, error: errInfo(err) });
@@ -527,9 +462,9 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			}
 		});
 
-		// «Провести»: submit ядра (двигает остатки ERPNext) + зеркала D/S в Б24 черновиками.
+		// «Провести»: submit ядра (двигает остатки ERPNext).
 		app.post('/api/inventory/erp-doc-submit', async (req, reply) => {
-			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number; userId?: string };
+			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number };
 			const client = clientFrom(b);
 			if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 			if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
@@ -540,38 +475,16 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 				const doc = pt['erpDoc'] as { name?: string; status?: string; lines?: number } | undefined;
 				if (!doc?.name) return reply.code(200).send({ ok: false, error: 'сначала «Записать» (черновика ядра нет)' });
 				// ИДЕМПОТЕНТНО: проведение в ядре может пережить таймаут фронта, а entity-запись — нет.
-				// Повторное «Провести» ДОЗАВЕРШАЕТ (живой случай 2026-06-12): уже проведённый reco не
-				// проводим заново, идём дальше к зеркалам и записи статуса.
+				// Повторное «Провести» дозавершает запись статуса, но не проводит документ повторно.
 				const live = await erp.get('Stock Reconciliation', doc.name);
 				if (!live) return reply.code(200).send({ ok: false, error: `${doc.name} не найден в ядре — пересоздай через «Записать»` });
 				if (Number(live['docstatus'] ?? 0) !== 1) await submitInventoryReco(erp, doc.name);
 				else app.log.info({ name: doc.name }, '[api/inventory/erp-doc-submit] reco уже проведён — дозавершаю');
 				pt['erpDoc'] = { ...doc, status: 'submitted', submittedAt: new Date().toISOString() };
-				// статус — в entity СРАЗУ (до зеркал): если зеркала не уложатся в таймаут,
-				// повторный клик увидит submitted и пойдёт только дозаканчивать зеркала
 				data['points'] = points;
 				await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
-
-				// зеркала в Б24 — по расхождениям против книги Б24 (result.lines), если ещё не делали
-				let mirrors: InvDocRef[] = Array.isArray(pt['documents']) ? (pt['documents'] as InvDocRef[]) : [];
-				if (!mirrors.length) {
-					const lines = (((pt['result'] ?? {}) as { lines?: Array<{ productId: number; diff: number }> }).lines ?? [])
-						.filter((l) => Number(l.diff) !== 0);
-					if (lines.length) {
-						mirrors = await createB24MirrorDocs(client, {
-							storeId: Number(b.storeId),
-							storeName: String(pt['storeName'] ?? `склад ${b.storeId}`),
-							invTitle: String(item['NAME'] ?? ''),
-							responsibleId: Number(b.userId ?? pt['responsibleId'] ?? 0) || undefined,
-							lines,
-						});
-						pt['documents'] = mirrors;
-					}
-				}
-				data['points'] = points;
-				await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
-				app.log.info({ storeId: b.storeId, name: doc.name, mirrors: mirrors.length }, '[api/inventory/erp-doc-submit] ok');
-				return { ok: true, doc: pt['erpDoc'], docs: mirrors };
+				app.log.info({ storeId: b.storeId, name: doc.name }, '[api/inventory/erp-doc-submit] ok');
+				return { ok: true, doc: pt['erpDoc'] };
 			} catch (err) {
 				app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-submit] failed — ${errInfo(err)}`);
 				return reply.code(200).send({ ok: false, error: errInfo(err) });

@@ -11,7 +11,6 @@ import {
 	deleteInventory,
 	makeActPoint,
 	reopenPoint,
-	buildPointDocuments,
 	getInitiators,
 	fetchCurrentUser,
 	fetchCurrentAppAccess,
@@ -24,7 +23,6 @@ import {
 	type ErpRecoLine,
 	type Inventory,
 	type InvPoint,
-	type BuiltDoc,
 	type InvResult,
 	type SimpleUser,
 	type StoreInfo,
@@ -129,8 +127,6 @@ export function InventoryHome(): JSX.Element {
 	const [actionErr, setActionErr] = useState<string | null>(null);
 	/** Ключ `invId:storeId` раскрытой точки (просмотр расхождений). */
 	const [expanded, setExpanded] = useState<string | null>(null);
-	/** Результат формирования документов: текст + ссылки на черновики (кнопки «Открыть»). */
-	const [docResult, setDocResult] = useState<{ docs: BuiltDoc[]; text: string } | null>(null);
 	/** Открытая модалка QR точки (мобильный подсчёт): какую точку показываем. */
 	const [qrFor, setQrFor] = useState<{ invId: string; storeId: number; storeName: string } | null>(null);
 	/** Открытая модалка документа ЯДРА (Stock Reconciliation, 1С-цепочка Записать→Провести). */
@@ -294,35 +290,6 @@ export function InventoryHome(): JSX.Element {
 		}
 	}
 
-	/** Открыть карточку складского документа в Б24 (слайдером, не уходя из приложения). */
-	function openDoc(id: number): void {
-		const path = `/shop/documents/details/${id}/?inventoryManagementSource=inventory`;
-		const bx = window.BX24;
-		if (bx && typeof bx.openPath === 'function') bx.openPath(path);
-		else {
-			const auth = bx ? bx.getAuth() : false;
-			window.open(`https://${auth ? (auth.domain ?? '') : ''}${path}`, '_blank');
-		}
-	}
-
-	/** Сформировать черновики списания/оприходования по сверённой точке (фаза C). Проведение — вручную в Б24. */
-	async function buildDocs(inv: Inventory, p: InvPoint): Promise<void> {
-		setActionErr(null);
-		setDocResult(null);
-		if (ctx.__mock) {
-			setDocResult({ docs: [], text: 'dev-мок: документы формируются только на проде.' });
-			return;
-		}
-		if (!window.confirm(`Сформировать ЧЕРНОВИКИ списания/оприходования по точке «${p.storeName}»? Остатки не изменятся — проводить будешь сам в Б24.`)) return;
-		try {
-			const { docs, message } = await withTimeout(buildPointDocuments(inv.id, p.storeId, me.id), 20000, 'build-documents');
-			setDocResult({ docs, text: message ?? 'Черновики созданы (не проведены). Открой, проверь и проведи в Б24:' });
-			void reload();
-		} catch (e: unknown) {
-			setActionErr(String(e instanceof Error ? e.message : e));
-		}
-	}
-
 	/** Удалить инвентаризацию целиком (необратимо, с подтверждением). */
 	async function removeInventory(inv: Inventory): Promise<void> {
 		if (!window.confirm(`Удалить «${inv.title}»? Это насовсем.`)) return;
@@ -474,7 +441,6 @@ export function InventoryHome(): JSX.Element {
 							Документ ядра{erpBadge}
 						</button>
 					)}
-					{isInitiator && !p.erpDoc && <button className="btn-mini ghost" onClick={() => void buildDocs(inv, p)}>Документы в Б24</button>}
 					{openBtn}
 					{reopenBtn}
 				</>
@@ -601,16 +567,6 @@ export function InventoryHome(): JSX.Element {
 			)}
 
 			{actionErr && <div className="beta-banner">⛔ {actionErr}</div>}
-			{docResult && (
-					<div className="beta-banner ok">
-						✅ {docResult.text}
-						{docResult.docs.map((d) => (
-							<button key={d.id} className="btn-mini doc-open" onClick={() => openDoc(d.id)}>
-								Открыть {d.type === 'D' ? 'списание' : 'оприходование'} #{d.id}
-							</button>
-						))}
-					</div>
-				)}
 				{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
 			<h2 className="inv-h2">Инвентаризации</h2>
 			{visibleInvs.length
@@ -622,9 +578,7 @@ export function InventoryHome(): JSX.Element {
 					invId={erpFor.invId}
 					storeId={erpFor.storeId}
 					storeName={erpFor.storeName}
-					userId={me.id}
 					mock={Boolean(ctx.__mock)}
-					openDoc={openDoc}
 					onClose={() => setErpFor(null)}
 					onChanged={() => void reload()}
 				/>
@@ -636,22 +590,19 @@ export function InventoryHome(): JSX.Element {
 /**
  * Документ ЯДРА «на основании» точки (1С-модель): болванка (ничего не записано;
  * закрыл — пропала) → «Записать» (черновик Stock Reconciliation в ERPNext) →
- * «Провести» (остатки ядра двигаются + в Б24 создаются ЧЕРНОВИКИ-зеркала D/S).
+ * «Провести» (остатки ядра изменяются по фактам точки).
  * Книга здесь — остатки ЯДРА (ERPNext), не Б24: документ выравнивает ядро по фактам.
  */
 function ErpDocModal(props: {
 	invId: string;
 	storeId: number;
 	storeName: string;
-	userId: string;
 	mock: boolean;
-	openDoc: (id: number) => void;
 	onClose: () => void;
 	onChanged: () => void;
 }): JSX.Element {
 	const [lines, setLines] = useState<ErpRecoLine[] | null>(null);
 	const [doc, setDoc] = useState<ErpInvDoc | null>(null);
-	const [mirrors, setMirrors] = useState<BuiltDoc[]>([]);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
@@ -659,7 +610,7 @@ function ErpDocModal(props: {
 		if (props.mock) { setLines([]); setErr('dev-мок: документ ядра доступен только с подключённым ERPNext.'); return; }
 		let alive = true;
 		withTimeout(previewErpDoc(props.invId, props.storeId), 20000, 'erp-doc-preview')
-			.then((r) => { if (alive) { setLines(r.lines); setDoc(r.doc); setMirrors(r.docs); } })
+			.then((r) => { if (alive) { setLines(r.lines); setDoc(r.doc); } })
 			.catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)); });
 		return () => { alive = false; };
 	}, [props.invId, props.storeId, props.mock]);
@@ -676,14 +627,12 @@ function ErpDocModal(props: {
 
 	async function doSubmit(): Promise<void> {
 		if (!doc) return;
-		// дозавершение уже проведённого (зеркала после таймаута) — без устрашающего confirm
-		if (doc.status !== 'submitted' && !window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки, в Б24 будут созданы ЧЕРНОВИКИ-зеркала (их проводишь сам).`)) return;
+		if (doc.status !== 'submitted' && !window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки.`)) return;
 		setBusy(true); setErr(null);
 		try {
 			// Проведение и связанные записи могут быть небыстрыми, поэтому оставляем явный прогресс.
-			const r = await withTimeout(submitErpDoc(props.invId, props.storeId, props.userId), 55000, 'erp-doc-submit');
-			setDoc(r.doc);
-			setMirrors(r.docs);
+			const submittedDoc = await withTimeout(submitErpDoc(props.invId, props.storeId), 55000, 'erp-doc-submit');
+			setDoc(submittedDoc);
 			props.onChanged();
 		} catch (e: unknown) {
 			const msg = String(e instanceof Error ? e.message : e);
@@ -728,16 +677,6 @@ function ErpDocModal(props: {
 						</table>
 					) : !err ? <p className="muted">Факты сошлись с ядром — документ не нужен.</p> : null
 				)}
-				{submitted && mirrors.length > 0 && (
-					<div className="beta-banner ok">
-						Зеркала в Б24 (черновики — проверь и проведи сам):
-						{mirrors.map((d) => (
-							<button key={d.id} className="btn-mini doc-open" onClick={() => props.openDoc(d.id)}>
-								Открыть {d.type === 'D' ? 'списание' : 'оприходование'} #{d.id}
-							</button>
-						))}
-					</div>
-				)}
 				<div className="inv-actions">
 					{!doc && lines !== null && lines.length > 0 && (
 						<button className="btn-primary" disabled={busy} onClick={() => void doSave()}>{busy ? 'Записываю…' : 'Записать'}</button>
@@ -747,9 +686,6 @@ function ErpDocModal(props: {
 							<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести'}</button>
 							<button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать от свежей болванки</button>
 						</>
-					)}
-					{submitted && mirrors.length === 0 && (
-						<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Дозавершаю…' : 'Дозавершить зеркала в Б24'}</button>
 					)}
 					<button className="btn-secondary" onClick={props.onClose}>Закрыть</button>
 				</div>

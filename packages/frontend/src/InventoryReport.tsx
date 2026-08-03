@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	fetchStoreStock,
 	fetchActLines,
@@ -10,6 +10,15 @@ import {
 	type InvLine,
 	type InvResult,
 } from './b24.js';
+import {
+	clearInventoryLocalDraft,
+	commentsToDraft,
+	countsToDraft,
+	inventoryDraftStorageKey,
+	readInventoryLocalDraft,
+	writeInventoryLocalDraft,
+	type InventoryLocalDraft,
+} from './inventory-draft.js';
 
 /**
  * Экран подсчёта ОДНОЙ точки инвентаризации. Точка уже выбрана инициатором/менеджером
@@ -17,7 +26,8 @@ import {
  *
  * Опознание товара: Название · Артикул (property360) · Раздел; группировка по разделам;
  * поиск по названию И артикулу; тумблер фото (по умолчанию off — текст быстрее).
- * «Сохранить» → черновик (saveDraft), «Отправить» → финал (submit) — реальная запись в entity.
+ * Каждое изменение сразу пишется в localStorage и фоном в серверный черновик;
+ * «Сохранить» форсирует синхронизацию, «Отправить» фиксирует финальный результат.
  */
 
 interface InventoryCountProps {
@@ -63,6 +73,12 @@ const MOCK_STOCK: Record<number, InvLine[]> = {
 
 export function InventoryCount(props: InventoryCountProps): JSX.Element {
 	const { inventoryId, storeId, storeName, me, initialDraft, initialComments, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
+	const draftMode = mode === 'act' ? 'act' : 'count';
+	const localDraftKey = inventoryDraftStorageKey(inventoryId, storeId, draftMode);
+	const restoredLocalRef = useRef<InventoryLocalDraft | null>(readInventoryLocalDraft(localDraftKey));
+	const restoredLocal = restoredLocalRef.current?.pending ? restoredLocalRef.current : null;
+	const restoredDraft = restoredLocal?.draft ?? initialDraft;
+	const restoredComments = restoredLocal?.comments ?? initialComments;
 
 	const [items, setItems] = useState<InvLine[] | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -71,19 +87,153 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 	const [showPhotos, setShowPhotos] = useState(false);
 	const [counts, setCounts] = useState<Record<number, string>>(() => {
 		const o: Record<number, string> = {};
-		if (initialDraft) for (const [k, v] of Object.entries(initialDraft)) o[Number(k)] = String(v);
+		if (restoredDraft) for (const [k, v] of Object.entries(restoredDraft)) o[Number(k)] = String(v);
 		return o;
 	});
 	const [comments, setComments] = useState<Record<number, string>>(() => {
 		const o: Record<number, string> = {};
-		if (initialComments) for (const [k, v] of Object.entries(initialComments)) o[Number(k)] = String(v);
+		if (restoredComments) for (const [k, v] of Object.entries(restoredComments)) o[Number(k)] = String(v);
 		return o;
 	});
 	const [saving, setSaving] = useState(false);
 	const [done, setDone] = useState<'draft' | 'sent' | null>(null);
 	const [actionErr, setActionErr] = useState<string | null>(null);
+	const [syncState, setSyncState] = useState<'saved' | 'pending' | 'saving' | 'offline' | 'error'>(restoredLocal ? 'pending' : 'saved');
+	const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 	/** Вручную добавленные позиции (нет в остатках, физически есть) — учёт 0. */
 	const [added, setAdded] = useState<InvLine[]>([]);
+	const countsRef = useRef(counts);
+	const commentsRef = useRef(comments);
+	const latestSnapshotRef = useRef<{ sequence: number; draft: Record<number, number>; comments: Record<number, string>; updatedAt: string } | null>(null);
+	const savedSequenceRef = useRef(0);
+	const sequenceRef = useRef(0);
+	const sessionIdRef = useRef(typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+	const inFlightRef = useRef<Promise<void> | null>(null);
+	const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const mountedRef = useRef(true);
+	const flushLatestRef = useRef<() => Promise<void>>(async () => undefined);
+	const initializedAutosaveRef = useRef(false);
+
+	const flushLatest = useCallback(async (): Promise<void> => {
+		for (;;) {
+			const snapshot = latestSnapshotRef.current;
+			if (!snapshot || snapshot.sequence <= savedSequenceRef.current) return;
+			if (inFlightRef.current) {
+				await inFlightRef.current;
+				continue;
+			}
+			if (!mock && typeof navigator !== 'undefined' && !navigator.onLine) {
+				if (mountedRef.current) setSyncState('offline');
+				throw new Error('Нет связи с сервером');
+			}
+			if (mountedRef.current) setSyncState('saving');
+			const request = mock
+				? Promise.resolve()
+				: saveDraftPoint(inventoryId, storeId, me.id, snapshot.draft, snapshot.comments, {
+					userName: me.name,
+					sessionId: sessionIdRef.current,
+					sequence: snapshot.sequence,
+				}).then(() => undefined);
+			inFlightRef.current = request;
+			try {
+				await request;
+				savedSequenceRef.current = Math.max(savedSequenceRef.current, snapshot.sequence);
+				if (latestSnapshotRef.current?.sequence === snapshot.sequence) {
+					writeInventoryLocalDraft(localDraftKey, {
+						version: 1,
+						inventoryId,
+						storeId,
+						mode: draftMode,
+						draft: snapshot.draft,
+						comments: snapshot.comments,
+						updatedAt: snapshot.updatedAt,
+						pending: false,
+					});
+					if (mountedRef.current) {
+						setSyncState('saved');
+						setLastSavedAt(new Date().toISOString());
+					}
+				}
+			} catch (error) {
+				if (mountedRef.current) setSyncState(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+				if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+				retryTimerRef.current = setTimeout(() => {
+					void flushLatestRef.current().catch(() => undefined);
+				}, 5000);
+				throw error;
+			} finally {
+				if (inFlightRef.current === request) inFlightRef.current = null;
+			}
+		}
+	}, [draftMode, inventoryId, localDraftKey, me.id, me.name, mock, storeId]);
+	flushLatestRef.current = flushLatest;
+
+	const queueSnapshot = useCallback((nextCounts: Record<number, string>, nextComments: Record<number, string>, delay = 900): void => {
+		countsRef.current = nextCounts;
+		commentsRef.current = nextComments;
+		const snapshot = {
+			sequence: ++sequenceRef.current,
+			draft: countsToDraft(nextCounts),
+			comments: commentsToDraft(nextComments),
+			updatedAt: new Date().toISOString(),
+		};
+		latestSnapshotRef.current = snapshot;
+		writeInventoryLocalDraft(localDraftKey, {
+			version: 1,
+			inventoryId,
+			storeId,
+			mode: draftMode,
+			draft: snapshot.draft,
+			comments: snapshot.comments,
+			updatedAt: snapshot.updatedAt,
+			pending: true,
+		});
+		if (mountedRef.current) setSyncState(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'pending');
+		if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+		autosaveTimerRef.current = setTimeout(() => {
+			void flushLatestRef.current().catch(() => undefined);
+		}, delay);
+	}, [draftMode, inventoryId, localDraftKey, storeId]);
+
+	useEffect(() => {
+		if (!initializedAutosaveRef.current && restoredLocalRef.current?.pending) {
+			initializedAutosaveRef.current = true;
+			queueSnapshot(countsRef.current, commentsRef.current, 0);
+		}
+	}, [queueSnapshot]);
+
+	useEffect(() => {
+		mountedRef.current = true;
+		const retry = (): void => {
+			if (latestSnapshotRef.current && latestSnapshotRef.current.sequence > savedSequenceRef.current) {
+				void flushLatestRef.current().catch(() => undefined);
+			}
+		};
+		const keepalive = (): void => {
+			const snapshot = latestSnapshotRef.current;
+			if (mock || !snapshot || snapshot.sequence <= savedSequenceRef.current) return;
+			void saveDraftPoint(inventoryId, storeId, me.id, snapshot.draft, snapshot.comments, {
+				userName: me.name,
+				sessionId: sessionIdRef.current,
+				sequence: snapshot.sequence,
+				keepalive: true,
+			}).catch(() => undefined);
+		};
+		window.addEventListener('online', retry);
+		window.addEventListener('pagehide', keepalive);
+		const onVisibility = (): void => { if (document.visibilityState === 'hidden') keepalive(); };
+		document.addEventListener('visibilitychange', onVisibility);
+		return () => {
+			mountedRef.current = false;
+			window.removeEventListener('online', retry);
+			window.removeEventListener('pagehide', keepalive);
+			document.removeEventListener('visibilitychange', onVisibility);
+			if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+			if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+			keepalive();
+		};
+	}, [inventoryId, me.id, me.name, mock, storeId]);
 
 	useEffect(() => {
 		let alive = true;
@@ -107,11 +257,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				setAdded([]);
 				// Восстановить вручную добавленные позиции из черновика: их productId есть в черновике,
 				// но нет в текущих остатках (их там и не будет — учёт 0). Иначе при возврате к черновику терялись бы.
-				if (mode !== 'act' && (initialDraft || initialComments)) {
+				if (mode !== 'act' && (restoredDraft || restoredComments)) {
 					const have = new Set(rows.map((r) => r.productId));
 					const rememberedIds = new Set([
-						...Object.keys(initialDraft ?? {}).map(Number),
-						...Object.keys(initialComments ?? {}).map(Number),
+						...Object.keys(restoredDraft ?? {}).map(Number),
+						...Object.keys(restoredComments ?? {}).map(Number),
 					]);
 					const orphanIds = [...rememberedIds].filter((id) => id > 0 && !have.has(id));
 					if (orphanIds.length) {
@@ -174,32 +324,19 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 	const discrepancies = list.filter((i) => isCounted(i) && Number(counts[i.productId]) !== i.book).length;
 
 	const draftObj = (): Record<number, number> => {
-		const o: Record<number, number> = {};
-		for (const i of list) {
-			const v = counts[i.productId];
-			if (v !== undefined && v !== '') o[i.productId] = Number(v);
-		}
-		return o;
+		return countsToDraft(countsRef.current);
 	};
 
 	const commentsObj = (): Record<number, string> => {
-		const o: Record<number, string> = {};
-		for (const [productId, value] of Object.entries(comments)) {
-			const text = value.trim();
-			if (text) o[Number(productId)] = text.slice(0, 500);
-		}
-		return o;
+		return commentsToDraft(commentsRef.current);
 	};
 
 	async function onSave(): Promise<void> {
 		setActionErr(null);
-		if (mock) {
-			setDone('draft');
-			return;
-		}
 		setSaving(true);
 		try {
-			await saveDraftPoint(inventoryId, storeId, me.id, draftObj(), commentsObj());
+			queueSnapshot(countsRef.current, commentsRef.current, 0);
+			await flushLatest();
 			setDone('draft');
 		} catch (e: unknown) {
 			setActionErr(String(e instanceof Error ? e.message : e));
@@ -233,13 +370,19 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		const facts = draftObj(); // все факты раунда — чтобы предзаполнить 2-й раунд (акт)
 		const savedComments = commentsObj();
 		if (mock) {
+			latestSnapshotRef.current = null;
+			clearInventoryLocalDraft(localDraftKey);
 			setDone('sent');
 			setTimeout(() => onSubmitted(result, facts, savedComments), 700);
 			return;
 		}
 		setSaving(true);
 		try {
+			queueSnapshot(countsRef.current, commentsRef.current, 0);
+			await flushLatest();
 			await submitPoint(inventoryId, storeId, me.id, me.name, result, facts, savedComments);
+			latestSnapshotRef.current = null;
+			clearInventoryLocalDraft(localDraftKey);
 			setDone('sent');
 			setTimeout(() => onSubmitted(result, facts, savedComments), 700);
 		} catch (e: unknown) {
@@ -260,6 +403,18 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		}
 	}
 
+	const syncText = syncState === 'saving'
+		? 'Сохраняю изменения на сервер…'
+		: syncState === 'pending'
+			? 'Изменения сохранены на устройстве, отправляю…'
+			: syncState === 'offline'
+				? 'Нет связи — изменения сохранены на устройстве и уйдут после восстановления интернета.'
+				: syncState === 'error'
+					? 'Сервер пока не принял черновик — он сохранён на устройстве, повторю автоматически.'
+					: lastSavedAt
+						? `Черновик сохранён на сервере в ${new Date(lastSavedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+						: 'Автосохранение включено.';
+
 	return (
 		<div className="inv">
 			<header>
@@ -279,6 +434,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 			</header>
 
 			{mock && <div className="dev-banner">dev-режим: остатки — мок.</div>}
+			{restoredLocal && <div className="beta-banner ok">✅ Восстановлен незавершённый подсчёт с этого устройства.</div>}
 			{mode === 'act' && (
 				<div className="beta-banner">📝 Сверка акта разногласий: перепроверь спорные позиции, досчитай упущенное — затем «Отправить».</div>
 			)}
@@ -337,7 +493,12 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 												maxLength={500}
 												placeholder="Комментарий: не найден, повреждён, мыши съели…"
 												value={comments[i.productId] ?? ''}
-												onChange={(event) => setComments((current) => ({ ...current, [i.productId]: event.target.value }))}
+												onChange={(event) => {
+													const next = { ...commentsRef.current, [i.productId]: event.target.value };
+													commentsRef.current = next;
+													setComments(next);
+													queueSnapshot(countsRef.current, next);
+												}}
 											/>
 										</div>
 										<div className="count-nums">
@@ -348,7 +509,12 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 												min="0"
 												className="count-input"
 												value={raw ?? ''}
-												onChange={(e) => setCounts((c) => ({ ...c, [i.productId]: e.target.value }))} onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+												onChange={(e) => {
+													const next = { ...countsRef.current, [i.productId]: e.target.value };
+													countsRef.current = next;
+													setCounts(next);
+													queueSnapshot(next, commentsRef.current);
+												}} onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
 											/>
 											<span className={`diff ${cls}`}>{diff == null ? '—' : diff > 0 ? `+${diff}` : diff}</span>
 										</div>
@@ -370,11 +536,12 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				</button>
 				{done === 'draft' && <span className="hint ok">✅ Черновик сохранён — можно вернуться позже.</span>}
 				{done === 'sent' && <span className="hint ok">✅ Отчёт отправлен.</span>}
+				{done !== 'sent' && <span className={`hint${syncState === 'offline' || syncState === 'error' ? '' : ' ok'}`}>{syncText}</span>}
 				{actionErr && <span className="error">⛔ {actionErr}</span>}
 			</div>
 
 			<footer>
-				<small>Артикул и раздел — для опознания (название в каталоге часто дублируется). Списание/оприходование по расхождениям — задел на потом.</small>
+				<small>Каждое изменение сразу сохраняется на устройстве и автоматически отправляется на сервер. Артикул и раздел — для опознания товара.</small>
 			</footer>
 		</div>
 	);

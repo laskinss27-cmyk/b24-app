@@ -2850,10 +2850,12 @@ export interface InvPoint {
 	draft?: Record<number, number>;
 	/** Комментарии проверяющего по позициям (productId → текст). */
 	comments?: Record<number, string>;
+	/** Последнее успешное серверное автосохранение черновика. */
+	draftUpdatedAt?: string;
+	draftUpdatedById?: string;
+	draftUpdatedByName?: string;
 	/** Документ ЯДРА (Stock Reconciliation в ERPNext) по 1С-модели «Записать → Провести». */
 	erpDoc?: ErpInvDoc;
-	/** Б24-зеркала (черновики D/S) — создаются при проведении ядра или старой кнопкой. */
-	documents?: BuiltDoc[];
 }
 
 export interface ErpInvDoc {
@@ -2905,14 +2907,21 @@ export async function createInventory(
 }
 
 /** Обновление одной точки (claim / saveDraft / submit) — через бэкенд, entity. */
-async function postInventoryUpdate(payload: Record<string, unknown>): Promise<void> {
+interface InventoryUpdateResponse {
+	draftUpdatedAt?: string | null;
+	ignored?: boolean;
+}
+
+async function postInventoryUpdate(payload: Record<string, unknown>, keepalive = false): Promise<InventoryUpdateResponse> {
 	const res = await fetch('/api/inventory/update', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...payload }),
+		keepalive,
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string };
+	const json = (await res.json()) as { ok: boolean; error?: string } & InventoryUpdateResponse;
 	if (!json.ok) throw new Error(json.error ?? 'не удалось обновить точку');
+	return json;
 }
 
 /** «Начал выполнение» — менеджер берёт точку себе (становится ответственным, статус «в работе»). */
@@ -2926,8 +2935,19 @@ export async function saveDraftPoint(
 	userId: string,
 	draft: Record<number, number>,
 	comments: Record<number, string>,
-): Promise<void> {
-	await postInventoryUpdate({ inventoryId, storeId, action: 'saveDraft', userId, draft, comments });
+	options?: { userName?: string; sessionId?: string; sequence?: number; keepalive?: boolean },
+): Promise<InventoryUpdateResponse> {
+	return postInventoryUpdate({
+		inventoryId,
+		storeId,
+		action: 'saveDraft',
+		userId,
+		userName: options?.userName,
+		draft,
+		comments,
+		draftSessionId: options?.sessionId,
+		draftSequence: options?.sequence,
+	}, options?.keepalive === true);
 }
 /** «Отправить» — результат точки (статус «отправлено», либо «сверено» если был акт) + факты раунда. */
 export async function submitPoint(
@@ -2963,23 +2983,6 @@ export async function deleteInventory(inventoryId: string): Promise<void> {
 	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить');
 }
 
-export interface BuiltDoc {
-	type: string;
-	id: number;
-	lines: number;
-}
-/** Сформировать черновики списания/оприходования по сверённой точке (фаза C). Проведение — вручную в Б24. */
-export async function buildPointDocuments(inventoryId: string, storeId: number, userId: string): Promise<{ docs: BuiltDoc[]; message?: string | undefined }> {
-	const res = await fetch('/api/inventory/build-documents', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), inventoryId, storeId, userId }),
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string; docs?: BuiltDoc[]; message?: string };
-	if (!json.ok) throw new Error(json.error ?? 'не удалось сформировать документы');
-	return { docs: json.docs ?? [], message: json.message };
-}
-
 // ── Документ ядра (Stock Reconciliation, 1С-модель «на основании») ───────────
 
 export interface ErpRecoLine {
@@ -3002,9 +3005,9 @@ async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Pr
 }
 
 /** Болванка: строки документа ядра, ничего не записано (1С: «не сохранил — пропала»). */
-export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[]; doc: ErpInvDoc | null; docs: BuiltDoc[] }> {
-	const j = await postErpDoc<{ lines?: ErpRecoLine[]; doc?: ErpInvDoc | null; docs?: BuiltDoc[] }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
-	return { lines: j.lines ?? [], doc: j.doc ?? null, docs: j.docs ?? [] };
+export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[]; doc: ErpInvDoc | null }> {
+	const j = await postErpDoc<{ lines?: ErpRecoLine[]; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
+	return { lines: j.lines ?? [], doc: j.doc ?? null };
 }
 
 /** «Записать»: черновик Stock Reconciliation в ядре (остатки не двигаются). */
@@ -3014,11 +3017,11 @@ export async function saveErpDoc(inventoryId: string, storeId: number, recreate 
 	return j.doc;
 }
 
-/** «Провести»: submit ядра + Б24-зеркала черновиками. */
-export async function submitErpDoc(inventoryId: string, storeId: number, userId: string): Promise<{ doc: ErpInvDoc; docs: BuiltDoc[] }> {
-	const j = await postErpDoc<{ doc?: ErpInvDoc; docs?: BuiltDoc[] }>('/api/inventory/erp-doc-submit', { inventoryId, storeId, userId });
+/** «Провести»: submit Stock Reconciliation в ядре. */
+export async function submitErpDoc(inventoryId: string, storeId: number): Promise<ErpInvDoc> {
+	const j = await postErpDoc<{ doc?: ErpInvDoc }>('/api/inventory/erp-doc-submit', { inventoryId, storeId });
 	if (!j.doc) throw new Error('бэкенд не вернул документ');
-	return { doc: j.doc, docs: j.docs ?? [] };
+	return j.doc;
 }
 
 export interface SimpleUser {

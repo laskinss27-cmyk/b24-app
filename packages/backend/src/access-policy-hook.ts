@@ -122,7 +122,6 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/inventory/search-products': ['inventory.view'],
 	'/api/inventory/create': ['inventory.create'],
 	'/api/inventory/update': ['inventory.count'],
-	'/api/inventory/build-documents': ['inventory.post'],
 	'/api/inventory/erp-doc-preview': ['inventory.manage'],
 	'/api/inventory/erp-doc-save': ['inventory.manage'],
 	'/api/inventory/erp-doc-submit': ['inventory.post'],
