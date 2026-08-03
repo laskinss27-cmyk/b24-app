@@ -2777,6 +2777,7 @@ html, body, #root { height: 100%; }
 .assortment-matrix-add { align-items: center; padding: 12px; margin-bottom: 12px; border: 1px solid #e3e8ef; border-radius: 8px; background: #f8fafc; }
 .assortment-matrix-add > select { min-width: 170px; }
 .assortment-matrix-add > input { min-width: 220px; }
+.assortment-matrix-category-count { color: #667085; white-space: nowrap; }
 .assortment-matrix-search { position: relative; display: flex; flex: 1 1 340px; gap: 5px; }
 .assortment-matrix-search > input { flex: 1; }
 .assortment-matrix-search > div { position: absolute; z-index: 15; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow: auto; border: 1px solid #cdd5e0; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(16, 24, 40, .14); }
@@ -5593,6 +5594,10 @@ body.deal-placement-body #root {
 	box-sizing: border-box;
 	padding: 16px;
 	overflow-x: auto;
+}
+
+.supply-matrix-card {
+	overflow: visible;
 }
 
 .supply-proto-card-head {

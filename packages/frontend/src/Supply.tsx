@@ -1983,7 +1983,7 @@ export function Supply(): JSX.Element {
 				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card supply-stock-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
 				{view === 'ledger' && <div className="supply-proto-card supply-stock-card"><LedgerTab /></div>}
 				{view === 'turnover' && <div className="supply-proto-card supply-stock-card"><TurnoverReportTab stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
-				{view === 'matrix' && ASSORTMENT_MATRIX_CANARY_IDS.has(currentUserId) && <div className="supply-proto-card supply-stock-card"><AssortmentMatrix stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
+				{view === 'matrix' && ASSORTMENT_MATRIX_CANARY_IDS.has(currentUserId) && <div className="supply-proto-card supply-stock-card supply-matrix-card"><AssortmentMatrix stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
 				{view === 'inventory' && <InventoryHome />}
 			</main>
 			{createKind && <StandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onCreateSupplier={addSupplier} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}

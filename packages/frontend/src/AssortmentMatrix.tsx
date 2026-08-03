@@ -11,6 +11,12 @@ import {
 
 const STORE_KEY = 'b24-assortment-matrix-stores-v1';
 const SALES_SCOPE_KEY = 'b24-assortment-matrix-sales-scope-v1';
+const MOCK_CATEGORIES = [
+	'Аудиотрубки для домофонов', 'Видеодомофония', 'Видеодомофония + СКУД', 'Видеонаблюдение',
+	'Кабель и монтажные коробки', 'Кабельная продукция', 'Накопители', 'ОПС', 'ОПС радиоканал',
+	'Прочее оборудование', 'Расходники', 'Роутеры/коммутаторы', 'Роутеры/точки доступа',
+	'СКУД', 'Умный дом', 'Умный дом протечки', 'Услуги', 'Электрика',
+];
 
 const dateText = (date: Date): string => {
 	const year = date.getFullYear();
@@ -26,14 +32,14 @@ interface RowDraft { category: string; segment: string; toOrder: string; comment
 const mockReport = (stores: string[]): AssortmentMatrixReport => ({
 	stores,
 	selectedStores: stores,
-	categories: ['Домофония', 'Видеонаблюдение'],
+	categories: MOCK_CATEGORIES,
 	salesScope: 'selected',
 	periodDays: 90,
 	targetDays: 60,
 	generatedAt: new Date().toISOString(),
 	rows: [
-		{ productId: 111139, name: 'CTV-M4108Ai B', article: '', model: 'CTV-M4108Ai B', brand: 'CTV', category: 'Домофония', segment: 'Видеодомофон 7 дюймов без вайфай', stocks: Object.fromEntries(stores.map((store, index) => [store, index ? 1 : 0])), totalStock: Math.max(stores.length - 1, 0), reservedQty: 0, freeQty: Math.max(stores.length - 1, 0), orderedQty: 0, soldQty: 3, recommendedQty: 1, toOrderQty: 7, comment: '' },
-		{ productId: 111125, name: 'CTV-M3713 Astra Plus B', article: '', model: 'CTV-M3713 Astra Plus B', brand: 'CTV', category: 'Домофония', segment: 'Видеодомофон 7 дюймов без вайфай', stocks: Object.fromEntries(stores.map((store, index) => [store, index + 1])), totalStock: stores.reduce((sum, _store, index) => sum + index + 1, 0), reservedQty: 2, freeQty: Math.max(stores.reduce((sum, _store, index) => sum + index + 1, 0) - 2, 0), orderedQty: 0, soldQty: 8, recommendedQty: 0, toOrderQty: 15, comment: 'Проверить доступность' },
+		{ productId: 111139, name: 'CTV-M4108Ai B', article: '', model: 'CTV-M4108Ai B', brand: 'CTV', category: 'Видеодомофония', segment: 'Видеодомофон 7 дюймов без вайфай', stocks: Object.fromEntries(stores.map((store, index) => [store, index ? 1 : 0])), totalStock: Math.max(stores.length - 1, 0), reservedQty: 0, freeQty: Math.max(stores.length - 1, 0), orderedQty: 0, soldQty: 3, recommendedQty: 1, toOrderQty: 7, comment: '' },
+		{ productId: 111125, name: 'CTV-M3713 Astra Plus B', article: '', model: 'CTV-M3713 Astra Plus B', brand: 'CTV', category: 'Видеодомофония', segment: 'Видеодомофон 7 дюймов без вайфай', stocks: Object.fromEntries(stores.map((store, index) => [store, index + 1])), totalStock: stores.reduce((sum, _store, index) => sum + index + 1, 0), reservedQty: 2, freeQty: Math.max(stores.reduce((sum, _store, index) => sum + index + 1, 0) - 2, 0), orderedQty: 0, soldQty: 8, recommendedQty: 0, toOrderQty: 15, comment: 'Проверить доступность' },
 	],
 });
 
@@ -176,11 +182,12 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 		<p className="assortment-matrix-note">Общий остаток считается только по выведенным складам. Рекомендация: продажи в день × 60 дней − свободный остаток − уже заказано поставщикам.</p>
 
 		<div className="assortment-matrix-add">
-			<select value={addCategory} onChange={(event) => setAddCategory(event.target.value)}><option value="">Категория</option>{categories.map((category) => <option key={category}>{category}</option>)}</select>
+			<select value={addCategory} onChange={(event) => setAddCategory(event.target.value)}><option value="">Категория{categories.length ? ` (${categories.length})` : ''}</option>{categories.map((category) => <option key={category}>{category}</option>)}</select>
 			<input list="assortment-matrix-segments" value={addSegment} placeholder="Сегмент товара" onChange={(event) => setAddSegment(event.target.value)} />
 			<datalist id="assortment-matrix-segments">{segments.map((segment) => <option key={segment} value={segment} />)}</datalist>
 			<div className="assortment-matrix-search"><input value={search} placeholder="ID, модель или название товара" onChange={(event) => { setSearch(event.target.value); setPicked(null); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void findProducts(); } }} /><button type="button" disabled={searching} onClick={() => void findProducts()}>{searching ? '…' : 'Найти'}</button>{results.length > 0 && <div>{results.map((item) => <button key={item.productId} type="button" className={picked?.productId === item.productId ? 'picked' : ''} onClick={() => { setPicked(item); setSearch(item.name); setResults([]); }}>{item.name}<small>#{item.productId}{item.article ? ` · ${item.article}` : ''}</small></button>)}</div>}</div>
 			<button className="btn-primary" type="button" disabled={!picked || saving !== null} onClick={() => void addProduct()}>+ Добавить товар</button>
+			<small className="assortment-matrix-category-count">Категорий первого уровня: {categories.length}</small>
 		</div>
 
 		{error && <p className="error">⛔ {error}</p>}

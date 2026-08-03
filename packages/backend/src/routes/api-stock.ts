@@ -84,13 +84,22 @@ async function matrixCategories(client: B24Client): Promise<string[]> {
 	const names = new Set<string>();
 	for (const iblockId of [24, 26]) {
 		const all: Array<Record<string, unknown>> = [];
+		const seenIds = new Set<string>();
 		for (let start = 0; start < 5000; start += 50) {
 			const result = await client.call<{ sections?: Array<Record<string, unknown>> }>('catalog.section.list', {
 				filter: { iblockId }, select: ['id', 'name', 'iblockSectionId'], order: { id: 'ASC' }, start,
 			});
 			const sections = result?.sections ?? [];
-			all.push(...sections);
-			if (sections.length < 50) break;
+			const fresh = sections.filter((section) => {
+				const id = String(fieldValue(section['id']) ?? '');
+				if (!id || seenIds.has(id)) return false;
+				seenIds.add(id);
+				return true;
+			});
+			all.push(...fresh);
+			// catalog.section.list на total, кратном 50, повторяет последнюю страницу
+			// для слишком большого start. Останавливаемся, как только новых ID больше нет.
+			if (sections.length < 50 || fresh.length === 0) break;
 		}
 		const roots = all.filter((section) => Number(fieldValue(section['iblockSectionId']) ?? 0) <= 0);
 		for (const section of roots.length ? roots : all) {
