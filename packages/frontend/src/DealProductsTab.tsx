@@ -826,6 +826,15 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const clearEdit = (id: string): void => setRowEdits((m) => { const n = { ...m }; delete n[id]; return n; });
 	/** Итоговая цена за единицу из текущих правок (база · скидка). */
 	const finalUnitOf = (r: EnrichedRow): number => { const e = editOf(r); const p = Number(e.price.replace(',', '.')) || 0; const d = Number(e.disc.replace(',', '.')) || 0; return Math.round(p * (1 - d / 100) * 100) / 100; };
+	/** Наценка относительно закупочной цены; считаем от фактической цены продажи после скидки. */
+	const markupPercentOf = (r: EnrichedRow): number | null => {
+		if (r.purchasingPrice == null || r.purchasingPrice <= 0) return null;
+		return Math.round(((finalUnitOf(r) - r.purchasingPrice) / r.purchasingPrice) * 1000) / 10;
+	};
+	const markupTextOf = (r: EnrichedRow): string => {
+		const value = markupPercentOf(r);
+		return value == null ? '—' : `${value.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+	};
 	// Строка ТОВАРА — из плана ядра (id вида 'plan-<productId>'); работы — из Б24 (числовой rowId).
 	const isPlanRow = (r: EnrichedRow): boolean => String(r.id).startsWith('plan-');
 	const isVariantRow = (r: EnrichedRow): boolean => String(r.id).startsWith('variant-');
@@ -1368,7 +1377,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					<td><span className="type-badge goods">товар</span></td>
 					<td className="num cell-edit">
 						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
-						<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
+						<div className="cell-final" title="Наценка от закупочной цены, рассчитанная по итоговой цене продажи после скидки">наценка {markupTextOf(r)}{savingRow === r.id ? ' …' : ''}</div>
 						{r.purchasingPrice != null
 							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
 							: <div className="purchase-hint muted-hint">закуп —</div>}
