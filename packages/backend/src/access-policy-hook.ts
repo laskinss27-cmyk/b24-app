@@ -54,6 +54,8 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/stock/item-history': ['stock.view_movements'],
 	'/api/stock/turnover-report': ['reports.stock_movements'],
 	'/api/stock/turnover-report.xlsx': ['reports.stock_movements', 'reports.export'],
+	'/api/stock/assortment-matrix': ['supply.view'],
+	'/api/stock/assortment-matrix/save': ['supply.view'],
 	'/api/stock/form-data': ['stock.view'],
 	'/api/stock/search-items': ['stock.view'],
 	'/api/stock/create-product': ['stock.create_product'],

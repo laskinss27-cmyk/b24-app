@@ -9,6 +9,11 @@ import {
 } from '../erp/operations.js';
 import { buildTurnoverReport } from '../erp/turnover-report.js';
 import { buildTurnoverXlsx, type TurnoverExportFilters } from '../erp/turnover-report-xlsx.js';
+import {
+	buildAssortmentMatrixReport,
+	saveAssortmentMatrixItem,
+	type MatrixSalesScope,
+} from '../erp/assortment-matrix.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
@@ -40,6 +45,7 @@ function moscowDate(): string {
 
 const SUPPLY_DEPARTMENT_ID = 10;
 const STOCK_ADMIN_IDS = new Set(['1', '986', '1858']);
+const ASSORTMENT_MATRIX_CANARY_IDS = new Set(['1858']);
 
 interface StockAccess {
 	canManage: boolean;
@@ -53,6 +59,48 @@ async function stockAccess(client: B24Client): Promise<StockAccess> {
 	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
 	const isSupply = departments.includes(SUPPLY_DEPARTMENT_ID);
 	return { canManage: STOCK_ADMIN_IDS.has(id) || isSupply, isSupply };
+}
+
+async function canUseAssortmentMatrix(client: B24Client): Promise<boolean> {
+	const me = await client.call<{ ID?: string | number; UF_DEPARTMENT?: unknown; ADMIN?: boolean | string }>('user.current', {}).catch(() => null);
+	const id = String(me?.ID ?? '');
+	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
+	const isSupply = departments.includes(SUPPLY_DEPARTMENT_ID);
+	const isAdmin = STOCK_ADMIN_IDS.has(id) || me?.ADMIN === true || String(me?.ADMIN ?? '').toUpperCase() === 'Y';
+	return ASSORTMENT_MATRIX_CANARY_IDS.has(id) && (isSupply || isAdmin);
+}
+
+let matrixCategoryCache: { expiresAt: number; names: string[] } | null = null;
+
+function fieldValue(value: unknown): unknown {
+	return value && typeof value === 'object' && 'value' in value
+		? (value as { value?: unknown }).value
+		: value;
+}
+
+/** Категории первого уровня старого каталога Б24 для независимой разметки матрицы. */
+async function matrixCategories(client: B24Client): Promise<string[]> {
+	if (matrixCategoryCache && matrixCategoryCache.expiresAt > Date.now()) return matrixCategoryCache.names;
+	const names = new Set<string>();
+	for (const iblockId of [24, 26]) {
+		const all: Array<Record<string, unknown>> = [];
+		for (let start = 0; start < 5000; start += 50) {
+			const result = await client.call<{ sections?: Array<Record<string, unknown>> }>('catalog.section.list', {
+				filter: { iblockId }, select: ['id', 'name', 'iblockSectionId'], order: { id: 'ASC' }, start,
+			});
+			const sections = result?.sections ?? [];
+			all.push(...sections);
+			if (sections.length < 50) break;
+		}
+		const roots = all.filter((section) => Number(fieldValue(section['iblockSectionId']) ?? 0) <= 0);
+		for (const section of roots.length ? roots : all) {
+			const name = String(fieldValue(section['name']) ?? '').trim();
+			if (name) names.add(name);
+		}
+	}
+	const sorted = [...names].sort((left, right) => left.localeCompare(right, 'ru'));
+	matrixCategoryCache = { expiresAt: Date.now() + 10 * 60_000, names: sorted };
+	return sorted;
 }
 
 /** Право напрямую двигать склад: отдел снабжения и установленные руководящие учётки. */
@@ -265,6 +313,73 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 		} catch (e) {
 			app.log.error({}, `[api/stock/turnover-report.xlsx] failed — ${errInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(e) });
+		}
+	});
+
+	// Канареечная матрица ассортимента и заказа. На этапе проверки доступна только Сергею #1858.
+	app.post('/api/stock/assortment-matrix', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & {
+			from?: unknown; to?: unknown; selectedStores?: unknown; salesScope?: unknown;
+		};
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (!(await canUseAssortmentMatrix(client))) return reply.code(403).send({ ok: false, error: 'матрица пока доступна только канарейке' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const from = String(b.from ?? '');
+		const to = String(b.to ?? '');
+		const today = moscowDate();
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+			return reply.code(400).send({ ok: false, error: 'нужны даты от и до' });
+		}
+		if (from > to) return reply.code(400).send({ ok: false, error: 'дата «от» должна быть раньше даты «до»' });
+		if (to > today) return reply.code(400).send({ ok: false, error: 'отчёт нельзя построить за будущий период' });
+		const selectedStores = Array.isArray(b.selectedStores)
+			? b.selectedStores.map((value) => String(value).trim()).filter(Boolean).slice(0, 50)
+			: [];
+		const salesScope: MatrixSalesScope = b.salesScope === 'all' ? 'all' : 'selected';
+		try {
+			const [report, categories] = await Promise.all([
+				buildAssortmentMatrixReport(erp, { from, to, selectedStores, salesScope }),
+				matrixCategories(client).catch((error) => {
+					app.log.warn({ error: errInfo(error) }, '[api/stock/assortment-matrix] categories unavailable');
+					return [];
+				}),
+			]);
+			app.log.info({ rows: report.rows.length, from, to, salesScope, stores: report.selectedStores.length }, '[api/stock/assortment-matrix] ok');
+			return { ok: true, ...report, categories };
+		} catch (error) {
+			app.log.error({}, `[api/stock/assortment-matrix] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/stock/assortment-matrix/save', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & {
+			productId?: unknown; enabled?: unknown; category?: unknown; segment?: unknown;
+			toOrderQty?: unknown; comment?: unknown;
+		};
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (!(await canUseAssortmentMatrix(client))) return reply.code(403).send({ ok: false, error: 'матрица пока доступна только канарейке' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		const productId = Number(b.productId);
+		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'некорректный товар' });
+		try {
+			await saveAssortmentMatrixItem(erp, {
+				productId,
+				enabled: b.enabled !== false,
+				category: String(b.category ?? ''),
+				segment: String(b.segment ?? ''),
+				toOrderQty: Number(b.toOrderQty ?? 0),
+				comment: String(b.comment ?? ''),
+			});
+			app.log.info({ productId, enabled: b.enabled !== false }, '[api/stock/assortment-matrix/save] ok');
+			return { ok: true };
+		} catch (error) {
+			app.log.error({ productId }, `[api/stock/assortment-matrix/save] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
 		}
 	});
 

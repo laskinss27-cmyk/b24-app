@@ -1632,6 +1632,78 @@ export interface TurnoverReportRow {
 	status: TurnoverStatus;
 }
 
+export type AssortmentMatrixSalesScope = 'selected' | 'all';
+export interface AssortmentMatrixRow {
+	productId: number;
+	name: string;
+	article: string;
+	model: string;
+	brand: string;
+	category: string;
+	segment: string;
+	stocks: Record<string, number>;
+	totalStock: number;
+	reservedQty: number;
+	freeQty: number;
+	orderedQty: number;
+	soldQty: number;
+	recommendedQty: number;
+	toOrderQty: number;
+	comment: string;
+}
+
+export interface AssortmentMatrixReport {
+	rows: AssortmentMatrixRow[];
+	stores: string[];
+	selectedStores: string[];
+	categories: string[];
+	salesScope: AssortmentMatrixSalesScope;
+	periodDays: number;
+	targetDays: number;
+	generatedAt: string;
+}
+
+/** Канареечная матрица ассортимента и заказа. */
+export async function fetchAssortmentMatrix(input: {
+	from: string;
+	to: string;
+	selectedStores: string[];
+	salesScope: AssortmentMatrixSalesScope;
+}): Promise<AssortmentMatrixReport> {
+	const res = await fetch('/api/stock/assortment-matrix', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<AssortmentMatrixReport>;
+	if (!json.ok) throw new Error(json.error ?? 'не удалось построить матрицу заказа');
+	return {
+		rows: json.rows ?? [],
+		stores: json.stores ?? [],
+		selectedStores: json.selectedStores ?? input.selectedStores,
+		categories: json.categories ?? [],
+		salesScope: json.salesScope ?? input.salesScope,
+		periodDays: Number(json.periodDays ?? 0),
+		targetDays: Number(json.targetDays ?? 60),
+		generatedAt: json.generatedAt ?? '',
+	};
+}
+
+export async function saveAssortmentMatrixItem(input: {
+	productId: number;
+	enabled: boolean;
+	category: string;
+	segment: string;
+	toOrderQty: number;
+	comment: string;
+}): Promise<void> {
+	const res = await fetch('/api/stock/assortment-matrix/save', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить строку матрицы');
+}
+
 /** Оборачиваемость всех складских позиций за произвольный период. Только чтение ядра. */
 export async function fetchTurnoverReport(from: string, to: string, store?: string): Promise<{ rows: TurnoverReportRow[]; generatedAt: string; days: number }> {
 	const res = await fetch('/api/stock/turnover-report', {

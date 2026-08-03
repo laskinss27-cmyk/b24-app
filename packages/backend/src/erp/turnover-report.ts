@@ -95,6 +95,48 @@ async function getDocumentsInBatches(erp: ErpClient, doctype: string, names: str
 	return out;
 }
 
+/**
+ * Количество товара, которое ещё ожидается по заявкам поставщикам со стадией «Заказано».
+ * Черновые Purchase Order приложения не попадают в нативный Bin.ordered_qty, поэтому
+ * остаток считаем по строкам заказа за вычетом уже проведённых приходов.
+ */
+export async function fetchOutstandingOrderedQuantities(
+	erp: ErpClient,
+	productIds?: readonly number[],
+): Promise<Map<number, number>> {
+	const wanted = productIds?.length ? new Set(productIds) : null;
+	const orderedHeaders = await erp.list('Purchase Order', ['name'], [[SUPPLY_PURCHASE_STAGE_FIELD, '=', 'ordered'], ['docstatus', '!=', 2]]);
+	const orderedNames = orderedHeaders.map((row) => String(row['name'] ?? '')).filter(Boolean);
+	const out = new Map<number, number>();
+	if (!orderedNames.length) return out;
+	const [orders, receiptHeaders] = await Promise.all([
+		getDocumentsInBatches(erp, 'Purchase Order', orderedNames),
+		erp.list('Purchase Receipt', ['name', SUPPLY_PURCHASE_ORDER_FIELD], [[SUPPLY_PURCHASE_ORDER_FIELD, 'in', orderedNames], ['docstatus', '=', 1]]),
+	]);
+	const receiptNames = receiptHeaders.map((row) => String(row['name'] ?? '')).filter(Boolean);
+	const receivedByOrderProduct = new Map<string, number>();
+	const receipts = await getDocumentsInBatches(erp, 'Purchase Receipt', receiptNames);
+	for (const receipt of receipts) {
+		const order = String(receipt[SUPPLY_PURCHASE_ORDER_FIELD] ?? '');
+		for (const item of Array.isArray(receipt['items']) ? receipt['items'] as Array<Record<string, unknown>> : []) {
+			const productId = Number(item['item_code']);
+			if (!order || !Number.isInteger(productId) || productId <= 0 || (wanted && !wanted.has(productId))) continue;
+			const key = `${order}:${productId}`;
+			receivedByOrderProduct.set(key, (receivedByOrderProduct.get(key) ?? 0) + Number(item['qty'] ?? 0));
+		}
+	}
+	for (const order of orders) {
+		const orderName = String(order['name'] ?? '');
+		for (const item of Array.isArray(order['items']) ? order['items'] as Array<Record<string, unknown>> : []) {
+			const productId = Number(item['item_code']);
+			if (!orderName || !Number.isInteger(productId) || productId <= 0 || (wanted && !wanted.has(productId))) continue;
+			const remaining = Math.max(Number(item['qty'] ?? 0) - (receivedByOrderProduct.get(`${orderName}:${productId}`) ?? 0), 0);
+			out.set(productId, (out.get(productId) ?? 0) + remaining);
+		}
+	}
+	return out;
+}
+
 /** Чистый расчёт одной строки. Все движения уже суммируются по выбранному складу или по компании. */
 export function buildTurnoverRow(input: BuildRowInput): TurnoverReportRow {
 	let periodNet = 0;
@@ -186,14 +228,14 @@ export async function buildTurnoverReport(
 		? ['warehouse', '=', warehouses[0]]
 		: ['warehouse', 'in', warehouses];
 
-	const [catalog, bins, rawLedger, orderedHeaders] = await Promise.all([
+	const [catalog, bins, rawLedger, appOrdered] = await Promise.all([
 		fetchCoreCatalogItems(erp),
 		erp.list('Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty', 'ordered_qty', 'stock_value', 'valuation_rate'], [warehouseFilter]),
 		erp.list('Stock Ledger Entry',
 			['item_code', 'posting_date', 'actual_qty', 'warehouse', 'voucher_type', 'voucher_no'],
 			[['posting_date', '>=', params.from], ['posting_date', '<=', today], ['is_cancelled', '=', 0], warehouseFilter],
 			0, 'posting_date asc, creation asc'),
-		erp.list('Purchase Order', ['name'], [[SUPPLY_PURCHASE_STAGE_FIELD, '=', 'ordered'], ['docstatus', '!=', 2]]),
+		fetchOutstandingOrderedQuantities(erp),
 	]);
 
 	type AggregatedBalance = TurnoverBalance & { valuationComplete: boolean };
@@ -245,42 +287,12 @@ export async function buildTurnoverReport(
 		for (const entry of entries) stockEntryTypes.set(String(entry['name']), String(entry['stock_entry_type'] ?? ''));
 	}
 
-	// Заказы поставщикам в приложении остаются черновиками ERPNext, поэтому нативный
-	// Bin.ordered_qty их не видит. Добавляем остаток по заказам со стадией «Заказано».
-	// Для отчёта одного склада это значение всё равно общее: склад прихода выбирается при приёмке.
-	const orderedNames = orderedHeaders.map((row) => String(row['name'] ?? '')).filter(Boolean);
-	if (orderedNames.length) {
-		const [orders, receiptHeaders] = await Promise.all([
-			getDocumentsInBatches(erp, 'Purchase Order', orderedNames),
-			erp.list('Purchase Receipt', ['name', SUPPLY_PURCHASE_ORDER_FIELD], [[SUPPLY_PURCHASE_ORDER_FIELD, 'in', orderedNames], ['docstatus', '=', 1]]),
-		]);
-		const receiptNames = receiptHeaders.map((row) => String(row['name'] ?? '')).filter(Boolean);
-		const receivedByOrderProduct = new Map<string, number>();
-		const receipts = await getDocumentsInBatches(erp, 'Purchase Receipt', receiptNames);
-		for (const receipt of receipts) {
-			const order = String(receipt[SUPPLY_PURCHASE_ORDER_FIELD] ?? '');
-			for (const item of Array.isArray(receipt['items']) ? receipt['items'] as Array<Record<string, unknown>> : []) {
-				const productId = Number(item['item_code']);
-				if (!order || !Number.isInteger(productId) || productId <= 0) continue;
-				const key = `${order}:${productId}`;
-				receivedByOrderProduct.set(key, (receivedByOrderProduct.get(key) ?? 0) + Number(item['qty'] ?? 0));
-			}
-		}
-		const appOrdered = new Map<number, number>();
-		for (const order of orders) {
-			const orderName = String(order['name'] ?? '');
-			for (const item of Array.isArray(order['items']) ? order['items'] as Array<Record<string, unknown>> : []) {
-				const productId = Number(item['item_code']);
-				if (!orderName || !Number.isInteger(productId) || productId <= 0) continue;
-				const remaining = Math.max(Number(item['qty'] ?? 0) - (receivedByOrderProduct.get(`${orderName}:${productId}`) ?? 0), 0);
-				appOrdered.set(productId, (appOrdered.get(productId) ?? 0) + remaining);
-			}
-		}
-		for (const [productId, qty] of appOrdered) {
-			const balance = balances.get(productId) ?? { actual: 0, reserved: 0, ordered: 0, stockValue: null, valuationQty: 0, valuationComplete: true };
-			balance.ordered = Math.max(balance.ordered, qty);
-			balances.set(productId, balance);
-		}
+	// Для отчёта одного склада заказанное значение всё равно общее: склад прихода
+	// выбирается при приёмке.
+	for (const [productId, qty] of appOrdered) {
+		const balance = balances.get(productId) ?? { actual: 0, reserved: 0, ordered: 0, stockValue: null, valuationQty: 0, valuationComplete: true };
+		balance.ordered = Math.max(balance.ordered, qty);
+		balances.set(productId, balance);
 	}
 
 	const rows = catalog
