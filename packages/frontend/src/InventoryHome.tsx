@@ -196,8 +196,11 @@ export function InventoryHome(): JSX.Element {
 				setIsInitiator(init);
 
 				const sts = await withTimeout(fetchStores(), 15000, 'core stores');
-				const usrs = init ? await withTimeout(fetchUsers(), 15000, 'user.get').catch(() => [] as SimpleUser[]) : [];
-				const secs = init ? await withTimeout(fetchSections(), 15000, 'catalog.section.list').catch(() => [] as { id: number; name: string }[]) : [];
+				// Создавать инвентаризацию может любой сотрудник, который открыл раздел.
+				// Для формы всем нужны списки ответственных и разделов каталога; права
+				// инициатора по-прежнему управляют только сверкой и документами.
+				const usrs = await withTimeout(fetchUsers(), 15000, 'user.get').catch(() => [] as SimpleUser[]);
+				const secs = await withTimeout(fetchSections(), 15000, 'catalog.section.list').catch(() => [] as { id: number; name: string }[]);
 				setMe(meUser);
 				setStores(sts.filter((s) => s.active));
 				setUsers(usrs);
@@ -524,28 +527,17 @@ export function InventoryHome(): JSX.Element {
 	};
 
 	const activeInvs = inventories.filter((inv) => inv.status === 'active');
+	const visibleInvs = isInitiator ? inventories : activeInvs;
 
-	// Менеджер (не инициатор): активные инвентаризации, берёт свободную/свою точку
-	if (!isInitiator) {
-		return (
-			<div className="inv">
-				<header>
-					<h1>Инвентаризация</h1>
-					<p className="subtitle">{me.name} · возьмите точку, где вы сейчас работаете</p>
-				</header>
-				{actionErr && <div className="beta-banner">⛔ {actionErr}</div>}
-				{activeInvs.length ? activeInvs.map(invCard) : <p className="stub-calm">Сейчас нет активных инвентаризаций.</p>}
-				{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
-			</div>
-		);
-	}
-
-	// Инициатор: создание + сводка статусов (и сам может пройти точку)
+	// Создание доступно всем. Полная сводка, удаление, сверка и документы
+	// остаются только у инициаторов.
 	return (
 		<div className="inv">
 			<header>
 				<h1>Инвентаризация</h1>
-				<p className="subtitle">{me.name} · инициатор{ctx.__mock ? ' · dev-мок' : ''}</p>
+				<p className="subtitle">
+					{me.name} · {isInitiator ? 'инициатор' : 'создайте инвентаризацию или возьмите нужную точку'}{ctx.__mock ? ' · dev-мок' : ''}
+				</p>
 			</header>
 
 			{!creating && (
@@ -621,7 +613,9 @@ export function InventoryHome(): JSX.Element {
 				)}
 				{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
 			<h2 className="inv-h2">Инвентаризации</h2>
-			{inventories.length ? inventories.map(invCard) : <p className="stub-calm">Пока ни одной инвентаризации. Создайте первую.</p>}
+			{visibleInvs.length
+				? visibleInvs.map(invCard)
+				: <p className="stub-calm">{isInitiator ? 'Пока ни одной инвентаризации. Создайте первую.' : 'Сейчас нет активных инвентаризаций. Можно создать новую.'}</p>}
 			{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
 			{erpFor && (
 				<ErpDocModal
