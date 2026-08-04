@@ -4123,14 +4123,14 @@ body.deal-placement-body #root {
 }
 
 @media print {
-	body.deal-placement-body * {
+	body.deal-placement-body.deal-contract-preview-open * {
 		visibility: hidden !important;
 	}
-	body.deal-placement-body .deal-contract-preview-overlay,
-	body.deal-placement-body .deal-contract-preview-overlay * {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview-overlay,
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview-overlay * {
 		visibility: visible !important;
 	}
-	body.deal-placement-body .deal-contract-preview-overlay {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview-overlay {
 		position: absolute !important;
 		inset: 0 !important;
 		display: block !important;
@@ -4139,27 +4139,27 @@ body.deal-placement-body #root {
 		padding: 0 !important;
 		background: #fff !important;
 	}
-	body.deal-placement-body .deal-contract-preview {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview {
 		width: 100% !important;
 		max-height: none !important;
 		overflow: visible !important;
 		border: 0 !important;
 		box-shadow: none !important;
 	}
-	body.deal-placement-body .deal-contract-preview > header,
-	body.deal-placement-body .deal-contract-preview > .deal-document-preview-facts,
-	body.deal-placement-body .deal-contract-preview > footer {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview > header,
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview > .deal-document-preview-facts,
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview > footer {
 		display: none !important;
 	}
-	body.deal-placement-body .deal-contract-preview-body {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-preview-body {
 		overflow: visible !important;
 		background: #fff !important;
 	}
-	body.deal-placement-body .deal-contract-docx .docx-wrapper {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-docx .docx-wrapper {
 		padding: 0 !important;
 		background: #fff !important;
 	}
-	body.deal-placement-body .deal-contract-docx .docx {
+	body.deal-placement-body.deal-contract-preview-open .deal-contract-docx .docx {
 		box-shadow: none !important;
 	}
 }

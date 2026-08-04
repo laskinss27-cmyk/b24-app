@@ -461,6 +461,11 @@ function DealContractDocumentModal({
 	};
 
 	useEffect(() => {
+		globalThis.document.body.classList.add('deal-contract-preview-open');
+		return () => globalThis.document.body.classList.remove('deal-contract-preview-open');
+	}, []);
+
+	useEffect(() => {
 		const closeOnEscape = (event: KeyboardEvent): void => {
 			if (event.key === 'Escape') onClose();
 		};
