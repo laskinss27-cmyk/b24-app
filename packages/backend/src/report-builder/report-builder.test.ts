@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import type { B24Client } from '../b24/client.js';
+import { reportBuilderUser } from './access.js';
 import { buildReportResult, type ReportDefinition } from './model.js';
 import { ReportBuilderStore, ReportStoreConflictError } from './store.js';
 
@@ -58,4 +60,17 @@ test('saved reports are isolated by owner and reject stale updates', async () =>
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test('report builder uses user.admin when user.current omits ADMIN', async () => {
+	const client = {
+		call: async (method: string): Promise<unknown> => method === 'user.admin'
+			? true
+			: { ID: '1858', NAME: 'Сергей', LAST_NAME: 'Ласкин' },
+	} as unknown as B24Client;
+	assert.deepEqual(await reportBuilderUser(client), {
+		id: '1858',
+		name: 'Ласкин Сергей',
+		isAdmin: true,
+	});
 });
