@@ -1641,6 +1641,49 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				return <div className={`deal-pay ${cls}`}>{text}</div>;
 			})()}
 
+			{workingMode && <div className="realize-bar deal-sticky-actions">
+				{hasPendingDrafts ? (
+					<div className="realize-plan">
+						<b>Черновики в ядре: {pendingDraftNames.length} — проверь партии ниже и проведи.</b>
+						<span className="hint">«Провести» спишет остаток ядра. Если закрыть сделку, кнопка восстановится при следующем открытии.</span>
+					</div>
+				) : segmentActionsBlocked ? (
+					<span className="hint">Для реализации выбери «Вид по этапам» — так цена и отгрузка попадут именно в нужный этап.</span>
+				) : readyRows.length > 0 ? (
+					<div className="realize-plan">
+						<b>К реализации — {realizeDocumentCount} {plural(realizeDocumentCount, 'документ', 'документа', 'документов')}:</b>
+						{[...realizeGroups.entries()].map(([sid, rs]) => (
+							<span key={sid} className="plan-group">{storeName(sid)}: {rs.map((r) => `${r.name.slice(0, 22)} ×${qtyOf(r)}`).join(' · ')}</span>
+						))}
+						{readyWorks.length > 0 && <span className="plan-group">Услуги · в едином документе, без склада: {readyWorks.map((row) => `${row.name.slice(0, 22)} ×${qtyOf(row)}`).join(' · ')}</span>}
+					</div>
+				) : (
+					<span className="hint">Отметь строки галочками: доступное можно реализовать, отсутствующее — заказать через снабжение.</span>
+				)}
+				<div className="realize-actions">
+					<div className="deal-action-total"><span>Общая сумма</span><b>{rub(total)}</b></div>
+					<button
+						className={`btn-realize-all${hasPendingDrafts ? ' submit' : ''}`}
+						disabled={dev || busy || supplyBusy || (hasPendingDrafts ? pendingDraftNames.length === 0 : realizeDocumentCount === 0)}
+						title={dev ? 'В dev-режиме недоступно — реализация считается на проде через ядро' : undefined}
+						onClick={() => void (hasPendingDrafts ? doSubmit() : doDraft())}
+					>
+						{busy ? '…' : hasPendingDrafts ? '✓ Провести' : `Реализация${realizeDocumentCount ? ` (${realizeDocumentCount})` : ''}`}
+					</button>
+					{!hasPendingDrafts && supplyGoods.length > 0 && (
+						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => {
+							setSupplyToStore('');
+							setSupplyDeadline('');
+							setSupplyOrderNote('');
+							setSupplyQty(Object.fromEntries(supplyGoods.map((row) => [row.id, String(remaining(row))])));
+							setSupplyFormError(null);
+							setShowSupplyOrder(true);
+						}}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
+					)}
+				</div>
+				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
+			</div>}
+
 			{data.quoteVariants.enabled && (
 				<section className="deal-variants" aria-label="Варианты коммерческого предложения">
 					<div className="deal-variant-tabs">
@@ -1854,48 +1897,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 
 			{workingMode && <div className="deal-stage-addbar">
 				<button className="btn-secondary" onClick={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}>Добавить этап</button>
-			</div>}
-
-			{workingMode && <div className="realize-bar">
-				{hasPendingDrafts ? (
-					<div className="realize-plan">
-						<b>Черновики в ядре: {pendingDraftNames.length} — проверь партии выше и проведи.</b>
-						<span className="hint">«Провести» спишет остаток ядра. Если закрыть сделку, кнопка восстановится при следующем открытии.</span>
-					</div>
-				) : segmentActionsBlocked ? (
-					<span className="hint">Для реализации выбери «Вид по этапам» — так цена и отгрузка попадут именно в нужный этап.</span>
-				) : readyRows.length > 0 ? (
-					<div className="realize-plan">
-						<b>К реализации — {realizeDocumentCount} {plural(realizeDocumentCount, 'документ', 'документа', 'документов')}:</b>
-						{[...realizeGroups.entries()].map(([sid, rs]) => (
-							<span key={sid} className="plan-group">{storeName(sid)}: {rs.map((r) => `${r.name.slice(0, 22)} ×${qtyOf(r)}`).join(' · ')}</span>
-						))}
-						{readyWorks.length > 0 && <span className="plan-group">Услуги · в едином документе, без склада: {readyWorks.map((row) => `${row.name.slice(0, 22)} ×${qtyOf(row)}`).join(' · ')}</span>}
-					</div>
-				) : (
-					<span className="hint">Отметь строки галочками и выбери действие: реализовать доступное со склада или заказать через снабжение.</span>
-				)}
-				<div className="realize-actions">
-					<button
-						className={`btn-realize-all${hasPendingDrafts ? ' submit' : ''}`}
-						disabled={dev || busy || supplyBusy || (hasPendingDrafts ? pendingDraftNames.length === 0 : realizeDocumentCount === 0)}
-						title={dev ? 'В dev-режиме недоступно — реализация считается на проде через ядро' : undefined}
-						onClick={() => void (hasPendingDrafts ? doSubmit() : doDraft())}
-					>
-						{busy ? '…' : hasPendingDrafts ? '✓ Провести' : `Реализация${realizeDocumentCount ? ` (${realizeDocumentCount})` : ''}`}
-					</button>
-					{!hasPendingDrafts && supplyGoods.length > 0 && (
-						<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={() => {
-							setSupplyToStore('');
-							setSupplyDeadline('');
-							setSupplyOrderNote('');
-							setSupplyQty(Object.fromEntries(supplyGoods.map((row) => [row.id, String(remaining(row))])));
-							setSupplyFormError(null);
-							setShowSupplyOrder(true);
-						}}>{supplyBusy ? '…' : `Заказать (${supplyGoods.length})`}</button>
-					)}
-				</div>
-				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>}
 
 			{workingMode && showSupplyOrder && (
