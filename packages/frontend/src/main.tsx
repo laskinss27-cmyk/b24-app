@@ -8,6 +8,7 @@ import { SalesReport } from './SalesReport.js';
 import { Repairs } from './Repairs.js';
 import { StockLedger } from './StockLedger.js';
 import { Supply } from './Supply.js';
+import { ReportBuilder } from './ReportBuilder.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
 import './styles.css';
 
@@ -29,6 +30,6 @@ const lowVisionEnabled = initializeLowVisionMode();
 createRoot(root).render(
 	<StrictMode>
 		<LowVisionMode initialEnabled={lowVisionEnabled} />
-		{opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
+		{opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'reportBuilder' ? <ReportBuilder /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
 	</StrictMode>,
 );

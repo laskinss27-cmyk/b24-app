@@ -5,7 +5,7 @@ import {
 	extractInstallAuth,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindStockMenuPlacement, reconcilePlacements, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindStockMenuPlacement, bindReportBuilderMenuPlacement, reconcilePlacements, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
@@ -78,6 +78,8 @@ export function registerInstallRoute(app: FastifyInstance): void {
 				app.log.info({ placement: 'LEFT_MENU', status: menuResult.status }, '[install] inventory menu bound');
 				const stockResult = await bindStockMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				app.log.info({ placement: 'LEFT_MENU', status: stockResult.status }, '[install] stock menu bound');
+				const reportBuilderResult = await bindReportBuilderMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ placement: 'LEFT_MENU', status: reportBuilderResult.status }, '[install] report builder menu bound');
 				// Сверка: снять ВСЕ привязки меню и поставить начисто (чинит дубли + применяет
 				// переименования «Товары»→«Продажа», которые идемпотентный bind не обновляет).
 				const rec = await reconcilePlacements({ client, publicBaseUrl: app.config.publicBaseUrl });

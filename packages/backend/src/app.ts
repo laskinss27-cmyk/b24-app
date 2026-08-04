@@ -30,6 +30,8 @@ import { registerApiSupplyRoute } from './routes/api-supply.js';
 import { registerApiMarketplacesRoute } from './routes/api-marketplaces.js';
 import { registerApiContractsRoute } from './routes/api-contracts.js';
 import { registerApiAccessControlRoute } from './routes/api-access-control.js';
+import { registerApiReportBuilderRoute } from './routes/api-report-builder.js';
+import { registerPlacementReportBuilderRoute } from './routes/placement-report-builder.js';
 import { registerAccessPolicyHook } from './access-policy-hook.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
@@ -127,6 +129,8 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerApiMarketplacesRoute(app);
 	registerApiContractsRoute(app);
 	registerApiAccessControlRoute(app);
+	registerApiReportBuilderRoute(app);
+	registerPlacementReportBuilderRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
 

@@ -2424,7 +2424,7 @@ export function openProductCard(iblockId: number, productId: number): void {
 // Хранилище инвентаризации (entity) фронт НЕ трогает — BX24 виснет на entity.*.
 // Все операции идут через наш бэкенд (/api/inventory/*), который ходит в entity
 // серверным B24Client (чистый JSON). Сюда шлём BX24-токен пользователя + домен.
-function bx24Auth(): { domain: string; accessToken: string } {
+export function bx24Auth(): { domain: string; accessToken: string } {
 	const a = window.BX24 ? window.BX24.getAuth() : false;
 	if (a && a.access_token && a.domain) return { domain: a.domain, accessToken: a.access_token };
 	// Мобильный режим (/m, вне iframe): BX24 SDK нет — токен/домен приходят в контексте.

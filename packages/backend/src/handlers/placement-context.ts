@@ -79,8 +79,8 @@ export interface PlacementContext {
 	dealSupplyId?: number | null;
 	linkTarget?: 'manager' | 'supply' | null;
 	repairId?: number | null;
-	/** 'inventory' — инвентаризация; 'salesReport' — отчёт по продажам; 'repairs' — ремонты; 'stock' — складской учёт; 'supply' — рабочее место снабженца («Снаб»). */
-	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply';
+	/** Экран приложения, который должен открыть placement. */
+	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder';
 	domain: string | null;
 	memberId: string | null;
 	placement: string | null;
@@ -196,6 +196,18 @@ export function buildStockContext(body: PlacementBody): PlacementContext {
 		dealId: null,
 		taskId: null,
 		view: 'stock',
+		domain: body.DOMAIN ?? null,
+		memberId: body.member_id ?? null,
+		placement: body.PLACEMENT ?? null,
+	};
+}
+
+/** Контекст для личного конструктора отчётов. */
+export function buildReportBuilderContext(body: PlacementBody): PlacementContext {
+	return {
+		dealId: null,
+		taskId: null,
+		view: 'reportBuilder',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,
 		placement: body.PLACEMENT ?? null,
