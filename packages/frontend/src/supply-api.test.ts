@@ -53,11 +53,11 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 	return requests;
 }
 
-test('supply order listing and request creation preserve their current fallbacks and payloads', async () => {
-	const requests = captureResponses([{ ok: false }, { ok: true }]);
+test('supply order listing rejects backend errors and request creation preserves its payload', async () => {
+	const requests = captureResponses([{ ok: false, error: 'supply unavailable' }, { ok: true }]);
 	const lines = [{ productId: 17, itemName: 'Товар', qty: 2, note: 'Срочно' }];
 
-	assert.deepEqual(await fetchSupplyOrders(), []);
+	await assert.rejects(fetchSupplyOrders(), /supply unavailable/);
 	assert.equal(await createDealSupplyRequest(91, lines, {
 		toStore: 'Основной склад',
 		deadline: '2026-08-20',
@@ -126,14 +126,14 @@ test('successful supply document creation preserves empty collection fallbacks',
 	}), { transfers: [], purchases: [], updatedPurchases: [] });
 });
 
-test('supply purchase lifecycle preserves endpoint order, fallbacks, and transfer result', async () => {
+test('supply purchase lifecycle rejects supplier errors and preserves endpoint order and transfer result', async () => {
 	const transfer = { id: 7, name: 'TR-7', status: 'draft', fromStore: 'Основной', toStore: 'Точка 2', lines: [], receivedLines: [], shortageLines: [] };
 	const requests = captureResponses([
 		{ ok: true, name: 'PO-1' },
 		{ ok: true, name: 'PO-2' },
 		{ ok: true },
 		{ ok: true },
-		{ ok: false },
+		{ ok: false, error: 'suppliers unavailable' },
 		{ ok: true, name: 'Vendor', created: false },
 		{ ok: true, name: 'PO-1' },
 		{ ok: true, name: 'PR-1' },
@@ -145,7 +145,7 @@ test('supply purchase lifecycle preserves endpoint order, fallbacks, and transfe
 	assert.equal(await createStandaloneSupplyPurchase('Vendor', '2026-08-20', purchaseLines), 'PO-2');
 	assert.equal(await updateSupplyPurchaseOrder('PO-1', 'Vendor', purchaseLines), '');
 	await deleteSupplyPurchaseOrder('PO-3');
-	assert.deepEqual(await fetchSupplySuppliers(), []);
+	await assert.rejects(fetchSupplySuppliers(), /suppliers unavailable/);
 	assert.deepEqual(await createSupplySupplier('Vendor'), { name: 'Vendor', suppliers: ['Vendor'], created: false });
 	assert.equal(await updateSupplyPurchaseStage('PO-1', 'ordered', '2026-08-20'), 'PO-1');
 	assert.equal(await receiveSupplyPurchase('MR-1', 'request-key', 91, 'PO-1', [{ productId: 17, qty: 2, rate: 800 }]), 'PR-1');

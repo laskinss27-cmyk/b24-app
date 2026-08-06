@@ -48,15 +48,15 @@ export interface SupplyCreatedDocuments {
 	updatedPurchases: string[];
 }
 
-/** Все заявки снабжения из ядра (Material Request по сделкам) + название сделки из Б24. Ядро не подключено → []. */
+/** Все заявки снабжения из ядра (Material Request по сделкам) + название сделки из Б24. */
 export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 	const res = await fetch('/api/supply/orders', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; orders?: SupplyOrderRow[] };
-	if (!json.ok) return [];
+	const json = (await res.json()) as { ok: boolean; error?: string; orders?: SupplyOrderRow[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить заявки снабжения');
 	return json.orders ?? [];
 }
 
@@ -182,8 +182,8 @@ export async function fetchSupplySuppliers(): Promise<string[]> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; suppliers?: string[] };
-	if (!json.ok) return [];
+	const json = (await res.json()) as { ok: boolean; error?: string; suppliers?: string[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить поставщиков');
 	return json.suppliers ?? [];
 }
 
