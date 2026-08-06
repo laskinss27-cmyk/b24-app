@@ -16,6 +16,11 @@ import {
 	SUPPLY_PURCHASE_STAGE_FIELD,
 	SUPPLY_REQUEST_FIELD,
 	SUPPLY_REQUEST_KEY_FIELD,
+	appendDealStage,
+	appendDealStageItems,
+	assertDealQuoteVariantSelected,
+	calculateDealPlanTotal,
+	cancelDealQuoteVariantSelection,
 	createDealQuoteVariant,
 	deleteDealQuoteVariant,
 	createMarketplaceBundle,
@@ -49,7 +54,9 @@ import {
 	itemStockLedger,
 	coreStoreId,
 	listActiveStoreTitles,
+	listDealPlan,
 	listDealRealizations,
+	listDealStages,
 	listCoreMovements,
 	listMarketplaceOperations,
 	listMarketplaceReturnOptions,
@@ -59,15 +66,20 @@ import {
 	moveRepairUnit,
 	planTransferCompletion,
 	receiveTransferFromTransit,
+	reduceDealPlanForReturns,
+	removeDealStageItem,
 	renameDealQuoteVariant,
+	renameDealStage,
 	searchErpItems,
 	shipTransferToTransit,
+	selectDealQuoteVariant,
 	submitDoc,
 	submitInventoryReco,
 	submitRealization,
 	syncDealRealizationPrices,
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
+	updateDealStageItem,
 	updateMarketplaceOldId,
 	updateCoreCatalogPrices,
 	updatePurchaseOrderDraft,
@@ -458,6 +470,135 @@ test('first quote on an active deal can be recorded as the already selected work
 	assert.equal(created.selectedId, created.variants[0]?.id);
 	assert.equal(created.variants[0]?.items[0]?.productId, 404);
 	assert.equal(created.variants[0]?.items[0]?.discountPercent, 10);
+});
+
+test('deal plan reader and staged totals keep ERP quantities, discounts and service markers', async () => {
+	const erp = new FakeErp([], {
+		name: 'SO-PLAN',
+		docstatus: 0,
+		b24_deal_id: '90',
+		b24_deal_stages: JSON.stringify([{
+			id: 'stage-1',
+			name: 'Монтаж',
+			at: '2026-08-01T00:00:00.000Z',
+			byId: '1',
+			byName: 'Manager',
+			items: [{ productId: 101, itemName: 'Product 101', qty: 1, price: 150, discountPercent: 10, isService: false }],
+		}]),
+		items: [
+			item('SO-ROW-1', 101, 3, 100, { delivered_qty: 1, b24_line_key: 'line-101' }),
+			item('SO-ROW-2', 9814001, 1, 500, { warehouse: '', delivered_qty: 0, b24_line_key: 'line-service' }),
+		],
+	});
+
+	const plan = await listDealPlan(erp.asClient(), 90);
+	assert.deepEqual(plan.map((line) => ({
+		productId: line.productId,
+		qty: line.qty,
+		delivered: line.delivered,
+		isService: line.isService,
+		lineKey: line.lineKey,
+	})), [
+		{ productId: 101, qty: 3, delivered: 1, isService: false, lineKey: 'line-101' },
+		{ productId: 9814001, qty: 1, delivered: 0, isService: true, lineKey: 'line-service' },
+	]);
+	assert.equal(await calculateDealPlanTotal(erp.asClient(), 90), 835);
+	assert.equal(await calculateDealPlanTotal(erp.asClient(), 90, true), 500);
+});
+
+test('deal stage lifecycle keeps stage JSON and aggregated plan quantity in sync', async () => {
+	const erp = new FakeErp([], {
+		name: 'SO-STAGES',
+		docstatus: 0,
+		b24_deal_id: '91',
+		delivery_date: '2026-08-10',
+		items: [item('SO-STAGE-ROW', 101, 2, 100, { b24_line_key: 'line-101', discount_percentage: 0 })],
+	});
+
+	await appendDealStage(erp.asClient(), 91, {
+		id: 'stage-1',
+		name: 'Первый этап',
+		at: '2026-08-02T00:00:00.000Z',
+		byId: '1',
+		byName: 'Manager',
+		items: [],
+	});
+	await appendDealStageItems(erp.asClient(), 91, 'stage-1', [
+		{ productId: 101, itemName: 'Product 101', qty: 1, price: 150, discountPercent: 10, isService: false },
+	]);
+	assert.equal(await calculateDealPlanTotal(erp.asClient(), 91), 235);
+	const renamed = await renameDealStage(erp.asClient(), 91, 'stage-1', 'Монтаж');
+	assert.equal(renamed[0]?.name, 'Монтаж');
+
+	const afterUpdate = await updateDealStageItem(erp.asClient(), 91, 'stage-1', 101, 2, 140, 5);
+	assert.equal(afterUpdate[0]?.qty, 3);
+	assert.deepEqual((await listDealStages(erp.asClient(), 91))[0]?.items, [
+		{ productId: 101, itemName: 'Product 101', qty: 2, price: 140, discountPercent: 5, isService: false },
+	]);
+
+	const afterRemove = await removeDealStageItem(erp.asClient(), 91, 'stage-1', 101);
+	assert.equal(afterRemove[0]?.qty, 1);
+	assert.deepEqual((await listDealStages(erp.asClient(), 91))[0]?.items, []);
+});
+
+test('returned stage quantity reduces both the stage and the accumulated plan', async () => {
+	const erp = new FakeErp([], {
+		name: 'SO-RETURN',
+		docstatus: 0,
+		b24_deal_id: '92',
+		delivery_date: '2026-08-10',
+		b24_deal_stages: JSON.stringify([{
+			id: 'stage-1',
+			at: '2026-08-02T00:00:00.000Z',
+			byId: '1',
+			byName: 'Manager',
+			items: [{ productId: 101, itemName: 'Product 101', qty: 2, price: 140, isService: false }],
+		}]),
+		items: [item('SO-RETURN-ROW', 101, 3, 100, { b24_line_key: 'line-101', discount_percentage: 0 })],
+	});
+
+	const plan = await reduceDealPlanForReturns(erp.asClient(), 92, [
+		{ productId: 101, qty: 1, segmentId: 'stage:stage-1' },
+	], '2026-08-10');
+	assert.equal(plan[0]?.qty, 2);
+	assert.equal((await listDealStages(erp.asClient(), 92))[0]?.items[0]?.qty, 1);
+});
+
+test('quote selection replaces the working plan and cancellation preserves its latest snapshot', async () => {
+	const variants = {
+		enabled: true,
+		selectedId: null,
+		variants: [{
+			id: 'quote-1',
+			name: 'Выбранный',
+			createdAt: '2026-08-01T00:00:00.000Z',
+			createdById: '1',
+			createdByName: 'Manager',
+			items: [{ productId: 303, itemName: 'Product 303', qty: 2, priceListRate: 250, discountPercent: 5, isService: false }],
+		}],
+	};
+	const erp = new FakeErp([], {
+		name: 'SO-QUOTE',
+		docstatus: 0,
+		b24_deal_id: '93',
+		delivery_date: '2026-08-10',
+		b24_quote_variants: JSON.stringify(variants),
+		items: [item('SO-OLD-ROW', 101, 1, 100, { b24_line_key: 'line-old' })],
+	});
+
+	const selected = await selectDealQuoteVariant(erp.asClient(), 93, 'quote-1', '2026-08-12');
+	assert.equal(selected.selectedId, 'quote-1');
+	assert.deepEqual((await listDealPlan(erp.asClient(), 93)).map((line) => ({ productId: line.productId, qty: line.qty })), [
+		{ productId: 303, qty: 2 },
+	]);
+	await assertDealQuoteVariantSelected(erp.asClient(), 93);
+
+	const cancelled = await cancelDealQuoteVariantSelection(erp.asClient(), 93);
+	assert.equal(cancelled.selectedId, null);
+	assert.deepEqual(cancelled.variants[0]?.items.map((line) => ({ productId: line.productId, qty: line.qty })), [
+		{ productId: 303, qty: 2 },
+	]);
+	await assert.rejects(assertDealQuoteVariantSelected(erp.asClient(), 93), /сначала отметьте вариант КП/);
 });
 
 test('stage price change amends only that stage realization and its return without changing stock quantity', async () => {
