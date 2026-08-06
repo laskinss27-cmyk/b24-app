@@ -10,9 +10,13 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
+import { b24StoreTitle, erpContext, erpWarehouse, type ErpContext } from './warehouse-context.js';
 import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { assertProductReplaceAllowed, quantityFromDealChange, quantityFromSupplyChange, resolveDealQtyAtSync } from '../supply/line-sync.js';
+
+export { b24StoreTitle, erpContext, erpWarehouse };
+export type { ErpContext };
 
 const DEAL_FIELD = 'b24_deal_id';
 export const REALIZATION_BASE_SEGMENT = 'base';
@@ -42,25 +46,9 @@ const TECH_SUPPLIER = 'Б24 Снабжение';
 const ITEM_GROUP = 'Каталог Б24';
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
-export interface ErpContext {
-	company: string;
-	abbr: string;
-}
-
-let ctxCache: ErpContext | null = null;
 let setupDone = false;
 let marketplaceFieldsDone = false;
 let marketplaceOldIdFieldDone = false;
-
-/** Компания (не Demo) + аббревиатура. Кэш на процесс. */
-export async function erpContext(erp: ErpClient): Promise<ErpContext> {
-	if (ctxCache) return ctxCache;
-	const companies = await erp.list('Company', ['name', 'abbr']);
-	const real = companies.find((c) => !String(c['name']).includes('Demo')) ?? companies[0];
-	if (!real) throw new Error('ERPNext: нет ни одной компании (setup wizard не пройден?)');
-	ctxCache = { company: String(real['name']), abbr: String(real['abbr']) };
-	return ctxCache;
-}
 
 /** Идемпотентная настройка: custom-поля b24_deal_id + технические контрагенты. Раз на процесс. */
 export async function ensureErpSetup(erp: ErpClient): Promise<void> {
@@ -199,20 +187,6 @@ export async function ensureSupplier(erp: ErpClient, name: string): Promise<stri
 	if (existing) return String(existing['name']);
 	const doc = await erp.create('Supplier', { supplier_name: clean, supplier_type: 'Company' });
 	return String(doc['name']);
-}
-
-/** Имя склада ERPNext из названия склада Б24. */
-export function erpWarehouse(ctx: ErpContext, b24StoreTitle: string): string {
-	const suffix = ` - ${ctx.abbr}`;
-	let title = b24StoreTitle.trim();
-	while (title.endsWith(suffix)) title = title.slice(0, -suffix.length).trimEnd();
-	return `${title} - ${ctx.abbr}`;
-}
-
-/** Название склада Б24 из имени склада ERPNext (срез суффикса компании). */
-export function b24StoreTitle(ctx: ErpContext, erpWarehouseName: string): string {
-	const suffix = ` - ${ctx.abbr}`;
-	return erpWarehouseName.endsWith(suffix) ? erpWarehouseName.slice(0, -suffix.length) : erpWarehouseName;
 }
 
 /** Остатки всего каталога: productId → { '<title склада Б24>': qty }. Один запрос (Bin). */
