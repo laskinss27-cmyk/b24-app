@@ -41,6 +41,8 @@ import {
 	fetchErpItemNames,
 	fetchErpStoreStock,
 	fetchErpStoreStockFull,
+	fetchCoreCatalogItems,
+	fetchCoreCatalogPrices,
 	fetchCoreDocDetail,
 	itemStockLedger,
 	coreStoreId,
@@ -64,6 +66,7 @@ import {
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
 	updateMarketplaceOldId,
+	updateCoreCatalogPrices,
 	updatePurchaseOrderDraft,
 	updateSupplyPurchaseStage,
 } from './operations.js';
@@ -874,6 +877,99 @@ test('ERP stock and price readers keep filters, aggregation and buying-price fal
 			insert_after: 'item_code', in_list_view: 1,
 		},
 	}]);
+});
+
+test('core catalog reader keeps ERP filters, normalization and stable sorting', async () => {
+	const itemQueries: Array<{ fields: string[]; filters: unknown[][] }> = [];
+	const client = {
+		list: async (doctype: string, fields: string[], filters: unknown[][] = []) => {
+			if (doctype !== 'Item') return [];
+			itemQueries.push({ fields: [...fields], filters: structuredClone(filters) });
+			return [
+				{
+					name: '202', item_name: ' Beta (Сток) ', is_stock_item: 0,
+					b24_article: ' B-2 ', b24_model: ' M-2 ', b24_brand: ' Brand B ', b24_section: ' Sensors ',
+					b24_product_status: 'Уценка', b24_catalog_content: '', b24_filter_category: ' sensor ',
+					description: ' Customer description ', image: ' /files/b.jpg ',
+					[MARKETPLACE_BUNDLE_SOURCE_FIELD]: '101', [MARKETPLACE_OLD_ID_FIELD]: ' OLD-202 ',
+				},
+				{
+					name: '101', item_name: ' Alpha ', is_stock_item: 1,
+					b24_article: ' A-1 ', b24_model: ' M-1 ', b24_brand: ' Brand A ', b24_section: ' Relays ',
+					b24_product_status: 'Available', b24_catalog_content: '', b24_filter_category: ' relay ',
+					description: 'Б24 productId=101', image: ' /files/a.jpg ',
+					[MARKETPLACE_BUNDLE_SOURCE_FIELD]: '', [MARKETPLACE_OLD_ID_FIELD]: ' OLD-101 ',
+				},
+				{ name: 'REPAIR-1', item_name: 'Repair item' },
+			];
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await fetchCoreCatalogItems(client), [
+		{
+			productId: 101, name: 'Alpha', isService: false, isMarketplaceBundle: false,
+			article: 'A-1', model: 'M-1', manufacturer: 'Brand A', section: 'Relays', status: 'Available',
+			description: '', filterCategory: 'relay', image: '/files/a.jpg', marketplaceOldId: 'OLD-101',
+		},
+		{
+			productId: 202, name: 'Beta', isService: true, isMarketplaceBundle: true,
+			article: 'B-2', model: 'M-2', manufacturer: 'Brand B', section: 'Sensors', status: 'Уценка, Сток',
+			description: 'Customer description', filterCategory: 'sensor', image: '/files/b.jpg', marketplaceOldId: 'OLD-202',
+		},
+	]);
+	assert.deepEqual(itemQueries[0]?.filters, [['item_group', '=', 'Каталог Б24'], ['disabled', '=', 0]]);
+	assert.ok(itemQueries[0]?.fields.includes(MARKETPLACE_BUNDLE_SOURCE_FIELD));
+	assert.ok(itemQueries[0]?.fields.includes(MARKETPLACE_OLD_ID_FIELD));
+});
+
+test('core catalog prices keep read mapping and ERP price-list upserts', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const updated: Array<{ doctype: string; name: string; fields: Record<string, unknown> }> = [];
+	const listCalls: Array<{ doctype: string; fields: string[]; filters: unknown[][] }> = [];
+	const client = {
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Item' && name === '101') return { name };
+			if (doctype === 'Price List' && name === 'Standard Selling') return { name };
+			return null;
+		},
+		list: async (doctype: string, fields: string[], filters: unknown[][] = []) => {
+			listCalls.push({ doctype, fields: [...fields], filters: structuredClone(filters) });
+			if (doctype !== 'Item Price') return [];
+			if (fields.includes('price_list_rate')) return [
+				{ item_code: '101', price_list: 'Standard Selling', price_list_rate: 125 },
+				{ item_code: '101', price_list: 'Standard Buying', price_list_rate: 70 },
+				{ item_code: 'not-a-product', price_list: 'Standard Selling', price_list_rate: 999 },
+			];
+			const priceList = String(filters.find((filter) => filter[0] === 'price_list')?.[2] ?? '');
+			return priceList === 'Standard Selling' ? [{ name: 'IP-SELL-101' }] : [];
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: `${doctype}-1`, ...fields };
+		},
+		update: async (doctype: string, name: string, fields: Record<string, unknown>) => {
+			updated.push({ doctype, name, fields: structuredClone(fields) });
+			return { name, ...fields };
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual([...await fetchCoreCatalogPrices(client)], [[101, { retail: 125, purchase: 70 }]]);
+	await updateCoreCatalogPrices(client, { productId: 101, retail: 130, purchase: 75 });
+
+	assert.deepEqual(updated, [{
+		doctype: 'Item Price', name: 'IP-SELL-101', fields: { price_list_rate: 130, currency: 'RUB' },
+	}]);
+	assert.deepEqual(created, [
+		{
+			doctype: 'Price List',
+			fields: { price_list_name: 'Standard Buying', currency: 'RUB', enabled: 1, selling: 0, buying: 1 },
+		},
+		{
+			doctype: 'Item Price',
+			fields: { item_code: '101', price_list: 'Standard Buying', price_list_rate: 75, currency: 'RUB' },
+		},
+	]);
+	assert.deepEqual(listCalls[0]?.filters, [['price_list', 'in', ['Standard Selling', 'Standard Buying']]]);
 });
 
 test('supply purchase drafts keep create, edit and stage payloads', async () => {
