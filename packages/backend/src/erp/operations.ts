@@ -16,15 +16,12 @@ import {
 	MARKETPLACE_BUNDLE_SOURCE_FIELD,
 	MARKETPLACE_BUNDLE_UNITS_FIELD,
 	MARKETPLACE_NAME_FIELD,
-	MARKETPLACE_OLD_ID_FIELD,
 	MARKETPLACE_OPERATION_FIELD,
 	MARKETPLACE_TITLE_FIELD,
 	ensureMarketplaceFields,
-	ensureMarketplaceOldIdField,
 } from './marketplace-fields.js';
 import {
 	CORE_ENGINEER_VISIT_SERVICE_ID,
-	ITEM_GROUP,
 	REALIZATION_SEGMENT_FIELD,
 	ensureCoreItem,
 	fetchErpStocks,
@@ -37,8 +34,6 @@ import {
 	ensurePurchaseFields,
 } from './supply-purchases.js';
 import { b24StoreTitle, erpContext, erpWarehouse, type ErpContext } from './warehouse-context.js';
-import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
-import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { assertProductReplaceAllowed, quantityFromDealChange, quantityFromSupplyChange, resolveDealQtyAtSync } from '../supply/line-sync.js';
 
 export { b24StoreTitle, ensureErpSetup, erpContext, erpWarehouse };
@@ -66,13 +61,18 @@ export {
 	coreStoreId,
 	ensureCoreItem,
 	ensureSupplier,
+	fetchCoreCatalogItems,
+	fetchCoreCatalogPrices,
 	fetchErpPurchasing,
 	fetchErpRetailPrices,
 	fetchErpStocks,
 	fetchErpStocksFor,
 	listActiveStoreTitles,
 	searchErpItems,
+	updateCoreCatalogPrices,
+	updateMarketplaceOldId,
 } from './stock-catalog.js';
+export type { CoreCatalogItem, CoreCatalogPrices } from './stock-catalog.js';
 export { createReceiptDraft, createWriteOffDraft, submitDoc } from './stock-document-drafts.js';
 export { fetchCoreDocDetail, itemStockLedger, listCoreMovements } from './stock-movements.js';
 export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement } from './stock-movements.js';
@@ -112,161 +112,6 @@ export const REALIZATION_BASE_SEGMENT = 'base';
 export const DEAL_PLAN_LINE_KEY_FIELD = 'b24_line_key';
 export const SUPPLY_DEAL_LINE_KEY_FIELD = 'b24_deal_line_key';
 export const SUPPLY_DEAL_QTY_FIELD = 'b24_deal_qty';
-
-export interface CoreCatalogPrices {
-	retail?: number;
-	purchase?: number;
-}
-
-export interface CoreCatalogItem {
-	productId: number;
-	name: string;
-	isService: boolean;
-	isMarketplaceBundle: boolean;
-	article: string;
-	model: string;
-	manufacturer: string;
-	section: string;
-	status: string;
-	description: string;
-	content?: CatalogProductContent;
-	filterCategory: string;
-	image: string;
-	marketplaceOldId: string;
-}
-
-function isTechnicalCoreDescription(value: unknown): boolean {
-	return /^Б24\s+productId=\d+\b(?:\s*\([^)]*\))?\.?$/iu.test(String(value ?? '').trim());
-}
-
-/** Полный товарный справочник ядра. Складские экраны не должны зависеть от наличия строки в каталоге Б24. */
-export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalogItem[]> {
-	await ensureMarketplaceFields(erp);
-	await ensureMarketplaceOldIdField(erp);
-	const rows = await erp.list('Item', [
-		'name', 'item_name', 'is_stock_item',
-		'b24_article', 'b24_model', 'b24_brand', 'b24_section', 'b24_product_status',
-		'b24_catalog_content', 'b24_filter_category', 'description', 'image',
-		MARKETPLACE_BUNDLE_SOURCE_FIELD, MARKETPLACE_OLD_ID_FIELD,
-	], [['item_group', '=', ITEM_GROUP], ['disabled', '=', 0]]);
-	const out: CoreCatalogItem[] = [];
-	for (const row of rows) {
-		const productId = Number(row['name']);
-		if (!Number.isInteger(productId) || productId <= 0) continue;
-		const content = parseCatalogContent(row['b24_catalog_content']);
-		const normalizedIdentity = splitCatalogProductNameStatus(
-			row['item_name'],
-			row['b24_product_status'],
-		);
-		out.push({
-			productId,
-			name: normalizedIdentity.name || `#${productId}`,
-			isService: Number(row['is_stock_item'] ?? 1) === 0,
-			isMarketplaceBundle: Boolean(String(row[MARKETPLACE_BUNDLE_SOURCE_FIELD] ?? '').trim()),
-			article: String(row['b24_article'] ?? '').trim(),
-			model: String(row['b24_model'] ?? '').trim(),
-			manufacturer: String(row['b24_brand'] ?? '').trim(),
-			section: String(row['b24_section'] ?? '').trim(),
-			status: normalizedIdentity.status,
-			description: isTechnicalCoreDescription(row['description'])
-				? ''
-				: String(row['description'] ?? '').trim(),
-			...(content ? { content } : {}),
-			filterCategory: String(row['b24_filter_category'] ?? '').trim(),
-			image: String(row['image'] ?? '').trim(),
-			marketplaceOldId: String(row[MARKETPLACE_OLD_ID_FIELD] ?? '').trim(),
-		});
-	}
-	return out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-}
-
-/** Сохранить вручную проверенный старый ID. Один старый ID нельзя назначить двум действующим товарам. */
-export async function updateMarketplaceOldId(
-	erp: ErpClient,
-	args: { productId: number; oldId: string },
-): Promise<string> {
-	await ensureMarketplaceOldIdField(erp);
-	const itemCode = String(args.productId);
-	if (!(await erp.get('Item', itemCode))) throw new Error(`товар #${args.productId} не найден в ядре`);
-	const oldId = String(args.oldId ?? '').trim();
-	if (oldId.length > 120) throw new Error('старый ID не должен быть длиннее 120 символов');
-	if (oldId) {
-		const matches = await erp.list('Item', ['name', 'item_name'], [
-			[MARKETPLACE_OLD_ID_FIELD, '=', oldId],
-			['disabled', '=', 0],
-		], 2);
-		const duplicate = matches.find((item) => String(item['name']) !== itemCode);
-		if (duplicate) {
-			throw new Error(`старый ID «${oldId}» уже указан у товара #${String(duplicate['name'])} ${String(duplicate['item_name'] ?? '')}`.trim());
-		}
-	}
-	await erp.update('Item', itemCode, { [MARKETPLACE_OLD_ID_FIELD]: oldId });
-	return oldId;
-}
-
-/** Справочные цены каталога ядра. Они не меняют складскую valuation_rate. */
-export async function fetchCoreCatalogPrices(erp: ErpClient): Promise<Map<number, CoreCatalogPrices>> {
-	const rows = await erp.list('Item Price', ['item_code', 'price_list', 'price_list_rate'], [
-		['price_list', 'in', ['Standard Selling', 'Standard Buying']],
-	]);
-	const out = new Map<number, CoreCatalogPrices>();
-	for (const row of rows) {
-		const productId = Number(row['item_code']);
-		if (!(productId > 0)) continue;
-		const current = out.get(productId) ?? {};
-		const rate = Number(row['price_list_rate'] ?? 0);
-		if (row['price_list'] === 'Standard Selling') current.retail = rate;
-		if (row['price_list'] === 'Standard Buying') current.purchase = rate;
-		out.set(productId, current);
-	}
-	return out;
-}
-
-async function ensureCorePriceList(erp: ErpClient, name: string, kind: 'selling' | 'buying'): Promise<void> {
-	if (await erp.get('Price List', name)) return;
-	await erp.create('Price List', {
-		price_list_name: name,
-		currency: 'RUB',
-		enabled: 1,
-		selling: kind === 'selling' ? 1 : 0,
-		buying: kind === 'buying' ? 1 : 0,
-	});
-}
-
-async function upsertCoreItemPrice(erp: ErpClient, itemCode: string, priceList: string, rate: number): Promise<void> {
-	const existing = await erp.list('Item Price', ['name'], [
-		['item_code', '=', itemCode],
-		['price_list', '=', priceList],
-	], 1, 'modified desc');
-	const name = String(existing[0]?.['name'] ?? '');
-	if (name) {
-		await erp.update('Item Price', name, { price_list_rate: rate, currency: 'RUB' });
-		return;
-	}
-	await erp.create('Item Price', {
-		item_code: itemCode,
-		price_list: priceList,
-		price_list_rate: rate,
-		currency: 'RUB',
-	});
-}
-
-/** Записать розничную и закупочную цены товара в штатные прайс-листы ERPNext. */
-export async function updateCoreCatalogPrices(
-	erp: ErpClient,
-	args: { productId: number; retail?: number; purchase?: number },
-): Promise<void> {
-	const itemCode = String(args.productId);
-	if (!(await erp.get('Item', itemCode))) throw new Error(`товар #${args.productId} не найден в ядре`);
-	if (args.retail !== undefined) {
-		await ensureCorePriceList(erp, 'Standard Selling', 'selling');
-		await upsertCoreItemPrice(erp, itemCode, 'Standard Selling', args.retail);
-	}
-	if (args.purchase !== undefined) {
-		await ensureCorePriceList(erp, 'Standard Buying', 'buying');
-		await upsertCoreItemPrice(erp, itemCode, 'Standard Buying', args.purchase);
-	}
-}
 
 export interface RealizationLine {
 	productId: number;
