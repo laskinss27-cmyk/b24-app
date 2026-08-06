@@ -8,12 +8,21 @@ import {
 	MARKETPLACE_BUNDLE_SOURCE_FIELD,
 	MARKETPLACE_BUNDLE_UNITS_FIELD,
 	REALIZATION_SEGMENT_FIELD,
+	SUPPLY_PURCHASE_EXPECTED_AT_FIELD,
+	SUPPLY_PURCHASE_ORDERED_AT_FIELD,
+	SUPPLY_PURCHASE_ORDER_FIELD,
+	SUPPLY_PURCHASE_REQUEST_QTY_FIELD,
+	SUPPLY_PURCHASE_STAGE_FIELD,
+	SUPPLY_REQUEST_FIELD,
+	SUPPLY_REQUEST_KEY_FIELD,
 	createDealQuoteVariant,
 	deleteDealQuoteVariant,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
+	createPurchaseOrderDraft,
+	createSupplyPurchaseReceipt,
 	createInventoryRecoDraft,
 	createReceiptDraft,
 	createTransferDraft,
@@ -53,6 +62,8 @@ import {
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
 	updateMarketplaceOldId,
+	updatePurchaseOrderDraft,
+	updateSupplyPurchaseStage,
 } from './operations.js';
 
 type Doc = Record<string, unknown> & {
@@ -786,6 +797,223 @@ test('ERP stock and price readers keep filters, aggregation and buying-price fal
 			insert_after: 'item_code', in_list_view: 1,
 		},
 	}]);
+});
+
+test('supply purchase drafts keep create, edit and stage payloads', async () => {
+	const purchaseOrders = new Map<string, Record<string, unknown>>();
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const updates: Array<{ doctype: string; name: string; fields: Record<string, unknown> }> = [];
+	const client = {
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Custom Field') return null;
+			if (doctype === 'Purchase Order') return structuredClone(purchaseOrders.get(name) ?? null);
+			if (doctype === 'Item') return { name, item_name: `Item ${name}`, is_stock_item: 1 };
+			if (doctype === 'Supplier' || doctype === 'Customer' || doctype === 'UOM' || doctype === 'Item Group') return { name };
+			return null;
+		},
+		list: async (doctype: string, _fields: string[], filters: unknown[][] = []) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Item Price' && filters.some((filter) => filter[2] === 'Standard Buying')) {
+				return [{ item_code: '101', price_list_rate: 12.5 }];
+			}
+			if (doctype === 'Item') return [
+				{ name: '101', valuation_rate: 9 },
+				{ name: '202', valuation_rate: 18 },
+			];
+			return [];
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			if (doctype === 'Purchase Order') {
+				const document = { name: 'PO-1', docstatus: 0, ...structuredClone(fields) };
+				purchaseOrders.set('PO-1', document);
+				return structuredClone(document);
+			}
+			return { name: `${doctype}-${String(fields['fieldname'] ?? '1')}` };
+		},
+		update: async (doctype: string, name: string, fields: Record<string, unknown>) => {
+			updates.push({ doctype, name, fields: structuredClone(fields) });
+			if (doctype !== 'Purchase Order') return { name, ...fields };
+			const current = purchaseOrders.get(name);
+			if (!current) throw new Error(`missing ${name}`);
+			Object.assign(current, structuredClone(fields));
+			return structuredClone(current);
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await createPurchaseOrderDraft(client, {
+		dealId: 77,
+		supplyRequest: 'MR-1',
+		supplyRequestKey: 'MR-1::v1',
+		scheduleDate: '2026-08-20',
+		supplier: ' Vendor A ',
+		lines: [
+			{ productId: 101, itemName: 'Product 101', qty: 2, requestQty: 5 },
+			{ productId: 202, itemName: 'Product 202', qty: 1, rate: 0 },
+		],
+	}), { name: 'PO-1' });
+
+	const order = purchaseOrders.get('PO-1');
+	assert.ok(order);
+	assert.equal(order['company'], 'Test Company');
+	assert.equal(order['supplier'], 'Vendor A');
+	assert.equal(order['schedule_date'], '2026-08-20');
+	assert.equal(order['b24_deal_id'], '77');
+	assert.equal(order[SUPPLY_REQUEST_FIELD], 'MR-1');
+	assert.equal(order[SUPPLY_REQUEST_KEY_FIELD], 'MR-1::v1');
+	assert.equal(order[SUPPLY_PURCHASE_STAGE_FIELD], 'draft');
+	assert.equal(order[SUPPLY_PURCHASE_EXPECTED_AT_FIELD], '2026-08-20');
+	assert.deepEqual(order['items'], [
+		{
+			item_code: '101', qty: 2, [SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: 5,
+			schedule_date: '2026-08-20', rate: 12.5,
+		},
+		{
+			item_code: '202', qty: 1, [SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: 1,
+			schedule_date: '2026-08-20', rate: 0.01,
+		},
+	]);
+
+	assert.deepEqual(await updatePurchaseOrderDraft(client, {
+		purchaseOrder: 'PO-1',
+		supplier: 'Vendor B',
+		lines: [
+			{ productId: 101, qty: 1 },
+			{ productId: 202, qty: 2, requestQty: 6 },
+		],
+	}), { name: 'PO-1' });
+	assert.deepEqual(purchaseOrders.get('PO-1')?.['items'], [
+		{
+			item_code: '101', qty: 1, [SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: 5,
+			schedule_date: '2026-08-20', rate: 12.5,
+		},
+		{
+			item_code: '202', qty: 2, [SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: 6,
+			schedule_date: '2026-08-20', rate: 18,
+		},
+	]);
+	assert.equal(purchaseOrders.get('PO-1')?.['supplier'], 'Vendor B');
+
+	const today = new Date().toISOString().slice(0, 10);
+	assert.deepEqual(await updateSupplyPurchaseStage(client, {
+		purchaseOrder: 'PO-1', stage: 'ordered', expectedAt: '2026-08-25',
+	}), { name: 'PO-1' });
+	assert.deepEqual(updates.at(-1), {
+		doctype: 'Purchase Order',
+		name: 'PO-1',
+		fields: {
+			[SUPPLY_PURCHASE_STAGE_FIELD]: 'ordered',
+			[SUPPLY_PURCHASE_ORDERED_AT_FIELD]: today,
+			[SUPPLY_PURCHASE_EXPECTED_AT_FIELD]: '2026-08-25',
+		},
+	});
+
+	const customFieldNames = created
+		.filter((entry) => entry.doctype === 'Custom Field')
+		.map((entry) => String(entry.fields['fieldname']));
+	for (const fieldname of [
+		SUPPLY_REQUEST_FIELD,
+		SUPPLY_REQUEST_KEY_FIELD,
+		SUPPLY_PURCHASE_ORDER_FIELD,
+		SUPPLY_PURCHASE_STAGE_FIELD,
+		SUPPLY_PURCHASE_ORDERED_AT_FIELD,
+		SUPPLY_PURCHASE_EXPECTED_AT_FIELD,
+		SUPPLY_PURCHASE_REQUEST_QTY_FIELD,
+	]) assert.ok(customFieldNames.includes(fieldname), `missing custom field ${fieldname}`);
+});
+
+test('supply purchase receipt keeps limits, ERP payload and submit rollback', async () => {
+	const order = {
+		name: 'PO-7',
+		docstatus: 0,
+		supplier: 'Vendor A',
+		b24_deal_id: '77',
+		[SUPPLY_REQUEST_FIELD]: 'MR-7',
+		[SUPPLY_REQUEST_KEY_FIELD]: 'MR-7::v1',
+		[SUPPLY_PURCHASE_STAGE_FIELD]: 'ordered',
+		items: [
+			{ item_code: '101', qty: 5, rate: 12.5 },
+			{ item_code: '202', qty: 1, rate: 20 },
+		],
+	};
+	const oldReceipt = { name: 'PR-old', items: [{ item_code: '101', qty: 2 }] };
+	const created: Array<{ name: string; fields: Record<string, unknown> }> = [];
+	const submitted: string[] = [];
+	const deleted: string[] = [];
+	let failSubmit = false;
+	const client = {
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Purchase Order' && name === 'PO-7') return structuredClone(order);
+			if (doctype === 'Purchase Receipt' && name === 'PR-old') return structuredClone(oldReceipt);
+			if (doctype === 'Item') return { name, is_stock_item: 1 };
+			if (doctype === 'Custom Field' || doctype === 'Supplier' || doctype === 'Customer') return { name };
+			return null;
+		},
+		list: async (doctype: string) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Purchase Receipt') return [{ name: 'PR-old' }];
+			return [];
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			if (doctype !== 'Purchase Receipt') return { name: `${doctype}-1` };
+			const name = `PR-${created.length + 1}`;
+			created.push({ name, fields: structuredClone(fields) });
+			return { name, ...fields };
+		},
+		submit: async (_doctype: string, name: string) => {
+			submitted.push(name);
+			if (failSubmit) throw new Error('submit failed');
+		},
+		delete: async (_doctype: string, name: string) => {
+			deleted.push(name);
+		},
+	} as unknown as ErpClient;
+
+	await assert.rejects(
+		createSupplyPurchaseReceipt(client, {
+			dealId: 77, supplyRequest: 'MR-7', supplyRequestKey: 'MR-7::v1', purchaseOrder: 'PO-7',
+			toStore: 'Main', lines: [{ productId: 101, qty: 4, rate: 99 }],
+		}),
+		/осталось 3, указано 4/,
+	);
+	assert.equal(created.length, 0);
+
+	assert.deepEqual(await createSupplyPurchaseReceipt(client, {
+		dealId: 77,
+		supplyRequest: 'MR-7',
+		supplyRequestKey: 'MR-7::v1',
+		purchaseOrder: 'PO-7',
+		toStore: 'Main',
+		lines: [
+			{ productId: 101, qty: 3, rate: 99 },
+			{ productId: 202, qty: 1, rate: 99 },
+		],
+	}), { name: 'PR-1' });
+	assert.deepEqual(created[0]?.fields, {
+		company: 'Test Company',
+		supplier: 'Vendor A',
+		set_posting_time: 1,
+		remarks: 'Supply purchase order PO-7',
+		b24_deal_id: '77',
+		[SUPPLY_REQUEST_FIELD]: 'MR-7',
+		[SUPPLY_REQUEST_KEY_FIELD]: 'MR-7::v1',
+		[SUPPLY_PURCHASE_ORDER_FIELD]: 'PO-7',
+		items: [
+			{ item_code: '101', qty: 3, warehouse: 'Main - TEST', rate: 12.5 },
+			{ item_code: '202', qty: 1, warehouse: 'Main - TEST', rate: 20 },
+		],
+	});
+	assert.deepEqual(submitted, ['PR-1']);
+
+	failSubmit = true;
+	await assert.rejects(
+		createSupplyPurchaseReceipt(client, {
+			dealId: 77, supplyRequest: 'MR-7', supplyRequestKey: 'MR-7::v1', purchaseOrder: 'PO-7',
+			toStore: 'Main', lines: [{ productId: 101, qty: 1, rate: 99 }],
+		}),
+		/submit failed/,
+	);
+	assert.deepEqual(deleted, ['PR-2']);
 });
 
 test('marketplace old ID is editable, clearable and unique across active products', async () => {
