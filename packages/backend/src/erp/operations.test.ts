@@ -22,6 +22,8 @@ import {
 	fetchErpStoreStockFull,
 	fetchCoreDocDetail,
 	itemStockLedger,
+	coreStoreId,
+	listActiveStoreTitles,
 	listDealRealizations,
 	listCoreMovements,
 	listMarketplaceOperations,
@@ -31,6 +33,7 @@ import {
 	marketplaceSaleTitle,
 	moveRepairUnit,
 	renameDealQuoteVariant,
+	searchErpItems,
 	submitInventoryReco,
 	syncDealRealizationPrices,
 	upsertDealPlan,
@@ -891,4 +894,77 @@ test('item stock ledger labels movements and hides technical corrections', async
 	assert.deepEqual(ledgerCall.filters, [['item_code', '=', '101'], ['is_cancelled', '=', 0]]);
 	assert.equal(ledgerCall.limit, 25);
 	assert.equal(ledgerCall.order, 'posting_date desc, creation desc');
+});
+
+test('ERP item search keeps query order, catalog filter and deduplication', async () => {
+	const calls: Array<{ filters: unknown[][]; limit: number | undefined }> = [];
+	const client = {
+		list: async (doctype: string, _fields: string[], filters: unknown[][] = [], limit?: number) => {
+			assert.equal(doctype, 'Item');
+			calls.push({ filters: structuredClone(filters), limit });
+			const query = filters.at(-1);
+			if (query?.[0] === 'name') return [{ name: '101', item_name: 'Exact', b24_article: 'A-101', b24_brand: 'Shelly' }];
+			if (query?.[0] === 'item_name') return [
+				{ name: '101', item_name: 'Duplicate', b24_article: 'duplicate', b24_brand: '' },
+				{ name: '202', item_name: 'Relay Pro', b24_article: 'A-202', b24_brand: 'Vendor' },
+			];
+			if (query?.[0] === 'b24_article') return [
+				{ name: '303', item_name: 'Article result', b24_article: 'relay', b24_brand: 'Vendor' },
+				{ name: 'REPAIR-1', item_name: 'Ignored', b24_article: 'relay', b24_brand: '' },
+			];
+			return [];
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await searchErpItems(client, ' 101 ', 2), [
+		{ productId: 101, name: 'Exact', article: 'A-101', brand: 'Shelly' },
+		{ productId: 202, name: 'Relay Pro', article: 'A-202', brand: 'Vendor' },
+	]);
+	assert.equal(calls.length, 2);
+	assert.deepEqual(calls[0], {
+		filters: [['item_group', '=', 'Каталог Б24'], ['name', '=', '101']], limit: 1,
+	});
+	assert.deepEqual(calls[1], {
+		filters: [['item_group', '=', 'Каталог Б24'], ['item_name', 'like', '%101%']], limit: 2,
+	});
+
+	calls.length = 0;
+	assert.deepEqual(await searchErpItems(client, 'relay', 4), [
+		{ productId: 101, name: 'Duplicate', article: 'duplicate', brand: '' },
+		{ productId: 202, name: 'Relay Pro', article: 'A-202', brand: 'Vendor' },
+		{ productId: 303, name: 'Article result', article: 'relay', brand: 'Vendor' },
+	]);
+	assert.deepEqual(calls.map((call) => call.filters.at(-1)), [
+		['item_name', 'like', '%relay%'],
+		['b24_article', 'like', '%relay%'],
+	]);
+	assert.deepEqual(await searchErpItems(client, '   '), []);
+});
+
+test('active store titles keep ERP filtering, sorting and stable legacy IDs', async () => {
+	const calls: Array<{ doctype: string; fields: string[]; filters: unknown[][] }> = [];
+	const client = {
+		list: async (doctype: string, fields: string[], filters: unknown[][] = []) => {
+			calls.push({ doctype, fields, filters: structuredClone(filters) });
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Warehouse') return [
+				{ name: 'Zulu - TEST', warehouse_type: '' },
+				{ name: 'Goods In Transit - TEST', warehouse_type: '' },
+				{ name: 'Transit Point - TEST', warehouse_type: 'Transit' },
+				{ name: 'Alpha - TEST', warehouse_type: '' },
+				{ name: 'Main - TEST', warehouse_type: '' },
+				{ name: '', warehouse_type: '' },
+			];
+			return [];
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await listActiveStoreTitles(client), ['Alpha', 'Main', 'Zulu']);
+	const warehouseCall = calls.find((call) => call.doctype === 'Warehouse');
+	assert.ok(warehouseCall);
+	assert.deepEqual(warehouseCall.fields, ['name', 'warehouse_type']);
+	assert.deepEqual(warehouseCall.filters, [['is_group', '=', 0], ['disabled', '=', 0]]);
+	assert.equal(coreStoreId('Main'), -1366325545);
+	assert.equal(coreStoreId('Reserve'), -1473378028);
+	assert.equal(coreStoreId('section:Lighting'), -2022651243);
 });
