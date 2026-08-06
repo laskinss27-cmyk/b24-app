@@ -14,7 +14,12 @@ import {
 	createMarketplaceReturn,
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
+	createInventoryRecoDraft,
+	deleteInventoryRecoDraft,
 	deliverRepairUnit,
+	fetchErpItemNames,
+	fetchErpStoreStock,
+	fetchErpStoreStockFull,
 	listDealRealizations,
 	listMarketplaceOperations,
 	listMarketplaceReturnOptions,
@@ -23,6 +28,7 @@ import {
 	marketplaceSaleTitle,
 	moveRepairUnit,
 	renameDealQuoteVariant,
+	submitInventoryReco,
 	syncDealRealizationPrices,
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
@@ -671,4 +677,102 @@ test('marketplace old ID is editable, clearable and unique across active product
 	);
 	assert.equal(await updateMarketplaceOldId(client, { productId: 101, oldId: '' }), '');
 	assert.equal(items[0]?.b24_marketplace_old_id, '');
+});
+
+test('inventory reconciliation reads stock, product cards and names from ERP', async () => {
+	const binFilters: unknown[][][] = [];
+	const client = {
+		list: async (doctype: string, fields: string[], filters: unknown[][] = []) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Bin') {
+				binFilters.push(filters);
+				if (fields.includes('valuation_rate')) {
+					return [
+						{ item_code: '101', actual_qty: 3, valuation_rate: 125.5 },
+						{ item_code: 'REPAIR-7', actual_qty: 1, valuation_rate: 0 },
+					];
+				}
+				return [
+					{ item_code: '101', actual_qty: 3 },
+					{ item_code: 'REPAIR-7', actual_qty: 1 },
+				];
+			}
+			if (doctype === 'Item' && fields.includes('b24_model')) {
+				return [{
+					name: '101', item_name: 'Relay', b24_model: 'Plus 1PM', b24_article: 'A-101',
+					b24_brand: 'Shelly', b24_section: 'Relays', image: '/files/relay.jpg',
+				}];
+			}
+			if (doctype === 'Item') {
+				return [
+					{ name: '101', item_name: 'Relay' },
+					{ name: '202', item_name: 'Sensor' },
+				];
+			}
+			return [];
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual([...await fetchErpStoreStock(client, 'Main')], [[101, { qty: 3, valuation: 125.5 }]]);
+	assert.deepEqual(await fetchErpStoreStockFull(client, 'Main'), [{
+		productId: 101,
+		name: 'Relay',
+		book: 3,
+		article: 'A-101',
+		model: 'Plus 1PM',
+		brand: 'Shelly',
+		section: 'Relays',
+		image: '/files/relay.jpg',
+	}]);
+	assert.deepEqual([...await fetchErpItemNames(client, [101, 202])], [[101, 'Relay'], [202, 'Sensor']]);
+	assert.ok(binFilters.every((filters) => filters.some((filter) => filter[0] === 'warehouse' && filter[2] === 'Main - TEST')));
+});
+
+test('inventory reconciliation keeps its current draft lifecycle and payload', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const submitted: Array<{ doctype: string; name: string }> = [];
+	const requests: Array<{ method: string; path: string }> = [];
+	const client = {
+		list: async (doctype: string) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Account') return [{ name: 'Stock Adjustment - TEST' }];
+			return [];
+		},
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Custom Field') return null;
+			if (doctype === 'Stock Reconciliation') return { name, docstatus: 0 };
+			return null;
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: doctype === 'Stock Reconciliation' ? 'RECO-1' : `created-${doctype}` };
+		},
+		submit: async (doctype: string, name: string) => { submitted.push({ doctype, name }); },
+		request: async (method: string, path: string) => {
+			requests.push({ method, path });
+			return { status: 200, json: {} };
+		},
+	} as unknown as ErpClient;
+
+	const result = await createInventoryRecoDraft(client, {
+		invRef: 'inv42:store7',
+		storeTitle: 'Main',
+		postingDate: '2026-08-06',
+		lines: [{ productId: 101, qty: 4, valuation: 0 }],
+	});
+	assert.deepEqual(result, { name: 'RECO-1' });
+	const document = created.find((entry) => entry.doctype === 'Stock Reconciliation');
+	assert.ok(document);
+	assert.equal(document.fields['company'], 'Test Company');
+	assert.equal(document.fields['expense_account'], 'Stock Adjustment - TEST');
+	assert.equal(document.fields['b24_inv_ref'], 'inv42:store7');
+	assert.equal(document.fields['posting_date'], '2026-08-06');
+	assert.deepEqual(document.fields['items'], [{
+		item_code: '101', warehouse: 'Main - TEST', qty: 4, valuation_rate: 0.01,
+	}]);
+
+	await submitInventoryReco(client, result.name);
+	assert.deepEqual(submitted, [{ doctype: 'Stock Reconciliation', name: 'RECO-1' }]);
+	await deleteInventoryRecoDraft(client, result.name);
+	assert.deepEqual(requests, [{ method: 'DELETE', path: '/api/resource/Stock%20Reconciliation/RECO-1' }]);
 });
