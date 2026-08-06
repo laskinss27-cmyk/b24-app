@@ -20,7 +20,10 @@ import {
 	fetchErpItemNames,
 	fetchErpStoreStock,
 	fetchErpStoreStockFull,
+	fetchCoreDocDetail,
+	itemStockLedger,
 	listDealRealizations,
+	listCoreMovements,
 	listMarketplaceOperations,
 	listMarketplaceReturnOptions,
 	listMarketplaceReturnSales,
@@ -775,4 +778,117 @@ test('inventory reconciliation keeps its current draft lifecycle and payload', a
 	assert.deepEqual(submitted, [{ doctype: 'Stock Reconciliation', name: 'RECO-1' }]);
 	await deleteInventoryRecoDraft(client, result.name);
 	assert.deepEqual(requests, [{ method: 'DELETE', path: '/api/resource/Stock%20Reconciliation/RECO-1' }]);
+});
+
+test('stock movement list keeps document filters, summaries and submission state', async () => {
+	const calls: Array<{ doctype: string; fields: string[]; filters: unknown[][]; limit: number | undefined; order: string | undefined }> = [];
+	const client = {
+		get: async (doctype: string, name: string) => doctype === 'Custom Field' ? { name } : null,
+		list: async (doctype: string, fields: string[], filters: unknown[][] = [], limit?: number, order?: string) => {
+			calls.push({ doctype, fields, filters: structuredClone(filters), limit, order });
+			if (doctype === 'Delivery Note') {
+				const isReturn = filters.some((filter) => filter[0] === 'is_return' && filter[2] === 1);
+				return [{
+					name: isReturn ? 'RET-1' : 'DN-1', posting_date: '2026-08-05', grand_total: 125,
+					docstatus: isReturn ? 0 : 1, b24_deal_id: '42', b24_note: isReturn ? 'повреждение' : '',
+				}];
+			}
+			if (doctype === 'Purchase Receipt') {
+				return [{ name: 'PR-1', posting_date: '2026-08-04', supplier: 'Поставщик', docstatus: 1, b24_deal_id: '', b24_note: 'срочно' }];
+			}
+			if (doctype === 'Stock Entry') {
+				return [{ name: 'STE-1', posting_date: '2026-08-03', docstatus: 0, b24_deal_id: '7', b24_reason: '', b24_note: 'бой' }];
+			}
+			return [];
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await listCoreMovements(client, 'delivery', { from: '2026-08-01', to: '2026-08-06', productId: 101 }), [{
+		name: 'DN-1', date: '2026-08-05', submitted: true, summary: '125 ₽', dealId: '42',
+	}]);
+	assert.deepEqual(await listCoreMovements(client, 'return'), [{
+		name: 'RET-1', date: '2026-08-05', submitted: false, summary: '125 ₽ · повреждение', dealId: '42',
+	}]);
+	assert.deepEqual(await listCoreMovements(client, 'receipt'), [{
+		name: 'PR-1', date: '2026-08-04', submitted: true, summary: 'Поставщик · срочно', dealId: '',
+	}]);
+	assert.deepEqual(await listCoreMovements(client, 'issue'), [{
+		name: 'STE-1', date: '2026-08-03', submitted: false, summary: 'списание · бой', dealId: '7',
+	}]);
+
+	const deliveryCall = calls.find((call) => call.doctype === 'Delivery Note' && call.limit === 1000);
+	assert.ok(deliveryCall);
+	assert.equal(deliveryCall.order, 'posting_date desc');
+	assert.deepEqual(deliveryCall.filters, [
+		['docstatus', '!=', 2],
+		['is_return', '=', 0],
+		['posting_date', '>=', '2026-08-01'],
+		['posting_date', '<=', '2026-08-06'],
+		['Delivery Note Item', 'item_code', '=', '101'],
+	]);
+	assert.ok(calls.filter((call) => call.doctype !== 'Delivery Note').every((call) => call.limit === 50));
+});
+
+test('stock document detail keeps header fields and warehouse-name conversion', async () => {
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (doctype: string, name: string) => doctype === 'Stock Entry' && name === 'STE-1' ? {
+			name, posting_date: '2026-08-03', docstatus: 1, b24_deal_id: '7', supplier: 'Поставщик',
+			b24_reason: 'брак', b24_note: 'проверено',
+			items: [
+				{ item_code: '101', item_name: 'Relay', qty: -2, warehouse: 'Main - TEST', rate: 125 },
+				{ item_code: '202', item_name: 'Sensor', qty: 3, t_warehouse: 'Reserve - TEST', valuation_rate: 40 },
+			],
+		} : null,
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await fetchCoreDocDetail(client, 'Stock Entry', 'STE-1'), {
+		name: 'STE-1', doctype: 'Stock Entry', date: '2026-08-03', submitted: true, dealId: '7',
+		supplier: 'Поставщик', reason: 'брак', note: 'проверено',
+		items: [
+			{ productId: 101, itemName: 'Relay', qty: -2, store: 'Main', rate: 125 },
+			{ productId: 202, itemName: 'Sensor', qty: 3, store: 'Reserve', rate: 40 },
+		],
+	});
+	await assert.rejects(fetchCoreDocDetail(client, 'Sales Invoice', 'SI-1'), /недопустимый тип документа/);
+});
+
+test('item stock ledger labels movements and hides technical corrections', async () => {
+	const calls: Array<{ doctype: string; filters: unknown[][]; limit: number | undefined; order: string | undefined }> = [];
+	const client = {
+		list: async (doctype: string, _fields: string[], filters: unknown[][] = [], limit?: number, order?: string) => {
+			calls.push({ doctype, filters: structuredClone(filters), limit, order });
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Stock Ledger Entry') return [
+				{ posting_date: '2026-08-06', actual_qty: 1, warehouse: 'Main - TEST', voucher_type: 'Stock Reconciliation', voucher_no: 'RECO-CORR' },
+				{ posting_date: '2026-08-05', actual_qty: -1, warehouse: 'Main - TEST', voucher_type: 'Stock Reconciliation', voucher_no: 'RECO-INV' },
+				{ posting_date: '2026-08-04', actual_qty: -2, warehouse: 'Main - TEST', voucher_type: 'Stock Entry', voucher_no: 'STE-MOVE' },
+				{ posting_date: '2026-08-03', actual_qty: 3, warehouse: 'Reserve - TEST', voucher_type: 'Stock Entry', voucher_no: 'STE-RECEIPT' },
+				{ posting_date: '2026-08-02', actual_qty: 4, warehouse: 'Main - TEST', voucher_type: 'Purchase Receipt', voucher_no: 'PR-1' },
+				{ posting_date: '2026-08-01', actual_qty: -1, warehouse: 'Main - TEST', voucher_type: 'Delivery Note', voucher_no: 'DN-1' },
+			];
+			if (doctype === 'Stock Reconciliation') return [
+				{ name: 'RECO-CORR', b24_inv_ref: 'correction:store7' },
+				{ name: 'RECO-INV', b24_inv_ref: 'inv42:store7' },
+			];
+			if (doctype === 'Stock Entry') return [
+				{ name: 'STE-MOVE', stock_entry_type: 'Material Transfer' },
+				{ name: 'STE-RECEIPT', stock_entry_type: 'Material Receipt' },
+			];
+			return [];
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await itemStockLedger(client, 101, 25), [
+		{ date: '2026-08-05', doctype: 'Stock Reconciliation', voucherNo: 'RECO-INV', kind: 'инвентаризация/коррекция', qty: -1, store: 'Main' },
+		{ date: '2026-08-04', doctype: 'Stock Entry', voucherNo: 'STE-MOVE', kind: 'перемещение', qty: -2, store: 'Main' },
+		{ date: '2026-08-03', doctype: 'Stock Entry', voucherNo: 'STE-RECEIPT', kind: 'оприходование', qty: 3, store: 'Reserve' },
+		{ date: '2026-08-02', doctype: 'Purchase Receipt', voucherNo: 'PR-1', kind: 'оприходование', qty: 4, store: 'Main' },
+		{ date: '2026-08-01', doctype: 'Delivery Note', voucherNo: 'DN-1', kind: 'реализация', qty: -1, store: 'Main' },
+	]);
+	const ledgerCall = calls.find((call) => call.doctype === 'Stock Ledger Entry');
+	assert.ok(ledgerCall);
+	assert.deepEqual(ledgerCall.filters, [['item_code', '=', '101'], ['is_cancelled', '=', 0]]);
+	assert.equal(ledgerCall.limit, 25);
+	assert.equal(ledgerCall.order, 'posting_date desc, creation desc');
 });
