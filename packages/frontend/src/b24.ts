@@ -1,12 +1,3 @@
-import { bx24Auth } from './bitrix-auth.js';
-import type {
-	SupplyRequestLineDto,
-	TransferDoc,
-	TransferHistoryEventDto,
-	TransferLineDto,
-	TransferRequestDoc,
-} from './stock-transfer-types.js';
-
 export { bx24Auth } from './bitrix-auth.js';
 export { call, callBatch, withTimeout } from './bitrix-client.js';
 export { QUICKSALE_USER_IDS, addProductsToDeal, createQuickSale, searchDealProducts } from './deal-product-actions.js';
@@ -265,41 +256,4 @@ export {
 	searchProducts,
 } from './inventory-catalog.js';
 export type { InvLine } from './inventory-catalog.js';
-
-// ── Доменные типы ─────────────────────────────────────────────────────────────
-
-
-
-
-// ── Перемещения (складской учёт) ─────────────────────────────────────────────
-/** Журнал движений для окна «Складской учёт»: списания/оприходования/реализации. */
-/** Создать перемещение вручную из окна (без сделки) → документ «Запрошено». */
-
-// ── Реализация В ЯДРЕ (Delivery Note) — новая модель «покрывала» ───────────────
-// Реализация — документ ERPNext (мимо битриксовых стен sale.order/shipment). Связь со
-// сделкой = поле b24_deal_id. Склад выбирается у нас и пишется в документ (warehouse).
-
-// ── КП (коммерческое предложение) из сделки ───────────────────────────────────
-
-/** Один раз создать служебное поле реализации и заполнить сделки с указанной даты. */
-export async function setupDealFulfillment(from = '2026-07-20', dealId?: number): Promise<{ checked: number; changed: number; failed: number }> {
-	const res = await fetch('/api/deal/fulfillment-setup', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), from, ...(dealId ? { dealId } : {}) }),
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string; checked?: number; changed?: number; failed?: number };
-	if (!json.ok) throw new Error(json.error ?? 'не удалось настроить статус реализации');
-	return { checked: json.checked ?? 0, changed: json.changed ?? 0, failed: json.failed ?? 0 };
-}
-
-
-
-// ── Инвентаризация: хранилище (entity.*) + инициаторы (app.option) ────────────
-// ВАЖНО: entity.* и app.option.* работают только в контексте приложения (iframe), не через вебхук.
-
-// ── Ремонты (RMA) — всё наше: карточки в нашем store, клиент/фото из Б24 ───────
-
-
-
-// ── Права сотрудников и отделов приложения ───────────────────────────────────
+export { setupDealFulfillment } from './deal-fulfillment-setup.js';
