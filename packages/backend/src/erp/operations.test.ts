@@ -3,6 +3,7 @@ import test from 'node:test';
 import { ErpClient } from './client.js';
 import {
 	MARKETPLACE_NAME_FIELD,
+	MARKETPLACE_OLD_ID_FIELD,
 	MARKETPLACE_OPERATION_FIELD,
 	MARKETPLACE_TITLE_FIELD,
 	MARKETPLACE_BUNDLE_SOURCE_FIELD,
@@ -31,6 +32,7 @@ import {
 	deleteInventoryRecoDraft,
 	deliverRepairUnit,
 	ensureCoreItem,
+	ensureMarketplaceOldIdField,
 	ensureSupplier,
 	fetchErpPurchasing,
 	fetchErpRetailPrices,
@@ -483,6 +485,81 @@ test('legacy realization rows are assigned to base and stages in deal order befo
 	assert.equal(base.items[0]?.['rate'], 100);
 	assert.equal(stage.items[0]?.['rate'], 125);
 	assert.equal(stage.items[0]?.[REALIZATION_SEGMENT_FIELD], 'stage:stage-1');
+});
+
+test('marketplace field setup keeps document, bundle and legacy ID payloads', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Custom Field') return null;
+			if (doctype === 'Item' || doctype === 'Customer' || doctype === 'Supplier') return { name };
+			return null;
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: doctype === 'Delivery Note' ? 'DN-FIELDS' : `${doctype}-${String(fields['fieldname'] ?? '1')}`, ...fields };
+		},
+		submit: async () => undefined,
+	} as unknown as ErpClient;
+
+	await createMarketplaceSale(client, {
+		marketplace: 'Ozon',
+		storeTitle: 'Main',
+		postingDate: '2026-08-06',
+		lines: [{ productId: 101, itemName: 'Product 101', qty: 1, rate: 100 }],
+	});
+	await ensureMarketplaceOldIdField(client);
+
+	const marketplaceFields = created
+		.filter((entry) => entry.doctype === 'Custom Field')
+		.filter((entry) => [
+			MARKETPLACE_OPERATION_FIELD,
+			MARKETPLACE_NAME_FIELD,
+			MARKETPLACE_TITLE_FIELD,
+			MARKETPLACE_BUNDLE_SOURCE_FIELD,
+			MARKETPLACE_BUNDLE_UNITS_FIELD,
+			MARKETPLACE_OLD_ID_FIELD,
+		].includes(String(entry.fields['fieldname'])))
+		.map((entry) => entry.fields);
+	assert.deepEqual(marketplaceFields, [
+		{
+			dt: 'Delivery Note', fieldname: MARKETPLACE_OPERATION_FIELD, label: 'Marketplace operation', fieldtype: 'Data',
+			insert_after: 'posting_time', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Delivery Note', fieldname: MARKETPLACE_NAME_FIELD, label: 'Marketplace', fieldtype: 'Data',
+			insert_after: 'posting_time', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Delivery Note', fieldname: MARKETPLACE_TITLE_FIELD, label: 'Marketplace title', fieldtype: 'Data',
+			insert_after: 'posting_time', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Stock Entry', fieldname: MARKETPLACE_OPERATION_FIELD, label: 'Marketplace operation', fieldtype: 'Data',
+			insert_after: 'stock_entry_type', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Stock Entry', fieldname: MARKETPLACE_NAME_FIELD, label: 'Marketplace', fieldtype: 'Data',
+			insert_after: 'stock_entry_type', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Stock Entry', fieldname: MARKETPLACE_TITLE_FIELD, label: 'Marketplace title', fieldtype: 'Data',
+			insert_after: 'stock_entry_type', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Item', fieldname: MARKETPLACE_BUNDLE_SOURCE_FIELD, label: 'Bundle source product', fieldtype: 'Data',
+			insert_after: 'description', in_standard_filter: 1,
+		},
+		{
+			dt: 'Item', fieldname: MARKETPLACE_BUNDLE_UNITS_FIELD, label: 'Bundle units', fieldtype: 'Int',
+			insert_after: 'description', in_standard_filter: 1,
+		},
+		{
+			dt: 'Item', fieldname: MARKETPLACE_OLD_ID_FIELD, label: 'Старый ID', fieldtype: 'Data',
+			insert_after: 'description', in_standard_filter: 1, in_list_view: 0,
+		},
+	]);
 });
 
 test('marketplace realization gets a human title, warehouse marker and is submitted without a deal link', async () => {
