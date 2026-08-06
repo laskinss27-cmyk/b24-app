@@ -10,15 +10,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
+import { DEAL_FIELD, TECH_CUSTOMER, TECH_SUPPLIER, UOM, ensureErpSetup } from './erp-setup.js';
 import { b24StoreTitle, erpContext, erpWarehouse, type ErpContext } from './warehouse-context.js';
 import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { assertProductReplaceAllowed, quantityFromDealChange, quantityFromSupplyChange, resolveDealQtyAtSync } from '../supply/line-sync.js';
 
-export { b24StoreTitle, erpContext, erpWarehouse };
+export { b24StoreTitle, ensureErpSetup, erpContext, erpWarehouse };
 export type { ErpContext };
 
-const DEAL_FIELD = 'b24_deal_id';
 export const REALIZATION_BASE_SEGMENT = 'base';
 export const REALIZATION_SEGMENT_FIELD = 'b24_deal_segment';
 export const MARKETPLACE_OPERATION_FIELD = 'b24_marketplace_operation';
@@ -27,8 +27,6 @@ export const MARKETPLACE_TITLE_FIELD = 'b24_marketplace_title';
 export const MARKETPLACE_BUNDLE_SOURCE_FIELD = 'b24_bundle_source_product';
 export const MARKETPLACE_BUNDLE_UNITS_FIELD = 'b24_bundle_units';
 export const MARKETPLACE_OLD_ID_FIELD = 'b24_marketplace_old_id';
-/** Документы, которым нужно поле сделки. */
-const DEAL_DOCTYPES = ['Delivery Note', 'Stock Entry', 'Purchase Receipt'] as const;
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
 export const SUPPLY_REQUEST_KEY_FIELD = 'b24_supply_request_key';
 export const SUPPLY_PURCHASE_ORDER_FIELD = 'b24_purchase_order';
@@ -41,35 +39,11 @@ export const SUPPLY_DEAL_LINE_KEY_FIELD = 'b24_deal_line_key';
 export const SUPPLY_DEAL_QTY_FIELD = 'b24_deal_qty';
 const TRANSFER_DOCUMENT_FIELD = 'b24_transfer_document';
 const TRANSFER_PHASE_FIELD = 'b24_transfer_phase';
-const TECH_CUSTOMER = 'Б24 Розница';
-const TECH_SUPPLIER = 'Б24 Снабжение';
 const ITEM_GROUP = 'Каталог Б24';
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
-let setupDone = false;
 let marketplaceFieldsDone = false;
 let marketplaceOldIdFieldDone = false;
-
-/** Идемпотентная настройка: custom-поля b24_deal_id + технические контрагенты. Раз на процесс. */
-export async function ensureErpSetup(erp: ErpClient): Promise<void> {
-	if (setupDone) return;
-	for (const dt of DEAL_DOCTYPES) {
-		const cfName = `${dt}-${DEAL_FIELD}`;
-		if (!(await erp.get('Custom Field', cfName))) {
-			await erp.create('Custom Field', {
-				dt, fieldname: DEAL_FIELD, label: 'B24 Deal', fieldtype: 'Data',
-				insert_after: 'posting_time', in_standard_filter: 1, in_list_view: 1,
-			});
-		}
-	}
-	if (!(await erp.get('Customer', TECH_CUSTOMER))) {
-		await erp.create('Customer', { customer_name: TECH_CUSTOMER, customer_type: 'Individual' });
-	}
-	if (!(await erp.get('Supplier', TECH_SUPPLIER))) {
-		await erp.create('Supplier', { supplier_name: TECH_SUPPLIER, supplier_type: 'Company' });
-	}
-	setupDone = true;
-}
 
 /** Technical markers keep marketplace documents separate from deal realizations. */
 async function ensureMarketplaceFields(erp: ErpClient): Promise<void> {
@@ -131,9 +105,6 @@ export async function ensureMarketplaceOldIdField(erp: ErpClient): Promise<void>
 	}
 	marketplaceOldIdFieldDone = true;
 }
-
-/** Единица измерения по умолчанию (как в миграции каталога). */
-const UOM = 'шт';
 
 /** Завести товар в ЯДРЕ — зеркало нового продукта Б24 (code = productId). Идемпотентно: уже есть → ничего.
  *  Для «Создать товар» в форме прихода: продукт сперва создан в каталоге Б24 (получил productId), тут — Item ядра. */
