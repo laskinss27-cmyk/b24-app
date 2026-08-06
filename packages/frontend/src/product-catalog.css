@@ -1,0 +1,139 @@
+/* ── База товаров (каталог-браузер) ──────────────────────────────────────────── */
+html, body, #root { height: 100%; }
+.base {
+	box-sizing: border-box;
+	height: 100%;
+	max-width: 100%;
+	margin: 0 auto;
+	padding: 18px;
+	color: #1a2231;
+	display: flex;
+	flex-direction: column;
+}
+/* Шапка, тулбар (поиск+кнопки) и футер — закреплены; скроллится только таблица. */
+.base > header,
+.base-toolbar,
+.base-foot {
+	flex: 0 0 auto;
+}
+.base header h1 {
+	margin: 0 0 2px;
+	font-size: 20px;
+}
+.base .subtitle {
+	margin: 0 0 14px;
+	color: #7a8699;
+	font-size: 12.5px;
+}
+.base .muted {
+	color: #7a8699;
+}
+.base .error {
+	color: #e5484d;
+}
+.base-load {
+	color: #7a8699;
+	padding: 24px 4px;
+}
+.base-backbar {
+	max-width: 1180px;
+	margin: 0 auto;
+	padding: 12px 18px 0;
+}
+
+.base-toolbar {
+	background: #fff;
+	border: 1px solid #e3e8ef;
+	border-radius: 12px;
+	padding: 12px;
+	display: flex;
+	gap: 10px;
+	align-items: flex-end;
+	flex-wrap: wrap;
+	margin-bottom: 12px;
+	box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+.tb-field {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	font-size: 12px;
+	color: #7a8699;
+}
+.tb-field select,
+.tb-field input {
+	border: 1px solid #e3e8ef;
+	border-radius: 9px;
+	padding: 9px 11px;
+	font-size: 14px;
+	outline: none;
+	background: #fff;
+	color: #1a2231;
+}
+.tb-field select:focus,
+.tb-field input:focus {
+	border-color: #0b5fff;
+}
+.tb-search {
+	flex: 1;
+	min-width: 240px;
+}
+.tb-chk {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 13.5px;
+	color: #1a2231;
+	cursor: pointer;
+	user-select: none;
+	padding-bottom: 9px;
+}
+/* Сегментированный переключатель вида позиции (Все / Товары / Услуги). */
+.tb-seg {
+	display: inline-flex;
+	border: 1px solid #cdd5e0;
+	border-radius: 8px;
+	overflow: hidden;
+	margin-bottom: 9px;
+}
+.tb-seg-btn {
+	border: none;
+	background: #fff;
+	color: #475569;
+	font-size: 13px;
+	font-family: inherit;
+	padding: 6px 12px;
+	cursor: pointer;
+	border-left: 1px solid #cdd5e0;
+}
+.tb-seg-btn:first-child { border-left: none; }
+.tb-seg-btn:hover { background: #f6f8fb; }
+.tb-seg-btn.active { background: #185fa5; color: #fff; }
+/* Кнопка удаления строки товара/работы из сделки. */
+/* Явный крестик удаления слева от названия товара/работы. */
+.row-del-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border: 1px solid #e3b7b7;
+	border-radius: 5px;
+	background: transparent;
+	color: #c0392b;
+	font-size: 12px;
+	line-height: 1;
+	font-weight: 700;
+	cursor: pointer;
+	vertical-align: middle;
+	flex: 0 0 auto;
+	transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.row-del-x:hover { background: #c0392b; border-color: #c0392b; color: #fff; }
+.row-del-x:disabled { opacity: 0.3; cursor: default; border-color: #e0e0e0; color: #bbb; }
+/* Бейдж скидки в строке товара/работы. */
+.disc-tag { display: inline-block; margin-left: 5px; font-size: 11px; color: #1a7f37; background: #e7f6ee; border-radius: 5px; padding: 1px 5px; vertical-align: middle; white-space: nowrap; }
+/* Закупочная цена под розницей в строке товара (.danger — розница ≤ закупки). */
+.purchase-hint { font-size: 11px; color: #7a8699; font-weight: 400; margin-top: 2px; white-space: nowrap; }
+.purchase-hint.danger { color: #c0392b; font-weight: 600; }
+.purchase-hint.muted-hint { color: #aab4c2; }
