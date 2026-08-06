@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "tsx --test src/inventory-draft.test.ts src/b24-client.test.ts src/product-catalog.test.ts src/deal-product-actions.test.ts src/supply-api.test.ts src/stock-transfers.test.ts src/deal-planning.test.ts src/deal-fulfillment.test.ts src/stock-history.test.ts src/stock-analytics.test.ts src/stock-documents.test.ts src/marketplace-api.test.ts src/core-realizations.test.ts src/deal-commercial-proposals.test.ts src/deal-contracts.test.ts src/bitrix-navigation.test.ts src/repair-api.test.ts src/inventory-settings.test.ts src/access-control-api.test.ts src/inventory-api.test.ts src/reporting-api.test.ts src/current-user.test.ts src/deal-stock.test.ts",
+    "test": "tsx --test src/inventory-draft.test.ts src/b24-client.test.ts src/product-catalog.test.ts src/deal-product-actions.test.ts src/supply-api.test.ts src/stock-transfers.test.ts src/deal-planning.test.ts src/deal-fulfillment.test.ts src/stock-history.test.ts src/stock-analytics.test.ts src/stock-documents.test.ts src/marketplace-api.test.ts src/core-realizations.test.ts src/deal-commercial-proposals.test.ts src/deal-contracts.test.ts src/bitrix-navigation.test.ts src/repair-api.test.ts src/inventory-settings.test.ts src/access-control-api.test.ts src/inventory-api.test.ts src/reporting-api.test.ts src/current-user.test.ts src/deal-stock.test.ts src/inventory-catalog.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
