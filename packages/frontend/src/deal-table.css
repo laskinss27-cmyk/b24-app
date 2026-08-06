@@ -1,0 +1,30 @@
+/* ── Разделение товаров и работ/услуг в таблице сделки ────────────────────── */
+.products-table tr.group-band td {
+	background: #eef2f7;
+	font-weight: 600;
+	color: #334155;
+	border-top: 2px solid #cbd5e1;
+	padding-top: 8px;
+	padding-bottom: 8px;
+}
+.group-band-count { font-weight: 400; color: #64748b; }
+.group-band-sum { color: #334155; }
+
+/* ── Первая колонка: удалить (✕) + чекбокс «отгрузить эту строку» ──────────── */
+.products-table th.check-col,
+.products-table td.check-col {
+	width: 52px;
+	text-align: center;
+	padding-left: 6px;
+	padding-right: 6px;
+}
+.row-controls { display: inline-flex; align-items: center; gap: 7px; }
+.products-table input.row-check {
+	width: 16px;
+	height: 16px;
+	cursor: pointer;
+	accent-color: #2563eb;
+}
+.products-table input.row-check:disabled { cursor: not-allowed; opacity: 0.4; }
+.products-table tr.goods-row.sel-row { background: #eff6ff; }
+.products-table tr.goods-row.sel-row:hover { background: #e0edff; }
