@@ -15,6 +15,8 @@ import {
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
 	createInventoryRecoDraft,
+	createReceiptDraft,
+	createWriteOffDraft,
 	deleteInventoryRecoDraft,
 	deliverRepairUnit,
 	fetchErpItemNames,
@@ -34,6 +36,7 @@ import {
 	moveRepairUnit,
 	renameDealQuoteVariant,
 	searchErpItems,
+	submitDoc,
 	submitInventoryReco,
 	syncDealRealizationPrices,
 	upsertDealPlan,
@@ -967,4 +970,71 @@ test('active store titles keep ERP filtering, sorting and stable legacy IDs', as
 	assert.equal(coreStoreId('Main'), -1366325545);
 	assert.equal(coreStoreId('Reserve'), -1473378028);
 	assert.equal(coreStoreId('section:Lighting'), -2022651243);
+});
+
+test('stock document drafts keep their current ERP payloads', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (_doctype: string, name: string) => ({ name }),
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: doctype === 'Stock Entry' ? 'STE-1' : 'PR-1' };
+		},
+	} as unknown as ErpClient;
+
+	const reason = 'R'.repeat(145);
+	const writeOffNote = 'W'.repeat(145);
+	assert.deepEqual(await createWriteOffDraft(client, {
+		dealId: 42,
+		reason,
+		note: writeOffNote,
+		lines: [{ productId: 101, qty: 2, fromStore: 'Main' }],
+	}), { name: 'STE-1' });
+	assert.deepEqual(created[0], {
+		doctype: 'Stock Entry',
+		fields: {
+			company: 'Test Company',
+			stock_entry_type: 'Material Issue',
+			b24_deal_id: '42',
+			b24_reason: reason.slice(0, 140),
+			b24_note: writeOffNote.slice(0, 140),
+			items: [{ item_code: '101', qty: 2, s_warehouse: 'Main - TEST' }],
+		},
+	});
+
+	const receiptNote = 'P'.repeat(145);
+	assert.deepEqual(await createReceiptDraft(client, {
+		dealId: 7,
+		note: receiptNote,
+		lines: [{ productId: 202, qty: 3, toStore: 'Reserve', rate: 125.5 }],
+	}), { name: 'PR-1' });
+	assert.deepEqual(created[1], {
+		doctype: 'Purchase Receipt',
+		fields: {
+			company: 'Test Company',
+			supplier: 'Б24 Снабжение',
+			set_posting_time: 1,
+			b24_deal_id: '7',
+			b24_note: receiptNote.slice(0, 140),
+			items: [{ item_code: '202', qty: 3, warehouse: 'Reserve - TEST', rate: 125.5 }],
+		},
+	});
+});
+
+test('stock document helpers keep empty-writeoff rejection and submit arguments', async () => {
+	const submitted: Array<{ doctype: string; name: string }> = [];
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (_doctype: string, name: string) => ({ name }),
+		submit: async (doctype: string, name: string) => { submitted.push({ doctype, name }); },
+	} as unknown as ErpClient;
+
+	await assert.rejects(createWriteOffDraft(client, { lines: [] }), /пустое списание/);
+	await submitDoc(client, 'Stock Entry', 'STE-1');
+	await submitDoc(client, 'Purchase Receipt', 'PR-1');
+	assert.deepEqual(submitted, [
+		{ doctype: 'Stock Entry', name: 'STE-1' },
+		{ doctype: 'Purchase Receipt', name: 'PR-1' },
+	]);
 });
