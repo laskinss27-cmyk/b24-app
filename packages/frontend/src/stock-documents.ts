@@ -31,7 +31,8 @@ export async function searchStockItems(q: string): Promise<StockItem[]> {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), q }),
 	});
-	const json = (await res.json()) as { ok: boolean; items?: StockItem[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; items?: StockItem[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось найти товары');
 	return json.items ?? [];
 }
 

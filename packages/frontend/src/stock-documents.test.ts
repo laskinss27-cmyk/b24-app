@@ -30,15 +30,15 @@ test('stock form data preserves empty and boolean fallbacks', async () => {
 	});
 });
 
-test('stock product creation and search preserve current response handling', async () => {
+test('stock product creation succeeds and search rejects backend errors', async () => {
 	const requests = captureResponses([
 		{ ok: true, productId: 17 },
-		{ ok: false, items: [{ productId: 17, name: 'Товар', article: '', brand: '' }] },
+		{ ok: false, error: 'core unavailable', items: [{ productId: 17, name: 'Товар', article: '', brand: '' }] },
 	]);
 
 	assert.deepEqual(await createStockProduct('Товар'), { productId: 17, name: 'Товар', article: '', brand: '' });
 	assert.deepEqual(await searchStockItems('  '), []);
-	assert.deepEqual(await searchStockItems('товар'), [{ productId: 17, name: 'Товар', article: '', brand: '' }]);
+	await assert.rejects(searchStockItems('товар'), /core unavailable/);
 	assert.deepEqual(requests.map((item) => item.url), ['/api/stock/create-product', '/api/stock/search-items']);
 });
 
