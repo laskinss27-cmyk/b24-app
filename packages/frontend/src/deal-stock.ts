@@ -86,7 +86,7 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
 	const ids = productIds.filter((id) => id > 0);
 	if (!ids.length) return {};
 	try {
-		// Таймаут 5с: ядро может быть недоступно из прода — не виснем, быстро падаем на Б24-фолбэк.
+		// Таймаут 15с: ядро может быть недоступно — не оставляем загрузку висеть без ограничения.
 		const res = await fetch('/api/catalog/erp-stocks', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
