@@ -22,7 +22,7 @@ function makeSdk(callMethod: CallMethod, callBatch?: CallBatch): BX24Sdk {
 const browserWindow = {} as Window;
 Object.defineProperty(globalThis, 'window', { value: browserWindow, configurable: true });
 
-const { call, callBatch, fetchSections, withTimeout } = await import('./b24.js');
+const { bx24Auth, call, callBatch, fetchSections, withTimeout } = await import('./b24.js');
 
 test('call forwards the method and params and preserves the current SDK error shape', async () => {
 	let received: { method: string; params: Record<string, unknown> } | null = null;
@@ -93,4 +93,25 @@ test('section loading follows native BX24 pagination for both catalog iblocks', 
 test('withTimeout preserves resolved values and rejects stalled work with its label', async () => {
 	assert.equal(await withTimeout(Promise.resolve('ready'), 50, 'fast-call'), 'ready');
 	await assert.rejects(withTimeout(new Promise<never>(() => {}), 5, 'slow-call'), /slow-call/);
+});
+
+test('bx24Auth prefers SDK credentials, falls back to mobile context, and rejects missing auth', () => {
+	browserWindow.__B24_CONTEXT__ = {
+		dealId: null,
+		domain: 'mobile.example',
+		memberId: null,
+		accessToken: 'mobile-token',
+	};
+	browserWindow.BX24 = {
+		...makeSdk(() => {}),
+		getAuth: () => ({ domain: 'portal.example', access_token: 'sdk-token' }),
+	};
+	assert.deepEqual(bx24Auth(), { domain: 'portal.example', accessToken: 'sdk-token' });
+
+	browserWindow.BX24 = makeSdk(() => {});
+	assert.deepEqual(bx24Auth(), { domain: 'mobile.example', accessToken: 'mobile-token' });
+
+	delete browserWindow.BX24;
+	delete browserWindow.__B24_CONTEXT__;
+	assert.throws(() => bx24Auth(), /нет авторизации/);
 });
