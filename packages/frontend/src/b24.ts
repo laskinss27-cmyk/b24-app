@@ -1,4 +1,4 @@
-import { canonicalProductId, type AccessControlDraft, type AccessDecision, type AccessPermissionId } from '@b24-app/shared';
+import { canonicalProductId } from '@b24-app/shared';
 import { bx24Auth } from './bitrix-auth.js';
 import { call, callBatch, callPaged, withTimeout } from './bitrix-client.js';
 import type { DealProductRow } from './deal-fulfillment.js';
@@ -215,6 +215,14 @@ export type {
 	RepairStatus,
 } from './repair-api.js';
 export { getInitiators, setInitiators } from './inventory-settings.js';
+export {
+	fetchAccessControlDraft,
+	fetchAccessEmployees,
+	fetchAccessSubjects,
+	fetchCurrentAppAccess,
+	saveAccessControlDraft,
+} from './access-control-api.js';
+export type { AccessDepartment, AccessEmployee, CurrentAppAccess } from './access-control-api.js';
 
 // ── Доменные типы ─────────────────────────────────────────────────────────────
 
@@ -637,70 +645,6 @@ export async function setupDealFulfillment(from = '2026-07-20', dealId?: number)
 
 // ── Права сотрудников и отделов приложения ───────────────────────────────────
 
-export interface AccessEmployee {
-	id: string;
-	name: string;
-	position: string;
-	departments: number[];
-}
-
-export interface AccessDepartment {
-	id: number;
-	name: string;
-	memberCount: number;
-}
-
-export interface CurrentAppAccess {
-	user: { id: string; name: string; departments: number[]; isPortalAdmin: boolean } | null;
-	policyMode: 'draft' | 'active';
-	decisions: Partial<Record<AccessPermissionId, AccessDecision>>;
-	canManageAccess: boolean;
-}
-
-async function accessControlRequest<T>(path: 'me' | 'load' | 'users' | 'save', extra: Record<string, unknown> = {}): Promise<T> {
-	const response = await fetch(`/api/access-control/${path}`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...extra }),
-	});
-	const json = await response.json() as { ok?: boolean; error?: string };
-	if (!response.ok || !json.ok) throw new Error(json.error ?? 'не удалось выполнить запрос прав');
-	return json as T;
-}
-
-export async function fetchAccessControlDraft(): Promise<AccessControlDraft> {
-	const result = await accessControlRequest<{ ok: true; draft: AccessControlDraft }>('load');
-	return result.draft;
-}
-
-export async function fetchAccessEmployees(): Promise<AccessEmployee[]> {
-	const result = await fetchAccessSubjects();
-	return result.users;
-}
-
-export async function fetchAccessSubjects(): Promise<{ users: AccessEmployee[]; departments: AccessDepartment[] }> {
-	const result = await accessControlRequest<{
-		ok: true;
-		users: AccessEmployee[];
-		departments: AccessDepartment[];
-	}>('users');
-	return { users: result.users, departments: result.departments };
-}
-
-export async function fetchCurrentAppAccess(): Promise<CurrentAppAccess> {
-	const result = await accessControlRequest<{ ok: true } & CurrentAppAccess>('me');
-	return {
-		user: result.user,
-		policyMode: result.policyMode,
-		decisions: result.decisions,
-		canManageAccess: result.canManageAccess,
-	};
-}
-
-export async function saveAccessControlDraft(draft: AccessControlDraft): Promise<AccessControlDraft> {
-	const result = await accessControlRequest<{ ok: true; draft: AccessControlDraft }>('save', { draft });
-	return result.draft;
-}
 
 export type InvPointStatus = 'idle' | 'in_progress' | 'submitted' | 'act' | 'reconciled';
 
