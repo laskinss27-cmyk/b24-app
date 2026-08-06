@@ -21,6 +21,12 @@ import {
 	completeTransferFromTransit,
 	deleteInventoryRecoDraft,
 	deliverRepairUnit,
+	ensureCoreItem,
+	ensureSupplier,
+	fetchErpPurchasing,
+	fetchErpRetailPrices,
+	fetchErpStocks,
+	fetchErpStocksFor,
 	fetchErpItemNames,
 	fetchErpStoreStock,
 	fetchErpStoreStockFull,
@@ -657,6 +663,129 @@ test('marketplace return starts from a sale and returns several selected sold-ou
 	const remaining = await listMarketplaceReturnSales(erp.asClient());
 	assert.equal(remaining.length, 1);
 	assert.deepEqual(remaining[0]?.items.map((item) => [item.productId, item.availableQty]), [[302, 1]]);
+});
+
+test('ERP item and supplier helpers keep their current create and update payloads', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const updated: Array<{ doctype: string; name: string; fields: Record<string, unknown> }> = [];
+	const client = {
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Item' && name === '101') return { name, item_name: 'Old name', is_stock_item: 1 };
+			if (doctype === 'Supplier' && name === 'Existing supplier') return { name: 'Existing supplier' };
+			return null;
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: String(fields['supplier_name'] ?? fields['item_code'] ?? fields['uom_name'] ?? fields['item_group_name'] ?? doctype) };
+		},
+		update: async (doctype: string, name: string, fields: Record<string, unknown>) => {
+			updated.push({ doctype, name, fields: structuredClone(fields) });
+			return { name, ...fields };
+		},
+	} as unknown as ErpClient;
+
+	await ensureCoreItem(client, {
+		productId: 101,
+		name: 'Updated name',
+		isService: true,
+		model: 'Model 1',
+		article: 'A-101',
+		brand: 'Brand',
+		section: 'Section',
+		description: 'Description',
+	});
+	await ensureCoreItem(client, { productId: 202, name: 'New item' });
+
+	assert.deepEqual(updated, [{
+		doctype: 'Item',
+		name: '101',
+		fields: {
+			is_stock_item: 0,
+			item_name: 'Updated name',
+			b24_model: 'Model 1',
+			b24_article: 'A-101',
+			b24_brand: 'Brand',
+			b24_section: 'Section',
+			description: 'Description',
+		},
+	}]);
+	assert.deepEqual(created.slice(0, 3), [
+		{ doctype: 'UOM', fields: { uom_name: 'шт' } },
+		{ doctype: 'Item Group', fields: { item_group_name: 'Каталог Б24', parent_item_group: 'All Item Groups', is_group: 0 } },
+		{
+			doctype: 'Item',
+			fields: {
+				item_code: '202', item_name: 'New item', item_group: 'Каталог Б24', stock_uom: 'шт', is_stock_item: 1,
+				description: 'Б24 productId=202', b24_model: '', b24_article: '', b24_brand: '', b24_section: '',
+			},
+		},
+	]);
+	assert.equal(await ensureSupplier(client, '  '), 'Б24 Снабжение');
+	assert.equal(await ensureSupplier(client, ' Existing supplier '), 'Existing supplier');
+	assert.equal(await ensureSupplier(client, ' New supplier '), 'New supplier');
+	assert.deepEqual(created.at(-1), {
+		doctype: 'Supplier',
+		fields: { supplier_name: 'New supplier', supplier_type: 'Company' },
+	});
+});
+
+test('ERP stock and price readers keep filters, aggregation and buying-price fallback', async () => {
+	const calls: Array<{ doctype: string; fields: string[]; filters: unknown[][] }> = [];
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const client = {
+		list: async (doctype: string, fields: string[], filters: unknown[][] = []) => {
+			calls.push({ doctype, fields: [...fields], filters: structuredClone(filters) });
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Bin') return [
+				{ item_code: '101', warehouse: 'Main - TEST', actual_qty: 2 },
+				{ item_code: '101', warehouse: 'Main - TEST', actual_qty: 3 },
+				{ item_code: '202', warehouse: 'Reserve - TEST', actual_qty: -1 },
+				{ item_code: 'REPAIR-1', warehouse: 'Main - TEST', actual_qty: 8 },
+			];
+			if (doctype === 'Item Price' && filters.some((filter) => filter[2] === 'Standard Buying')) {
+				return [{ item_code: '101', price_list_rate: 12.5 }];
+			}
+			if (doctype === 'Item Price' && filters.some((filter) => filter[2] === 'Standard Selling')) {
+				return [{ item_code: '101', price_list_rate: 25 }, { item_code: '202', price_list_rate: 40 }];
+			}
+			if (doctype === 'Item') return [
+				{ name: '101', valuation_rate: 9 },
+				{ name: '202', valuation_rate: 18 },
+			];
+			return [];
+		},
+		get: async (doctype: string) => doctype === 'Custom Field' ? null : {},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: `${doctype}-1` };
+		},
+	} as unknown as ErpClient;
+
+	assert.deepEqual([...await fetchErpStocks(client)], [
+		[101, { Main: 5 }],
+		[202, { Reserve: -1 }],
+	]);
+	assert.deepEqual([...await fetchErpStocksFor(client, [101, 101, 0, 202])], [
+		[101, { Main: 5 }],
+		[202, { Reserve: -1 }],
+	]);
+	assert.deepEqual([...await fetchErpPurchasing(client, [101, 101, -1, 202])], [[101, 12.5], [202, 18]]);
+	assert.deepEqual([...await fetchErpRetailPrices(client, [101, 101, 202])], [[101, 25], [202, 40]]);
+
+	const filteredBins = calls.find((call) => call.doctype === 'Bin' && call.filters.length > 0);
+	assert.deepEqual(filteredBins?.filters, [['item_code', 'in', ['101', '202']]]);
+	const buying = calls.find((call) => call.doctype === 'Item Price' && call.filters.some((filter) => filter[2] === 'Standard Buying'));
+	assert.deepEqual(buying?.filters, [
+		['item_code', 'in', ['101', '202']],
+		['price_list', '=', 'Standard Buying'],
+	]);
+	assert.deepEqual(created, [{
+		doctype: 'Custom Field',
+		fields: {
+			dt: 'Delivery Note Item', fieldname: REALIZATION_SEGMENT_FIELD, label: 'B24 Deal Segment', fieldtype: 'Data',
+			insert_after: 'item_code', in_list_view: 1,
+		},
+	}]);
 });
 
 test('marketplace old ID is editable, clearable and unique across active products', async () => {
