@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "tsx --test src/inventory-draft.test.ts src/b24-client.test.ts src/product-catalog.test.ts src/deal-product-actions.test.ts src/supply-api.test.ts src/stock-transfers.test.ts",
+    "test": "tsx --test src/inventory-draft.test.ts src/b24-client.test.ts src/product-catalog.test.ts src/deal-product-actions.test.ts src/supply-api.test.ts src/stock-transfers.test.ts src/deal-planning.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
