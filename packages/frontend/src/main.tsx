@@ -11,6 +11,7 @@ import { Supply } from './Supply.js';
 import { ReportBuilder } from './ReportBuilder.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
 import './styles.css';
+import './supply-print.css';
 import './stock-ledger.css';
 import './supply-responsive.css';
 import './marketplaces.css';
