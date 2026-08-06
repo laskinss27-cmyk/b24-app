@@ -22,16 +22,15 @@ export interface DealQuoteVariantItem { productId: number; itemName: string; qty
 export interface DealQuoteVariant { id: string; name: string; createdAt: string; createdById: string; createdByName: string; items: DealQuoteVariantItem[] }
 export interface DealQuoteVariants { enabled: boolean; selectedId: string | null; variants: DealQuoteVariant[] }
 
-/** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24.
- *  Ядро не подключено / read-only фолбэк → []. */
+/** Состав сделки из ЯДРА (реальные товары — план). Источник правды для вкладки, мимо подмены Б24. */
 export async function fetchDealPlan(dealId: number): Promise<DealPlanItem[]> {
 	const res = await fetch('/api/deal/plan', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), dealId }),
 	});
-	const json = (await res.json()) as { ok: boolean; items?: DealPlanItem[] };
-	if (!json.ok) return [];
+	const json = (await res.json()) as { ok: boolean; error?: string; items?: DealPlanItem[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить состав сделки из ядра');
 	return json.items ?? [];
 }
 
@@ -136,8 +135,8 @@ export async function fetchDealStages(dealId: number): Promise<DealStage[]> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), dealId }),
 	});
-	const json = (await res.json()) as { ok: boolean; stages?: DealStage[] };
-	if (!json.ok) return [];
+	const json = (await res.json()) as { ok: boolean; error?: string; stages?: DealStage[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить этапы сделки из ядра');
 	return json.stages ?? [];
 }
 
@@ -150,8 +149,9 @@ async function dealVariantMutation(path: string, body: Record<string, unknown>):
 
 export async function fetchDealQuoteVariants(dealId: number): Promise<DealQuoteVariants> {
 	const res = await fetch('/api/deal/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), dealId }) });
-	const json = (await res.json()) as { ok: boolean; variants?: DealQuoteVariants };
-	return json.ok && json.variants ? json.variants : { enabled: false, selectedId: null, variants: [] };
+	const json = (await res.json()) as { ok: boolean; error?: string; variants?: DealQuoteVariants };
+	if (!json.ok || !json.variants) throw new Error(json.error ?? 'не удалось загрузить варианты КП из ядра');
+	return json.variants;
 }
 
 export async function createDealQuoteVariant(dealId: number, name: string, sourceVariantId?: string): Promise<DealQuoteVariants> {

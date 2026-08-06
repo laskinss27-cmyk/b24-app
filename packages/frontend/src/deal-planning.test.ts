@@ -64,14 +64,14 @@ const planItem = {
 	delivered: 0,
 };
 
-test('deal plan reads preserve empty error fallback and write payload options', async () => {
+test('deal plan reads reject backend errors and write payload options are preserved', async () => {
 	const requests = captureResponses([
-		{ ok: false },
+		{ ok: false, error: 'plan unavailable' },
 		{ ok: true },
 		{ ok: true },
 	]);
 
-	assert.deepEqual(await fetchDealPlan(91), []);
+	await assert.rejects(fetchDealPlan(91), /plan unavailable/);
 	assert.equal(await setDealPlan(91, [planItem], 'variant-2'), 0);
 	assert.equal(await collapseDealToService(91), 0);
 	assert.deepEqual(requests.map((item) => item.url), [
@@ -104,20 +104,20 @@ test('legacy deal row edits preserve their endpoint payloads', async () => {
 	]);
 });
 
-test('plan product and stage mutations preserve totals, payloads, and list fallbacks', async () => {
+test('plan product and stage mutations preserve totals and reject stage read errors', async () => {
 	const requests = captureResponses([
 		{ ok: true, total: '3300' },
 		{ ok: true, total: 3200 },
 		{ ok: true },
 		{ ok: true },
-		{ ok: false },
+		{ ok: false, error: 'stages unavailable' },
 	]);
 
 	assert.equal(await replaceDealPlanProduct(91, 17, { productId: 18, name: 'Новый товар' }), 3300);
 	assert.equal(await updateDealStageItem(91, 'stage-1', 18, 3, 1200, 5), 3200);
 	assert.equal(await removeDealStageItem(91, 'stage-1', 18), 0);
 	assert.deepEqual(await renameDealStage(91, 'stage-1', 'Монтаж'), []);
-	assert.deepEqual(await fetchDealStages(91), []);
+	await assert.rejects(fetchDealStages(91), /stages unavailable/);
 	assert.deepEqual(requests.map((item) => item.url), [
 		'/api/deal/replace-plan-product',
 		'/api/deal/stage-item-update',
@@ -129,9 +129,9 @@ test('plan product and stage mutations preserve totals, payloads, and list fallb
 	assert.equal(requests[0]?.body['newItemName'], 'Новый товар');
 });
 
-test('quote variant reads preserve disabled fallback', async () => {
-	captureResponses([{ ok: false }]);
-	assert.deepEqual(await fetchDealQuoteVariants(91), { enabled: false, selectedId: null, variants: [] });
+test('quote variant reads reject backend errors', async () => {
+	captureResponses([{ ok: false, error: 'variants unavailable' }]);
+	await assert.rejects(fetchDealQuoteVariants(91), /variants unavailable/);
 });
 
 test('all quote variant mutations share auth and preserve endpoint-specific payloads', async () => {
