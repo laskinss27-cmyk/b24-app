@@ -25,7 +25,7 @@ export interface CoreRealization {
 	items: CoreRealizationItem[];
 }
 
-/** Что уже реализовано по сделке — из ЯДРА (черновики + проведённые). Ядро не подключено → []. */
+/** Что уже реализовано по сделке — из ЯДРА (черновики + проведённые). */
 export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRealization[]> {
 	const res = await fetch('/api/deal/realize-core', {
 		method: 'POST',
@@ -33,7 +33,7 @@ export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRea
 		body: JSON.stringify({ ...bx24Auth(), action: 'list', dealId }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; realizations?: CoreRealization[] };
-	if (!json.ok) return []; // ядро не подключено / read-only фолбэк — вкладка работает без партий
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить реализации сделки из ядра');
 	return json.realizations ?? [];
 }
 

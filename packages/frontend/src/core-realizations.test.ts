@@ -27,10 +27,10 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 	return requests;
 }
 
-test('core realization list preserves the read-only empty fallback', async () => {
-	const requests = captureResponses([{ ok: false, realizations: [{ name: 'DN-ignored' }] }]);
+test('core realization list rejects backend errors', async () => {
+	const requests = captureResponses([{ ok: false, error: 'realizations unavailable', realizations: [{ name: 'DN-ignored' }] }]);
 
-	assert.deepEqual(await fetchDealRealizationsCore(501), []);
+	await assert.rejects(fetchDealRealizationsCore(501), /realizations unavailable/);
 	assert.deepEqual(requests[0], {
 		url: '/api/deal/realize-core',
 		body: { domain: 'core.example', accessToken: 'core-token', action: 'list', dealId: 501 },
