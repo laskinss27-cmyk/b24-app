@@ -1,6 +1,8 @@
 import { canonicalProductId, type AccessControlDraft, type AccessDecision, type AccessPermissionId } from '@b24-app/shared';
+import { bx24Auth } from './bitrix-auth.js';
 import { call, callBatch, callPaged, withTimeout } from './bitrix-client.js';
 
+export { bx24Auth } from './bitrix-auth.js';
 export { call, callBatch, withTimeout } from './bitrix-client.js';
 
 // ── Доменные типы ─────────────────────────────────────────────────────────────
@@ -2337,18 +2339,6 @@ export function openProductCard(iblockId: number, productId: number): void {
 
 // ── Инвентаризация: хранилище (entity.*) + инициаторы (app.option) ────────────
 // ВАЖНО: entity.* и app.option.* работают только в контексте приложения (iframe), не через вебхук.
-
-// Хранилище инвентаризации (entity) фронт НЕ трогает — BX24 виснет на entity.*.
-// Все операции идут через наш бэкенд (/api/inventory/*), который ходит в entity
-// серверным B24Client (чистый JSON). Сюда шлём BX24-токен пользователя + домен.
-export function bx24Auth(): { domain: string; accessToken: string } {
-	const a = window.BX24 ? window.BX24.getAuth() : false;
-	if (a && a.access_token && a.domain) return { domain: a.domain, accessToken: a.access_token };
-	// Мобильный режим (/m, вне iframe): BX24 SDK нет — токен/домен приходят в контексте.
-	const ctx = window.__B24_CONTEXT__;
-	if (ctx?.accessToken && ctx.domain) return { domain: ctx.domain, accessToken: ctx.accessToken };
-	throw new Error('нет авторизации (ни BX24 getAuth, ни мобильный контекст)');
-}
 
 // ── Ремонты (RMA) — всё наше: карточки в нашем store, клиент/фото из Б24 ───────
 
