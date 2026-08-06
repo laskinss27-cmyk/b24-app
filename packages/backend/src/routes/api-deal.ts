@@ -861,7 +861,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	});
 
 	// СОСТАВ СДЕЛКИ ИЗ ЯДРА (план = строки черновика Sales Order). Источник правды для нашей вкладки:
-	// показываем реальные товары, что бы Б24 ни подменял в своей карточке. Ядро не подключено → [].
+	// показываем реальные товары, что бы Б24 ни подменял в своей карточке. Без ядра возвращаем явную ошибку.
 	app.post('/api/deal/plan', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
 		const client = clientFrom(b);
@@ -869,7 +869,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const erp = ErpClient.fromEnv();
-		if (!erp) return { ok: true, items: [] as unknown[] };
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
 			const items = await listDealPlan(erp, dealId);
 			const serviceIds = await fetchServiceProductIds(client, items.map((item) => item.productId));
@@ -897,7 +897,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const erp = ErpClient.fromEnv();
-		if (!erp) return { ok: true, stages: [] as unknown[] };
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
 			return { ok: true, stages: await listDealStages(erp, dealId) };
 		} catch (err) {
@@ -931,7 +931,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const erp = ErpClient.fromEnv();
-		if (!erp) return { ok: true, variants: { enabled: false, selectedId: null, variants: [] } };
+		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		try { return { ok: true, variants: await listDealQuoteVariants(erp, dealId) }; }
 		catch (err) { return reply.code(200).send({ ok: false, error: errInfo(err) }); }
 	});
