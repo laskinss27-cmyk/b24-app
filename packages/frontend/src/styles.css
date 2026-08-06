@@ -7367,35 +7367,3 @@ body.deal-placement-body #root {
 	font-size: 13px;
 	white-space: pre-wrap;
 }
-
-@media (max-width: 980px) {
-	.supply-shell {
-		grid-template-columns: 1fr;
-	}
-	.supply-rail {
-		position: static;
-	}
-	.supply-content-grid,
-	.supply-kpis,
-	.supply-summary,
-	.supply-flow {
-		grid-template-columns: 1fr;
-	}
-	.supply-preview {
-		position: static;
-	}
-	.supply-tr,
-	.supply-detail-row {
-		grid-template-columns: 1fr;
-	}
-	.supply-plan-cell,
-	.supply-purchase-fields {
-		grid-template-columns: 1fr;
-	}
-	.supply-plan-actions {
-		justify-content: stretch;
-	}
-	.supply-plan-actions .supply-primary {
-		width: 100%;
-	}
-}
