@@ -29,6 +29,8 @@ import {
 	createTransferDraft,
 	createWriteOffDraft,
 	completeTransferFromTransit,
+	createClientReturns,
+	createRealizationDraft,
 	deleteInventoryRecoDraft,
 	deliverRepairUnit,
 	ensureCoreItem,
@@ -62,6 +64,7 @@ import {
 	shipTransferToTransit,
 	submitDoc,
 	submitInventoryReco,
+	submitRealization,
 	syncDealRealizationPrices,
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
@@ -176,6 +179,93 @@ const item = (name: string, productId: number, qty: number, rate: number, extra:
 	rate,
 	price_list_rate: rate,
 	...extra,
+});
+
+test('deal realization draft keeps product, service and explicit-submit payloads', async () => {
+	const erp = new FakeErp([]);
+	const client = erp.asClient();
+	const created = await createRealizationDraft(client, {
+		dealId: 73,
+		postingDate: '2026-08-05',
+		lines: [
+			{ productId: 101, qty: 2, segmentId: 'stage:install', storeTitle: 'Main', rate: 125 },
+			{ productId: 9814001, qty: 1, isService: true, rate: 900 },
+		],
+	});
+
+	const draft = erp.active().find((document) => document.name === created.name);
+	assert.ok(draft);
+	assert.equal(draft.docstatus, 0);
+	assert.equal(draft['company'], 'Test Company');
+	assert.equal(draft['customer'], 'Б24 Розница');
+	assert.equal(draft['set_posting_time'], 1);
+	assert.equal(draft['posting_date'], '2026-08-05');
+	assert.equal(draft['b24_deal_id'], '73');
+	assert.deepEqual(draft.items.map((line) => ({
+		itemCode: line['item_code'],
+		qty: line['qty'],
+		segment: line[REALIZATION_SEGMENT_FIELD],
+		warehouse: line['warehouse'],
+		rate: line['rate'],
+	})), [
+		{ itemCode: '101', qty: 2, segment: 'stage:install', warehouse: 'Main - TEST', rate: 125 },
+		{ itemCode: '9814001', qty: 1, segment: 'base', warehouse: undefined, rate: 900 },
+	]);
+
+	await submitRealization(client, created.name);
+	assert.equal(erp.active().find((document) => document.name === created.name)?.docstatus, 1);
+});
+
+test('client return keeps source row, segment, sale rate and remaining-quantity limit', async () => {
+	const erp = new FakeErp([{
+		name: 'DN-SALE',
+		docstatus: 1,
+		company: 'Test Company',
+		customer: 'Б24 Розница',
+		posting_date: '2026-08-01',
+		b24_deal_id: '74',
+		items: [item('DN-SALE-ROW', 202, 2, 340, { [REALIZATION_SEGMENT_FIELD]: 'stage:delivery' })],
+	}]);
+
+	const result = await createClientReturns(erp.asClient(), {
+		dealId: 74,
+		note: 'Повреждена упаковка',
+		lines: [{ productId: 202, qty: 1, storeTitle: 'Returns' }],
+	});
+	assert.deepEqual(result.returned, [{ productId: 202, qty: 1, segmentId: 'stage:delivery' }]);
+	assert.equal(result.names.length, 1);
+
+	const returned = erp.active().find((document) => document.name === result.names[0]);
+	assert.ok(returned);
+	assert.equal(returned.docstatus, 1);
+	assert.equal(returned['is_return'], 1);
+	assert.equal(returned['return_against'], 'DN-SALE');
+	assert.equal(returned['b24_deal_id'], '74');
+	assert.equal(returned['b24_note'], 'Повреждена упаковка');
+	assert.deepEqual(returned.items.map((line) => ({
+		itemCode: line['item_code'],
+		qty: line['qty'],
+		warehouse: line['warehouse'],
+		sourceRow: line['dn_detail'],
+		segment: line[REALIZATION_SEGMENT_FIELD],
+		rate: line['rate'],
+	})), [{
+		itemCode: '202',
+		qty: -1,
+		warehouse: 'Returns - TEST',
+		sourceRow: 'DN-SALE-ROW',
+		segment: 'stage:delivery',
+		rate: 340,
+	}]);
+
+	await assert.rejects(
+		createClientReturns(erp.asClient(), {
+			dealId: 74,
+			lines: [{ productId: 202, qty: 2, storeTitle: 'Returns' }],
+		}),
+		/возврат превышает фактически реализованное количество/,
+	);
+	assert.equal(erp.active().filter((document) => Number(document['is_return'] ?? 0) === 1).length, 1);
 });
 
 test('repair stock operations allow zero valuation and remove a failed draft', async () => {
