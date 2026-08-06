@@ -10,9 +10,17 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
-import { DEAL_FIELD, TECH_CUSTOMER, TECH_SUPPLIER, UOM, ensureErpSetup } from './erp-setup.js';
+import { DEAL_FIELD, TECH_CUSTOMER, TECH_SUPPLIER, ensureErpSetup } from './erp-setup.js';
 import { fetchErpStoreStock } from './inventory-reconciliation.js';
-import { ITEM_GROUP } from './stock-catalog.js';
+import {
+	CORE_ENGINEER_VISIT_SERVICE_ID,
+	ITEM_GROUP,
+	REALIZATION_SEGMENT_FIELD,
+	ensureCoreItem,
+	ensureSupplier,
+	fetchErpPurchasing,
+	fetchErpStocks,
+} from './stock-catalog.js';
 import { NOTE_FIELD, ensureNoteField } from './stock-movements.js';
 import { SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD } from './stock-transfers.js';
 import { b24StoreTitle, erpContext, erpWarehouse, type ErpContext } from './warehouse-context.js';
@@ -31,7 +39,18 @@ export {
 	submitInventoryReco,
 } from './inventory-reconciliation.js';
 export type { ErpStoreLine, InventoryRecoLine } from './inventory-reconciliation.js';
-export { coreStoreId, listActiveStoreTitles, searchErpItems } from './stock-catalog.js';
+export {
+	REALIZATION_SEGMENT_FIELD,
+	coreStoreId,
+	ensureCoreItem,
+	ensureSupplier,
+	fetchErpPurchasing,
+	fetchErpRetailPrices,
+	fetchErpStocks,
+	fetchErpStocksFor,
+	listActiveStoreTitles,
+	searchErpItems,
+} from './stock-catalog.js';
 export { createReceiptDraft, createWriteOffDraft, submitDoc } from './stock-document-drafts.js';
 export { fetchCoreDocDetail, itemStockLedger, listCoreMovements } from './stock-movements.js';
 export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement } from './stock-movements.js';
@@ -57,7 +76,6 @@ export {
 export type { RepairUnitLocation } from './repair-stock.js';
 
 export const REALIZATION_BASE_SEGMENT = 'base';
-export const REALIZATION_SEGMENT_FIELD = 'b24_deal_segment';
 export const MARKETPLACE_OPERATION_FIELD = 'b24_marketplace_operation';
 export const MARKETPLACE_NAME_FIELD = 'b24_marketplace';
 export const MARKETPLACE_TITLE_FIELD = 'b24_marketplace_title';
@@ -71,7 +89,6 @@ export const SUPPLY_PURCHASE_REQUEST_QTY_FIELD = 'b24_request_qty';
 export const DEAL_PLAN_LINE_KEY_FIELD = 'b24_line_key';
 export const SUPPLY_DEAL_LINE_KEY_FIELD = 'b24_deal_line_key';
 export const SUPPLY_DEAL_QTY_FIELD = 'b24_deal_qty';
-const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
 let marketplaceFieldsDone = false;
 let marketplaceOldIdFieldDone = false;
@@ -135,145 +152,6 @@ export async function ensureMarketplaceOldIdField(erp: ErpClient): Promise<void>
 		});
 	}
 	marketplaceOldIdFieldDone = true;
-}
-
-/** Завести товар в ЯДРЕ — зеркало нового продукта Б24 (code = productId). Идемпотентно: уже есть → ничего.
- *  Для «Создать товар» в форме прихода: продукт сперва создан в каталоге Б24 (получил productId), тут — Item ядра. */
-export async function ensureCoreItem(erp: ErpClient, args: {
-	productId: number;
-	name: string;
-	isService?: boolean;
-	model?: string;
-	article?: string;
-	brand?: string;
-	section?: string;
-	description?: string;
-}): Promise<void> {
-	const code = String(args.productId);
-	const existing = await erp.get<Record<string, unknown>>('Item', code);
-	if (existing) {
-		const patch: Record<string, unknown> = {};
-		const hasStructuredMeta = args.model !== undefined || args.article !== undefined || args.brand !== undefined || args.section !== undefined || args.description !== undefined;
-		if (args.isService && Number(existing['is_stock_item'] ?? 1) !== 0) patch['is_stock_item'] = 0;
-		if (hasStructuredMeta && args.name && String(existing['item_name'] ?? '') !== args.name) patch['item_name'] = args.name.slice(0, 140);
-		if (args.model !== undefined) patch['b24_model'] = args.model;
-		if (args.article !== undefined) patch['b24_article'] = args.article;
-		if (args.brand !== undefined) patch['b24_brand'] = args.brand;
-		if (args.section !== undefined) patch['b24_section'] = args.section;
-		if (args.description !== undefined) patch['description'] = args.description;
-		if (Object.keys(patch).length) await erp.update('Item', code, patch);
-		return;
-	}
-	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
-	if (!(await erp.get('Item Group', ITEM_GROUP))) await erp.create('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
-	const isService = Boolean(args.isService) || args.productId === CORE_ENGINEER_VISIT_SERVICE_ID;
-	await erp.create('Item', {
-		item_code: code,
-		item_name: args.name || `#${code}`,
-		item_group: ITEM_GROUP,
-		stock_uom: UOM,
-		is_stock_item: isService ? 0 : 1,
-		description: args.description?.trim() || `Б24 productId=${args.productId}`,
-		b24_model: args.model ?? '',
-		b24_article: args.article ?? '',
-		b24_brand: args.brand ?? '',
-		b24_section: args.section ?? '',
-	});
-}
-
-/** Найти/создать поставщика по имени (выбор из списка Б24-контрагентов / ввод нового в форме «Приход»). Возвращает имя в ядре. */
-export async function ensureSupplier(erp: ErpClient, name: string): Promise<string> {
-	const clean = name.trim();
-	if (!clean) return TECH_SUPPLIER;
-	const existing = await erp.get('Supplier', clean);
-	if (existing) return String(existing['name']);
-	const doc = await erp.create('Supplier', { supplier_name: clean, supplier_type: 'Company' });
-	return String(doc['name']);
-}
-
-/** Остатки всего каталога: productId → { '<title склада Б24>': qty }. Один запрос (Bin). */
-export async function fetchErpStocks(erp: ErpClient): Promise<Map<number, Record<string, number>>> {
-	const ctx = await erpContext(erp);
-	const bins = await erp.list('Bin', ['item_code', 'warehouse', 'actual_qty']);
-	const out = new Map<number, Record<string, number>>();
-	for (const b of bins) {
-		const productId = Number(b['item_code']);
-		if (!Number.isInteger(productId) || productId <= 0) continue; // демо-SKU и чужое
-		const store = b24StoreTitle(ctx, String(b['warehouse'] ?? ''));
-		const qty = Number(b['actual_qty'] ?? 0);
-		const e = out.get(productId) ?? {};
-		e[store] = (e[store] ?? 0) + qty;
-		out.set(productId, e);
-	}
-	return out;
-}
-
-/** Остатки ТОЛЬКО запрошенных товаров: productId → { '<title склада Б24>': qty }. Фильтр item_code in —
- *  компактный ответ вместо чтения всего Bin: полный каталог избыточен для точечной проверки. */
-export async function fetchErpStocksFor(erp: ErpClient, productIds: number[]): Promise<Map<number, Record<string, number>>> {
-	const ctx = await erpContext(erp);
-	const out = new Map<number, Record<string, number>>();
-	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
-	for (let i = 0; i < ids.length; i += 200) {
-		const chunk = ids.slice(i, i + 200).map(String);
-		const bins = await erp.list('Bin', ['item_code', 'warehouse', 'actual_qty'], [['item_code', 'in', chunk]]);
-		for (const b of bins) {
-			const productId = Number(b['item_code']);
-			if (!Number.isInteger(productId) || productId <= 0) continue;
-			const store = b24StoreTitle(ctx, String(b['warehouse'] ?? ''));
-			const qty = Number(b['actual_qty'] ?? 0);
-			const e = out.get(productId) ?? {};
-			e[store] = (e[store] ?? 0) + qty;
-			out.set(productId, e);
-		}
-	}
-	return out;
-}
-
-/** Закупочная (valuation_rate ядра) пачкой: productId → rate. Для витрины остатков. */
-export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
-	const out = new Map<number, number>();
-	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
-	for (let i = 0; i < ids.length; i += 200) {
-		const chunk = ids.slice(i, i + 200).map(String);
-		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
-			['item_code', 'in', chunk],
-			['price_list', '=', 'Standard Buying'],
-		]);
-		for (const row of prices) out.set(Number(row['item_code']), Number(row['price_list_rate'] ?? 0));
-		const rows = await erp.list('Item', ['name', 'valuation_rate'], [['name', 'in', chunk]]);
-		for (const r of rows) {
-			const productId = Number(r['name']);
-			if (!out.has(productId)) out.set(productId, Number(r['valuation_rate'] ?? 0));
-		}
-	}
-	const realizationSegmentField = `Delivery Note Item-${REALIZATION_SEGMENT_FIELD}`;
-	if (!(await erp.get('Custom Field', realizationSegmentField))) {
-		await erp.create('Custom Field', {
-			dt: 'Delivery Note Item',
-			fieldname: REALIZATION_SEGMENT_FIELD,
-			label: 'B24 Deal Segment',
-			fieldtype: 'Data',
-			insert_after: 'item_code',
-			in_list_view: 1,
-		});
-	}
-	return out;
-}
-
-/** Розничные цены каталога ядра для сделок и подборщиков. */
-export async function fetchErpRetailPrices(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
-	const out = new Map<number, number>();
-	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
-	for (let i = 0; i < ids.length; i += 200) {
-		const chunk = ids.slice(i, i + 200).map(String);
-		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
-			['item_code', 'in', chunk],
-			['price_list', '=', 'Standard Selling'],
-		]);
-		for (const row of prices) out.set(Number(row['item_code']), Number(row['price_list_rate'] ?? 0));
-	}
-	return out;
 }
 
 export interface CoreCatalogPrices {
