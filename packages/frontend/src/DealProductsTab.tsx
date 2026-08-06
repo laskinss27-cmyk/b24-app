@@ -173,20 +173,17 @@ const requestB24FitWindow = (delay = 120): void => {
 };
 
 async function loadAll(dealId: number): Promise<TableData> {
-	// Каждый вызов с таймаутом + мягким фолбэком: ни один зависший BX24-вызов (напр. app.option.get
-	// иногда виснет на фронте) не должен подвесить вкладку навсегда. Пустая сделка → пустая таблица
-	// с кнопкой «Добавить товар», а не вечная «Загрузка…».
+	// Критические данные ядра завершают загрузку явной ошибкой. Для второстепенных данных остаются
+	// мягкие фолбэки, чтобы зависший BX24-вызов (например app.option.get) не блокировал вкладку.
 	const [stores, coef, shippedInfo, coreReals, plan, stages, quoteVariants, contracts] = await Promise.all([
-		withTimeout(fetchStores(), 20000, 'core stores').catch(() => [] as StoreInfo[]),
+		withTimeout(fetchStores(), 15000, 'склады ядра'),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
 		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, sourceStoreId: null, supply: [], rows: null })),
-		// Что уже реализовано — из ЯДРА (Delivery Note по сделке). Ядро не подключено → [].
-		withTimeout(fetchDealRealizationsCore(dealId), 25000, 'deal/realize-core list').catch(() => [] as CoreRealization[]),
-		// Состав сделки (план = Sales Order ядра) — реальные товары, мимо подмены Б24. Ядро не подключено → [].
-		withTimeout(fetchDealPlan(dealId), 25000, 'deal/plan').catch(() => [] as DealPlanItem[]),
-		withTimeout(fetchDealStages(dealId), 25000, 'deal/stages').catch(() => [] as DealStage[]),
-		withTimeout(fetchDealQuoteVariants(dealId), 25000, 'deal/variants').catch((): DealQuoteVariants => ({ enabled: false, selectedId: null, variants: [] })),
+		withTimeout(fetchDealRealizationsCore(dealId), 15000, 'реализации сделки из ядра'),
+		withTimeout(fetchDealPlan(dealId), 15000, 'состав сделки из ядра'),
+		withTimeout(fetchDealStages(dealId), 15000, 'этапы сделки из ядра'),
+		withTimeout(fetchDealQuoteVariants(dealId), 15000, 'варианты КП из ядра'),
 		withTimeout(fetchDealContracts(dealId), 20000, 'contracts/list').catch(() => [] as StoredDealContractDocument[]),
 	]);
 	const rows: EnrichedRow[] = [];
@@ -197,7 +194,7 @@ async function loadAll(dealId: number): Promise<TableData> {
 	const variantIds = quoteVariants.variants.flatMap((variant) => variant.items.map((item) => item.productId));
 	const allIds = [...new Set([...planIds, ...realizedIds, ...variantIds])];
 	const enrich: Record<number, ProductEnrichment> = allIds.length
-		? await withTimeout(fetchStockPreferCore(allIds), 25000, 'stock/purchasing').catch(() => ({}))
+		? await withTimeout(fetchStockPreferCore(allIds), 15000, 'остатки и закупочные цены из ядра')
 		: {};
 	const mkStocks = (pid: number): EnrichedRow['stocks'] =>
 		(enrich[pid]?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));
