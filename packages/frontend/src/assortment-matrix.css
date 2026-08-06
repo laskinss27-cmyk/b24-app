@@ -1,0 +1,53 @@
+/* ── Канареечная матрица ассортимента и заказа ───────────────────────────── */
+.assortment-matrix { min-width: 0; }
+.assortment-matrix-banner { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin-bottom: 12px; border: 1px solid #9fc5ff; border-radius: 8px; background: #eef6ff; color: #194f90; font-size: 13px; }
+.assortment-matrix-banner b { padding: 3px 7px; border-radius: 10px; background: #185fa5; color: #fff; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.assortment-matrix-filters, .assortment-matrix-add, .assortment-matrix-toolbar { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.assortment-matrix-filters label { display: grid; gap: 4px; color: #667085; font-size: 12px; }
+.assortment-matrix input, .assortment-matrix select, .assortment-matrix textarea, .assortment-matrix button, .assortment-matrix summary { box-sizing: border-box; padding: 7px 9px; border: 1px solid #cdd5e0; border-radius: 6px; background: #fff; color: #1a2231; font: inherit; }
+.assortment-matrix button, .assortment-matrix summary { cursor: pointer; }
+.assortment-matrix button:disabled { cursor: default; opacity: .55; }
+.assortment-matrix-note { margin: 8px 0 14px; color: #667085; font-size: 12px; }
+.assortment-matrix-stores { position: relative; align-self: end; }
+.assortment-matrix-stores > summary { min-width: 190px; list-style: none; }
+.assortment-matrix-stores > div { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; display: grid; gap: 5px; min-width: 320px; max-height: 340px; padding: 10px; overflow: auto; border: 1px solid #cdd5e0; border-radius: 8px; background: #fff; box-shadow: 0 10px 30px rgba(16, 24, 40, .16); }
+.assortment-matrix-stores label { display: flex; grid-template-columns: auto 1fr; flex-direction: row; gap: 7px; align-items: center; font-size: 13px; }
+.assortment-matrix-stores input { width: auto; }
+.assortment-matrix-add { align-items: center; padding: 12px; margin-bottom: 12px; border: 1px solid #e3e8ef; border-radius: 8px; background: #f8fafc; }
+.assortment-matrix-add > select { min-width: 170px; }
+.assortment-matrix-add > input { min-width: 220px; }
+.assortment-matrix-category-count { color: #667085; white-space: nowrap; }
+.assortment-matrix-search { position: relative; display: flex; flex: 1 1 340px; gap: 5px; }
+.assortment-matrix-search > input { flex: 1; }
+.assortment-matrix-search > div { position: absolute; z-index: 15; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow: auto; border: 1px solid #cdd5e0; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(16, 24, 40, .14); }
+.assortment-matrix-search > div button { display: block; width: 100%; border: 0; border-bottom: 1px solid #eef1f5; border-radius: 0; text-align: left; }
+.assortment-matrix-search > div button:hover, .assortment-matrix-search > div button.picked { background: #eef6ff; }
+.assortment-matrix-search small { display: block; margin-top: 2px; color: #7a8699; }
+.assortment-matrix-toolbar { justify-content: space-between; margin: 10px 0; }
+.assortment-matrix-toolbar input { min-width: 260px; }
+.assortment-matrix-toolbar span { color: #667085; font-size: 12px; }
+.assortment-matrix-table-wrap { max-width: 100%; overflow: auto; border: 1px solid #d8dee8; border-radius: 8px; }
+.assortment-matrix table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; }
+.assortment-matrix th, .assortment-matrix td { min-width: 88px; padding: 6px; border-right: 1px solid #e4e7ec; border-bottom: 1px solid #e4e7ec; vertical-align: middle; font-size: 12px; }
+.assortment-matrix th { position: sticky; top: 0; z-index: 3; max-width: 145px; background: #d9fbff; color: #17424a; text-align: center; white-space: normal; }
+.assortment-matrix th small { font-weight: 400; }
+.assortment-matrix td input, .assortment-matrix td select, .assortment-matrix td textarea { width: 100%; min-width: 120px; }
+.assortment-matrix td textarea { min-width: 180px; resize: vertical; }
+.assortment-matrix td.number, .assortment-matrix td.zero, .assortment-matrix td.total, .assortment-matrix td.sales, .assortment-matrix td.recommended { text-align: center; font-variant-numeric: tabular-nums; }
+.assortment-matrix td.zero { background: #fff1f1; color: #d92d20; }
+.assortment-matrix td.total { font-size: 14px; font-weight: 700; }
+.assortment-matrix td.sales { font-weight: 600; }
+.assortment-matrix td.recommended { min-width: 125px; background: #f0f8ff; color: #185fa5; font-size: 14px; font-weight: 700; }
+.assortment-matrix td.recommended small { display: block; margin-top: 3px; color: #667085; font-size: 10px; font-weight: 400; }
+.assortment-matrix-product { min-width: 220px !important; }
+.assortment-matrix-product b, .assortment-matrix-product small { display: block; }
+.assortment-matrix-product small { margin-top: 3px; color: #7a8699; }
+.assortment-matrix-actions { min-width: 92px; }
+.assortment-matrix-actions button { display: block; width: 100%; padding: 5px 7px; margin: 2px 0; font-size: 11px; }
+.assortment-matrix-actions button.danger { color: #b42318; }
+.assortment-matrix-empty { padding: 28px !important; color: #7a8699; text-align: center; }
+
+@media (max-width: 900px) {
+	.assortment-matrix-banner { align-items: flex-start; flex-direction: column; }
+	.assortment-matrix-stores > div { right: auto; left: 0; min-width: min(320px, 80vw); }
+}
