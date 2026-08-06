@@ -16,7 +16,9 @@ import {
 	createMarketplaceSale,
 	createInventoryRecoDraft,
 	createReceiptDraft,
+	createTransferDraft,
 	createWriteOffDraft,
+	completeTransferFromTransit,
 	deleteInventoryRecoDraft,
 	deliverRepairUnit,
 	fetchErpItemNames,
@@ -34,8 +36,11 @@ import {
 	locateRepairUnit,
 	marketplaceSaleTitle,
 	moveRepairUnit,
+	planTransferCompletion,
+	receiveTransferFromTransit,
 	renameDealQuoteVariant,
 	searchErpItems,
+	shipTransferToTransit,
 	submitDoc,
 	submitInventoryReco,
 	syncDealRealizationPrices,
@@ -1037,4 +1042,168 @@ test('stock document helpers keep empty-writeoff rejection and submit arguments'
 		{ doctype: 'Stock Entry', name: 'STE-1' },
 		{ doctype: 'Purchase Receipt', name: 'PR-1' },
 	]);
+});
+
+test('transfer completion plan keeps aggregation and route ordering', () => {
+	assert.deepEqual(planTransferCompletion(
+		[
+			{ productId: 101, qty: 5 },
+			{ productId: 101, qty: 2 },
+			{ productId: 202, qty: 3 },
+			{ productId: 303, qty: -1 },
+		],
+		[
+			{ productId: 101, qty: 4 },
+			{ productId: 202, qty: 5 },
+			{ productId: 404, qty: 2 },
+		],
+	), [
+		{ productId: 101, qty: 4, route: 'deliver' },
+		{ productId: 101, qty: 3, route: 'return' },
+		{ productId: 202, qty: 3, route: 'deliver' },
+		{ productId: 202, qty: 2, route: 'extra' },
+		{ productId: 404, qty: 2, route: 'extra' },
+	]);
+});
+
+test('stock transfer drafts keep direct, shipping and legacy receive payloads', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const submitted: Array<{ doctype: string; name: string }> = [];
+	let sequence = 0;
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (_doctype: string, name: string) => ({ name }),
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: `STE-${++sequence}` };
+		},
+		submit: async (doctype: string, name: string) => { submitted.push({ doctype, name }); },
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await createTransferDraft(client, {
+		dealId: 42,
+		lines: [{ productId: 101, qty: 2, fromStore: 'Main', toStore: 'Reserve' }],
+	}), { name: 'STE-1' });
+	assert.deepEqual(created[0], {
+		doctype: 'Stock Entry',
+		fields: {
+			company: 'Test Company', stock_entry_type: 'Material Transfer', b24_deal_id: '42',
+			items: [{ item_code: '101', qty: 2, s_warehouse: 'Main - TEST', t_warehouse: 'Reserve - TEST' }],
+		},
+	});
+	assert.deepEqual(submitted, []);
+
+	const metadata = {
+		transferId: 9, dealId: 42, supplyRequest: 'MR-1', supplyRequestKey: 'request-key', purchaseOrder: 'PO-1',
+	};
+	assert.deepEqual(await shipTransferToTransit(client, {
+		...metadata,
+		lines: [{ productId: 101, qty: 2, fromStore: 'Main' }],
+	}), { name: 'STE-2' });
+	assert.deepEqual(created[1], {
+		doctype: 'Stock Entry',
+		fields: {
+			company: 'Test Company', stock_entry_type: 'Material Transfer', b24_deal_id: '42',
+			b24_supply_request: 'MR-1', b24_supply_request_key: 'request-key', b24_purchase_order: 'PO-1',
+			b24_transfer_document: '9', b24_transfer_phase: 'ship',
+			items: [{ item_code: '101', qty: 2, s_warehouse: 'Main - TEST', t_warehouse: 'Goods In Transit - TEST' }],
+		},
+	});
+
+	assert.deepEqual(await receiveTransferFromTransit(client, {
+		...metadata,
+		lines: [{ productId: 101, qty: 2, toStore: 'Reserve' }],
+	}), { name: 'STE-3' });
+	assert.deepEqual(created[2], {
+		doctype: 'Stock Entry',
+		fields: {
+			company: 'Test Company', stock_entry_type: 'Material Transfer', b24_deal_id: '42',
+			b24_supply_request: 'MR-1', b24_supply_request_key: 'request-key', b24_purchase_order: 'PO-1',
+			b24_transfer_document: '9', b24_transfer_phase: 'legacy_receive',
+			items: [{ item_code: '101', qty: 2, s_warehouse: 'Goods In Transit - TEST', t_warehouse: 'Reserve - TEST' }],
+		},
+	});
+	assert.deepEqual(submitted, [
+		{ doctype: 'Stock Entry', name: 'STE-2' },
+		{ doctype: 'Stock Entry', name: 'STE-3' },
+	]);
+});
+
+test('final transfer completion keeps receive and correction phases separate', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const submitted: string[] = [];
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (_doctype: string, name: string) => ({ name }),
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: `PHASE-${created.length}` };
+		},
+		submit: async (_doctype: string, name: string) => { submitted.push(name); },
+	} as unknown as ErpClient;
+
+	assert.deepEqual(await completeTransferFromTransit(client, {
+		shippedLines: [{ productId: 101, qty: 5 }, { productId: 202, qty: 1 }],
+		finalLines: [{ productId: 101, qty: 3 }, { productId: 202, qty: 2 }],
+		fromStore: 'Main', toStore: 'Reserve', transferId: 9, dealId: 42,
+		supplyRequest: 'MR-1', supplyRequestKey: 'request-key', purchaseOrder: 'PO-1',
+	}), {
+		receiveEntry: 'PHASE-1',
+		corrections: [
+			{ kind: 'shortage_return', name: 'PHASE-2', lines: [{ productId: 101, qty: 2 }] },
+			{ kind: 'overage_transfer', name: 'PHASE-3', lines: [{ productId: 202, qty: 1 }] },
+		],
+	});
+	assert.deepEqual(created.map((entry) => ({ phase: entry.fields['b24_transfer_phase'], items: entry.fields['items'] })), [
+		{
+			phase: 'receive',
+			items: [
+				{ item_code: '101', qty: 3, s_warehouse: 'Goods In Transit - TEST', t_warehouse: 'Reserve - TEST' },
+				{ item_code: '202', qty: 1, s_warehouse: 'Goods In Transit - TEST', t_warehouse: 'Reserve - TEST' },
+			],
+		},
+		{
+			phase: 'correction_return',
+			items: [{ item_code: '101', qty: 2, s_warehouse: 'Goods In Transit - TEST', t_warehouse: 'Main - TEST' }],
+		},
+		{
+			phase: 'correction_extra',
+			items: [{ item_code: '202', qty: 1, s_warehouse: 'Main - TEST', t_warehouse: 'Reserve - TEST' }],
+		},
+	]);
+	assert.deepEqual(submitted, ['PHASE-1', 'PHASE-2', 'PHASE-3']);
+});
+
+test('transit shipping keeps rollback and unfinished-operation recovery', async () => {
+	const deleted: Array<{ doctype: string; name: string }> = [];
+	const failingClient = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (_doctype: string, name: string) => ({ name }),
+		create: async () => ({ name: 'FAILED-1' }),
+		submit: async () => { throw new Error('submit failed'); },
+		delete: async (doctype: string, name: string) => { deleted.push({ doctype, name }); },
+	} as unknown as ErpClient;
+	await assert.rejects(shipTransferToTransit(failingClient, {
+		lines: [{ productId: 101, qty: 1, fromStore: 'Main' }],
+	}), /submit failed/);
+	assert.deepEqual(deleted, [{ doctype: 'Stock Entry', name: 'FAILED-1' }]);
+
+	const submitted: string[] = [];
+	let createCalled = false;
+	const recoveryClient = {
+		list: async (doctype: string) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Stock Entry') return [{ name: 'EXISTING-1', docstatus: 0 }];
+			return [];
+		},
+		get: async (_doctype: string, name: string) => ({ name }),
+		create: async () => { createCalled = true; return { name: 'UNEXPECTED' }; },
+		submit: async (_doctype: string, name: string) => { submitted.push(name); },
+	} as unknown as ErpClient;
+	assert.deepEqual(await shipTransferToTransit(recoveryClient, {
+		transferId: 9,
+		lines: [{ productId: 101, qty: 1, fromStore: 'Main' }],
+	}), { name: 'EXISTING-1' });
+	assert.equal(createCalled, false);
+	assert.deepEqual(submitted, ['EXISTING-1']);
 });
