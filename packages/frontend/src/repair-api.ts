@@ -187,7 +187,8 @@ export async function searchRepairContacts(q: string): Promise<RepairContact[]> 
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), q }),
 	});
-	const json = (await res.json()) as { ok: boolean; contacts?: RepairContact[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; contacts?: RepairContact[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось найти контакты');
 	return json.contacts ?? [];
 }
 

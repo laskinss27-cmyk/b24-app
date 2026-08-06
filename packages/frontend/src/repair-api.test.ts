@@ -122,10 +122,10 @@ test('repair editing lifecycle preserves endpoints and response mutation', async
 	]);
 });
 
-test('repair status and contact lookups preserve boolean and error fallbacks', async () => {
+test('repair status and contact lookups preserve boolean fallbacks and reject search errors', async () => {
 	const requests = captureResponses([
 		{ ok: true, dealCreated: 1, syncWarning: undefined },
-		{ ok: false, contacts: [{ id: 9, name: 'Client', phone: '+70000000000' }] },
+		{ ok: false, error: 'contacts unavailable', contacts: [{ id: 9, name: 'Client', phone: '+70000000000' }] },
 		{ ok: false, contact: { id: 10, name: 'Ignored', phone: '+71111111111' } },
 	]);
 
@@ -134,7 +134,7 @@ test('repair status and contact lookups preserve boolean and error fallbacks', a
 		dealNoContact: false,
 		syncWarning: null,
 	});
-	assert.deepEqual(await searchRepairContacts('Cl'), [{ id: 9, name: 'Client', phone: '+70000000000' }]);
+	await assert.rejects(searchRepairContacts('Cl'), /contacts unavailable/);
 	assert.equal(await findRepairContactByPhone('+70000000000'), null);
 	assert.deepEqual(await searchRepairContacts(' '), []);
 	assert.deepEqual(requests.map((item) => item.url), [
