@@ -14,6 +14,8 @@ import {
 	SUPPLY_PURCHASE_ORDER_FIELD,
 	SUPPLY_PURCHASE_REQUEST_QTY_FIELD,
 	SUPPLY_PURCHASE_STAGE_FIELD,
+	SUPPLY_DEAL_LINE_KEY_FIELD,
+	SUPPLY_DEAL_QTY_FIELD,
 	SUPPLY_REQUEST_FIELD,
 	SUPPLY_REQUEST_KEY_FIELD,
 	appendDealStage,
@@ -31,6 +33,7 @@ import {
 	createSupplyPurchaseReceipt,
 	createInventoryRecoDraft,
 	createReceiptDraft,
+	createSupplyRequest,
 	createTransferDraft,
 	createWriteOffDraft,
 	completeTransferFromTransit,
@@ -61,12 +64,15 @@ import {
 	listMarketplaceOperations,
 	listMarketplaceReturnOptions,
 	listMarketplaceReturnSales,
+	listSupplyRequests,
+	listSupplyRequestsForDeal,
 	locateRepairUnit,
 	marketplaceSaleTitle,
 	moveRepairUnit,
 	planTransferCompletion,
 	receiveTransferFromTransit,
 	reduceDealPlanForReturns,
+	replaceDealPlanSupplyProduct,
 	removeDealStageItem,
 	renameDealQuoteVariant,
 	renameDealStage,
@@ -77,6 +83,7 @@ import {
 	submitInventoryReco,
 	submitRealization,
 	syncDealRealizationPrices,
+	syncSupplyRequestQuantitiesFromDeal,
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
 	updateDealStageItem,
@@ -84,6 +91,9 @@ import {
 	updateCoreCatalogPrices,
 	updatePurchaseOrderDraft,
 	updateSupplyPurchaseStage,
+	updateSupplyRequestLineAndDeal,
+	updateSupplyRequestNote,
+	updateSupplyRequestStore,
 } from './operations.js';
 
 type Doc = Record<string, unknown> & {
@@ -182,6 +192,107 @@ class FakeErp {
 	}
 }
 
+class SupplyWorkflowFake {
+	private salesOrder: Record<string, unknown>;
+	private readonly requests = new Map<string, Record<string, unknown>>();
+	private sequence = 0;
+
+	constructor() {
+		this.salesOrder = {
+			name: 'SO-SUPPLY',
+			docstatus: 0,
+			b24_deal_id: '501',
+			delivery_date: '2026-08-20',
+			transaction_date: '2026-08-01',
+			grand_total: 500,
+			items: [item('SO-SUPPLY-ROW', 101, 5, 100, { b24_line_key: 'line-101', delivered_qty: 0 })],
+		};
+	}
+
+	asClient(): ErpClient {
+		return this as unknown as ErpClient;
+	}
+
+	plan(): Record<string, unknown> {
+		return structuredClone(this.salesOrder);
+	}
+
+	requestDoc(name: string): Record<string, unknown> | null {
+		const request = this.requests.get(name);
+		return request ? structuredClone(request) : null;
+	}
+
+	async list(doctype: string): Promise<Array<Record<string, unknown>>> {
+		if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+		if (doctype === 'Sales Order') return [{
+			name: this.salesOrder['name'],
+			b24_deal_id: this.salesOrder['b24_deal_id'],
+			transaction_date: this.salesOrder['transaction_date'],
+			grand_total: this.salesOrder['grand_total'],
+		}];
+		if (doctype === 'Material Request') return [...this.requests.values()].map((request) => ({
+			name: request['name'],
+			b24_deal_id: request['b24_deal_id'],
+			transaction_date: request['transaction_date'],
+			status: request['status'],
+		}));
+		if (doctype === 'Item') return [
+			{ name: '101', is_stock_item: 1 },
+			{ name: '202', is_stock_item: 1 },
+		];
+		if (doctype === 'Bin') return [
+			{ item_code: '101', warehouse: 'Main - TEST', actual_qty: 7 },
+			{ item_code: '202', warehouse: 'Reserve - TEST', actual_qty: 4 },
+		];
+		return [];
+	}
+
+	async get(doctype: string, name: string): Promise<Record<string, unknown> | null> {
+		if (doctype === 'Sales Order') return name === this.salesOrder['name'] ? structuredClone(this.salesOrder) : null;
+		if (doctype === 'Material Request') return this.requestDoc(name);
+		if (doctype === 'Warehouse') return { name, disabled: 0, is_group: 0 };
+		if (doctype === 'Custom Field' || doctype === 'Customer' || doctype === 'Supplier'
+			|| doctype === 'Item' || doctype === 'UOM' || doctype === 'Item Group') return { name, is_stock_item: 1 };
+		return null;
+	}
+
+	async create(doctype: string, fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+		if (doctype !== 'Material Request') throw new Error(`unexpected create ${doctype}`);
+		const name = `MR-${++this.sequence}`;
+		const items = ((fields['items'] as Array<Record<string, unknown>> | undefined) ?? []).map((row, index) => ({
+			...structuredClone(row),
+			name: `${name}-ROW-${index + 1}`,
+			item_name: `Product ${String(row['item_code'] ?? '')}`,
+		}));
+		const request = {
+			...structuredClone(fields),
+			name,
+			docstatus: 0,
+			status: 'Pending',
+			creation: `2026-08-01T00:00:0${this.sequence}.000Z`,
+			transaction_date: '2026-08-01',
+			items,
+		};
+		this.requests.set(name, request);
+		return structuredClone(request);
+	}
+
+	async update(doctype: string, name: string, fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+		if (doctype === 'Sales Order' && name === this.salesOrder['name']) {
+			Object.assign(this.salesOrder, structuredClone(fields));
+			return structuredClone(this.salesOrder);
+		}
+		if (doctype === 'Material Request') {
+			const request = this.requests.get(name);
+			if (!request) throw new Error(`missing ${name}`);
+			Object.assign(request, structuredClone(fields));
+			return structuredClone(request);
+		}
+		if (doctype === 'Item') return { name, ...structuredClone(fields) };
+		throw new Error(`unexpected update ${doctype}`);
+	}
+}
+
 const item = (name: string, productId: number, qty: number, rate: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
 	name,
 	item_code: String(productId),
@@ -192,6 +303,55 @@ const item = (name: string, productId: number, qty: number, rate: number, extra:
 	price_list_rate: rate,
 	...extra,
 });
+
+test('supply request lifecycle keeps deal linkage, notes, stocks and destination warehouse payloads', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		toStore: 'Main',
+		note: 'Срочная поставка',
+		lines: [{ productId: 101, itemName: 'Product 101', qty: 2, note: 'Белый корпус' }],
+	});
+	const request = erp.requestDoc(created.name);
+	assert.ok(request);
+	assert.equal(request['company'], 'Test Company');
+	assert.equal(request['material_request_type'], 'Purchase');
+	assert.equal(request['b24_deal_id'], '501');
+	assert.equal(request['b24_to_store'], 'Main');
+	assert.equal(request['b24_note'], 'Срочная поставка');
+	assert.deepEqual((request['items'] as Array<Record<string, unknown>>).map((row) => ({
+		itemCode: row['item_code'],
+		qty: row['qty'],
+		warehouse: row['warehouse'],
+		lineKey: row[SUPPLY_DEAL_LINE_KEY_FIELD],
+		dealQty: row[SUPPLY_DEAL_QTY_FIELD],
+		description: row['description'],
+	})), [{
+		itemCode: '101',
+		qty: 2,
+		warehouse: 'Main - TEST',
+		lineKey: 'line-101',
+		dealQty: 5,
+		description: 'Белый корпус',
+	}]);
+
+	const summaries = await listSupplyRequestsForDeal(erp.asClient(), 501);
+	assert.equal(summaries[0]?.requestKey, `${created.name}@2026-08-01T00:00:01.000Z`);
+	assert.deepEqual(summaries[0]?.productIds, [101]);
+	const requests = await listSupplyRequests(erp.asClient());
+	assert.deepEqual(requests[0]?.items[0]?.stocks, { Main: 7 });
+	assert.equal(await updateSupplyRequestNote(erp.asClient(), created.name, '  Новый комментарий  '), 'Новый комментарий');
+	assert.equal(await updateSupplyRequestStore(erp.asClient(), {
+		requestName: created.name,
+		requestKey: summaries[0]!.requestKey,
+		toStore: 'Reserve',
+	}), 'Reserve');
+	const updated = erp.requestDoc(created.name)!;
+	assert.equal(updated['b24_to_store'], 'Reserve');
+	assert.equal((updated['items'] as Array<Record<string, unknown>>)[0]?.['warehouse'], 'Reserve - TEST');
+});
+
 
 test('deal realization draft keeps product, service and explicit-submit payloads', async () => {
 	const erp = new FakeErp([]);
@@ -1418,6 +1578,84 @@ test('supply purchase receipt keeps limits, ERP payload and submit rollback', as
 		/submit failed/,
 	);
 	assert.deepEqual(deleted, ['PR-2']);
+});
+
+test('supply line quantity change applies the same delta to the deal plan', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 2 }],
+	});
+	const request = erp.requestDoc(created.name)!;
+	const result = await updateSupplyRequestLineAndDeal(erp.asClient(), {
+		dealId: 501,
+		requestName: created.name,
+		requestKey: `${created.name}@${String(request['creation'])}`,
+		rowName: String((request['items'] as Array<Record<string, unknown>>)[0]?.['name']),
+		productId: 101,
+		nextProductId: 101,
+		nextItemName: 'Product 101',
+		nextQty: 3,
+		deliveryDate: '2026-08-25',
+	});
+	assert.deepEqual(result, { dealQty: 6 });
+	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 6);
+	const updatedRow = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
+	assert.equal(updatedRow['qty'], 3);
+	assert.equal(updatedRow[SUPPLY_DEAL_QTY_FIELD], 6);
+});
+
+test('deal quantity synchronization preserves the request delta and line identity', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 4 }],
+	});
+	const changed = await syncSupplyRequestQuantitiesFromDeal(erp.asClient(), {
+		dealId: 501,
+		previousPlan: [{
+			productId: 101,
+			itemName: 'Product 101',
+			qty: 5,
+			rate: 100,
+			priceListRate: 100,
+			discountPercent: 0,
+			delivered: 0,
+			isService: false,
+			lineKey: 'line-101',
+		}],
+		nextPlan: [{ productId: 101, itemName: 'Product 101', qty: 3, priceListRate: 100, discountPercent: 0, lineKey: 'line-101' }],
+	});
+	assert.equal(changed, 1);
+	const row = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
+	assert.equal(row['qty'], 3);
+	assert.equal(row[SUPPLY_DEAL_LINE_KEY_FIELD], 'line-101');
+	assert.equal(row[SUPPLY_DEAL_QTY_FIELD], 3);
+});
+
+test('manager product replacement updates both the plan and every open supply request', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 2 }],
+	});
+	const plan = await replaceDealPlanSupplyProduct(erp.asClient(), {
+		dealId: 501,
+		oldProductId: 101,
+		newProductId: 202,
+		newItemName: 'Product 202',
+		deliveryDate: '2026-08-25',
+	});
+	assert.deepEqual(plan.map((line) => ({ productId: line.productId, qty: line.qty, lineKey: line.lineKey })), [
+		{ productId: 202, qty: 5, lineKey: 'line-101' },
+	]);
+	const row = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
+	assert.equal(row['item_code'], '202');
+	assert.equal(row[SUPPLY_DEAL_LINE_KEY_FIELD], 'line-101');
+	assert.equal(row[SUPPLY_DEAL_QTY_FIELD], 5);
 });
 
 test('marketplace old ID is editable, clearable and unique across active products', async () => {
