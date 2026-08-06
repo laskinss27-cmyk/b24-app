@@ -43,7 +43,8 @@ export async function searchDealProducts(q: string): Promise<{ id: number; name:
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), q }),
 	});
-	const json = (await res.json()) as { ok: boolean; products?: { id: number; name: string; price: number }[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; products?: { id: number; name: string; price: number }[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось найти товары');
 	return json.products ?? [];
 }
 

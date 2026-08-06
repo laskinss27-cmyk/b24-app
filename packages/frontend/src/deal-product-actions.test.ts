@@ -54,12 +54,12 @@ test('createQuickSale preserves auth, item data, assignee, and selected store', 
 	}]);
 });
 
-test('searchDealProducts skips short queries and currently does not inspect the ok flag', async () => {
-	const requests = captureResponses([{ ok: false, products: [{ id: 17, name: 'Товар', price: 1200 }] }]);
+test('searchDealProducts skips short queries and rejects backend errors', async () => {
+	const requests = captureResponses([{ ok: false, error: 'catalog unavailable', products: [{ id: 17, name: 'Товар', price: 1200 }] }]);
 
 	assert.deepEqual(await searchDealProducts(' x '), []);
 	assert.equal(requests.length, 0);
-	assert.deepEqual(await searchDealProducts('товар'), [{ id: 17, name: 'Товар', price: 1200 }]);
+	await assert.rejects(searchDealProducts('товар'), /catalog unavailable/);
 	assert.deepEqual(requests[0], {
 		url: '/api/deal/search-products',
 		body: { domain: 'mobile.example', accessToken: 'deal-token', q: 'товар' },
