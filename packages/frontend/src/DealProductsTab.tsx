@@ -9,7 +9,8 @@ import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
 import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
-import { DealProductRealizationRow, type DealProductRealizationPart } from './DealProductRealizationRow.js';
+import { DealProductRealizationRow } from './DealProductRealizationRow.js';
+import { dealProductRealizationParts } from './deal-product-realization-parts.js';
 import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
 import { DealWorkRow } from './DealWorkRow.js';
 import { DealGoodsStatusCell, type DealGoodsRowStatus } from './DealGoodsStatusCell.js';
@@ -56,7 +57,6 @@ import {
 	call,
 	isWorkRow,
 	type ProductEnrichment,
-	type CoreRealization,
 	type DealPlanItem,
 	type DealQuoteVariants,
 	type RealizeCoreGroup,
@@ -842,36 +842,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	}
 	const profitability = profitGoods + profitWorks;
 
-	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
-	const partsOf = (r: EnrichedRow): DealProductRealizationPart[] => {
-		const matchesRow = (item: CoreRealization['items'][number]): boolean =>
-			item.productId === r.productId && (!r.segmentKind || (item.segmentId || 'base') === segmentIdOf(r));
-		const linkedReturns = new Map<string, number>();
-		let unlinkedReturns = 0;
-		for (const document of data.coreReals.filter((item) => item.isReturn && item.submitted)) {
-			const qty = Math.abs(document.items
-				.filter(matchesRow)
-				.reduce((sum, item) => sum + item.qty, 0));
-			if (qty <= 0.000001) continue;
-			if (document.returnAgainst) linkedReturns.set(document.returnAgainst, (linkedReturns.get(document.returnAgainst) ?? 0) + qty);
-			else unlinkedReturns += qty;
-		}
-		const parts = data.coreReals
-			.filter((rz) => !rz.isReturn)
-			.map((rz): DealProductRealizationPart | null => {
-				const its = rz.items.filter(matchesRow);
-				if (!its.length) return null;
-				const gross = its.reduce((sum, item) => sum + item.qty, 0);
-				const linked = linkedReturns.get(rz.name) ?? 0;
-				const fallback = rz.submitted ? Math.min(Math.max(gross - linked, 0), unlinkedReturns) : 0;
-				unlinkedReturns -= fallback;
-				const qty = Math.max(0, gross - linked - fallback);
-				if (qty <= 0.000001) return null;
-				return { name: rz.name, submitted: rz.submitted, isReturn: false, qty, storeName: its[0]!.storeTitle };
-			})
-			.filter((p): p is DealProductRealizationPart => p != null);
-		return parts;
-	};
 	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const dealDocumentCount = data.contracts.length + data.coreReals.length + data.supply.length + dealTransfers.length;
@@ -908,7 +878,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
 	// под ними — строка остатка с селектором склада, полем кол-ва и кнопкой «Реализовать».
 	const renderGoodsRows = (r: EnrichedRow): JSX.Element[] => {
-		const parts = partsOf(r);
+		const parts = dealProductRealizationParts(r, data.coreReals);
 		const left = remaining(r);
 		const out: JSX.Element[] = parts.map((p) => <DealProductRealizationRow key={`${r.id}-${p.name}`} row={r} part={p} />);
 		if (left > 0) {

@@ -1,13 +1,6 @@
 import { rub } from './deal-display-formatters.js';
+import type { DealProductRealizationPart } from './deal-product-realization-parts.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
-
-export interface DealProductRealizationPart {
-	name: string;
-	submitted: boolean;
-	isReturn: boolean;
-	qty: number;
-	storeName: string;
-}
 
 export function DealProductRealizationRow({ row, part }: { row: EnrichedRow; part: DealProductRealizationPart }): JSX.Element {
 	return (
