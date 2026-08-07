@@ -20,6 +20,7 @@ import {
 } from './supply-document-values.js';
 import { orderSearchValues, searchMatches } from './supply-search-values.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
+import { ASSORTMENT_MATRIX_CANARY_IDS, SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
 import { SupplySearch } from './SupplyOverviewControls.js';
 import {
 	PURCHASE_STAGE_OPTIONS,
@@ -30,7 +31,7 @@ import { orderStatus, SupplyMetrics, SupplyOrdersView, type OrderStatusFilter, t
 import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
-import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
+import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
 import {
 	cancelTransfer,
 	createSupplySupplier,
@@ -65,8 +66,7 @@ import {
 } from './b24.js';
 
 type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
-type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'inventory';
-const ASSORTMENT_MATRIX_CANARY_IDS = new Set(['1858']);
+type ViewKey = SupplyViewKey;
 const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юнона', 'Сатро-Паладин', 'Амиком'];
 
 export function Supply(): JSX.Element {
@@ -454,49 +454,7 @@ export function Supply(): JSX.Element {
 
 	return (
 		<div className="supply-proto-shell">
-			<aside className="supply-proto-rail">
-				<div className="supply-proto-brand"><span>С</span><div><b>Снаб</b><small>рабочий сценарий</small></div></div>
-				<nav className="supply-proto-nav" aria-label="Разделы снабжения">
-					{!marketplaceOnly && <>
-						<div className="supply-proto-nav-group">
-							<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => setView('orders')}>Обеспечение и заказы</button>
-							<button className={view === 'incoming' ? 'active' : ''} type="button" onClick={() => setView('incoming')}>Входящие заявки ТТ</button>
-							<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => setView('purchase')}>Закупки</button>
-							<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => setView('logistics')}>Логистика</button>
-						</div>
-						<div className="supply-proto-nav-group">
-							<button className={view === 'receipt' ? 'active' : ''} type="button" onClick={() => setView('receipt')}>Оприходования</button>
-							<button className={view === 'delivery' ? 'active' : ''} type="button" onClick={() => setView('delivery')}>Реализации</button>
-							<button className={view === 'issue' ? 'active' : ''} type="button" onClick={() => setView('issue')}>Списания</button>
-							<button className={view === 'return' ? 'active' : ''} type="button" onClick={() => setView('return')}>Возвраты</button>
-							<button className={view === 'inventory' ? 'active' : ''} type="button" onClick={() => setView('inventory')}>Инвентаризация</button>
-						</div>
-						<div className="supply-proto-nav-group">
-							<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => setView('stocks')}>Остатки</button>
-							<button
-								className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' || view === 'matrix' ? ' active' : ''}`}
-								type="button"
-								aria-expanded={reportsOpen}
-								aria-controls="supply-reports-menu"
-								onClick={() => setReportsOpen((current) => !current)}
-							>
-								<span>Отчёты</span><span aria-hidden="true">{reportsOpen ? '⌃' : '⌄'}</span>
-							</button>
-							{reportsOpen && (
-								<div id="supply-reports-menu" className="supply-proto-subnav">
-									<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => setView('ledger')}>Движение товаров</button>
-									<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => setView('turnover')}>Оборачиваемость</button>
-									{ASSORTMENT_MATRIX_CANARY_IDS.has(currentUserId) && <button className={view === 'matrix' ? 'active' : ''} type="button" onClick={() => setView('matrix')}>Матрица заказа <small>β</small></button>}
-								</div>
-							)}
-						</div>
-					</>}
-					{canOpenMarketplaces && <div className="supply-proto-nav-group">
-						<button className={view === 'marketplaces' ? 'active' : ''} type="button" onClick={() => setView('marketplaces')}>Маркетплейсы</button>
-					</div>}
-				</nav>
-				<div className="supply-proto-source">Данные: {ctx.__mock ? 'демо' : 'ядро'}<br />Документы: {ctx.__mock ? 'превью' : 'живые'}</div>
-			</aside>
+			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={setView} onToggleReports={() => setReportsOpen((current) => !current)} />
 			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
 				<header className="supply-proto-top">
 					<div>
