@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY } from './DealDocumentPreviewModal.js';
@@ -40,6 +39,11 @@ import {
 	useDealReturnModalState,
 	useDealTransferSplitState,
 } from './useDealOperationalModalState.js';
+import {
+	useDealBatchQuantityState,
+	useDealRealizationBusyState,
+	useDealWorkspaceNoticeState,
+} from './useDealWorkspaceOperationState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -76,8 +80,8 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	// ядра. Реализация группируется ПО СКЛАДАМ — один Delivery Note на склад. Что уже реализовано
 	// (черновики + проведённые) читаем из ядра по b24_deal_id. Реализованная часть застывает
 	// строкой-записью, под ней живёт остаток со своим складом, полем кол-ва и кнопкой.
-	const [batchQty, setBatchQty] = useState<Record<string, string>>({});
-	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+	const { batchQty, setBatchQty } = useDealBatchQuantityState();
+	const { notice, setNotice } = useDealWorkspaceNoticeState();
 	const {
 		removing,
 		setRemoving,
@@ -105,7 +109,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	/** Раскрытые остатки по складам: не распираем товарную строку при наведении. */
 	const { expandedStocks, setExpandedStocks } = useDealProductStockExpansion();
 	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
-	const [busy, setBusy] = useState(false);
+	const { busy, setBusy } = useDealRealizationBusyState();
 	const { pendingDraftNames, hasPendingDrafts, setDraftNames } = useDealRealizationDrafts(data.coreReals);
 	const {
 		supplyBusy,
