@@ -4,11 +4,9 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem, type DealStage, type ErpRealization } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
-import { buildDealExportXlsx } from '../deal-export-xlsx.js';
-import { dealExportRows, type ExportPlanLine } from '../deal-export-rows.js';
 import { loadDealOrderInfo } from '../deal-order-info.js';
 import {
 	CORE_ENGINEER_VISIT_SERVICE_ID,
@@ -34,6 +32,7 @@ import { syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { syncDealServiceSum } from '../deal-service-sum.js';
 import { registerDealCommercialProposalFileRoutes } from './deal-commercial-proposal-file-routes.js';
 import { registerDealCommercialProposalRoute } from './deal-commercial-proposal-route.js';
+import { registerDealPlanExportRoute } from './deal-plan-export-route.js';
 import { registerDealTechnicalFieldsRoute } from './deal-technical-fields-route.js';
 
 /**
@@ -824,54 +823,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// Excel-снимок состава сделки: товары и услуги, этапы, цены, скидки и фактически проведённая реализация.
-	// Для ещё не выбранного варианта КП выгружается сам вариант без складской истории рабочей сделки.
-	app.post('/api/deal/export-xlsx', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		try {
-			const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
-			const erp = ErpClient.fromEnv();
-			const variantId = String(b.variantId ?? '').trim();
-			if (variantId && !erp) throw new Error('ядро недоступно — вариант КП нельзя выгрузить');
-
-			let plan: ExportPlanLine[] = [];
-			let stages: DealStage[] = [];
-			let realizations: ErpRealization[] = [];
-			if (erp) {
-				if (variantId) {
-					const variants = await listDealQuoteVariants(erp, dealId);
-					const variant = variants.variants.find((item) => item.id === variantId);
-					if (!variant) throw new Error('вариант КП не найден');
-					plan = variant.items.map((item) => ({ ...item, isService: Boolean(item.isService) }));
-				} else {
-					[plan, stages, realizations] = await Promise.all([
-						listDealPlan(erp, dealId),
-						listDealStages(erp, dealId),
-						listDealRealizations(erp, dealId),
-					]);
-				}
-			}
-			const rows = dealExportRows(plan, stages, realizations, Boolean(variantId));
-			const file = await buildDealExportXlsx({
-				dealId,
-				dealTitle: String(deal?.['TITLE'] ?? ''),
-				rows,
-			});
-			app.log.info({ dealId, variantId: variantId || undefined, rows: rows.length }, '[api/deal/export-xlsx] ok');
-			return reply
-				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-				.header('Content-Disposition', `attachment; filename="deal-${dealId}.xlsx"`)
-				.header('Cache-Control', 'no-store')
-				.send(file);
-		} catch (err) {
-			app.log.error({ dealId }, `[api/deal/export-xlsx] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealPlanExportRoute(app, clientFrom);
 
 	app.post('/api/deal/replace-plan-product', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; oldProductId?: unknown; newProductId?: unknown; newItemName?: unknown };
