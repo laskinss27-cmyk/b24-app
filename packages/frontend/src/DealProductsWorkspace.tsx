@@ -1,11 +1,8 @@
 import type { DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
-import { DealDocumentPreviewModal, documentPreviewAnchorY } from './DealDocumentPreviewModal.js';
-import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
-import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import { DealSupplyOrderDialog } from './DealSupplyOrderDialog.js';
 import { DealActionsBar } from './DealActionsBar.js';
 import { DealProductsTable } from './DealProductsTable.js';
@@ -27,6 +24,7 @@ import {
 import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
 import { DealOperationalDialogs } from './DealOperationalDialogs.js';
 import { DealPlanningDialogs } from './DealPlanningDialogs.js';
+import { DealDocumentsWorkspace } from './DealDocumentsWorkspace.js';
 import {
 	useDealContractModalState,
 	useDealReturnModalState,
@@ -54,7 +52,6 @@ import {
 } from './deal-products-placement-sizing.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
-	openSupplyCard,
 	isWorkRow,
 } from './b24.js';
 
@@ -449,25 +446,21 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onToggleDocuments={() => { setShowDealDocuments((shown) => !shown); requestB24FitWindow(160); }}
 			/>
 
-			{workingMode && showDealDocuments && (
-				<DealDocumentsPanel
-					contracts={data.contracts}
-					realizations={realizationDocuments}
-					returns={returnDocuments}
-					supply={data.supply}
-					transfers={dealTransfers}
-					documentCount={dealDocumentCount}
-					onOpenContract={(document, anchor) => setContractPreview({ document, anchorY: documentPreviewAnchorY(anchor) })}
-					onOpenRealization={(document, anchor) => setDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(anchor) })}
-					onOpenSupply={(document, anchor) => {
-						if (document.source === 'core') setDocumentPreview({ kind: 'supply', document, anchorY: documentPreviewAnchorY(anchor) });
-						else if (document.id > 0) openSupplyCard(document.id);
-					}}
-					onOpenTransfer={(document, anchor) => setDocumentPreview({ kind: 'transfer', document, anchorY: documentPreviewAnchorY(anchor) })}
-				/>
-			)}
-			{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={() => setDocumentPreview(null)} />}
-			{contractPreview && <DealContractDocumentModal preview={contractPreview} onClose={() => setContractPreview(null)} />}
+			<DealDocumentsWorkspace
+				visible={workingMode && showDealDocuments}
+				contracts={data.contracts}
+				realizations={realizationDocuments}
+				returns={returnDocuments}
+				supply={data.supply}
+				transfers={dealTransfers}
+				documentCount={dealDocumentCount}
+				documentPreview={documentPreview}
+				contractPreview={contractPreview}
+				onOpenDocumentPreview={setDocumentPreview}
+				onOpenContractPreview={setContractPreview}
+				onCloseDocumentPreview={() => setDocumentPreview(null)}
+				onCloseContractPreview={() => setContractPreview(null)}
+			/>
 
 			<DealProductsTable
 				workingMode={workingMode}
