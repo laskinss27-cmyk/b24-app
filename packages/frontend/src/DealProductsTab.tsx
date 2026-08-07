@@ -37,6 +37,7 @@ import { DEAL_PRODUCTS_MOCK_DATA, dealProductsMockVariantData } from './deal-pro
 import { DealProductsTable } from './DealProductsTable.js';
 import { loadDealProductsData } from './deal-products-data-loader.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
+import { useDealTransfers } from './useDealTransfers.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -80,7 +81,6 @@ import {
 	realizeCoreSubmit,
 	setupDealFulfillment,
 	openSupplyCard,
-	listTransfers,
 	call,
 	isWorkRow,
 	type DealPlanItem,
@@ -439,13 +439,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		}
 	};
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
-	const [dealTransfers, setDealTransfers] = useState<TransferDoc[]>([]);
-	useEffect(() => {
-		if (dealId == null) { setDealTransfers([]); return; }
-		let alive = true;
-		listTransfers(dealId).then((r) => { if (alive) setDealTransfers(r.transfers); }).catch(() => { if (alive) setDealTransfers([]); });
-		return () => { alive = false; };
-	}, [dealId]);
+	const { dealTransfers, refreshDealTransfers } = useDealTransfers(dealId);
 	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
 	/** Дефолтный склад строк (UI-выпадайки вверху больше нет — склад выбирается на самой строке).
 	 *  Дефолт = склад-источник сделки (из резервов заказа), если активен; иначе первый склад.
@@ -994,7 +988,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				const srcs = splitRow.stocks.filter((s) => s.amount > 0 && s.storeId !== dest).map((s) => ({ storeName: s.storeName, amount: s.amount }));
 				return <TransferSplitModal dealId={dealId} productId={splitRow.productId} name={splitRow.name} need={remaining(splitRow)} destName={storeName(dest)} sources={srcs}
 					onClose={() => setSplitRow(null)}
-					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); const fresh = await listTransfers(dealId).catch(() => null); if (fresh) setDealTransfers(fresh.transfers); }} />;
+					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); await refreshDealTransfers(); }} />;
 			})()}
 
 			{workingMode && showReturn && dealId != null && (
