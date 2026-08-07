@@ -6,7 +6,7 @@ import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSumm
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
-import { DealSupplyOrderModal } from './DealSupplyOrderModal.js';
+import { DealSupplyOrderDialog } from './DealSupplyOrderDialog.js';
 import { DealActionsBar } from './DealActionsBar.js';
 import { DealProductsTable } from './DealProductsTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
@@ -43,7 +43,7 @@ import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
 import { createDealStageActions } from './deal-stage-actions.js';
 import { createDealProductRowEditActions } from './deal-product-row-edit-actions.js';
 import { createDealProductRowRemovalActions } from './deal-product-row-removal-actions.js';
-import { createDealSupplyOrderActions, supplyMinimumDate } from './deal-supply-order-actions.js';
+import { createDealSupplyOrderActions } from './deal-supply-order-actions.js';
 import { createDealRealizationActions } from './deal-realization-actions.js';
 import { buildDealRealizationSelection } from './deal-realization-selection.js';
 import { createDealWorkRowRenderer } from './deal-work-row-renderer.js';
@@ -489,27 +489,26 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				<button className="btn-secondary" onClick={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}>Добавить этап</button>
 			</div>}
 
-			{workingMode && showSupplyOrder && (
-				<DealSupplyOrderModal
-					rows={supplyGoods.map((row) => ({ id: row.id, name: row.name, measure: row.measure, remaining: remaining(row) }))}
-					stores={data.stores}
-					busy={supplyBusy}
-					toStore={supplyToStore}
-					deadline={supplyDeadline}
-					minimumDate={supplyMinimumDate()}
-					orderNote={supplyOrderNote}
-					formError={supplyFormError}
-					quantities={supplyQty}
-					notes={supplyNotes}
-					onClose={() => setShowSupplyOrder(false)}
-					onStoreChange={(value) => { setSupplyToStore(value); setSupplyFormError(null); }}
-					onDeadlineChange={(value) => { setSupplyDeadline(value); setSupplyFormError(null); }}
-					onOrderNoteChange={setSupplyOrderNote}
-					onQuantityChange={(rowId, value) => { setSupplyQty((quantities) => ({ ...quantities, [rowId]: value })); setSupplyFormError(null); }}
-					onNoteChange={(rowId, value) => setSupplyNotes((notes) => ({ ...notes, [rowId]: value }))}
-					onSubmit={() => void doCreateSupply()}
-				/>
-			)}
+			<DealSupplyOrderDialog
+				visible={workingMode && showSupplyOrder}
+				goods={supplyGoods}
+				stores={data.stores}
+				busy={supplyBusy}
+				toStore={supplyToStore}
+				deadline={supplyDeadline}
+				orderNote={supplyOrderNote}
+				formError={supplyFormError}
+				quantities={supplyQty}
+				notes={supplyNotes}
+				remaining={remaining}
+				onClose={() => setShowSupplyOrder(false)}
+				onStoreChange={(value) => { setSupplyToStore(value); setSupplyFormError(null); }}
+				onDeadlineChange={(value) => { setSupplyDeadline(value); setSupplyFormError(null); }}
+				onOrderNoteChange={setSupplyOrderNote}
+				onQuantityChange={(rowId, value) => { setSupplyQty((quantities) => ({ ...quantities, [rowId]: value })); setSupplyFormError(null); }}
+				onNoteChange={(rowId, value) => setSupplyNotes((notes) => ({ ...notes, [rowId]: value }))}
+				onSubmit={() => void doCreateSupply()}
+			/>
 
 			<DealOperationalDialogs
 				workingMode={workingMode}
