@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type FocusEvent } from 'react';
+import { useEffect, useState, type FocusEvent } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
@@ -8,7 +8,6 @@ import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
-import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
 import { DealProductRealizationRow } from './DealProductRealizationRow.js';
 import { dealProductRealizationParts } from './deal-product-realization-parts.js';
 import {
@@ -35,6 +34,7 @@ import {
 	type DealVariantDialogState,
 } from './DealNameDialogs.js';
 import { DEAL_PRODUCTS_MOCK_DATA, dealProductsMockVariantData } from './deal-products-mock-data.js';
+import { DealProductsTable } from './DealProductsTable.js';
 import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
@@ -1113,68 +1113,21 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={() => setDocumentPreview(null)} />}
 			{contractPreview && <DealContractDocumentModal preview={contractPreview} onClose={() => setContractPreview(null)} />}
 
-			<div className="table-wrap">
-			<table className="products-table">
-				<thead>
-					<tr>
-						<th className="check-col" title={workingMode ? 'Выбор строк для действий' : undefined}></th>
-						<th>Товар / работа</th>
-						<th>Тип</th>
-						<th className="num">Цена</th>
-						<th className="num">Скидка</th>
-						<th className="num">Кол-во</th>
-						<th className="num">{workingMode ? 'Реализовано' : ''}</th>
-						<th className="num">{workingMode ? 'К отгрузке' : ''}</th>
-						<th className="num">Сумма</th>
-						<th>Остатки по складам</th>
-						<th>{workingMode ? 'Склад · статус' : 'Статус'}</th>
-					</tr>
-				</thead>
-				<tbody>
-					{summaryView ? (
-						<>
-							{goods.length > 0 && <DealProductGroupBand label="Оборудование" count={goods.length} sum={sumGoods} />}
-							{goods.flatMap(renderGoodsRows)}
-							{realWorks.length > 0 && <DealProductGroupBand label="Работы и услуги" count={realWorks.length} sum={sumRealWorks} />}
-							{realWorks.map(renderWorkRow)}
-						</>
-					) : (
-						<>
-							{(() => {
-								const baseWorks = basePlanRows.filter((row) => isWorkRow(row.type));
-								const baseGoods = basePlanRows.filter((row) => !isWorkRow(row.type));
-								const all = [...baseGoods, ...baseWorks];
-								return (
-									<Fragment key="base-deal">
-										<DealStageSectionBand title={activeVariant && !workingMode ? activeVariant.name : 'Основная сделка'} subtitle="" rows={all} />
-										{baseGoods.length > 0 && <DealProductGroupBand label="Оборудование" count={baseGoods.length} sum={baseGoods.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
-										{baseGoods.flatMap(renderGoodsRows)}
-										{baseWorks.length > 0 && <DealProductGroupBand label="Работы и услуги" count={baseWorks.length} sum={baseWorks.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
-										{baseWorks.map(renderWorkRow)}
-									</Fragment>
-								);
-							})()}
-							{stageSections.map(({ stage, number, rows: stageRows }) => {
-								const at = new Date(stage.at);
-								const when = Number.isNaN(at.getTime()) ? stage.at : at.toLocaleDateString('ru-RU');
-								const stageName = stage.name?.trim() || `Этап ${number}`;
-								const stageGoods = stageRows.filter((row) => !isWorkRow(row.type));
-								const stageWorks = stageRows.filter((row) => isWorkRow(row.type));
-								return (
-									<Fragment key={stage.id}>
-										<DealStageSectionBand title={stageName} subtitle={`${when}${stage.byName ? ` · ${stage.byName}` : ''}`} rows={stageRows} onAddItems={() => onAddToStage(stage.id, stageName)} onRename={() => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId: stage.id }); }} />
-										{stageGoods.length > 0 && <DealProductGroupBand label="Оборудование" count={stageGoods.length} sum={stageGoods.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
-										{stageGoods.flatMap(renderGoodsRows)}
-										{stageWorks.length > 0 && <DealProductGroupBand label="Работы и услуги" count={stageWorks.length} sum={stageWorks.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
-										{stageWorks.map(renderWorkRow)}
-									</Fragment>
-								);
-							})}
-						</>
-					)}
-				</tbody>
-			</table>
-			</div>
+			<DealProductsTable
+				workingMode={workingMode}
+				summaryView={summaryView}
+				goods={goods}
+				works={realWorks}
+				goodsTotal={sumGoods}
+				worksTotal={sumRealWorks}
+				baseRows={basePlanRows}
+				stageSections={stageSections}
+				activeVariant={activeVariant}
+				renderGoodsRows={renderGoodsRows}
+				renderWorkRow={renderWorkRow}
+				onAddToStage={onAddToStage}
+				onRenameStage={(stageId, stageName) => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId }); }}
+			/>
 
 			{workingMode && <div className="deal-stage-addbar">
 				<button className="btn-secondary" onClick={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}>Добавить этап</button>
