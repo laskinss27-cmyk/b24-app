@@ -33,6 +33,7 @@ import {
 	useDealProductRowStores,
 	useDealProductStockExpansion,
 } from './useDealProductStockState.js';
+import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -49,9 +50,6 @@ import {
 	requestB24FitWindow,
 } from './deal-products-placement-sizing.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
-import {
-	isPlanRow,
-} from './deal-product-row-values.js';
 import {
 	openSupplyCard,
 	isWorkRow,
@@ -134,10 +132,10 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		contractPreview,
 		setContractPreview,
 	} = useDealDocumentsState();
-	const [summaryView, setSummaryView] = useState(false);
-	const segmentActionsBlocked = summaryView && data.stages.length > 0;
-	const rowEditable = (row: EnrichedRow): boolean =>
-		tableEditable && !(segmentActionsBlocked && isPlanRow(row));
+	const { summaryView, setSummaryView, segmentActionsBlocked, rowEditable } = useDealProductsSummaryView({
+		hasStages: data.stages.length > 0,
+		tableEditable,
+	});
 	const {
 		variantDialog,
 		setVariantDialog,
