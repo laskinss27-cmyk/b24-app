@@ -3,6 +3,7 @@ import { renderAsync as renderDocx } from 'docx-preview';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
+import { plural, rub, stageLabel, transferDocStatusLabel } from './deal-display-formatters.js';
 import {
 	fetchStores,
 	fetchProfitCoef,
@@ -263,50 +264,9 @@ async function loadAll(dealId: number): Promise<TableData> {
 	return { rows, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
 }
 
-const rub = (n: number): string => `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
 const todayYmd = (): string => {
 	const now = new Date();
 	return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-};
-
-/** Человеческая подпись стадии заявки снабжения (DT1110_114:NEW → «новая»). */
-const stageLabel = (stageId: string): string => {
-	if (stageId.startsWith('CORE:')) {
-		const status = stageId.slice(5).toLowerCase();
-		if (status.includes('draft')) return 'черновик';
-		if (status.includes('pending')) return 'новая';
-		if (status.includes('ordered')) return 'заказано';
-		if (status.includes('transferred') || status.includes('received') || status.includes('issued')) return 'выполнена';
-		if (status.includes('stopped') || status.includes('cancel')) return 'отменена';
-		return stageId.slice(5) || 'в ядре';
-	}
-	const tail = stageId.split(':')[1] ?? stageId;
-	if (tail === 'NEW') return 'новая';
-	if (tail === 'PREPARATION') return 'подготовка';
-	if (tail === 'SUCCESS') return 'выполнена';
-	if (tail === 'FAIL') return 'провалена';
-	return 'в работе';
-};
-
-const transferDocStatusLabel = (status: TransferDoc['status']): string => ({
-	draft: 'черновик',
-	collected: 'собрано',
-	requested: 'запрошено',
-	in_transit: 'в пути',
-	accepted: 'на проверке',
-	posted: 'проведено',
-	received: 'получено',
-	shortage: 'расхождение',
-	canceled: 'отменено',
-})[status];
-
-/** Русская плюрализация: plural(2,'строка','строки','строк') → 'строки'. */
-const plural = (n: number, one: string, few: string, many: string): string => {
-	const m10 = n % 10;
-	const m100 = n % 100;
-	if (m10 === 1 && m100 !== 11) return one;
-	if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-	return many;
 };
 
 type DealDocumentPreview = (
