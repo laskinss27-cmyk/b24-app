@@ -6,7 +6,6 @@ import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
-import { dealProductRealizedProductQuantity } from './deal-product-fulfillment-values.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
@@ -34,6 +33,7 @@ import {
 	useDealProductStockExpansion,
 } from './useDealProductStockState.js';
 import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
+import { buildDealReturnableProducts } from './deal-returnable-products.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -503,7 +503,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				<ReturnModal
 					dealId={dealId}
 					stores={data.stores}
-					returnable={goods.filter((r) => dealProductRealizedProductQuantity(r.productId, data.coreReals) > 0).map((r) => ({ productId: r.productId, name: r.name, shipped: dealProductRealizedProductQuantity(r.productId, data.coreReals), measure: r.measure }))}
+					returnable={buildDealReturnableProducts(goods, data.coreReals)}
 					onClose={() => setShowReturn(false)}
 					onDone={async (msg) => { setShowReturn(false); setNotice({ kind: 'ok', text: msg }); await onReload(); }}
 				/>
