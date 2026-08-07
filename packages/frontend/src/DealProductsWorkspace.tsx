@@ -5,7 +5,7 @@ import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealSupplyOrderDialog } from './DealSupplyOrderDialog.js';
 import { DealActionsBar } from './DealActionsBar.js';
-import { DealProductsTable } from './DealProductsTable.js';
+import { DealProductsPlanningTable } from './DealProductsPlanningTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
 import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
@@ -462,7 +462,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onCloseContractPreview={() => setContractPreview(null)}
 			/>
 
-			<DealProductsTable
+			<DealProductsPlanningTable
 				workingMode={workingMode}
 				summaryView={summaryView}
 				goods={goods}
@@ -476,11 +476,8 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				renderWorkRow={renderWorkRow}
 				onAddToStage={onAddToStage}
 				onRenameStage={(stageId, stageName) => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId }); }}
+				onAddStage={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}
 			/>
-
-			{workingMode && <div className="deal-stage-addbar">
-				<button className="btn-secondary" onClick={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}>Добавить этап</button>
-			</div>}
 
 			<DealSupplyOrderDialog
 				visible={workingMode && showSupplyOrder}
