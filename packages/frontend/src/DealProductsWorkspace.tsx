@@ -65,7 +65,24 @@ import {
 	isWorkRow,
 } from './b24.js';
 
-export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onReplace: (row: EnrichedRow) => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
+export interface DealProductsWorkspaceProps {
+	data: TableData;
+	viewer: string;
+	dev: boolean;
+	canReturn: boolean;
+	dealId: number | null;
+	activeVariantId: string | null;
+	workingVariantHasActivity: boolean;
+	onActiveVariant: (id: string | null) => void;
+	onAdd: () => void;
+	onReplace: (row: EnrichedRow) => void;
+	onStage: (stageName: string) => void;
+	onAddToStage: (stageId: string, stageName: string) => void;
+	onPrintDocument: (kind: DealPrintKind, variantId?: string) => void;
+	onReload: () => Promise<void>;
+}
+
+export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: DealProductsWorkspaceProps): JSX.Element {
 	const {
 		activeVariant,
 		viewingSelected,
