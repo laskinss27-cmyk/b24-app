@@ -44,6 +44,7 @@ import { createDealStageActions } from './deal-stage-actions.js';
 import { createDealProductRowEditActions } from './deal-product-row-edit-actions.js';
 import { createDealProductRowRemovalActions } from './deal-product-row-removal-actions.js';
 import { createDealSupplyOrderActions, supplyMinimumDate } from './deal-supply-order-actions.js';
+import { createDealRealizationActions } from './deal-realization-actions.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -68,13 +69,10 @@ import {
 import {
 	addProductsToDeal,
 	replaceDealPlanProduct,
-	realizeCoreDraft,
-	realizeCoreSubmit,
 	setupDealFulfillment,
 	openSupplyCard,
 	call,
 	isWorkRow,
-	type RealizeCoreGroup,
 	type StoredDealContractDocument,
 	type TransferDoc,
 } from './b24.js';
@@ -602,71 +600,25 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		setSelected,
 		setNotice,
 	});
-
-	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре
-	// (по одному на склад для товаров; услуги входят в первый товарный документ,
-	// а без товаров создаётся отдельный документ услуг без склада);
-	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
-	const doDraft = async (): Promise<void> => {
-		if (dealId == null || busy || supplyBusy || !realizeDocumentCount) return;
-		if (blockedSelectedGoods.length) {
-			const details = blockedSelectedGoods.map((row) => {
-				const selectedStore = storeOf(row);
-				return `«${row.name}»: на складе «${storeName(selectedStore)}» ${amountAt(row, selectedStore)}, нужно ${qtyOf(row)}`;
-			}).join('; ');
-			setNotice({ kind: 'err', text: `Реализация не создана. Не готовы отмеченные позиции: ${details}.` });
-			return;
-		}
-		const groups: RealizeCoreGroup[] = [...realizeGroups.entries()].map(([sid, rs]) => ({
-			storeTitle: storeName(sid),
-			lines: rs.map((r) => ({
-				productId: r.productId,
-				qty: qtyOf(r),
-				rate: r.price,
-				segmentId: r.segmentKind === 'stage' && r.stageId ? `stage:${r.stageId}` : 'base',
-			})),
-		}));
-		if (readyWorks.length) {
-			const serviceLines = readyWorks.map((row) => ({
-				productId: row.productId,
-				qty: qtyOf(row),
-				rate: row.price,
-				segmentId: row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : 'base',
-				isService: true,
-			}));
-			if (groups[0]) groups[0].lines.push(...serviceLines);
-			else groups.push({ storeTitle: '', lines: serviceLines });
-		}
-		setBusy(true);
-		setNotice(null);
-		try {
-			const drafts = await realizeCoreDraft(dealId, groups);
-			setDraftNames(drafts.map((d) => d.name));
-			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length}. Услуги включены в товарный документ без склада на строке. Проверь партии и нажми «Провести».` });
-			await onReload(); // черновики появятся строками-партиями (остаток уменьшится)
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setBusy(false);
-		}
-	};
-	const doSubmit = async (): Promise<void> => {
-		if (busy || supplyBusy || !pendingDraftNames.length) return;
-		setBusy(true);
-		setNotice(null);
-		try {
-			if (dealId == null) return;
-			const submitted = await realizeCoreSubmit(dealId, pendingDraftNames);
-			setBatchQty({}); // поля кол-ва сбрасываем — встанут новые остатки
-			setDraftNames([]);
-			setNotice({ kind: 'ok', text: `✅ Проведено документов: ${submitted.length}. Остаток ядра списан, реализованное застыло записью.` });
-			await onReload();
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setBusy(false);
-		}
-	};
+	const { doDraft, doSubmit } = createDealRealizationActions({
+		dealId,
+		busy,
+		supplyBusy,
+		realizeDocumentCount,
+		blockedSelectedGoods,
+		realizeGroups,
+		readyWorks,
+		pendingDraftNames,
+		storeOf,
+		storeName,
+		amountAt,
+		qtyOf,
+		onReload,
+		setBusy,
+		setNotice,
+		setDraftNames,
+		setBatchQty,
+	});
 
 	return (
 		<div className="deal-products-tab">
