@@ -31,7 +31,7 @@ import {
 	purchaseQuantities,
 	purchaseStatus,
 } from './supply-purchase-status.js';
-import { orderSearchValues, purchaseSearchValues, searchMatches, transferSearchValues } from './supply-search-values.js';
+import { orderSearchValues, searchMatches } from './supply-search-values.js';
 import { SupplySearch, SupplyStatusPill } from './SupplyOverviewControls.js';
 import {
 	numericDraft,
@@ -42,6 +42,7 @@ import {
 } from './SupplyDocumentDetail.js';
 import { SupplyDecisionRows } from './SupplyDecisionRows.js';
 import { SupplyOrderNoteEditor, SupplyOrderStoreEditor } from './SupplyOrderEditors.js';
+import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
 import { SupplySupplierField } from './SupplySupplierField.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
@@ -511,44 +512,6 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 					</div>
 				))}
 			</div>
-		</section>
-	);
-}
-
-type RegistryRow =
-	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
-	| { kind: 'logistics'; order: SupplyOrderRow; transfer: SupplyTransferChild };
-
-function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; kind: 'purchase' | 'logistics'; search: string; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
-	const rows: RegistryRow[] = (kind === 'purchase'
-		? orders.flatMap((order) => (order.purchases ?? []).map((purchase) => ({ kind: 'purchase' as const, order, purchase })))
-		: orders.flatMap((order) => (order.transfers ?? []).map((transfer) => ({ kind: 'logistics' as const, order, transfer }))))
-		.filter((row) => row.kind === 'purchase'
-			? searchMatches(search, purchaseSearchValues(row.order, row.purchase))
-			: searchMatches(search, transferSearchValues(row.order, row.transfer)));
-	return (
-		<section className="supply-proto-card">
-			<div className="supply-proto-card-head">
-				<div>
-					<h2>{kind === 'purchase' ? 'Закупки' : 'Логистика'}</h2>
-					<p>Отдельный реестр документов без дерева.</p>
-				</div>
-			</div>
-			<div className="supply-proto-table-wrap">
-					<table className="supply-proto-table">
-						<thead><tr><th>Документ</th><th>Сделка</th><th>Маршрут / поставщик</th><th>Позиции</th><th>Статус</th></tr></thead>
-						<tbody>
-							{rows.length === 0 ? <tr><td colSpan={5} className="empty">{search.trim() ? 'Ничего не найдено.' : 'Пока пусто.'}</td></tr> : rows.map((row) => {
-								if (row.kind === 'purchase') {
-									const status = purchaseStatus(row.purchase);
-									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></td></tr>;
-								}
-								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><div className="supply-status-pair">{transferHasDiscrepancy(row.transfer) && <SupplyStatusPill tone="warn">Расхождение</SupplyStatusPill>}<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></div></td></tr>;
-							})}
-						</tbody>
-					</table>
-				</div>
 		</section>
 	);
 }
@@ -1194,7 +1157,7 @@ export function Supply(): JSX.Element {
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
 				{view === 'orders' && <OrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
-				{view === 'purchase' && <RegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{view === 'purchase' && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>
 					<div className="supply-proto-card supply-stock-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} supplyMode /></div>
