@@ -27,7 +27,7 @@ import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import { DealSupplyOrderModal } from './DealSupplyOrderModal.js';
-import { DealDocumentMenu } from './DealDocumentMenu.js';
+import { DealActionsBar } from './DealActionsBar.js';
 import {
 	DealStageNameDialog,
 	DealVariantNameDialog,
@@ -1105,60 +1105,42 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 
 			{data.quoteVariants.enabled && <DealQuoteVariantTabs quoteVariants={data.quoteVariants} activeVariantId={activeVariantId} onActiveVariant={onActiveVariant} />}
 
-			<div className="deal-addbar">
-				<div className="deal-actions">
-				{(!data.quoteVariants.enabled || proposalEditable) && <button className="btn-primary" onClick={onAdd}>Добавить товар</button>}
-				{!data.quoteVariants.enabled && (
-					<button className="btn-secondary" onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: 'Вариант 1' }); }}>Варианты КП</button>
-				)}
-				{data.quoteVariants.enabled && <>
-					<button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: nextVariantName() }); }}>Добавить вариант</button>
-					{activeVariant && <button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'copy', value: availableVariantName(`Копия ${activeVariant.name}`) }); }}>Копировать</button>}
-					{proposalEditable && activeVariant && <button className="btn-secondary" disabled={variantBusy} onClick={() => { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); }}>Переименовать</button>}
-					{proposalEditable && activeVariant && data.quoteVariants.variants.length > 1 && <button className="btn-secondary danger" disabled={variantBusy} onClick={() => void removeVariant()}>Удалить</button>}
-				</>}
-				{workingMode && data.stages.length > 0 && (
-					<button className={`btn-secondary${summaryView ? ' active' : ''}`} onClick={() => {
-						setSummaryView((shown) => !shown);
-						setSelected({});
-						requestB24FitWindow(160);
-					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
-				)}
-				<DealDocumentMenu
-					exportBusy={exportBusy}
-					dealAvailable={dealId != null}
-					dev={dev}
-					workingMode={workingMode}
-					onExportWord={() => void exportDocx()}
-					onExportExcel={() => void exportXlsx()}
-					onPrintProposal={() => onPrintDocument('kp', documentVariantId)}
-					onPrintReceipt={() => onPrintDocument('receipt', documentVariantId)}
-					onOpenContract={() => setShowContract(true)}
-				/>
-				{(proposalEditable || viewingSelected) && activeVariant && (
-					<button
-						className={viewingSelected ? 'btn-secondary danger' : 'btn-primary'}
-						disabled={variantBusy || variantSelectionLocked || (!viewingSelected && activeVariant.items.length === 0)}
-						onClick={() => void (viewingSelected ? cancelVariantSelection() : chooseVariant())}
-						title={variantSelectionLocked ? 'По основному варианту уже начались этапы, снабжение, реализации или перемещения' : undefined}
-					>{variantSelectionLocked ? 'Основной зафиксирован' : viewingSelected ? 'Отменить основной' : data.quoteVariants.selectedId ? 'Сделать основным' : 'Выбран клиентом'}</button>
-				)}
-				{workingMode && <button
-					className="btn-secondary"
-					disabled={!canReturn || dev}
-					onClick={() => setShowReturn(true)}
-					title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Нет доступа к возврату'}
-				>Возврат</button>}
-				{workingMode && <button
-					className={`btn-secondary${showDealDocuments ? ' active' : ''}`}
-					onClick={() => {
-						setShowDealDocuments((shown) => !shown);
-						requestB24FitWindow(160);
-					}}
-				>Документы по сделке{dealDocumentCount ? ` (${dealDocumentCount})` : ''}</button>}
-				</div>
-				<span className="hint">{workingMode ? 'Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.' : alternativeView ? 'Альтернативный вариант можно редактировать и печатать независимо от основного.' : 'КП формируется только из открытого варианта.'}</span>
-			</div>
+			<DealActionsBar
+				showAddProduct={!data.quoteVariants.enabled || proposalEditable}
+				quoteVariantsEnabled={data.quoteVariants.enabled}
+				activeVariant={activeVariant ? { name: activeVariant.name, itemCount: activeVariant.items.length } : null}
+				proposalEditable={proposalEditable}
+				variantCount={data.quoteVariants.variants.length}
+				variantBusy={variantBusy}
+				workingMode={workingMode}
+				hasStages={data.stages.length > 0}
+				summaryView={summaryView}
+				exportBusy={exportBusy}
+				dealAvailable={dealId != null}
+				dev={dev}
+				viewingSelected={viewingSelected}
+				variantSelectionLocked={variantSelectionLocked}
+				selectedVariantExists={Boolean(data.quoteVariants.selectedId)}
+				canReturn={canReturn}
+				showDealDocuments={showDealDocuments}
+				dealDocumentCount={dealDocumentCount}
+				alternativeView={alternativeView}
+				onAddProduct={onAdd}
+				onOpenVariants={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: 'Вариант 1' }); }}
+				onAddVariant={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: nextVariantName() }); }}
+				onCopyVariant={() => { if (activeVariant) { setVariantError(null); setVariantDialog({ kind: 'copy', value: availableVariantName(`Копия ${activeVariant.name}`) }); } }}
+				onRenameVariant={() => { if (activeVariant) { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); } }}
+				onRemoveVariant={() => void removeVariant()}
+				onToggleSummary={() => { setSummaryView((shown) => !shown); setSelected({}); requestB24FitWindow(160); }}
+				onExportWord={() => void exportDocx()}
+				onExportExcel={() => void exportXlsx()}
+				onPrintProposal={() => onPrintDocument('kp', documentVariantId)}
+				onPrintReceipt={() => onPrintDocument('receipt', documentVariantId)}
+				onOpenContract={() => setShowContract(true)}
+				onToggleVariantSelection={() => void (viewingSelected ? cancelVariantSelection() : chooseVariant())}
+				onReturn={() => setShowReturn(true)}
+				onToggleDocuments={() => { setShowDealDocuments((shown) => !shown); requestB24FitWindow(160); }}
+			/>
 
 			{workingMode && showDealDocuments && (
 				<DealDocumentsPanel
