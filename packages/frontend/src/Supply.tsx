@@ -15,25 +15,20 @@ import { orderStatus, SupplyMetrics, SupplyOrdersView, type OrderStatusFilter, t
 import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
+import { useSupplyAccessState } from './useSupplyAccessState.js';
 import { useSupplyDecisionActions } from './useSupplyDecisionActions.js';
 import { useSupplyOpenDocumentActions } from './useSupplyOpenDocumentActions.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
 import {
 	createSupplySupplier,
-	fetchCurrentUserId,
-	fetchCurrentAppAccess,
-	fetchStockFormData,
 	fetchSupplyOrders,
-	fetchSupplySuppliers,
 	updateSupplyOrderNote,
 	updateSupplyOrderStore,
 	type SupplyOrderItem,
 	type SupplyOrderRow,
 	type SupplyPurchaseChild,
-	withTimeout,
 } from './b24.js';
 
-type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
 type ViewKey = SupplyViewKey;
 const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юнона', 'Сатро-Паладин', 'Амиком'];
 
@@ -44,29 +39,40 @@ export function Supply(): JSX.Element {
 	const transferDeepLinkId = Number(query.get('transfer') ?? ctx.transferId ?? 0);
 	const dealSupplyId = Number(query.get('dealSupply') ?? ctx.dealSupplyId ?? 0);
 	const linkTarget = query.get('target') ?? ctx.linkTarget ?? '';
-	const [phase, setPhase] = useState<Phase>('init');
 	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
-	const [suppliers, setSuppliers] = useState<string[]>(DEFAULT_SUPPLIERS);
-	const [loading, setLoading] = useState(!ctx.__mock);
 	const [view, setView] = useState<ViewKey>(requestId > 0 ? 'incoming' : 'orders');
 	const [reportsOpen, setReportsOpen] = useState(false);
 	const [sort, setSort] = useState<SortKey>('dateDesc');
 	const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
 	const [expanded, setExpanded] = useState('');
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
-	const [currentUserId, setCurrentUserId] = useState('');
-	const [canDeleteDocuments, setCanDeleteDocuments] = useState(Boolean(ctx.__mock));
-	const [marketplaceOnly, setMarketplaceOnly] = useState(false);
-	const [canOpenMarketplaces, setCanOpenMarketplaces] = useState(Boolean(ctx.__mock));
 	const [notice, setNotice] = useState<string | null>(null);
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
 	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', inventory: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
-	const [stockForm, setStockForm] = useState<Awaited<ReturnType<typeof fetchStockFormData>> | null>(ctx.__mock
-		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: DEFAULT_SUPPLIERS, canCreate: true, isSupply: true }
-		: null);
 	const [deepLinkHandled, setDeepLinkHandled] = useState(false);
+	const {
+		phase,
+		suppliers,
+		setSuppliers,
+		loading,
+		currentUserId,
+		canDeleteDocuments,
+		marketplaceOnly,
+		canOpenMarketplaces,
+		stockForm,
+		setStockForm,
+	} = useSupplyAccessState({
+		mock: Boolean(ctx.__mock),
+		requestId,
+		transferDeepLinkId,
+		dealSupplyId,
+		linkTarget,
+		defaultSuppliers: DEFAULT_SUPPLIERS,
+		setOrders,
+		setView,
+	});
 
 	useEffect(() => {
 		if (!printApprovalOrder) return;
@@ -158,64 +164,6 @@ export function Supply(): JSX.Element {
 		currentUserId,
 		reload,
 	});
-
-	useEffect(() => {
-		if (ctx.__mock) { setCurrentUserId('1858'); setPhase('ready'); return; }
-		const bx = window.BX24;
-		if (!bx) {
-			setOrders(MOCK_ORDERS);
-			setLoading(false);
-			setPhase('ready');
-			return;
-		}
-		bx.init(() => {
-			void (async () => {
-				const [uid, appAccess] = await Promise.all([
-					withTimeout(fetchCurrentUserId(), 15000, 'user.current'),
-					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
-				]);
-				const supplyDecision = appAccess?.decisions['supply.view'] ?? 'inherit';
-				const marketplaceDecision = appAccess?.decisions['marketplaces.view'] ?? 'inherit';
-				const access = supplyDecision === 'deny'
-					? null
-					: await withTimeout(fetchStockFormData(), 15000, 'stock.form-data').catch(() => null);
-				setCurrentUserId(uid);
-				if (access) setStockForm(access);
-				const deleteDecision = appAccess?.decisions['supply.delete_documents'] ?? 'inherit';
-				setCanDeleteDocuments(deleteDecision === 'allow' || (deleteDecision === 'inherit' && uid === '1858'));
-				const hasSmartLink = requestId > 0 || transferDeepLinkId > 0 || dealSupplyId > 0;
-				const managerLink = hasSmartLink && (linkTarget === 'manager' || (linkTarget !== 'supply' && !access?.isSupply));
-				if (managerLink) {
-					setLoading(false);
-					setPhase('manager-link');
-					return;
-				}
-				const canOpenSupply = supplyDecision === 'allow' || (supplyDecision === 'inherit' && Boolean(access?.canCreate));
-				const canOpenMarketplace = marketplaceDecision === 'allow'
-					|| (marketplaceDecision === 'inherit' && canOpenSupply);
-				setCanOpenMarketplaces(canOpenMarketplace);
-				if (!canOpenSupply && !canOpenMarketplace) { setLoading(false); setPhase('denied'); return; }
-				if (!canOpenSupply && canOpenMarketplace) {
-					setMarketplaceOnly(true);
-					setView('marketplaces');
-					setLoading(false);
-					setPhase('ready');
-					return;
-				}
-				setMarketplaceOnly(false);
-				setPhase('ready');
-				try {
-					const [loaded, supplierList] = await Promise.all([fetchSupplyOrders(), fetchSupplySuppliers()]);
-					setOrders(loaded);
-					setSuppliers([...new Set([...supplierList, ...DEFAULT_SUPPLIERS])].filter(Boolean));
-				} catch {
-					setOrders([]);
-				} finally {
-					setLoading(false);
-				}
-			})().catch(() => setPhase('denied'));
-		});
-	}, [ctx.__mock, dealSupplyId, linkTarget, requestId, transferDeepLinkId]);
 
 	useEffect(() => {
 		if (loading || deepLinkHandled) return;
