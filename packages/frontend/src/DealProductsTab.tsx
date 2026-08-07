@@ -22,6 +22,7 @@ import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
 import { DealWorkRow } from './DealWorkRow.js';
 import { DealGoodsStatusCell } from './DealGoodsStatusCell.js';
 import { DealGoodsRow } from './DealGoodsRow.js';
+import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
@@ -1056,36 +1057,21 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 
 	return (
 		<div className="deal-products-tab">
-			<header className="deal-head">
-				<div>
-					<h1>Товары сделки</h1>
-					<p className="subtitle">Сделка #{dealId ?? '—'} · {goods.length + realWorks.length} {plural(goods.length + realWorks.length, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
-				</div>
-				<div className="deal-head-stats">
-					<div><span>Сумма товаров</span><b>{rub(sumGoods)}</b></div>
-					<div><span>Сумма работ</span><b>{rub(sumWorks)}</b></div>
-					<div><span>Общая сумма</span><b>{rub(total)}</b></div>
-					<div title={unknownGoods ? `Прибыль товаров рассчитана без ${unknownGoods} из ${pricedGoods.length}: не заполнена закупочная цена.` : 'Прибыль товаров плюс прибыль работ.'}>
-						<span>Прибыльность</span>
-						<b className={`deal-profit-value${profitability > 0 ? ' positive' : profitability < 0 ? ' negative' : ''}`}>{unknownGoods ? '≈ ' : ''}{rub(profitability)}</b>
-					</div>
-				</div>
-			</header>
+			<DealProductsSummaryHeader
+				dealId={dealId}
+				rowCount={goods.length + realWorks.length}
+				viewer={viewer}
+				goodsTotal={sumGoods}
+				worksTotal={sumWorks}
+				total={total}
+				profitability={profitability}
+				unknownGoods={unknownGoods}
+				pricedGoodsCount={pricedGoods.length}
+			/>
 
 			{dev && <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>}
 
-			{workingMode && data.payment && data.payment.total > 0 && (() => {
-				const { total, paid } = data.payment;
-				const rem = Math.max(0, total - paid);
-				const full = paid >= total - 0.01;
-				const cls = full ? 'pay-full' : paid > 0 ? 'pay-partial' : 'pay-none';
-				const text = full
-					? `Оплачено 100% (${rub(total)})`
-					: paid > 0
-						? `Частичная оплата: оплачено ${rub(paid)} · остаток ${rub(rem)}`
-						: `Не оплачено · к оплате ${rub(total)}`;
-				return <div className={`deal-pay ${cls}`}>{text}</div>;
-			})()}
+			{workingMode && data.payment && data.payment.total > 0 && <DealPaymentStatus total={data.payment.total} paid={data.payment.paid} />}
 
 			{workingMode && <div className="realize-bar deal-sticky-actions">
 				{hasPendingDrafts ? (
