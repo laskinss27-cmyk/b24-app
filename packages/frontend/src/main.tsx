@@ -10,7 +10,7 @@ import { StockLedger } from './StockLedger.js';
 import { Supply } from './Supply.js';
 import { ReportBuilder } from './ReportBuilder.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
-import './styles.css';
+import './global.css';
 import './low-vision.css';
 import './deal-products-layout.css';
 import './deal-product-table.css';
