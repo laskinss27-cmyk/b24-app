@@ -27,6 +27,7 @@ import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import { DealSupplyOrderModal } from './DealSupplyOrderModal.js';
+import { DealDocumentMenu } from './DealDocumentMenu.js';
 import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
@@ -601,9 +602,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			setExportBusy(false);
 		}
 	};
-	const closeDocumentMenu = (element: HTMLElement): void => {
-		element.closest('details')?.removeAttribute('open');
-	};
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const [dealTransfers, setDealTransfers] = useState<TransferDoc[]>([]);
 	useEffect(() => {
@@ -1120,16 +1118,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						requestB24FitWindow(160);
 					}}>{summaryView ? 'Вид по этапам' : 'Сводный вид сделки'}</button>
 				)}
-				<details className="deal-document-menu">
-					<summary className="btn-secondary">{exportBusy ? 'Формируем…' : 'Документы'}<span aria-hidden="true">▾</span></summary>
-					<div className="deal-document-menu-list">
-						<button type="button" disabled={dealId == null || exportBusy || dev} onClick={(event) => { closeDocumentMenu(event.currentTarget); void exportDocx(); }}>КП в Word</button>
-						<button type="button" disabled={dealId == null || exportBusy} onClick={(event) => { closeDocumentMenu(event.currentTarget); void exportXlsx(); }}>КП в Excel</button>
-						<button type="button" onClick={(event) => { closeDocumentMenu(event.currentTarget); onPrintDocument('kp', documentVariantId); }}>КП в PDF</button>
-						<button type="button" onClick={(event) => { closeDocumentMenu(event.currentTarget); onPrintDocument('receipt', documentVariantId); }}>Товарный чек</button>
-						<button type="button" disabled={!workingMode || dealId == null || dev} onClick={(event) => { closeDocumentMenu(event.currentTarget); setShowContract(true); }}>Договор</button>
-					</div>
-				</details>
+				<DealDocumentMenu
+					exportBusy={exportBusy}
+					dealAvailable={dealId != null}
+					dev={dev}
+					workingMode={workingMode}
+					onExportWord={() => void exportDocx()}
+					onExportExcel={() => void exportXlsx()}
+					onPrintProposal={() => onPrintDocument('kp', documentVariantId)}
+					onPrintReceipt={() => onPrintDocument('receipt', documentVariantId)}
+					onOpenContract={() => setShowContract(true)}
+				/>
 				{(proposalEditable || viewingSelected) && activeVariant && (
 					<button
 						className={viewingSelected ? 'btn-secondary danger' : 'btn-primary'}
