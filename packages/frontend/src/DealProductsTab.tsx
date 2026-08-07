@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState, type FocusEvent } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
-import { plural, rub, stageLabel, transferDocStatusLabel } from './deal-display-formatters.js';
+import { plural, rub, stageLabel } from './deal-display-formatters.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
 import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
@@ -25,6 +25,7 @@ import { DealGoodsRow } from './DealGoodsRow.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
+import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
@@ -1154,77 +1155,21 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			</div>
 
 			{workingMode && showDealDocuments && (
-				<section className="deal-documents-panel" aria-label="Документы по сделке">
-					<header><h2>Документы по сделке</h2><span>{dealDocumentCount || 'нет документов'}</span></header>
-					{data.contracts.length > 0 && (
-						<div className="deal-documents-group">
-							<h3>Договоры</h3>
-							{data.contracts.map((document) => (
-								<button
-									type="button"
-									className="deal-document-row clickable"
-									key={document.id}
-									onClick={(event) => setContractPreview({ document, anchorY: documentPreviewAnchorY(event.currentTarget) })}
-								>
-									<span><b>Договор № {document.contractNumber}</b><small>{document.templateTitle} · {document.companyName} · {document.contractDate}</small></span>
-									<span className="deal-document-status">{rub(document.total)}</span>
-								</button>
-							))}
-						</div>
-					)}
-					{realizationDocuments.length > 0 && (
-						<div className="deal-documents-group">
-							<h3>Реализации</h3>
-							{realizationDocuments.map((document) => (
-								<button type="button" className="deal-document-row clickable" key={document.name} onClick={(event) => setDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(event.currentTarget) })}>
-									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
-									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
-								</button>
-							))}
-						</div>
-					)}
-					{returnDocuments.length > 0 && (
-						<div className="deal-documents-group">
-							<h3>Возвраты</h3>
-							{returnDocuments.map((document) => (
-								<button type="button" className="deal-document-row clickable" key={document.name} onClick={(event) => setDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(event.currentTarget) })}>
-									<span><b>{document.name}</b><small>{document.postingDate} · {document.items.map((item) => `${item.itemName} ×${Math.abs(item.qty)}`).join(' · ')}</small></span>
-									<span className="deal-document-status">{document.submitted ? 'проведён' : 'черновик'}</span>
-								</button>
-							))}
-						</div>
-					)}
-					{data.supply.length > 0 && (
-						<div className="deal-documents-group">
-							<h3>Снабжение</h3>
-							{data.supply.map((document) => (
-								<button
-									type="button"
-									key={`${document.source ?? 'b24'}-${document.id}-${document.title}`}
-									className="deal-document-row clickable"
-									onClick={(event) => document.source === 'core'
-										? setDocumentPreview({ kind: 'supply', document, anchorY: documentPreviewAnchorY(event.currentTarget) })
-										: document.id > 0 && openSupplyCard(document.id)}
-								>
-									<span><b>{document.title}</b><small>{document.source === 'core' ? 'ядро' : 'Битрикс24'}</small></span>
-									<span className="deal-document-status">{stageLabel(document.stageId)}</span>
-								</button>
-							))}
-						</div>
-					)}
-					{dealTransfers.length > 0 && (
-						<div className="deal-documents-group">
-							<h3>Перемещения</h3>
-							{dealTransfers.map((document) => (
-								<button type="button" className="deal-document-row clickable" key={document.id} onClick={(event) => setDocumentPreview({ kind: 'transfer', document, anchorY: documentPreviewAnchorY(event.currentTarget) })}>
-									<span><b>{document.name || `Перемещение #${document.id}`}</b><small>{document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
-									<span className="deal-document-status">{transferDocStatusLabel(document.status)}</span>
-								</button>
-							))}
-						</div>
-					)}
-					{dealDocumentCount === 0 && <p className="deal-documents-empty">Документов по сделке пока нет.</p>}
-				</section>
+				<DealDocumentsPanel
+					contracts={data.contracts}
+					realizations={realizationDocuments}
+					returns={returnDocuments}
+					supply={data.supply}
+					transfers={dealTransfers}
+					documentCount={dealDocumentCount}
+					onOpenContract={(document, anchor) => setContractPreview({ document, anchorY: documentPreviewAnchorY(anchor) })}
+					onOpenRealization={(document, anchor) => setDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(anchor) })}
+					onOpenSupply={(document, anchor) => {
+						if (document.source === 'core') setDocumentPreview({ kind: 'supply', document, anchorY: documentPreviewAnchorY(anchor) });
+						else if (document.id > 0) openSupplyCard(document.id);
+					}}
+					onOpenTransfer={(document, anchor) => setDocumentPreview({ kind: 'transfer', document, anchorY: documentPreviewAnchorY(anchor) })}
+				/>
 			)}
 			{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={() => setDocumentPreview(null)} />}
 			{contractPreview && <DealContractDocumentModal preview={contractPreview} onClose={() => setContractPreview(null)} />}
