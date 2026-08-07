@@ -1,17 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { DealSupplyFallback } from './DealSupplyFallback.js';
 import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
-import { orderSearchValues, searchMatches } from './supply-search-values.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
 import { ASSORTMENT_MATRIX_CANARY_IDS, SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
 import { SupplyPageHeader } from './SupplyPageHeader.js';
 import { SupplySearch } from './SupplyOverviewControls.js';
 import { SupplyDocumentDetail, type OpenSupplyDocument } from './SupplyDocumentDetail.js';
-import { orderStatus, SupplyMetrics, SupplyOrdersView, type OrderStatusFilter, type SortKey } from './SupplyOrdersView.js';
+import { SupplyMetrics, SupplyOrdersView } from './SupplyOrdersView.js';
 import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
@@ -19,6 +18,7 @@ import { useSupplyAccessState } from './useSupplyAccessState.js';
 import { useSupplyDeepLinks } from './useSupplyDeepLinks.js';
 import { useSupplyDecisionActions } from './useSupplyDecisionActions.js';
 import { useSupplyOpenDocumentActions } from './useSupplyOpenDocumentActions.js';
+import { useSupplyOrderFiltering } from './useSupplyOrderFiltering.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
 import {
 	createSupplySupplier,
@@ -43,8 +43,6 @@ export function Supply(): JSX.Element {
 	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
 	const [view, setView] = useState<ViewKey>(requestId > 0 ? 'incoming' : 'orders');
 	const [reportsOpen, setReportsOpen] = useState(false);
-	const [sort, setSort] = useState<SortKey>('dateDesc');
-	const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
 	const [expanded, setExpanded] = useState('');
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
@@ -52,6 +50,13 @@ export function Supply(): JSX.Element {
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
 	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', inventory: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
+	const {
+		sort,
+		setSort,
+		orderStatusFilter,
+		setOrderStatusFilter,
+		filteredOrders,
+	} = useSupplyOrderFiltering(orders, searches.orders);
 	const {
 		phase,
 		suppliers,
@@ -173,20 +178,6 @@ export function Supply(): JSX.Element {
 		currentUserId,
 		reload,
 	});
-
-	const requestOrders = useMemo(() => orders.filter((order) => !order.standalone), [orders]);
-	const sortedOrders = useMemo(() => [...requestOrders].sort((a, b) => {
-		if (sort === 'dateAsc') return String(a.date).localeCompare(String(b.date));
-		if (sort === 'store') return String(a.toStore).localeCompare(String(b.toStore), 'ru');
-		if (sort === 'deal') return String(a.dealTitle || a.dealId).localeCompare(String(b.dealTitle || b.dealId), 'ru');
-		return String(b.date).localeCompare(String(a.date));
-	}), [requestOrders, sort]);
-	const filteredOrders = useMemo(
-		() => sortedOrders.filter((order) =>
-			(orderStatusFilter === 'all' || orderStatus(order) === orderStatusFilter)
-			&& searchMatches(searches.orders, orderSearchValues(order))),
-		[orderStatusFilter, sortedOrders, searches.orders],
-	);
 
 	if (phase === 'init') return <div className="supply-proto-state">Загрузка...</div>;
 	if (phase === 'manager-link' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
