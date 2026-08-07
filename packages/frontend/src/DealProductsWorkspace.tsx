@@ -34,6 +34,7 @@ import {
 } from './useDealProductStockState.js';
 import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
 import { buildDealReturnableProducts } from './deal-returnable-products.js';
+import { buildDealTransferSplitSources } from './deal-transfer-split-view.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -493,7 +494,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 			{workingMode && splitRow && dealId != null && (() => {
 				const dest = storeOf(splitRow);
-				const srcs = splitRow.stocks.filter((s) => s.amount > 0 && s.storeId !== dest).map((s) => ({ storeName: s.storeName, amount: s.amount }));
+				const srcs = buildDealTransferSplitSources(splitRow, dest);
 				return <TransferSplitModal dealId={dealId} productId={splitRow.productId} name={splitRow.name} need={remaining(splitRow)} destName={storeName(dest)} sources={srcs}
 					onClose={() => setSplitRow(null)}
 					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); await refreshDealTransfers(); }} />;
