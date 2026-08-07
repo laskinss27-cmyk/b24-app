@@ -1,0 +1,376 @@
+/* ── Реальная таблица товаров (beta) ──────────────────────────────────────── */
+.beta-banner {
+	background: #fff7ed;
+	border: 1px solid #fed7aa;
+	color: #9a3412;
+	padding: 8px 12px;
+	border-radius: 8px;
+	font-size: 12px;
+	margin-bottom: 16px;
+}
+.dev-banner {
+	background: #eef2ff;
+	border: 1px solid #c7d2fe;
+	color: #3730a3;
+	padding: 6px 10px;
+	border-radius: 6px;
+	font-size: 12px;
+	margin-bottom: 12px;
+}
+
+.table-wrap {
+	overflow-x: auto;
+}
+.products-table {
+	width: 100%;
+	min-width: 720px;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+.products-table th,
+.products-table td {
+	padding: 8px 10px;
+	border-bottom: 1px solid #eee;
+	text-align: left;
+	vertical-align: middle;
+}
+.products-table th {
+	font-weight: 600;
+	color: #555;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+.products-table td.num,
+.products-table th.num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+.products-table tbody tr:hover {
+	background: #fafafa;
+}
+/* Заголовок над полем: колонки с инпутами/бейджем (Тип·Цена·Скидка·Кол-во·К отгрузке) — по центру,
+   чтобы короткая надпись села над полем, а не у правого края. Товар(2)/Сумма(8)/Остатки(9)/Склад(10) — как были. */
+.products-table thead th:nth-child(3), .products-table tbody td:nth-child(3),
+.products-table thead th:nth-child(4), .products-table tbody td:nth-child(4),
+.products-table thead th:nth-child(5), .products-table tbody td:nth-child(5),
+.products-table thead th:nth-child(6), .products-table tbody td:nth-child(6),
+.products-table thead th:nth-child(7), .products-table tbody td:nth-child(7) {
+	text-align: center;
+}
+
+.type-badge {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+.type-badge.goods {
+	background: #e8f0fe;
+	color: #1a56db;
+}
+.type-badge.work {
+	background: #f3e8ff;
+	color: #7e22ce;
+}
+
+.shipped {
+	color: #9ca3af;
+	cursor: help;
+}
+
+.row-store select {
+	font-size: 12px;
+	padding: 3px 6px;
+	border: 1px solid #ccc;
+	border-radius: 6px;
+	max-width: 240px;
+}
+.row-store .none {
+	color: #bbb;
+	font-size: 12px;
+}
+
+.realize-bar {
+	margin-top: 16px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+.realize-bar button {
+	background: #16a34a;
+	color: #fff;
+	border: none;
+	padding: 8px 16px;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 600;
+}
+.realize-bar button:hover:not([disabled]) {
+	background: #15803d;
+}
+.realize-bar button[disabled] {
+	background: #e5e7eb;
+	color: #9ca3af;
+	cursor: not-allowed;
+	font-weight: 400;
+}
+.realize-bar .hint {
+	color: #9ca3af;
+	font-size: 12px;
+}
+.realize-bar .realize-ok {
+	color: #15803d;
+	font-size: 12px;
+	font-weight: 600;
+}
+.realize-bar {
+	flex-wrap: wrap;
+	align-items: flex-start;
+}
+.realize-plan {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	font-size: 12px;
+}
+.realize-plan b { font-size: 13px; color: #0f172a; }
+.plan-group { color: #475569; }
+.realize-actions { display: flex; gap: 8px; align-items: center; }
+.btn-realize-all.submit { background: #2563eb; }
+.btn-realize-all.submit:hover:not([disabled]) { background: #1d4ed8; }
+.btn-cancel-draft {
+	background: #eef0f3 !important;
+	color: #4b5563 !important;
+	font-weight: 500 !important;
+}
+.realize-cell {
+	white-space: normal;
+}
+.products-table .qty-input {
+	width: 58px;
+	height: auto;
+	padding: 3px 6px;
+	border: 1px solid #9aa3af;
+	border-radius: 6px;
+	font-size: 12px;
+	text-align: right;
+}
+.store-select {
+	display: block;
+	max-width: 165px;
+	margin-bottom: 5px;
+	font-size: 12px;
+	padding: 3px 6px;
+	border: 1px solid #ccc;
+	border-radius: 6px;
+}
+.st-badge {
+	display: inline-block;
+	font-size: 12px;
+	font-weight: 600;
+	padding: 3px 9px;
+	border-radius: 6px;
+	border: 1px solid transparent;
+}
+.st-badge.ready { color: #16a34a; }
+.st-badge.transfer { background: #fff7ed; color: #c2410c; border-color: #fed7aa; cursor: not-allowed; }
+.st-badge.order { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; cursor: pointer; }
+.realize-cell .qty-input {
+	width: 64px;
+	margin-right: 6px;
+	padding: 3px 6px;
+	border: 1px solid #d1d5db;
+	border-radius: 6px;
+	font-size: 12px;
+}
+.btn-realize {
+	background: #16a34a;
+	color: #fff;
+	border: none;
+	padding: 4px 12px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 12px;
+	font-weight: 600;
+}
+.btn-realize:hover:not([disabled]) {
+	background: #15803d;
+}
+.btn-realize[disabled] {
+	background: #e5e7eb;
+	color: #9ca3af;
+	cursor: not-allowed;
+	font-weight: 400;
+}
+/* Застывшая запись-партия: приглушённая строка под товаром */
+.part-row td {
+	background: #f8fafc;
+	color: #6b7280;
+}
+.part-name {
+	color: #9ca3af;
+	padding-left: 12px;
+}
+.of-total {
+	color: #9ca3af;
+	font-size: 11px;
+}
+.type-badge.part {
+	background: #f0fdf4;
+	color: #15803d;
+}
+.type-badge.part.part-return {
+	background: #fff7ed;
+	color: #c2410c;
+}
+.part-store {
+	font-size: 12px;
+}
+.part-reserve {
+	color: #15803d;
+	font-size: 12px;
+	font-weight: 600;
+}
+.part-nostore {
+	color: #c2410c;
+	font-size: 12px;
+	font-weight: 600;
+}
+.shipment-chip {
+	background: #f0fdf4;
+	color: #15803d;
+	border: 1px solid #bbf7d0;
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: 12px;
+	cursor: pointer;
+}
+.shipment-chip:hover {
+	background: #dcfce7;
+}
+.no-stock {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+.stock-chips {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.stock-chip {
+	background: #f1f5f9;
+	color: #475569;
+	border: 1px solid #e2e8f0;
+	border-radius: 999px;
+	padding: 1px 8px;
+	font-size: 11px;
+	white-space: nowrap;
+}
+.stock-chip b {
+	color: #0f172a;
+}
+.stock-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 170px;
+	border: 1px solid #d7dde7;
+	border-radius: 7px;
+	background: #fff;
+	color: #334155;
+	padding: 4px 8px;
+	font: inherit;
+	font-size: 12px;
+	line-height: 1.2;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.stock-toggle:hover,
+.stock-toggle.open {
+	border-color: #9db6d8;
+	background: #f8fbff;
+}
+.stock-toggle b {
+	color: #0f172a;
+}
+.stock-toggle small {
+	color: #64748b;
+	font-size: 11px;
+}
+.stock-detail-row td {
+	background: #fbfdff;
+	padding-top: 6px;
+	padding-bottom: 8px;
+}
+.stock-detail-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 2px 0 2px 4px;
+}
+.stock-more {
+	font-size: 11px;
+	color: #7a8699;
+	background: #eef0f3;
+	border-radius: 999px;
+	padding: 1px 7px;
+	align-self: center;
+}
+.supply-to {
+	max-width: 150px;
+	font-size: 12px;
+	padding: 2px 4px;
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
+	color: #6b7280;
+}
+.btn-supply {
+	background: #fff7ed;
+	color: #c2410c;
+	border: 1px solid #fed7aa;
+	border-radius: 6px;
+	padding: 3px 10px;
+	font-size: 12px;
+	cursor: pointer;
+}
+.btn-supply:hover:not([disabled]) {
+	background: #ffedd5;
+}
+.btn-supply[disabled] {
+	color: #9ca3af;
+	border-color: #e5e7eb;
+	background: #f9fafb;
+	cursor: not-allowed;
+}
+.supply-line {
+	margin-top: 12px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	font-size: 12px;
+	color: #6b7280;
+}
+.supply-chip {
+	background: #fff7ed;
+	color: #c2410c;
+	border: 1px solid #fed7aa;
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: 12px;
+	cursor: pointer;
+}
+.supply-chip:hover {
+	background: #ffedd5;
+}
+
+.stub-calm {
+	color: #555;
+	line-height: 1.6;
+}
