@@ -38,6 +38,7 @@ import { DealProductsTable } from './DealProductsTable.js';
 import { loadDealProductsData } from './deal-products-data-loader.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { useDealTransfers } from './useDealTransfers.js';
+import { useDealProposalExports } from './useDealProposalExports.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -75,8 +76,6 @@ import {
 	deleteDealQuoteVariant,
 	selectDealQuoteVariant,
 	cancelDealQuoteVariantSelection,
-	downloadDealKpDocx,
-	downloadDealXlsx,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	setupDealFulfillment,
@@ -408,36 +407,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const [stageBusy, setStageBusy] = useState(false);
 	const [stageError, setStageError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
-	const [exportBusy, setExportBusy] = useState(false);
+	const documentVariantId = activeVariantId && activeVariantId !== data.quoteVariants.selectedId ? activeVariantId : undefined;
+	const { exportBusy, exportXlsx, exportDocx } = useDealProposalExports({ dealId, variantId: documentVariantId, dev, onNotice: setNotice });
 	const [showContract, setShowContract] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
-	const documentVariantId = activeVariantId && activeVariantId !== data.quoteVariants.selectedId ? activeVariantId : undefined;
-	const exportXlsx = async (): Promise<void> => {
-		if (dealId == null || exportBusy) return;
-		setExportBusy(true);
-		setNotice(null);
-		try {
-			await downloadDealXlsx(dealId, documentVariantId);
-			setNotice({ kind: 'ok', text: '✅ КП в Excel сформировано и скачано.' });
-		} catch (error) {
-			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
-		} finally {
-			setExportBusy(false);
-		}
-	};
-	const exportDocx = async (): Promise<void> => {
-		if (dealId == null || exportBusy || dev) return;
-		setExportBusy(true);
-		setNotice(null);
-		try {
-			await downloadDealKpDocx(dealId, documentVariantId);
-			setNotice({ kind: 'ok', text: '✅ КП в Word сформировано и скачано.' });
-		} catch (error) {
-			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
-		} finally {
-			setExportBusy(false);
-		}
-	};
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const { dealTransfers, refreshDealTransfers } = useDealTransfers(dealId);
 	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
