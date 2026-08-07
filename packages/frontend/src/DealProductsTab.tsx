@@ -12,6 +12,7 @@ import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableB
 import { DealProductRealizationRow, type DealProductRealizationPart } from './DealProductRealizationRow.js';
 import { DealProductStockDetailRow, DealProductStockSummary } from './DealProductStockDisplay.js';
 import { DealWorkRow } from './DealWorkRow.js';
+import { DealGoodsStatusCell, type DealGoodsRowStatus } from './DealGoodsStatusCell.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
@@ -634,8 +635,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const storeOf = (r: EnrichedRow): number => rowStore[r.id] ?? realizeStore;
 	const amountAt = (r: EnrichedRow, storeId: number): number => r.stocks.find((s) => s.storeId === storeId)?.amount ?? 0;
 	const totalStock = (r: EnrichedRow): number => r.stocks.reduce((a, s) => a + s.amount, 0);
-	type RowStatus = 'ready' | 'transfer' | 'order';
-	const rowStatus = (r: EnrichedRow): RowStatus => {
+	const rowStatus = (r: EnrichedRow): DealGoodsRowStatus => {
 		if (qtyOf(r) > 0 && amountAt(r, storeOf(r)) >= qtyOf(r)) return 'ready'; // хватает на выбранном складе
 		if (totalStock(r) > 0) return 'transfer';                                // 0 тут, но есть на других
 		return 'order';                                                          // нет нигде
@@ -980,36 +980,23 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 								}}
 						/>
 					</td>
-					<td className="realize-cell">
-						{!workingMode ? <span className="st-badge proposal">{alternativeView ? 'альтернатива' : 'расчёт'}</span> : <>
-						<select
-							className="store-select" value={storeOf(r)} disabled={hasPendingDrafts || busy}
-							onChange={(e) => setRowStore((m) => ({ ...m, [r.id]: Number(e.target.value) }))}
-							title="Склад, с которого отгружаем эту строку"
-						>
-							{data.stores.map((s) => (
-								<option key={s.id} value={s.id}>{s.title} ({amountAt(r, s.id)})</option>
-							))}
-						</select>
-						{activeTransfer ? (
-							<span className={`st-badge ${activeTransfer.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${activeTransfer.fromStore} → ${activeTransfer.toStore}`}>
-								{activeTransferLabel(activeTransfer)}
-							</span>
-						) : status === 'ready' ? <span className="st-badge ready">✓ хватит</span> : receivedTransfer ? (
-								<button
-									className="st-badge ready"
-									disabled={refreshing || busy}
-									onClick={() => void doRefresh()}
-									title="Перемещение получено — обновить остаток из ядра, чтобы реализовать"
-								>{refreshing ? '…' : '✓ принято — обновить'}</button>
-							) : null}
-						{!activeTransfer && !receivedTransfer && status === 'order' && (
-							activeSupply
-								? <span className="st-badge order" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>
-								: <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
-						)}
-						</>}
-					</td>
+					<DealGoodsStatusCell
+						workingMode={workingMode}
+						alternativeView={alternativeView}
+						stores={data.stores}
+						selectedStoreId={storeOf(r)}
+						storeAmount={(storeId) => amountAt(r, storeId)}
+						selectionDisabled={hasPendingDrafts || busy}
+						activeTransfer={activeTransfer}
+						activeTransferLabel={activeTransfer ? activeTransferLabel(activeTransfer) : null}
+						receivedTransfer={receivedTransfer != null}
+						status={status}
+						activeSupply={activeSupply}
+						refreshing={refreshing}
+						busy={busy}
+						onStoreChange={(storeId) => setRowStore((current) => ({ ...current, [r.id]: storeId }))}
+						onRefresh={() => void doRefresh()}
+					/>
 				</tr>,
 			);
 			if (isStockExpanded && sortedStocks.length) {
