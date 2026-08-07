@@ -35,6 +35,11 @@ import {
 import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
 import { buildDealReturnableProducts } from './deal-returnable-products.js';
 import { buildDealTransferSplitSources } from './deal-transfer-split-view.js';
+import {
+	useDealContractModalState,
+	useDealReturnModalState,
+	useDealTransferSplitState,
+} from './useDealOperationalModalState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -121,9 +126,9 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		setSupplyFormError,
 	} = useDealSupplyOrderFormState();
 	/** id строки, по которой создаётся перемещение. */
-	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
+	const { splitRow, setSplitRow } = useDealTransferSplitState();
 	/** Открыто модальное окно возврата от клиента. */
-	const [showReturn, setShowReturn] = useState(false);
+	const { showReturn, setShowReturn } = useDealReturnModalState();
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
 	const {
 		showDealDocuments,
@@ -153,7 +158,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	} = useDealNameDialogsState();
 	const { refreshing, refresh: doRefresh } = useDealProductsRefresh(onReload);
 	const { exportBusy, exportXlsx, exportDocx } = useDealProposalExports({ dealId, variantId: documentVariantId, dev, onNotice: setNotice });
-	const [showContract, setShowContract] = useState(false);
+	const { showContract, setShowContract } = useDealContractModalState();
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const { dealTransfers, refreshDealTransfers } = useDealTransfers(dealId);
 	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
