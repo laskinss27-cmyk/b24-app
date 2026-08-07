@@ -10,6 +10,7 @@ import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
 import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
 import { DealProductRealizationRow, type DealProductRealizationPart } from './DealProductRealizationRow.js';
+import { DealProductStockDetailRow, DealProductStockSummary } from './DealProductStockDisplay.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
@@ -989,20 +990,15 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					</td>
 					<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
 					<td className="row-store">
-						{r.stocks.length ? (
-							<button
-								type="button"
-								className={`stock-toggle${isStockExpanded ? ' open' : ''}`}
-								onClick={() => {
+						<DealProductStockSummary
+							stocks={r.stocks}
+							total={totalStock(r)}
+							expanded={isStockExpanded}
+							onToggle={() => {
 									setExpandedStocks((m) => ({ ...m, [r.id]: !m[r.id] }));
 									requestB24FitWindow(160);
 								}}
-								title={isStockExpanded ? 'Скрыть остатки по складам' : 'Показать остатки по складам'}
-							>
-								<span>всего <b>{totalStock(r)}</b></span>
-								<small>{r.stocks.length} {plural(r.stocks.length, 'склад', 'склада', 'складов')}</small>
-							</button>
-						) : <span className="none">нет нигде</span>}
+						/>
 					</td>
 					<td className="realize-cell">
 						{!workingMode ? <span className="st-badge proposal">{alternativeView ? 'альтернатива' : 'расчёт'}</span> : <>
@@ -1038,16 +1034,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			);
 			if (isStockExpanded && sortedStocks.length) {
 				out.push(
-					<tr key={`${r.id}-stocks`} className="stock-detail-row">
-						<td className="check-col"></td>
-						<td colSpan={10}>
-							<div className="stock-detail-list">
-								{sortedStocks.map((s) => (
-									<span key={s.storeId} className={`stock-chip${s.storeId === storeOf(r) ? ' sel' : ''}`}>{s.storeName}: <b>{s.amount}</b></span>
-								))}
-							</div>
-						</td>
-					</tr>,
+					<DealProductStockDetailRow key={`${r.id}-stocks`} stocks={sortedStocks} selectedStoreId={storeOf(r)} />,
 				);
 			}
 		}
