@@ -2,14 +2,12 @@ import { useEffect, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
-import { rub, stageLabel } from './deal-display-formatters.js';
+import { rub } from './deal-display-formatters.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
 import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
-import { DealProductRealizationRow } from './DealProductRealizationRow.js';
-import { dealProductRealizationParts } from './deal-product-realization-parts.js';
 import {
 	dealProductRealizedQuantity,
 	dealProductRealizedProductQuantity,
@@ -17,9 +15,6 @@ import {
 	dealProductSelectedQuantity,
 	dealProductShippedQuantity,
 } from './deal-product-fulfillment-values.js';
-import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
-import { DealGoodsStatusCell } from './DealGoodsStatusCell.js';
-import { DealGoodsRow } from './DealGoodsRow.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
@@ -46,6 +41,7 @@ import { createDealSupplyOrderActions, supplyMinimumDate } from './deal-supply-o
 import { createDealRealizationActions } from './deal-realization-actions.js';
 import { buildDealRealizationSelection } from './deal-realization-selection.js';
 import { createDealWorkRowRenderer } from './deal-work-row-renderer.js';
+import { createDealGoodsRowRenderer } from './deal-goods-row-renderer.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -60,7 +56,6 @@ import {
 	dealProductStockAmount,
 	dealProductStoreName,
 	dealProductTotalStock,
-	dealProductTransferLabel,
 } from './deal-product-availability.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
@@ -478,77 +473,40 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 
 	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
 	// под ними — строка остатка с селектором склада, полем кол-ва и кнопкой «Реализовать».
-	const renderGoodsRows = (r: EnrichedRow): JSX.Element[] => {
-		const parts = dealProductRealizationParts(r, data.coreReals);
-		const left = remaining(r);
-		const out: JSX.Element[] = parts.map((p) => <DealProductRealizationRow key={`${r.id}-${p.name}`} row={r} part={p} />);
-		if (left > 0) {
-			const status = rowStatus(r);
-			const activeSupply = activeSupplyOf(r);
-			const activeTransfer = activeTransferOf(r);
-			const receivedTransfer = receivedTransferOf(r);
-			const sortedStocks = [...r.stocks].sort((a, b) => b.amount - a.amount);
-			const isStockExpanded = Boolean(expandedStocks[r.id]);
-			const editable = rowEditable(r);
-			const edit = editOf(r);
-			out.push(
-				<DealGoodsRow
-					key={r.id}
-					row={r}
-					edit={edit}
-					left={left}
-					shipped={shippedForRow(r)}
-					status={status}
-					selected={isSel(r)}
-					editable={editable}
-					workingMode={workingMode}
-					hasParts={parts.length > 0}
-					orderedTitle={activeSupply ? `${activeSupply.title} · ${stageLabel(activeSupply.stageId)}` : null}
-					saving={savingRow === r.id}
-					controlsDisabled={busy || supplyBusy || removing != null || hasPendingDrafts}
-					selectionDisabled={hasPendingDrafts || busy || supplyBusy}
-					batchDisabled={hasPendingDrafts || busy}
-					removingThisRow={removing === r.id}
-					batchQuantity={batchQty[r.id] ?? String(left)}
-					stockExpanded={isStockExpanded}
-					totalStock={totalStock(r)}
-					onRemove={() => void doRemove(r)}
-					onReplace={() => onReplace(r)}
-					onToggleSelected={() => toggleSel(r)}
-					onEdit={(patch) => setEdit(r, patch)}
-					onBlur={(event) => onRowBlur(r, event)}
-					onBatchQuantity={(value) => setBatchQty((current) => ({ ...current, [r.id]: value }))}
-					onToggleStocks={() => {
-						setExpandedStocks((current) => ({ ...current, [r.id]: !current[r.id] }));
-						requestB24FitWindow(160);
-					}}
-					statusCell={<DealGoodsStatusCell
-						workingMode={workingMode}
-						alternativeView={alternativeView}
-						stores={data.stores}
-						selectedStoreId={storeOf(r)}
-						storeAmount={(storeId) => amountAt(r, storeId)}
-						selectionDisabled={hasPendingDrafts || busy}
-						activeTransfer={activeTransfer}
-						activeTransferLabel={activeTransfer ? dealProductTransferLabel(activeTransfer) : null}
-						receivedTransfer={receivedTransfer != null}
-						status={status}
-						activeSupply={activeSupply}
-						refreshing={refreshing}
-						busy={busy}
-						onStoreChange={(storeId) => setRowStore((current) => ({ ...current, [r.id]: storeId }))}
-						onRefresh={() => void doRefresh()}
-					/>}
-				/>,
-			);
-			if (isStockExpanded && sortedStocks.length) {
-				out.push(
-					<DealProductStockDetailRow key={`${r.id}-stocks`} stocks={sortedStocks} selectedStoreId={storeOf(r)} />,
-				);
-			}
-		}
-		return out;
-	};
+	const renderGoodsRows = createDealGoodsRowRenderer({
+		data,
+		remaining,
+		rowStatus,
+		activeSupplyOf,
+		activeTransferOf,
+		receivedTransferOf,
+		expandedStocks,
+		isEditable: rowEditable,
+		editOf,
+		shippedForRow,
+		isSelected: isSel,
+		workingMode,
+		alternativeView,
+		savingRow,
+		busy,
+		supplyBusy,
+		removing,
+		hasPendingDrafts,
+		batchQty,
+		totalStock,
+		storeOf,
+		amountAt,
+		refreshing,
+		onRemove: doRemove,
+		onReplace,
+		onToggleSelected: toggleSel,
+		onEdit: setEdit,
+		onRowBlur,
+		onRefresh: doRefresh,
+		setBatchQty,
+		setExpandedStocks,
+		setRowStore,
+	});
 	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
 	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
 	// отдельный документ только с услугами.
