@@ -32,9 +32,10 @@ import {
 } from '../deal-supply-cards.js';
 import { buildDealKpDocx } from '../deal-kp-docx.js';
 import { buildDealKpXlsx } from '../deal-kp-xlsx.js';
-import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
-import { backfillDealServiceSumSince, ensureDealServiceSumField, syncDealServiceSum } from '../deal-service-sum.js';
+import { syncDealFulfillmentStatus } from '../deal-fulfillment.js';
+import { syncDealServiceSum } from '../deal-service-sum.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
+import { registerDealTechnicalFieldsRoute } from './deal-technical-fields-route.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -122,43 +123,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	};
 
-	// Однократная административная настройка: создать служебное поле и заполнить новые сделки.
-	app.post('/api/deal/fulfillment-setup', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { from?: unknown; dealId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		const from = String(b.from ?? '2026-07-20').trim();
-		if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return reply.code(400).send({ ok: false, error: 'bad from' });
-		const dealId = Number(b.dealId);
-		if (b.dealId !== undefined && (!Number.isInteger(dealId) || dealId <= 0)) {
-			return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		}
-		try {
-			const me = await client.call<{ ID?: unknown }>('user.current', {});
-			if (!['1', '1858'].includes(String(me?.['ID'] ?? ''))) return reply.code(403).send({ ok: false, error: 'настройка доступна администратору' });
-			const field = await ensureDealFulfillmentField(client);
-			const serviceSumField = await ensureDealServiceSumField(client);
-			const currentDeal = Number.isInteger(dealId) && dealId > 0
-				? {
-					fulfillment: await syncDealFulfillmentStatus(client, erp, dealId),
-					serviceSum: await syncDealServiceSum(client, erp, dealId),
-				}
-				: null;
-			void backfillDealFulfillmentSince(client, erp, from)
-				.then((result) => app.log.info({ from, ...result }, '[deal-fulfillment] background backfill completed'))
-				.catch((err) => app.log.error({ from }, `[deal-fulfillment] background backfill failed — ${errInfo(err)}`));
-			void backfillDealServiceSumSince(client, erp, from)
-				.then((result) => app.log.info({ from, ...result }, '[deal-service-sum] background backfill completed'))
-				.catch((err) => app.log.error({ from }, `[deal-service-sum] background backfill failed — ${errInfo(err)}`));
-			app.log.info({ from, dealId: currentDeal ? dealId : undefined, field, serviceSumField, currentDeal }, '[deal-technical-fields] setup scheduled');
-			return { ok: true, field, serviceSumField, currentDeal, backfillScheduled: true, checked: 0, changed: 0, failed: 0 };
-		} catch (err) {
-			app.log.error({}, `[deal-fulfillment] setup failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealTechnicalFieldsRoute(app, clientFrom);
 
 	// РЕАЛИЗАЦИЯ В ЯДРЕ (Delivery Note) — «покрывало»: складской документ живёт в ERPNext, не в Б24.
 	// action='list': что уже реализовано по сделке (из ядра по b24_deal_id) — черновики + проведённые;
