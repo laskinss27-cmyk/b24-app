@@ -10,16 +10,15 @@ import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
 import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
 import { DealProductRealizationRow, type DealProductRealizationPart } from './DealProductRealizationRow.js';
-import { DealProductStockDetailRow, DealProductStockSummary } from './DealProductStockDisplay.js';
+import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
 import { DealWorkRow } from './DealWorkRow.js';
 import { DealGoodsStatusCell, type DealGoodsRowStatus } from './DealGoodsStatusCell.js';
+import { DealGoodsRow } from './DealGoodsRow.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
 	dealProductDiscountPercent,
-	dealProductFinalUnit,
 	dealProductLine,
-	dealProductMarkupText,
 	isPlanRow,
 	isVariantRow,
 	type DealProductRowEdit,
@@ -455,8 +454,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const setEdit = (r: EnrichedRow, patch: Partial<DealProductRowEdit>): void =>
 		setRowEdits((m) => ({ ...m, [r.id]: { ...editOf(r), ...patch } }));
 	const clearEdit = (id: string): void => setRowEdits((m) => { const n = { ...m }; delete n[id]; return n; });
-	const finalUnitOf = (r: EnrichedRow): number => dealProductFinalUnit(editOf(r));
-	const markupTextOf = (r: EnrichedRow): string => dealProductMarkupText(r, editOf(r));
 	const saveRow = async (r: EnrichedRow): Promise<void> => {
 		if (dealId == null || savingRow) return;
 		const e = editOf(r);
@@ -921,66 +918,40 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			const receivedTransfer = receivedTransferOf(r);
 			const sortedStocks = [...r.stocks].sort((a, b) => b.amount - a.amount);
 			const isStockExpanded = Boolean(expandedStocks[r.id]);
+			const editable = rowEditable(r);
+			const edit = editOf(r);
 			out.push(
-				<tr key={r.id} className={`goods-row st-${status}${isSel(r) ? ' sel-row' : ''}`}>
-					<td className="check-col">
-						<div className="row-controls">
-							{rowEditable(r) && <button
-								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || hasPendingDrafts}
-								onClick={() => void doRemove(r)}
-								title={r.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
-							>{removing === r.id ? '…' : '✕'}</button>}
-							{workingMode && rowEditable(r) && r.segmentKind !== 'stage' && <button
-								className="row-del-x"
-								disabled={busy || supplyBusy || removing != null || hasPendingDrafts}
-								onClick={() => onReplace(r)}
-								title="Заменить товар одновременно в сделке и необработанной заявке снабжению"
-							>↔</button>}
-							{workingMode && <input
-								type="checkbox"
-								className="row-check"
-								checked={isSel(r)}
-								disabled={hasPendingDrafts || busy || supplyBusy}
-								onChange={() => toggleSel(r)}
-								title={status === 'ready' ? 'Отметить: реализовать (если хватает) или отправить в снабжение' : 'Отметить, чтобы отправить в снабжение (на складе не хватает)'}
-							/>}
-						</div>
-					</td>
-					<td>
-						<span className="goods-name-line">{parts.length ? <span className="part-name">↳ {r.name}</span> : r.name}{activeSupply && <span className="goods-ordered-mark" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>}</span>
-					</td>
-					<td><span className="type-badge goods">товар</span></td>
-					<td className="num cell-edit">
-						<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
-						<div className="cell-final" title="Наценка от закупочной цены, рассчитанная по итоговой цене продажи после скидки">наценка {markupTextOf(r)}{savingRow === r.id ? ' …' : ''}</div>
-						{r.purchasingPrice != null
-							? <div className={`purchase-hint${finalUnitOf(r) <= r.purchasingPrice ? ' danger' : ''}`}>закуп {rub(r.purchasingPrice)}{finalUnitOf(r) <= r.purchasingPrice ? ' ⚠' : ''}</div>
-							: <div className="purchase-hint muted-hint">закуп —</div>}
-					</td>
-					<td className="num">
-						<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
-					</td>
-					<td className="num">
-						<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" />
-					</td>
-					<td className="num">{workingMode ? <b className="realized-qty">{shippedForRow(r)}</b> : <span className="none">—</span>}</td>
-					<td className="num">
-						{workingMode ? <input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={hasPendingDrafts || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} title={`Сколько отгрузить сейчас (остаток ${left} ${r.measure})`} /> : <span className="none">—</span>}
-					</td>
-					<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
-					<td className="row-store">
-						<DealProductStockSummary
-							stocks={r.stocks}
-							total={totalStock(r)}
-							expanded={isStockExpanded}
-							onToggle={() => {
-									setExpandedStocks((m) => ({ ...m, [r.id]: !m[r.id] }));
-									requestB24FitWindow(160);
-								}}
-						/>
-					</td>
-					<DealGoodsStatusCell
+				<DealGoodsRow
+					key={r.id}
+					row={r}
+					edit={edit}
+					left={left}
+					shipped={shippedForRow(r)}
+					status={status}
+					selected={isSel(r)}
+					editable={editable}
+					workingMode={workingMode}
+					hasParts={parts.length > 0}
+					orderedTitle={activeSupply ? `${activeSupply.title} · ${stageLabel(activeSupply.stageId)}` : null}
+					saving={savingRow === r.id}
+					controlsDisabled={busy || supplyBusy || removing != null || hasPendingDrafts}
+					selectionDisabled={hasPendingDrafts || busy || supplyBusy}
+					batchDisabled={hasPendingDrafts || busy}
+					removingThisRow={removing === r.id}
+					batchQuantity={batchQty[r.id] ?? String(left)}
+					stockExpanded={isStockExpanded}
+					totalStock={totalStock(r)}
+					onRemove={() => void doRemove(r)}
+					onReplace={() => onReplace(r)}
+					onToggleSelected={() => toggleSel(r)}
+					onEdit={(patch) => setEdit(r, patch)}
+					onBlur={(event) => onRowBlur(r, event)}
+					onBatchQuantity={(value) => setBatchQty((current) => ({ ...current, [r.id]: value }))}
+					onToggleStocks={() => {
+						setExpandedStocks((current) => ({ ...current, [r.id]: !current[r.id] }));
+						requestB24FitWindow(160);
+					}}
+					statusCell={<DealGoodsStatusCell
 						workingMode={workingMode}
 						alternativeView={alternativeView}
 						stores={data.stores}
@@ -996,8 +967,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						busy={busy}
 						onStoreChange={(storeId) => setRowStore((current) => ({ ...current, [r.id]: storeId }))}
 						onRefresh={() => void doRefresh()}
-					/>
-				</tr>,
+					/>}
+				/>,
 			);
 			if (isStockExpanded && sortedStocks.length) {
 				out.push(
