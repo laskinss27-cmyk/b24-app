@@ -22,6 +22,7 @@ import {
 import { DealProductsTable } from './DealProductsTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
+import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -99,16 +100,24 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		.map((document) => document.name);
 	const pendingDraftNames = [...new Set([...persistedDraftNames, ...draftNames])];
 	const hasPendingDrafts = pendingDraftNames.length > 0;
-	/** Идёт создание заявки в снабжение. */
-	const [supplyBusy, setSupplyBusy] = useState(false);
-	/** Подтверждение заказа снабжению и комментарии по выбранным позициям. */
-	const [showSupplyOrder, setShowSupplyOrder] = useState(false);
-	const [supplyNotes, setSupplyNotes] = useState<Record<string, string>>({});
-	const [supplyQty, setSupplyQty] = useState<Record<string, string>>({});
-	const [supplyToStore, setSupplyToStore] = useState('');
-	const [supplyDeadline, setSupplyDeadline] = useState('');
-	const [supplyOrderNote, setSupplyOrderNote] = useState('');
-	const [supplyFormError, setSupplyFormError] = useState<string | null>(null);
+	const {
+		supplyBusy,
+		setSupplyBusy,
+		showSupplyOrder,
+		setShowSupplyOrder,
+		supplyNotes,
+		setSupplyNotes,
+		supplyQty,
+		setSupplyQty,
+		supplyToStore,
+		setSupplyToStore,
+		supplyDeadline,
+		setSupplyDeadline,
+		supplyOrderNote,
+		setSupplyOrderNote,
+		supplyFormError,
+		setSupplyFormError,
+	} = useDealSupplyOrderFormState();
 	/** id строки, по которой создаётся перемещение. */
 	const [splitRow, setSplitRow] = useState<EnrichedRow | null>(null);
 	/** Открыто модальное окно возврата от клиента. */
