@@ -20,8 +20,19 @@ import {
 } from './deal-product-fulfillment-values.js';
 import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
 import { DealWorkRow } from './DealWorkRow.js';
-import { DealGoodsStatusCell, type DealGoodsRowStatus } from './DealGoodsStatusCell.js';
+import { DealGoodsStatusCell } from './DealGoodsStatusCell.js';
 import { DealGoodsRow } from './DealGoodsRow.js';
+import {
+	dealProductActiveSupply,
+	dealProductActiveTransfer,
+	dealProductAvailabilityStatus,
+	dealProductReceivedTransfer,
+	dealProductSelectedStoreId,
+	dealProductStockAmount,
+	dealProductStoreName,
+	dealProductTotalStock,
+	dealProductTransferLabel,
+} from './deal-product-availability.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
@@ -69,7 +80,6 @@ import {
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type StoredDealContractDocument,
-	type SupplyCard,
 	type TransferDoc,
 } from './b24.js';
 
@@ -614,30 +624,16 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const qtyOf = (row: EnrichedRow): number => dealProductSelectedQuantity(row, data.coreReals, batchQty[row.id]);
 
 	// ── Склад на строке → статус → группировка по складам ──
-	const storeOf = (r: EnrichedRow): number => rowStore[r.id] ?? realizeStore;
-	const amountAt = (r: EnrichedRow, storeId: number): number => r.stocks.find((s) => s.storeId === storeId)?.amount ?? 0;
-	const totalStock = (r: EnrichedRow): number => r.stocks.reduce((a, s) => a + s.amount, 0);
-	const rowStatus = (r: EnrichedRow): DealGoodsRowStatus => {
-		if (qtyOf(r) > 0 && amountAt(r, storeOf(r)) >= qtyOf(r)) return 'ready'; // хватает на выбранном складе
-		if (totalStock(r) > 0) return 'transfer';                                // 0 тут, но есть на других
-		return 'order';                                                          // нет нигде
-	};
-	const storeName = (id: number): string => data.stores.find((s) => s.id === id)?.title ?? `Склад #${id}`;
+	const storeOf = (row: EnrichedRow): number => dealProductSelectedStoreId(row, rowStore, realizeStore);
+	const amountAt = (row: EnrichedRow, storeId: number): number => dealProductStockAmount(row, storeId);
+	const totalStock = (row: EnrichedRow): number => dealProductTotalStock(row);
+	const rowStatus = (row: EnrichedRow) => dealProductAvailabilityStatus(row, qtyOf(row), storeOf(row));
+	const storeName = (storeId: number): string => dealProductStoreName(data.stores, storeId);
 	/** Незакрытое перемещение по этому товару (запрошено/в пути) — чтобы показать статус вместо кнопки. */
-	const activeTransferOf = (r: EnrichedRow): TransferDoc | null =>
-		dealTransfers.find((t) => !t.correctionOf && ['draft', 'collected', 'requested', 'in_transit', 'accepted', 'shortage'].includes(t.status) && t.lines.some((l) => l.productId === r.productId)) ?? null;
+	const activeTransferOf = (row: EnrichedRow): TransferDoc | null => dealProductActiveTransfer(row, dealTransfers);
 	/** Полученное перемещение по товару: товар уже на складе Б, но остаток открытой вкладки мог не обновиться. */
-	const receivedTransferOf = (r: EnrichedRow): TransferDoc | null =>
-		dealTransfers.find((t) => !t.correctionOf && (t.status === 'received' || t.status === 'posted') && t.lines.some((l) => l.productId === r.productId)) ?? null;
-	const activeTransferLabel = (transfer: TransferDoc): string => {
-		if (transfer.status === 'draft' || transfer.status === 'requested') return 'перемещение создано';
-		if (transfer.status === 'collected') return 'собрано';
-		if (transfer.status === 'in_transit') return 'в пути';
-		if (transfer.status === 'accepted') return 'на проверке';
-		return 'недовоз';
-	};
-	const activeSupplyOf = (r: EnrichedRow): SupplyCard | null =>
-		data.supply.find((s) => s.source === 'core' && !/stopped|closed|completed|success|fail/i.test(s.stageId) && (s.productIds ?? []).includes(r.productId)) ?? null;
+	const receivedTransferOf = (row: EnrichedRow): TransferDoc | null => dealProductReceivedTransfer(row, dealTransfers);
+	const activeSupplyOf = (row: EnrichedRow) => dealProductActiveSupply(row, data.supply);
 
 	// Удалить строку (товар/работу) из сделки. Подтверждение + перезагрузка таблицы.
 	const doRemove = async (r: EnrichedRow): Promise<void> => {
@@ -914,7 +910,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 						storeAmount={(storeId) => amountAt(r, storeId)}
 						selectionDisabled={hasPendingDrafts || busy}
 						activeTransfer={activeTransfer}
-						activeTransferLabel={activeTransfer ? activeTransferLabel(activeTransfer) : null}
+						activeTransferLabel={activeTransfer ? dealProductTransferLabel(activeTransfer) : null}
 						receivedTransfer={receivedTransfer != null}
 						status={status}
 						activeSupply={activeSupply}

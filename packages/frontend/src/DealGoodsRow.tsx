@@ -2,7 +2,7 @@ import type { FocusEvent, ReactNode } from 'react';
 import { rub } from './deal-display-formatters.js';
 import { dealProductFinalUnit, dealProductMarkupText, type DealProductRowEdit } from './deal-product-row-values.js';
 import { DealProductStockSummary } from './DealProductStockDisplay.js';
-import type { DealGoodsRowStatus } from './DealGoodsStatusCell.js';
+import type { DealProductAvailabilityStatus } from './deal-product-availability.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
 export function DealGoodsRow({
@@ -37,7 +37,7 @@ export function DealGoodsRow({
 	edit: DealProductRowEdit;
 	left: number;
 	shipped: number;
-	status: DealGoodsRowStatus;
+	status: DealProductAvailabilityStatus;
 	selected: boolean;
 	editable: boolean;
 	workingMode: boolean;

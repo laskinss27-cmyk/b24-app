@@ -1,7 +1,6 @@
 import type { StoreInfo, SupplyCard, TransferDoc } from './b24.js';
 import { stageLabel } from './deal-display-formatters.js';
-
-export type DealGoodsRowStatus = 'ready' | 'transfer' | 'order';
+import type { DealProductAvailabilityStatus } from './deal-product-availability.js';
 
 export function DealGoodsStatusCell({
 	workingMode,
@@ -29,7 +28,7 @@ export function DealGoodsStatusCell({
 	activeTransfer: TransferDoc | null;
 	activeTransferLabel: string | null;
 	receivedTransfer: boolean;
-	status: DealGoodsRowStatus;
+	status: DealProductAvailabilityStatus;
 	activeSupply: SupplyCard | null;
 	refreshing: boolean;
 	busy: boolean;
