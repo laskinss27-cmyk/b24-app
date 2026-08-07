@@ -4,7 +4,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, updateDealQuoteVariantItems, assertDealQuoteVariantSelected, replaceDealPlanSupplyProduct, type DealQuoteVariantItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, updateDealQuoteVariantItems, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { loadDealOrderInfo } from '../deal-order-info.js';
@@ -33,6 +33,7 @@ import { syncDealServiceSum } from '../deal-service-sum.js';
 import { registerDealCommercialProposalFileRoutes } from './deal-commercial-proposal-file-routes.js';
 import { registerDealCommercialProposalRoute } from './deal-commercial-proposal-route.js';
 import { registerDealPlanExportRoute } from './deal-plan-export-route.js';
+import { registerDealPlanProductReplacementRoute } from './deal-plan-product-replacement-route.js';
 import { registerDealPlanRoute } from './deal-plan-route.js';
 import { registerDealPlanUpdateRoute } from './deal-plan-update-route.js';
 import { registerDealQuoteVariantRoutes } from './deal-quote-variant-routes.js';
@@ -529,39 +530,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	registerDealPlanExportRoute(app, clientFrom);
 
-	app.post('/api/deal/replace-plan-product', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; oldProductId?: unknown; newProductId?: unknown; newItemName?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		const dealId = Number(b.dealId);
-		const oldProductId = Number(b.oldProductId);
-		const newProductId = Number(b.newProductId);
-		if (![dealId, oldProductId, newProductId].every((value) => Number.isInteger(value) && value > 0)) {
-			return reply.code(400).send({ ok: false, error: 'некорректные данные замены' });
-		}
-		try {
-			await assertDealQuoteVariantSelected(erp, dealId);
-			const transferAllocation = await supplyTransferAllocation(client, dealId);
-			const plan = await replaceDealPlanSupplyProduct(erp, {
-				dealId,
-				oldProductId,
-				newProductId,
-				newItemName: String(b.newItemName ?? '').trim(),
-				deliveryDate: new Date().toISOString().slice(0, 10),
-				transferAllocation,
-			});
-			const total = await calculateDealPlanTotal(erp, dealId);
-			await setDealB24Service(client, dealId, total);
-			await syncDealTechnicalFields(client, erp, dealId);
-			app.log.info({ dealId, oldProductId, newProductId }, '[api/deal/replace-plan-product] ok');
-			return { ok: true, total, lines: plan.length };
-		} catch (err) {
-			app.log.error({ dealId, oldProductId, newProductId }, `[api/deal/replace-plan-product] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealPlanProductReplacementRoute(app, clientFrom, supplyTransferAllocation, syncDealTechnicalFields);
 
 	registerDealCommercialProposalRoute(app, clientFrom);
 	registerDealCommercialProposalFileRoutes(app, clientFrom);
