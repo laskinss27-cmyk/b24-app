@@ -4,6 +4,17 @@ import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
+import {
+	decisionGroups,
+	decisionLinesForOrder,
+	decisionReady,
+	decisionsForRow,
+	makeDecision,
+	requestItemsForOrder,
+	rowKey,
+	type DecisionMap,
+	type DecisionState,
+} from './supply-decision-planning.js';
 import { SupplySearch, SupplyStatusPill } from './SupplyOverviewControls.js';
 import { SupplySupplierField } from './SupplySupplierField.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
@@ -39,7 +50,6 @@ import {
 	updateSupplyRequestLine,
 	searchProducts,
 	type SupplyDecisionAction,
-	type SupplyDecisionLine,
 	type SupplyOrderItem,
 	type SupplyOrderRow,
 	type SupplyPurchaseChild,
@@ -142,57 +152,10 @@ const ASSORTMENT_MATRIX_CANARY_IDS = new Set(['1858']);
 type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 type OrderStatusFilter = 'all' | 'needs_action' | 'in_progress' | 'closed';
 
-interface DecisionState {
-	id: string;
-	action: SupplyDecisionAction | '';
-	qty: number;
-	fromStore: string;
-	supplier: string;
-}
-
-type DecisionMap = Record<string, DecisionState[]>;
-
 const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юнона', 'Сатро-Паладин', 'Амиком'];
 const money = (value: number): string => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(value);
-const requestItemsForOrder = (order: SupplyOrderRow): SupplyOrderItem[] => order.items ?? [];
 const orderStatus = (order: SupplyOrderRow): Exclude<OrderStatusFilter, 'all'> =>
 	order.closed ? 'closed' : requestItemsForOrder(order).length > 0 ? 'needs_action' : 'in_progress';
-const rowKey = (orderName: string, productId: number, index: number): string => `${orderName}:${productId}:${index}`;
-let allocationSequence = 0;
-const makeDecision = (key: string, qty: number): DecisionState => ({
-	id: `${key}:allocation-${allocationSequence++}`,
-	action: '',
-	qty: Math.max(1, qty),
-	fromStore: '',
-	supplier: '',
-});
-const decisionsForRow = (decisions: DecisionMap, key: string, qty: number): DecisionState[] => decisions[key] ?? [{ ...makeDecision(key, qty), id: `${key}:initial` }];
-const decisionReady = (decision: DecisionState): boolean => Boolean(decision.action && (decision.action === 'transfer' ? decision.fromStore : decision.supplier.trim()));
-
-function decisionLinesForOrder(order: SupplyOrderRow, decisions: DecisionMap): SupplyDecisionLine[] {
-	return requestItemsForOrder(order).flatMap((item, index) => {
-		const key = rowKey(order.name, item.productId, index);
-		return decisionsForRow(decisions, key, item.qty)
-			.filter(decisionReady)
-			.map((decision) => ({
-				productId: item.productId,
-				itemName: item.itemName || `#${item.productId}`,
-				qty: Math.max(1, Number(decision.qty || 1)),
-				action: decision.action as SupplyDecisionAction,
-				...(decision.fromStore ? { fromStore: decision.fromStore } : {}),
-				...(decision.supplier.trim() ? { supplier: decision.supplier.trim() } : {}),
-			}));
-	});
-}
-
-function decisionGroups(lines: SupplyDecisionLine[], action: SupplyDecisionAction): Array<{ key: string; lines: SupplyDecisionLine[] }> {
-	const groups = new Map<string, SupplyDecisionLine[]>();
-	for (const line of lines.filter((item) => item.action === action)) {
-		const key = action === 'transfer' ? String(line.fromStore ?? '') : String(line.supplier ?? '');
-		groups.set(key, [...(groups.get(key) ?? []), line]);
-	}
-	return [...groups.entries()].map(([key, groupedLines]) => ({ key, lines: groupedLines }));
-}
 
 const stockEntries = (item: { stocks: Record<string, number> }): Array<[string, number]> =>
 	Object.entries(item.stocks ?? {}).filter(([, qty]) => Number(qty) > 0).sort((a, b) => b[1] - a[1]);
