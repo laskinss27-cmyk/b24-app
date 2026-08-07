@@ -4,7 +4,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, renameDealStage, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, createDealQuoteVariant, renameDealQuoteVariant, deleteDealQuoteVariant, updateDealQuoteVariantItems, selectDealQuoteVariant, cancelDealQuoteVariantSelection, assertDealQuoteVariantSelected, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { loadDealOrderInfo } from '../deal-order-info.js';
@@ -34,6 +34,7 @@ import { registerDealCommercialProposalFileRoutes } from './deal-commercial-prop
 import { registerDealCommercialProposalRoute } from './deal-commercial-proposal-route.js';
 import { registerDealPlanExportRoute } from './deal-plan-export-route.js';
 import { registerDealPlanRoute } from './deal-plan-route.js';
+import { registerDealStageRoutes } from './deal-stage-routes.js';
 import { registerDealTechnicalFieldsRoute } from './deal-technical-fields-route.js';
 
 /**
@@ -529,39 +530,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	registerDealPlanRoute(app, clientFrom);
 
-	app.post('/api/deal/stages', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		try {
-			return { ok: true, stages: await listDealStages(erp, dealId) };
-		} catch (err) {
-			app.log.error({ dealId }, `[api/deal/stages] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
-
-	app.post('/api/deal/stage-rename', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; stageId?: unknown; name?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		const stageId = String(b.stageId ?? '').trim();
-		if (!Number.isInteger(dealId) || dealId <= 0 || !stageId) return reply.code(400).send({ ok: false, error: 'некорректный этап' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		try {
-			await assertDealQuoteVariantSelected(erp, dealId);
-			return { ok: true, stages: await renameDealStage(erp, dealId, stageId, String(b.name ?? '')) };
-		} catch (err) {
-			app.log.error({ dealId, stageId }, `[api/deal/stage-rename] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealStageRoutes(app, clientFrom);
 
 	app.post('/api/deal/variants', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
