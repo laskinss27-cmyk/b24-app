@@ -25,6 +25,7 @@ import {
 	purchaseStatus,
 } from './supply-purchase-status.js';
 import { orderSearchValues, searchMatches } from './supply-search-values.js';
+import { MOCK_ORDERS } from './supply-mock-orders.js';
 import { SupplySearch, SupplyStatusPill } from './SupplyOverviewControls.js';
 import {
 	PURCHASE_STAGE_OPTIONS,
@@ -68,94 +69,6 @@ import {
 	type SupplyTransferChild,
 	withTimeout,
 } from './b24.js';
-
-const MOCK_ORDERS: SupplyOrderRow[] = [
-	{
-		name: 'MAT-MR-2026-0001',
-		displayTitle: 'Снабжение · Сделка #36766 · → Максидом Дунайский 64',
-		requestKey: 'MAT-MR-2026-0001@demo',
-		dealId: '36766',
-		dealTitle: '37204_тест ERP',
-		date: '2026-07-10',
-		deadline: '2026-07-17',
-		status: 'Pending',
-		closed: false,
-		toStore: 'Максидом Дунайский 64',
-		note: 'Для монтажа по сделке, привезти одной партией.',
-		items: [
-			{ productId: 16758, itemName: 'IP-камера 4 Мп CTV-IPB2028', qty: 6, note: 'нужно новое, в упаковке', stocks: { Парнас: 2, Офис: 1 } },
-			{ productId: 202, itemName: 'Контроллер СКУД ZKTeco', qty: 4, note: '', stocks: {} },
-		],
-		purchases: [],
-		transfers: [{
-			id: 9001,
-			name: 'Перемещение #36766: Максидом Тельмана 31 → Максидом Дунайский 64',
-			displayTitle: 'Перемещение · Сделка #36766 · по MAT-MR-2026-0001 · Максидом Тельмана 31 → Максидом Дунайский 64',
-			status: 'accepted',
-			fromStore: 'Максидом Тельмана 31',
-			toStore: 'Максидом Дунайский 64',
-			lines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2 }],
-			collectedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2 }],
-			shippedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 2 }],
-			acceptedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 1 }],
-			receivedLines: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', qty: 1 }],
-			shortageLines: [],
-			history: [
-				{ at: '2026-07-14T07:10:00.000Z', status: 'draft', byId: '1858', byName: 'Сергей Ласкин', action: 'created' },
-				{ at: '2026-07-14T07:30:00.000Z', status: 'collected', byId: '101', byName: 'Менеджер точки', action: 'collected', note: 'собрано полностью' },
-				{ at: '2026-07-14T08:00:00.000Z', status: 'in_transit', byId: '101', byName: 'Менеджер точки', action: 'shipped' },
-				{ at: '2026-07-14T09:15:00.000Z', status: 'accepted', byId: '102', byName: 'Менеджер приемки', action: 'accepted', note: 'принято с расхождениями', changes: [{ productId: 16758, name: 'IP-камера 4 Мп CTV-IPB2028', field: 'accepted', from: 0, to: 1 }] },
-			],
-		}],
-	},
-	{
-		name: 'MAT-MR-2026-0002',
-		requestKey: 'MAT-MR-2026-0002@demo',
-		dealId: '36801',
-		dealTitle: 'СКУД офис',
-		date: '2026-07-11',
-		deadline: '2026-07-18',
-		status: 'Pending',
-		closed: false,
-		toStore: 'Измайловский 18Д',
-		note: '',
-		items: [{ productId: 301, itemName: 'Домофон Tantos Prime SD', qty: 1, note: '', stocks: { Офис: 1 } }],
-		purchases: [],
-		transfers: [{
-			id: 9010,
-			name: 'Перемещение #36801: Максидом Московский 131 → Измайловский 18Д',
-			status: 'posted',
-			fromStore: 'Максидом Московский 131',
-			toStore: 'Измайловский 18Д',
-			shipEntry: 'MAT-STE-DEMO-001',
-			receiveEntry: 'MAT-STE-DEMO-002',
-			correctionIds: [9011],
-			lines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 2 }],
-			collectedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 3 }],
-			shippedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 3 }],
-			acceptedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 2 }],
-			receivedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 2 }],
-			shortageLines: [],
-			history: [],
-		}, {
-			id: 9011,
-			name: 'Корректировка #9010: Транзит → Максидом Московский 131',
-			status: 'posted',
-			fromStore: 'Транзит',
-			toStore: 'Максидом Московский 131',
-			receiveEntry: 'MAT-STE-DEMO-003',
-			correctionOf: 9010,
-			correctionKind: 'shortage_return',
-			lines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
-			collectedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
-			shippedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
-			acceptedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
-			receivedLines: [{ productId: 301, name: 'Домофон Tantos Prime SD', qty: 1 }],
-			shortageLines: [],
-			history: [],
-		}],
-	},
-];
 
 type Phase = 'init' | 'denied' | 'manager-link' | 'ready';
 type ViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'inventory';
