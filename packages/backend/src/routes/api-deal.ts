@@ -30,11 +30,10 @@ import {
 	SUPPLY_TYPE_ID,
 	type SupplyCard,
 } from '../deal-supply-cards.js';
-import { buildDealKpDocx } from '../deal-kp-docx.js';
-import { buildDealKpXlsx } from '../deal-kp-xlsx.js';
 import { syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { syncDealServiceSum } from '../deal-service-sum.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
+import { registerDealCommercialProposalFileRoutes } from './deal-commercial-proposal-file-routes.js';
 import { registerDealTechnicalFieldsRoute } from './deal-technical-fields-route.js';
 
 /**
@@ -1033,49 +1032,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// Word-версия КП собирается из уже подготовленных данных /api/deal/kp.
-	// Документ ничего не записывает в сделку: клиент получает обычный .docx для редактирования.
-	app.post('/api/deal/kp-docx', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; kp?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		try {
-			const file = await buildDealKpDocx(b.kp);
-			app.log.info({ dealId }, '[api/deal/kp-docx] ok');
-			return reply
-				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-				.header('Content-Disposition', `attachment; filename="kp-${dealId}.docx"`)
-				.header('Cache-Control', 'no-store')
-				.send(file);
-		} catch (err) {
-			app.log.error({ dealId }, `[api/deal/kp-docx] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
-
-	// Клиентская Excel-версия КП собирается из тех же данных, что Word и PDF.
-	// Складские поля, реализации и внутренние остатки в этот документ не попадают.
-	app.post('/api/deal/kp-xlsx', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; kp?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		try {
-			const file = await buildDealKpXlsx(b.kp);
-			app.log.info({ dealId }, '[api/deal/kp-xlsx] ok');
-			return reply
-				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-				.header('Content-Disposition', `attachment; filename="kp-${dealId}.xlsx"`)
-				.header('Cache-Control', 'no-store')
-				.send(file);
-		} catch (err) {
-			app.log.error({ dealId }, `[api/deal/kp-xlsx] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealCommercialProposalFileRoutes(app, clientFrom);
 
 	// Что уже отгружено по строкам сделки (для колонки «Отгружено» и остатков к отгрузке).
 	app.post('/api/deal/shipped', async (req, reply) => {
