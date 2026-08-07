@@ -10,6 +10,18 @@ import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js
 import { buildDealExportXlsx } from '../deal-export-xlsx.js';
 import { dealExportRows, type ExportPlanLine } from '../deal-export-rows.js';
 import { loadDealOrderInfo } from '../deal-order-info.js';
+import {
+	DEAL_SUPPLY_CREATED_FLAG,
+	listCoreSupplyCards,
+	listSupplyCards,
+	resolveSupplyStore,
+	SUPPLY_CATEGORY_ID,
+	SUPPLY_LIST_FIELD,
+	SUPPLY_NUMBER_FIELD,
+	SUPPLY_STORE_FIELD,
+	SUPPLY_TYPE_ID,
+	type SupplyCard,
+} from '../deal-supply-cards.js';
 import { buildDealKpDocx } from '../deal-kp-docx.js';
 import { buildDealKpXlsx } from '../deal-kp-xlsx.js';
 import { backfillDealFulfillmentSince, ensureDealFulfillmentField, syncDealFulfillmentStatus } from '../deal-fulfillment.js';
@@ -110,78 +122,6 @@ type DealPlanDraftLine = {
 	isService?: boolean;
 };
 
-// ── Снабжение (смарт-процесс «Снабжение», разведка 2026-06-11) ────────────────────────────────
-// Карточки «Поставка № N_<сделка>_<название>», parentId2 = сделка, перечень — текстовое поле.
-const SUPPLY_TYPE_ID = 1110;
-const SUPPLY_CATEGORY_ID = 114;
-const SUPPLY_LIST_FIELD = 'ufCrm38_1777818101'; // перечень оборудования (текст, «Комментарий»)
-const SUPPLY_NUMBER_FIELD = 'ufCrm38_1777817940'; // номер поставки (счётчик в карточках)
-const SUPPLY_STORE_FIELD = 'ufCrm38_1778141770'; // «Склад поставки (приход)» — элемент iblock 60
-const SUPPLY_STORE_IBLOCK = 60;
-const DEAL_SUPPLY_CREATED_FLAG = 'UF_CRM_1777817683'; // галка сделки «Заявка снабжения создана»
-
-/** Элемент справочника складов процесса (iblock 60) по имени склада каталога.
- *  lists-scope может отсутствовать у токена — тогда null (склад уедет строкой в перечень). */
-async function resolveSupplyStore(client: B24Client, storeName: string): Promise<number | null> {
-	if (!storeName) return null;
-	try {
-		const els = await client.call<Array<Record<string, unknown>>>('lists.element.get', {
-			IBLOCK_TYPE_ID: 'lists', IBLOCK_ID: SUPPLY_STORE_IBLOCK,
-		});
-		const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-		const want = norm(storeName);
-		const exact = (els ?? []).find((e) => norm(String(e['NAME'] ?? '')) === want);
-		if (exact) return Number(exact['ID']);
-		const partial = (els ?? []).find((e) => {
-			const n = norm(String(e['NAME'] ?? ''));
-			return n.includes(want) || want.includes(n);
-		});
-		return partial ? Number(partial['ID']) : null;
-	} catch {
-		return null;
-	}
-}
-
-interface SupplyCard {
-	id: number;
-	title: string;
-	stageId: string;
-	source?: 'b24' | 'core';
-	productIds?: number[];
-	date?: string;
-	deadline?: string;
-	toStore?: string;
-	note?: string;
-	items?: Array<{ productId: number; itemName: string; qty: number; note: string }>;
-}
-
-async function listSupplyCards(client: B24Client, dealId: number): Promise<SupplyCard[]> {
-	const res = await client.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
-		entityTypeId: SUPPLY_TYPE_ID,
-		filter: { parentId2: dealId },
-		select: ['id', 'title', 'stageId'],
-		order: { id: 'desc' },
-	});
-	return (res?.items ?? []).map((i) => ({ id: Number(i['id']), title: String(i['title'] ?? ''), stageId: String(i['stageId'] ?? '') }));
-}
-
-async function listCoreSupplyCards(dealId: number): Promise<SupplyCard[]> {
-	const erp = ErpClient.fromEnv();
-	if (!erp) return [];
-	const requests = await listSupplyRequestsForDeal(erp, dealId);
-	return requests.map((r) => ({
-		id: 0,
-		title: `${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`,
-		stageId: `CORE:${r.status || 'Draft'}`,
-		source: 'core',
-		productIds: r.productIds,
-		date: r.date,
-		deadline: r.deadline,
-		toStore: r.toStore,
-		note: r.note,
-		items: r.items,
-	}));
-}
 
 
 export function registerApiDealRoute(app: FastifyInstance): void {
