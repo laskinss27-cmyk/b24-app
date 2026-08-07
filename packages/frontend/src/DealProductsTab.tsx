@@ -23,6 +23,7 @@ import { DealWorkRow } from './DealWorkRow.js';
 import { DealGoodsStatusCell } from './DealGoodsStatusCell.js';
 import { DealGoodsRow } from './DealGoodsRow.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
+import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
@@ -77,7 +78,6 @@ import {
 	isWorkRow,
 	type ProductEnrichment,
 	type DealPlanItem,
-	type DealQuoteVariants,
 	type RealizeCoreGroup,
 	type DealShippedInfo,
 	type StoredDealContractDocument,
@@ -460,7 +460,6 @@ export function DealProductsTab(): JSX.Element {
 function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onReplace: (row: EnrichedRow) => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
 	const { coef } = data;
 	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
-	const variantsPending = data.quoteVariants.enabled && !data.quoteVariants.selectedId;
 	const viewingSelected = Boolean(activeVariant && data.quoteVariants.selectedId === activeVariant.id);
 	const workingMode = !data.quoteVariants.enabled || viewingSelected;
 	const proposalEditable = data.quoteVariants.enabled && Boolean(activeVariant) && !viewingSelected;
@@ -668,7 +667,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			setRemoving(null);
 		}
 	};
-	const variantTotal = (variant: DealQuoteVariants['variants'][number]): number => variant.items.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0);
 	const availableVariantName = (base: string): string => {
 		const names = new Set(data.quoteVariants.variants.map((variant) => variant.name.toLocaleLowerCase('ru-RU')));
 		if (!names.has(base.toLocaleLowerCase('ru-RU'))) return base;
@@ -1116,23 +1114,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 			</div>}
 
-			{data.quoteVariants.enabled && (
-				<section className="deal-variants" aria-label="Варианты коммерческого предложения">
-					<div className="deal-variant-tabs">
-						{data.quoteVariants.variants.map((variant) => {
-							const selectedVariant = data.quoteVariants.selectedId === variant.id;
-							const alternativeVariant = Boolean(data.quoteVariants.selectedId) && !selectedVariant;
-							return <div key={variant.id} className={`deal-variant-tab${activeVariantId === variant.id ? ' active' : ''}${selectedVariant ? ' selected' : ''}`}>
-								<button type="button" className="deal-variant-open" onClick={() => onActiveVariant(variant.id)}>
-									<span><b>{variant.name}</b><small>{variant.items.length} {plural(variant.items.length, 'позиция', 'позиции', 'позиций')} · {rub(variantTotal(variant))}</small></span>
-									<em>{selectedVariant ? 'Основной вариант' : alternativeVariant ? 'Альтернатива' : 'Черновик'}</em>
-								</button>
-							</div>;
-						})}
-					</div>
-					{variantsPending && <div className="deal-variant-notice">До выбора клиента это варианты расчёта. Складские действия и этапы пока недоступны.</div>}
-				</section>
-			)}
+			{data.quoteVariants.enabled && <DealQuoteVariantTabs quoteVariants={data.quoteVariants} activeVariantId={activeVariantId} onActiveVariant={onActiveVariant} />}
 
 			<div className="deal-addbar">
 				<div className="deal-actions">
