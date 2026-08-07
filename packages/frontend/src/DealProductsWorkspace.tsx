@@ -28,6 +28,11 @@ import { useDealNameDialogsState } from './useDealNameDialogsState.js';
 import { useDealProductRowMutationState } from './useDealProductRowMutationState.js';
 import { useDealProductsRefresh } from './useDealProductsRefresh.js';
 import { buildDealDocumentsView } from './deal-documents-view.js';
+import {
+	useDealDefaultRealizationStore,
+	useDealProductRowStores,
+	useDealProductStockExpansion,
+} from './useDealProductStockState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -90,11 +95,11 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		setNotice,
 	});
 	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
-	const [rowStore, setRowStore] = useState<Record<string, number>>({});
+	const { rowStore, setRowStore } = useDealProductRowStores();
 	/** Отмеченные галочкой строки — универсальный выбор для действий: реализация, заказ и дальше. */
 	const { selected, setSelected, isSelected: isSel, toggleSelected: toggleSel } = useDealProductSelection();
 	/** Раскрытые остатки по складам: не распираем товарную строку при наведении. */
-	const [expandedStocks, setExpandedStocks] = useState<Record<string, boolean>>({});
+	const { expandedStocks, setExpandedStocks } = useDealProductStockExpansion();
 	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
 	const [busy, setBusy] = useState(false);
 	const { pendingDraftNames, hasPendingDrafts, setDraftNames } = useDealRealizationDrafts(data.coreReals);
@@ -199,10 +204,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	/** Дефолтный склад строк (UI-выпадайки вверху больше нет — склад выбирается на самой строке).
 	 *  Дефолт = склад-источник сделки (из резервов заказа), если активен; иначе первый склад.
 	 *  Per-row селектор (rowStore) переопределяет его на конкретной строке. */
-	const [realizeStore] = useState<number>(() => {
-		const src = data.sourceStoreId;
-		return src != null && data.stores.some((s) => s.id === src) ? src : (data.stores[0]?.id ?? 0);
-	});
+	const realizeStore = useDealDefaultRealizationStore(data);
 
 	const {
 		realizedForRow,
