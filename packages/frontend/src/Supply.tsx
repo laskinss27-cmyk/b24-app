@@ -4,6 +4,7 @@ import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
+import { SupplySupplierField } from './SupplySupplierField.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
 import {
 	cancelTransfer,
@@ -151,7 +152,6 @@ interface DecisionState {
 type DecisionMap = Record<string, DecisionState[]>;
 
 const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юнона', 'Сатро-Паладин', 'Амиком'];
-const supplierNorm = (name: string): string => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const money = (value: number): string => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(value);
 const requestItemsForOrder = (order: SupplyOrderRow): SupplyOrderItem[] => order.items ?? [];
 const orderStatus = (order: SupplyOrderRow): Exclude<OrderStatusFilter, 'all'> =>
@@ -167,39 +167,6 @@ const makeDecision = (key: string, qty: number): DecisionState => ({
 });
 const decisionsForRow = (decisions: DecisionMap, key: string, qty: number): DecisionState[] => decisions[key] ?? [{ ...makeDecision(key, qty), id: `${key}:initial` }];
 const decisionReady = (decision: DecisionState): boolean => Boolean(decision.action && (decision.action === 'transfer' ? decision.fromStore : decision.supplier.trim()));
-
-function SupplierField({ id, label, value, suppliers, placeholder = 'поставщик', onChange, onCreate }: {
-	id: string;
-	label?: string;
-	value: string;
-	suppliers: string[];
-	placeholder?: string;
-	onChange: (value: string) => void;
-	onCreate: (name: string) => Promise<string>;
-}): JSX.Element {
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState('');
-	const clean = value.trim();
-	const exists = suppliers.some((supplier) => supplierNorm(supplier) === supplierNorm(clean));
-	const canCreate = clean.length >= 2 && clean !== 'Поставщик не выбран' && !exists;
-	const create = async (): Promise<void> => {
-		if (!canCreate || busy) return;
-		setBusy(true);
-		setError('');
-		try { onChange(await onCreate(clean)); }
-		catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-		finally { setBusy(false); }
-	};
-	return (
-		<div className="supply-supplier-field">
-			{label && <label htmlFor={id}>{label}</label>}
-			<input id={id} list={`${id}-list`} value={value} onChange={(event) => { setError(''); onChange(event.target.value); }} placeholder={placeholder} autoComplete="off" />
-			<datalist id={`${id}-list`}>{suppliers.map((supplier) => <option key={supplier} value={supplier} />)}</datalist>
-			{canCreate && <button className="supply-create-supplier" type="button" disabled={busy} onClick={() => void create()}>{busy ? 'Создаю...' : `+ Создать «${clean}»`}</button>}
-			{error && <small className="supply-create-supplier-error">{error}</small>}
-		</div>
-	);
-}
 
 function decisionLinesForOrder(order: SupplyOrderRow, decisions: DecisionMap): SupplyDecisionLine[] {
 	return requestItemsForOrder(order).flatMap((item, index) => {
@@ -639,7 +606,7 @@ function DocumentDetail({ document, suppliers, busy, canDelete, onClose, onDelet
 						<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 					</header>
 					<dl className="supply-document-facts">
-						<div><dt>Поставщик</dt><dd><SupplierField id="supply-document-supplier" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} /></dd></div>
+						<div><dt>Поставщик</dt><dd><SupplySupplierField id="supply-document-supplier" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} /></dd></div>
 						<div><dt>Склад заявки</dt><dd>{order.toStore || 'Не указан'}</dd></div>
 						<div><dt>Ожидаем</dt><dd><input type="date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} /></dd></div>
 						<div><dt>Сумма</dt><dd>{total > 0.01 ? `${money(total)} ₽` : '—'}</dd></div>
@@ -894,7 +861,7 @@ function DecisionRows({
 								</select>
 							)}
 							{decision.action === 'purchase' && (
-								<SupplierField id={`suppliers-${order.name}-${index}-${allocationIndex}`} value={decision.supplier} suppliers={suppliers} onChange={(supplier) => onPatch(decision.id, { supplier })} onCreate={onCreateSupplier} />
+								<SupplySupplierField id={`suppliers-${order.name}-${index}-${allocationIndex}`} value={decision.supplier} suppliers={suppliers} onChange={(supplier) => onPatch(decision.id, { supplier })} onCreate={onCreateSupplier} />
 							)}
 							{!decision.action && <span className="muted">выбери действие</span>}
 						</td>
@@ -1473,7 +1440,7 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onCreateSupplier, onCl
 				<header><div><h2>{documentTitle}</h2><p>Самостоятельный документ без сделки и заявки.</p></div><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></header>
 				<div className="supply-standalone-fields">
 					{kind === 'purchase' ? <>
-						<SupplierField id="standalone-purchase-supplier" label="Поставщик" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} />
+						<SupplySupplierField id="standalone-purchase-supplier" label="Поставщик" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} />
 						<label>Ожидаемая дата<input type="date" value={expectedAt} onChange={(event) => setExpectedAt(event.target.value)} /></label>
 					</> : kind === 'transfer' ? <>
 						<label>Склад отправки<select value={fromStore} onChange={(event) => setFromStore(event.target.value)}><option value="">Выбери склад</option>{stores.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
@@ -1483,7 +1450,7 @@ function StandaloneDocumentModal({ kind, suppliers, mock, onCreateSupplier, onCl
 						<label>Причина<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Брак, недостача, внутренние нужды" /></label>
 					</> : <>
 						<label>Склад оприходования<select value={toStore} onChange={(event) => setToStore(event.target.value)}><option value="">Выбери склад</option>{stores.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-						<SupplierField id="standalone-receipt-supplier" label="Поставщик (необязательно)" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} />
+						<SupplySupplierField id="standalone-receipt-supplier" label="Поставщик (необязательно)" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} />
 					</>}
 				</div>
 				<div className="supply-standalone-product-actions">
