@@ -8,6 +8,7 @@ import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
+import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
@@ -1072,26 +1073,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		}
 		return out;
 	};
-	// Разделяем визуально: блок товаров и блок работ/услуг — полосой-заголовком, чтобы
-	// наглядно было видно, где что (раньше шли вперемешку одним списком).
-	const groupBand = (label: string, list: EnrichedRow[], sum: number): JSX.Element => (
-		<tr className="group-band">
-			<td colSpan={8}>{label} <span className="group-band-count">· {list.length}</span></td>
-			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
-		</tr>
-	);
-	const sectionBand = (title: string, subtitle: string, list: EnrichedRow[], onAddItems?: () => void, onRename?: () => void): JSX.Element => (
-		<tr className="deal-stage-band">
-			<td colSpan={8}>
-				<div className="deal-stage-band-title">
-					<span className="deal-stage-band-heading"><b>{title}</b>{onRename && <button type="button" className="deal-stage-rename" title="Переименовать этап" aria-label={`Переименовать этап «${title}»`} onClick={onRename}>✎</button>}{subtitle && <small>{subtitle}</small>}</span>
-					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить оборудование или работу</button>}
-				</div>
-			</td>
-			<td className="num" colSpan={3}>{rub(list.reduce((sum, row) => sum + dealProductLine(row), 0))}</td>
-		</tr>
-	);
-
 	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
 	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
 	// отдельный документ только с услугами.
@@ -1461,9 +1442,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				<tbody>
 					{summaryView ? (
 						<>
-							{goods.length > 0 && groupBand('Оборудование', goods, sumGoods)}
+							{goods.length > 0 && <DealProductGroupBand label="Оборудование" count={goods.length} sum={sumGoods} />}
 							{goods.flatMap(renderGoodsRows)}
-							{realWorks.length > 0 && groupBand('Работы и услуги', realWorks, sumRealWorks)}
+							{realWorks.length > 0 && <DealProductGroupBand label="Работы и услуги" count={realWorks.length} sum={sumRealWorks} />}
 							{realWorks.map(renderWorkRow)}
 						</>
 					) : (
@@ -1474,10 +1455,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 								const all = [...baseGoods, ...baseWorks];
 								return (
 									<Fragment key="base-deal">
-								{sectionBand(activeVariant && !workingMode ? activeVariant.name : 'Основная сделка', '', all)}
-										{baseGoods.length > 0 && groupBand('Оборудование', baseGoods, baseGoods.reduce((sum, row) => sum + dealProductLine(row), 0))}
+										<DealStageSectionBand title={activeVariant && !workingMode ? activeVariant.name : 'Основная сделка'} subtitle="" rows={all} />
+										{baseGoods.length > 0 && <DealProductGroupBand label="Оборудование" count={baseGoods.length} sum={baseGoods.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
 										{baseGoods.flatMap(renderGoodsRows)}
-										{baseWorks.length > 0 && groupBand('Работы и услуги', baseWorks, baseWorks.reduce((sum, row) => sum + dealProductLine(row), 0))}
+										{baseWorks.length > 0 && <DealProductGroupBand label="Работы и услуги" count={baseWorks.length} sum={baseWorks.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
 										{baseWorks.map(renderWorkRow)}
 									</Fragment>
 								);
@@ -1490,10 +1471,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 								const stageWorks = stageRows.filter((row) => isWorkRow(row.type));
 								return (
 									<Fragment key={stage.id}>
-										{sectionBand(stageName, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows, () => onAddToStage(stage.id, stageName), () => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId: stage.id }); })}
-										{stageGoods.length > 0 && groupBand('Оборудование', stageGoods, stageGoods.reduce((sum, row) => sum + dealProductLine(row), 0))}
+										<DealStageSectionBand title={stageName} subtitle={`${when}${stage.byName ? ` · ${stage.byName}` : ''}`} rows={stageRows} onAddItems={() => onAddToStage(stage.id, stageName)} onRename={() => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId: stage.id }); }} />
+										{stageGoods.length > 0 && <DealProductGroupBand label="Оборудование" count={stageGoods.length} sum={stageGoods.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
 										{stageGoods.flatMap(renderGoodsRows)}
-										{stageWorks.length > 0 && groupBand('Работы и услуги', stageWorks, stageWorks.reduce((sum, row) => sum + dealProductLine(row), 0))}
+										{stageWorks.length > 0 && <DealProductGroupBand label="Работы и услуги" count={stageWorks.length} sum={stageWorks.reduce((sum, row) => sum + dealProductLine(row), 0)} />}
 										{stageWorks.map(renderWorkRow)}
 									</Fragment>
 								);
