@@ -16,8 +16,6 @@ import { DealActionsBar } from './DealActionsBar.js';
 import {
 	DealStageNameDialog,
 	DealVariantNameDialog,
-	type DealStageDialogState,
-	type DealVariantDialogState,
 } from './DealNameDialogs.js';
 import { DealProductsTable } from './DealProductsTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
@@ -26,6 +24,7 @@ import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
 import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
 import { useDealProductSelection } from './useDealProductSelection.js';
 import { useDealDocumentsState } from './useDealDocumentsState.js';
+import { useDealNameDialogsState } from './useDealNameDialogsState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -130,12 +129,20 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	const segmentActionsBlocked = summaryView && data.stages.length > 0;
 	const rowEditable = (row: EnrichedRow): boolean =>
 		tableEditable && !(segmentActionsBlocked && isPlanRow(row));
-	const [variantDialog, setVariantDialog] = useState<DealVariantDialogState | null>(null);
-	const [variantBusy, setVariantBusy] = useState(false);
-	const [variantError, setVariantError] = useState<string | null>(null);
-	const [stageDialog, setStageDialog] = useState<DealStageDialogState | null>(null);
-	const [stageBusy, setStageBusy] = useState(false);
-	const [stageError, setStageError] = useState<string | null>(null);
+	const {
+		variantDialog,
+		setVariantDialog,
+		variantBusy,
+		setVariantBusy,
+		variantError,
+		setVariantError,
+		stageDialog,
+		setStageDialog,
+		stageBusy,
+		setStageBusy,
+		stageError,
+		setStageError,
+	} = useDealNameDialogsState();
 	const [refreshing, setRefreshing] = useState(false);
 	const { exportBusy, exportXlsx, exportDocx } = useDealProposalExports({ dealId, variantId: documentVariantId, dev, onNotice: setNotice });
 	const [showContract, setShowContract] = useState(false);
