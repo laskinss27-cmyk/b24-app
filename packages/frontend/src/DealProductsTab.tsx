@@ -29,6 +29,12 @@ import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import { DealSupplyOrderModal } from './DealSupplyOrderModal.js';
 import { DealDocumentMenu } from './DealDocumentMenu.js';
 import {
+	DealStageNameDialog,
+	DealVariantNameDialog,
+	type DealStageDialogState,
+	type DealVariantDialogState,
+} from './DealNameDialogs.js';
+import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
 	dealProductAvailabilityStatus,
@@ -565,10 +571,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const segmentActionsBlocked = summaryView && data.stages.length > 0;
 	const rowEditable = (row: EnrichedRow): boolean =>
 		tableEditable && !(segmentActionsBlocked && isPlanRow(row));
-	const [variantDialog, setVariantDialog] = useState<null | { kind: 'create' | 'copy' | 'rename'; value: string }>(null);
+	const [variantDialog, setVariantDialog] = useState<DealVariantDialogState | null>(null);
 	const [variantBusy, setVariantBusy] = useState(false);
 	const [variantError, setVariantError] = useState<string | null>(null);
-	const [stageDialog, setStageDialog] = useState<null | { kind: 'create' | 'rename'; value: string; stageId?: string }>(null);
+	const [stageDialog, setStageDialog] = useState<DealStageDialogState | null>(null);
 	const [stageBusy, setStageBusy] = useState(false);
 	const [stageError, setStageError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
@@ -1294,28 +1300,27 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			)}
 
 			{variantDialog && (
-				<div className="deal-supply-order-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !variantBusy) setVariantDialog(null); }}>
-					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={variantDialog.kind === 'rename' ? 'Название варианта' : variantDialog.kind === 'copy' ? 'Копировать вариант' : 'Добавить вариант'}>
-						<header><h2>{variantDialog.kind === 'rename' ? 'Переименовать вариант' : variantDialog.kind === 'copy' ? 'Копировать вариант' : data.quoteVariants.enabled ? 'Добавить вариант' : 'Варианты КП'}</h2><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>×</button></header>
-						<label><span>Название</span><input autoFocus maxLength={80} value={variantDialog.value} disabled={variantBusy} onChange={(event) => { setVariantDialog({ ...variantDialog, value: event.target.value }); setVariantError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') void submitVariantDialog(); }} /></label>
-						{variantDialog.kind === 'create' && <p>{data.quoteVariants.enabled ? 'Создастся новый вариант. Товары и услуги добавьте после создания.' : 'Текущий состав сделки станет первым вариантом.'}</p>}
-						{variantDialog.kind === 'copy' && <p>Состав варианта «{activeVariant?.name ?? ''}» будет скопирован.</p>}
-						{variantError && <div className="deal-supply-order-error">{variantError}</div>}
-						<footer><button type="button" disabled={variantBusy} onClick={() => setVariantDialog(null)}>Отмена</button><button className="primary" type="button" disabled={variantBusy || !variantDialog.value.trim()} onClick={() => void submitVariantDialog()}>{variantBusy ? 'Сохраняю…' : 'Сохранить'}</button></footer>
-					</section>
-				</div>
+				<DealVariantNameDialog
+					dialog={variantDialog}
+					quoteVariantsEnabled={data.quoteVariants.enabled}
+					activeVariantName={activeVariant?.name ?? ''}
+					busy={variantBusy}
+					error={variantError}
+					onClose={() => setVariantDialog(null)}
+					onValueChange={(value) => { setVariantDialog({ ...variantDialog, value }); setVariantError(null); }}
+					onSubmit={() => void submitVariantDialog()}
+				/>
 			)}
 
 			{stageDialog && (
-				<div className="deal-supply-order-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !stageBusy) setStageDialog(null); }}>
-					<section className="deal-variant-modal" role="dialog" aria-modal="true" aria-label={stageDialog.kind === 'rename' ? 'Переименовать этап' : 'Добавить этап'}>
-						<header><h2>{stageDialog.kind === 'rename' ? 'Переименовать этап' : 'Новый этап'}</h2><button type="button" disabled={stageBusy} onClick={() => setStageDialog(null)}>×</button></header>
-						<label><span>Название</span><input autoFocus maxLength={80} value={stageDialog.value} disabled={stageBusy} onChange={(event) => { setStageDialog({ ...stageDialog, value: event.target.value }); setStageError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') void submitStageDialog(); }} /></label>
-						{stageDialog.kind === 'create' && <p>После сохранения выбери оборудование и работы для этого этапа.</p>}
-						{stageError && <div className="deal-supply-order-error">{stageError}</div>}
-						<footer><button type="button" disabled={stageBusy} onClick={() => setStageDialog(null)}>Отмена</button><button className="primary" type="button" disabled={stageBusy || !stageDialog.value.trim()} onClick={() => void submitStageDialog()}>{stageBusy ? 'Сохраняю…' : stageDialog.kind === 'create' ? 'Продолжить' : 'Сохранить'}</button></footer>
-					</section>
-				</div>
+				<DealStageNameDialog
+					dialog={stageDialog}
+					busy={stageBusy}
+					error={stageError}
+					onClose={() => setStageDialog(null)}
+					onValueChange={(value) => { setStageDialog({ ...stageDialog, value }); setStageError(null); }}
+					onSubmit={() => void submitStageDialog()}
+				/>
 			)}
 
 		</div>
