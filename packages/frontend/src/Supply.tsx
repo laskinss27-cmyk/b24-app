@@ -16,6 +16,7 @@ import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
 import { useSupplyAccessState } from './useSupplyAccessState.js';
+import { useSupplyDeepLinks } from './useSupplyDeepLinks.js';
 import { useSupplyDecisionActions } from './useSupplyDecisionActions.js';
 import { useSupplyOpenDocumentActions } from './useSupplyOpenDocumentActions.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
@@ -51,7 +52,6 @@ export function Supply(): JSX.Element {
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
 	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', inventory: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
-	const [deepLinkHandled, setDeepLinkHandled] = useState(false);
 	const {
 		phase,
 		suppliers,
@@ -72,6 +72,15 @@ export function Supply(): JSX.Element {
 		defaultSuppliers: DEFAULT_SUPPLIERS,
 		setOrders,
 		setView,
+	});
+	useSupplyDeepLinks({
+		contextTransferId: ctx.transferId,
+		dealSupplyId,
+		loading,
+		orders,
+		setView,
+		setOpenDocument,
+		setExpanded,
 	});
 
 	useEffect(() => {
@@ -164,30 +173,6 @@ export function Supply(): JSX.Element {
 		currentUserId,
 		reload,
 	});
-
-	useEffect(() => {
-		if (loading || deepLinkHandled) return;
-		const queryId = Number(new URLSearchParams(window.location.search).get('transfer') ?? 0);
-		const transferId = Number(ctx.transferId ?? queryId);
-		if (Number.isInteger(transferId) && transferId > 0) {
-			for (const order of orders) {
-				const transfer = (order.transfers ?? []).find((row) => row.id === transferId);
-				if (!transfer) continue;
-				setView('logistics');
-				setOpenDocument({ kind: 'transfer', order, transfer });
-				break;
-			}
-		}
-		setDeepLinkHandled(true);
-	}, [ctx.transferId, deepLinkHandled, loading, orders]);
-
-	useEffect(() => {
-		if (loading || dealSupplyId <= 0) return;
-		const order = orders.find((item) => Number(item.dealId) === dealSupplyId);
-		if (!order) return;
-		setView('orders');
-		setExpanded(order.name);
-	}, [dealSupplyId, loading, orders]);
 
 	const requestOrders = useMemo(() => orders.filter((order) => !order.standalone), [orders]);
 	const sortedOrders = useMemo(() => [...requestOrders].sort((a, b) => {
