@@ -10,6 +10,16 @@ import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
+	dealProductBasePrice,
+	dealProductDiscountPercent,
+	dealProductFinalUnit,
+	dealProductLine,
+	dealProductMarkupText,
+	isPlanRow,
+	isVariantRow,
+	type DealProductRowEdit,
+} from './deal-product-row-values.js';
+import {
 	fetchStores,
 	fetchProfitCoef,
 	fetchStockPreferCore,
@@ -434,37 +444,20 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const proposalEditable = data.quoteVariants.enabled && Boolean(activeVariant) && !viewingSelected;
 	const tableEditable = workingMode || proposalEditable;
 	const alternativeView = data.quoteVariants.enabled && Boolean(data.quoteVariants.selectedId) && !viewingSelected;
-	const line = (r: EnrichedRow): number => r.price * r.quantity;
-	/** Скидка строки в % (по сохранённой скидке за единицу): база = итог + скидка. */
-	const discPct = (r: EnrichedRow): number => { const base = r.price + r.discountSum; return base > 0 && r.discountSum > 0 ? Math.round((r.discountSum / base) * 1000) / 10 : 0; };
-
 	// ── Инлайн-правка строки: кол-во · базовая цена · скидка % (сохранение при уходе фокуса из строки) ──
-	const baseOf = (r: EnrichedRow): number => r.price + r.discountSum;
-	const editOf = (r: EnrichedRow): { qty: string; price: string; disc: string } =>
-		rowEdits[r.id] ?? { qty: String(r.quantity), price: String(baseOf(r)), disc: String(discPct(r)) };
-	const setEdit = (r: EnrichedRow, patch: Partial<{ qty: string; price: string; disc: string }>): void =>
+	const editOf = (r: EnrichedRow): DealProductRowEdit =>
+		rowEdits[r.id] ?? { qty: String(r.quantity), price: String(dealProductBasePrice(r)), disc: String(dealProductDiscountPercent(r)) };
+	const setEdit = (r: EnrichedRow, patch: Partial<DealProductRowEdit>): void =>
 		setRowEdits((m) => ({ ...m, [r.id]: { ...editOf(r), ...patch } }));
 	const clearEdit = (id: string): void => setRowEdits((m) => { const n = { ...m }; delete n[id]; return n; });
-	/** Итоговая цена за единицу из текущих правок (база · скидка). */
-	const finalUnitOf = (r: EnrichedRow): number => { const e = editOf(r); const p = Number(e.price.replace(',', '.')) || 0; const d = Number(e.disc.replace(',', '.')) || 0; return Math.round(p * (1 - d / 100) * 100) / 100; };
-	/** Наценка относительно закупочной цены; считаем от фактической цены продажи после скидки. */
-	const markupPercentOf = (r: EnrichedRow): number | null => {
-		if (r.purchasingPrice == null || r.purchasingPrice <= 0) return null;
-		return Math.round(((finalUnitOf(r) - r.purchasingPrice) / r.purchasingPrice) * 1000) / 10;
-	};
-	const markupTextOf = (r: EnrichedRow): string => {
-		const value = markupPercentOf(r);
-		return value == null ? '—' : `${value.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
-	};
-	// Строка ТОВАРА — из плана ядра (id вида 'plan-<productId>'); работы — из Б24 (числовой rowId).
-	const isPlanRow = (r: EnrichedRow): boolean => String(r.id).startsWith('plan-');
-	const isVariantRow = (r: EnrichedRow): boolean => String(r.id).startsWith('variant-');
+	const finalUnitOf = (r: EnrichedRow): number => dealProductFinalUnit(editOf(r));
+	const markupTextOf = (r: EnrichedRow): string => dealProductMarkupText(r, editOf(r));
 	const saveRow = async (r: EnrichedRow): Promise<void> => {
 		if (dealId == null || savingRow) return;
 		const e = editOf(r);
 		const q = Number(e.qty.replace(',', '.')), p = Number(e.price.replace(',', '.')), d = Number(e.disc.replace(',', '.'));
 		if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p) || p < 0 || !Number.isFinite(d) || d < 0 || d > 100) { clearEdit(r.id); return; }
-		if (q === r.quantity && Math.abs(p - baseOf(r)) < 0.005 && Math.abs(d - discPct(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
+		if (q === r.quantity && Math.abs(p - dealProductBasePrice(r)) < 0.005 && Math.abs(d - dealProductDiscountPercent(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
 		setSavingRow(r.id); setNotice(null);
 		try {
 			if (proposalEditable && activeVariantId && isVariantRow(r)) {
@@ -508,7 +501,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	/** id удаляемой строки (блокирует её кнопку на время запроса). */
 	const [removing, setRemoving] = useState<string | null>(null);
 	/** Инлайн-правки строк: rowId → {кол-во, базовая цена, скидка %} (строками, пока редактируется). */
-	const [rowEdits, setRowEdits] = useState<Record<string, { qty: string; price: string; disc: string }>>({});
+	const [rowEdits, setRowEdits] = useState<Record<string, DealProductRowEdit>>({});
 	/** rowId, по которому идёт сохранение правки (блокирует поля). */
 	const [savingRow, setSavingRow] = useState<string | null>(null);
 	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
@@ -834,8 +827,8 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const pricedWorks = workingMode && data.stages.length
 		? stagedPlanRows.filter((row) => isWorkRow(row.type))
 		: realWorks;
-	const sumRealWorks = pricedWorks.reduce((a, r) => a + line(r), 0);
-	const sumGoods = pricedGoods.reduce((a, r) => a + line(r), 0);
+	const sumRealWorks = pricedWorks.reduce((a, r) => a + dealProductLine(r), 0);
+	const sumGoods = pricedGoods.reduce((a, r) => a + dealProductLine(r), 0);
 	const sumWorks = sumRealWorks;
 
 	const total = sumGoods + sumWorks;
@@ -1095,7 +1088,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить оборудование или работу</button>}
 				</div>
 			</td>
-			<td className="num" colSpan={3}>{rub(list.reduce((sum, row) => sum + line(row), 0))}</td>
+			<td className="num" colSpan={3}>{rub(list.reduce((sum, row) => sum + dealProductLine(row), 0))}</td>
 		</tr>
 	);
 
@@ -1482,9 +1475,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 								return (
 									<Fragment key="base-deal">
 								{sectionBand(activeVariant && !workingMode ? activeVariant.name : 'Основная сделка', '', all)}
-										{baseGoods.length > 0 && groupBand('Оборудование', baseGoods, baseGoods.reduce((sum, row) => sum + line(row), 0))}
+										{baseGoods.length > 0 && groupBand('Оборудование', baseGoods, baseGoods.reduce((sum, row) => sum + dealProductLine(row), 0))}
 										{baseGoods.flatMap(renderGoodsRows)}
-										{baseWorks.length > 0 && groupBand('Работы и услуги', baseWorks, baseWorks.reduce((sum, row) => sum + line(row), 0))}
+										{baseWorks.length > 0 && groupBand('Работы и услуги', baseWorks, baseWorks.reduce((sum, row) => sum + dealProductLine(row), 0))}
 										{baseWorks.map(renderWorkRow)}
 									</Fragment>
 								);
@@ -1498,9 +1491,9 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 								return (
 									<Fragment key={stage.id}>
 										{sectionBand(stageName, `${when}${stage.byName ? ` · ${stage.byName}` : ''}`, stageRows, () => onAddToStage(stage.id, stageName), () => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId: stage.id }); })}
-										{stageGoods.length > 0 && groupBand('Оборудование', stageGoods, stageGoods.reduce((sum, row) => sum + line(row), 0))}
+										{stageGoods.length > 0 && groupBand('Оборудование', stageGoods, stageGoods.reduce((sum, row) => sum + dealProductLine(row), 0))}
 										{stageGoods.flatMap(renderGoodsRows)}
-										{stageWorks.length > 0 && groupBand('Работы и услуги', stageWorks, stageWorks.reduce((sum, row) => sum + line(row), 0))}
+										{stageWorks.length > 0 && groupBand('Работы и услуги', stageWorks, stageWorks.reduce((sum, row) => sum + dealProductLine(row), 0))}
 										{stageWorks.map(renderWorkRow)}
 									</Fragment>
 								);
