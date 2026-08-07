@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
-import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
@@ -38,6 +37,11 @@ import { createDealWorkRowRenderer } from './deal-work-row-renderer.js';
 import { createDealGoodsRowRenderer } from './deal-goods-row-renderer.js';
 import { createDealProductRowContext } from './deal-product-row-context.js';
 import {
+	DealProductsPicker,
+	type DealProductPickerRequest,
+	type DealProductReplacement,
+} from './DealProductsPicker.js';
+import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
 	requestB24FitWindow,
@@ -48,8 +52,6 @@ import {
 	type DealProductRowEdit,
 } from './deal-product-row-values.js';
 import {
-	addProductsToDeal,
-	replaceDealPlanProduct,
 	setupDealFulfillment,
 	openSupplyCard,
 	call,
@@ -66,14 +68,8 @@ type State =
 export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
 	const [state, setState] = useState<State>({ phase: 'init' });
-	const [adding, setAdding] = useState<
-		| { kind: 'deal' }
-		| { kind: 'variant'; variantId: string; variantName: string }
-		| { kind: 'new-stage'; stageName: string }
-		| { kind: 'stage'; stageId: string; stageName: string }
-		| null
-	>(null);
-	const [replacing, setReplacing] = useState<{ productId: number; name: string } | null>(null);
+	const [adding, setAdding] = useState<DealProductPickerRequest | null>(null);
+	const [replacing, setReplacing] = useState<DealProductReplacement | null>(null);
 	const [printKind, setPrintKind] = useState<DealPrintKind | null>(null);
 	const [kpVariantId, setKpVariantId] = useState<string | null>(null);
 	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
@@ -198,43 +194,15 @@ export function DealProductsTab(): JSX.Element {
 
 	// «Добавить товар» → открываем «Базу» как страницу-каталог (пикер). «Готово» → пачкой в сделку.
 	if ((adding || replacing) && ctx.dealId != null) {
-		const dealId = ctx.dealId;
-		const isNewStage = adding?.kind === 'new-stage';
-		const isExistingStage = adding?.kind === 'stage';
-		const isVariant = adding?.kind === 'variant';
 		return (
-			<ProductBase
-				picker={{
-					title: replacing
-						? `Заменить «${replacing.name}»`
-						: isVariant && adding?.kind === 'variant'
-						? `Добавить в вариант «${adding.variantName}»`
-						: isNewStage && adding?.kind === 'new-stage'
-						? `Новый этап «${adding.stageName}»`
-						: isExistingStage && adding?.kind === 'stage'
-							? `Добавить в этап «${adding.stageName}»`
-							: `Добавить товар в сделку #${dealId}`,
-					...(replacing ? { kindFilter: 'goods' as const } : {}),
-					onCancel: () => { setAdding(null); setReplacing(null); },
-					onDone: async (items) => {
-						if (replacing) {
-							if (items.length !== 1) throw new Error('Для замены выберите ровно один товар.');
-							const item = items[0]!;
-							await replaceDealPlanProduct(dealId, replacing.productId, { productId: item.productId, name: item.name });
-							setReplacing(null);
-							await reload();
-							return;
-						}
-						if (!adding) return;
-						await addProductsToDeal(
-							dealId,
-							items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price, name: i.name, isService: Boolean(i.isService) })),
-							{ stage: isNewStage, ...(isNewStage ? { stageName: adding.stageName } : {}), ...(isExistingStage ? { stageId: adding.stageId } : {}), ...(isVariant ? { variantId: adding.variantId } : {}) },
-						);
-						setAdding(null);
-						await reload();
-					},
-				}}
+			<DealProductsPicker
+				dealId={ctx.dealId}
+				adding={adding}
+				replacing={replacing}
+				onCancel={() => { setAdding(null); setReplacing(null); }}
+				onAdded={() => setAdding(null)}
+				onReplaced={() => setReplacing(null)}
+				onReload={reload}
 			/>
 		);
 	}
