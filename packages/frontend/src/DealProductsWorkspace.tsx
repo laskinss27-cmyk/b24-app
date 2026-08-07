@@ -21,6 +21,7 @@ import {
 } from './DealNameDialogs.js';
 import { DealProductsTable } from './DealProductsTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
+import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -48,12 +49,15 @@ import {
 } from './b24.js';
 
 export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onReplace: (row: EnrichedRow) => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
-	const activeVariant = data.quoteVariants.variants.find((variant) => variant.id === activeVariantId) ?? null;
-	const viewingSelected = Boolean(activeVariant && data.quoteVariants.selectedId === activeVariant.id);
-	const workingMode = !data.quoteVariants.enabled || viewingSelected;
-	const proposalEditable = data.quoteVariants.enabled && Boolean(activeVariant) && !viewingSelected;
-	const tableEditable = workingMode || proposalEditable;
-	const alternativeView = data.quoteVariants.enabled && Boolean(data.quoteVariants.selectedId) && !viewingSelected;
+	const {
+		activeVariant,
+		viewingSelected,
+		workingMode,
+		proposalEditable,
+		tableEditable,
+		alternativeView,
+		documentVariantId,
+	} = buildDealProductsWorkspaceMode(data, activeVariantId);
 	// Реализация — документ В ЯДРЕ (Delivery Note), а не в Битриксе (уходим от всех стен sale.order/
 	// shipment). Склад теперь НАШ: выбирается на каждой строке (селектор), пишется прямо в документ
 	// ядра. Реализация группируется ПО СКЛАДАМ — один Delivery Note на склад. Что уже реализовано
@@ -124,7 +128,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	const [stageBusy, setStageBusy] = useState(false);
 	const [stageError, setStageError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
-	const documentVariantId = activeVariantId && activeVariantId !== data.quoteVariants.selectedId ? activeVariantId : undefined;
 	const { exportBusy, exportXlsx, exportDocx } = useDealProposalExports({ dealId, variantId: documentVariantId, dev, onNotice: setNotice });
 	const [showContract, setShowContract] = useState(false);
 	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
