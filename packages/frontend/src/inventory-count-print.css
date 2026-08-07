@@ -1,0 +1,39 @@
+/* ── Печать: лист для обхода с ручкой (по умолчанию с учётом) ──────────────── */
+@media print {
+	.inv-toolbar,
+	.inv-actions,
+	.inv footer,
+	.dev-banner,
+	.beta-banner,
+	.count-photo,
+	.count-nums .diff,
+	.linklike {
+		display: none !important;
+	}
+	.group-head {
+		position: static;
+		background: none;
+		border-bottom: 1px solid #000;
+	}
+	.count-row {
+		border-bottom: 1px solid #ccc;
+		padding: 6px 0;
+		break-inside: avoid;
+	}
+	.count-nums .book {
+		color: #000;
+	}
+	.count-input {
+		width: 80px;
+		height: 26px;
+		border: 1px solid #000;
+		background: none;
+	}
+	.count-comment {
+		width: 100%;
+		border: 0;
+		border-bottom: 1px solid #777;
+		border-radius: 0;
+		background: none;
+	}
+}
