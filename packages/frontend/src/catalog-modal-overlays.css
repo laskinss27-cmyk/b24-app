@@ -1,0 +1,14 @@
+.new-product-overlay,
+.catalog-price-overlay,
+.catalog-product-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 1400;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	overflow: auto;
+	box-sizing: border-box;
+	padding: 44px 20px;
+	background: rgba(28, 38, 54, 0.48);
+}
