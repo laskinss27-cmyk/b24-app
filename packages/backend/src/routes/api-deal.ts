@@ -4,7 +4,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureRealizeEntity, ensureTransfersEntity, REALIZE_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appendDealStage, appendDealStageItems, updateDealStageItem, removeDealStageItem, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, updateDealQuoteVariantItems, assertDealQuoteVariantSelected, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem } from '../erp/operations.js';
+import { appendDealStage, appendDealStageItems, calculateDealPlanTotal, createRealizationDraft, fetchErpStocksFor, submitRealization, listDealRealizations, createClientReturns, reduceDealPlanForReturns, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listSupplyRequestsForDeal, listDealQuoteVariants, updateDealQuoteVariantItems, assertDealQuoteVariantSelected, syncSupplyRequestQuantitiesFromDeal, replaceDealPlanSupplyProduct, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { loadDealOrderInfo } from '../deal-order-info.js';
@@ -520,80 +520,9 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	registerDealPlanRoute(app, clientFrom);
 
-	registerDealStageRoutes(app, clientFrom);
+	registerDealStageRoutes(app, clientFrom, syncDealTechnicalFields);
 
 	registerDealQuoteVariantRoutes(app, clientFrom, syncDealTechnicalFields);
-
-	app.post('/api/deal/stage-item-update', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; stageId?: unknown; productId?: unknown; quantity?: unknown; price?: unknown; discountPercent?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		const dealId = Number(b.dealId);
-		const stageId = String(b.stageId ?? '').trim();
-		const productId = Number(b.productId);
-		const quantity = Number(b.quantity);
-		const price = Number(b.price);
-		const discountPercent = Number(b.discountPercent);
-		if (!Number.isInteger(dealId) || dealId <= 0 || !stageId || !Number.isInteger(productId) || productId <= 0
-			|| !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0
-			|| !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
-			return reply.code(400).send({ ok: false, error: 'некорректные данные строки этапа' });
-		}
-		try {
-			await assertDealQuoteVariantSelected(erp, dealId);
-			const previousStage = (await listDealStages(erp, dealId)).find((stage) => stage.id === stageId);
-			const previous = previousStage?.items.find((line) => line.productId === productId);
-			if (!previous) throw new Error('позиция этапа не найдена');
-			const previousFinalPrice = Math.round(previous.price * (1 - (previous.discountPercent ?? 0) / 100) * 100) / 100;
-			const nextFinalPrice = Math.round(price * (1 - discountPercent / 100) * 100) / 100;
-			const priceChanged = Math.abs(nextFinalPrice - previousFinalPrice) >= 0.005;
-			if (priceChanged) {
-				await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: `stage:${stageId}`, rate: nextFinalPrice }]);
-			}
-			try {
-				await updateDealStageItem(erp, dealId, stageId, productId, quantity, price, discountPercent);
-			} catch (error) {
-				if (priceChanged) {
-					await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: `stage:${stageId}`, rate: previousFinalPrice }]);
-				}
-				throw error;
-			}
-			const total = await calculateDealPlanTotal(erp, dealId);
-			await setDealB24Service(client, dealId, total);
-			await syncDealTechnicalFields(client, erp, dealId);
-			return { ok: true, total };
-		} catch (err) {
-			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-update] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
-
-	app.post('/api/deal/stage-item-remove', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; stageId?: unknown; productId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
-		const dealId = Number(b.dealId);
-		const stageId = String(b.stageId ?? '').trim();
-		const productId = Number(b.productId);
-		if (!Number.isInteger(dealId) || dealId <= 0 || !stageId || !Number.isInteger(productId) || productId <= 0) {
-			return reply.code(400).send({ ok: false, error: 'некорректные данные строки этапа' });
-		}
-		try {
-			await assertDealQuoteVariantSelected(erp, dealId);
-			await removeDealStageItem(erp, dealId, stageId, productId);
-			const total = await calculateDealPlanTotal(erp, dealId);
-			await setDealB24Service(client, dealId, total);
-			await syncDealTechnicalFields(client, erp, dealId);
-			return { ok: true, total };
-		} catch (err) {
-			app.log.error({ dealId, stageId, productId }, `[api/deal/stage-item-remove] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
 
 	// ПЕРЕЗАПИСАТЬ состав плана сделки целиком (из вкладки: правка кол-ва/цены, удаление строк) →
 	// затем пересчитать служебную строку с общей суммой в Б24. items=[] → план пуст и Б24-строки очищаются.
