@@ -38,6 +38,7 @@ import { registerDealPlanRoute } from './deal-plan-route.js';
 import { registerDealPlanUpdateRoute } from './deal-plan-update-route.js';
 import { registerDealQuoteVariantRoutes } from './deal-quote-variant-routes.js';
 import { registerDealStageRoutes } from './deal-stage-routes.js';
+import { registerDealSupplyRoutes } from './deal-supply-routes.js';
 import { registerDealTechnicalFieldsRoute } from './deal-technical-fields-route.js';
 
 /**
@@ -535,36 +536,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	registerDealCommercialProposalRoute(app, clientFrom);
 	registerDealCommercialProposalFileRoutes(app, clientFrom);
 
-	// Что уже отгружено по строкам сделки (для колонки «Отгружено» и остатков к отгрузке).
-	app.post('/api/deal/shipped', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		try {
-			const [info, b24Supply, coreSupply] = await Promise.all([
-				loadDealOrderInfo(client, dealId),
-				listSupplyCards(client, dealId).catch(() => [] as SupplyCard[]),
-				listCoreSupplyCards(dealId).catch(() => [] as SupplyCard[]),
-			]);
-			const supply = [...coreSupply, ...b24Supply];
-			return {
-				ok: true,
-				orderId: info.orderId,
-				shipped: Object.fromEntries(info.shipped),
-				reserves: Object.fromEntries(info.reserves),
-				shipments: info.shipments,
-				payment: info.payment,
-				sourceStoreId: info.sourceStoreId,
-				supply,
-				rows: [],
-			};
-		} catch (err) {
-			app.log.error({ dealId }, `[api/deal/shipped] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealSupplyRoutes(app, clientFrom);
 
 	// Товар «нет на складах» → в снабжение. Дополняем перечень существующей заявки сделки
 	// или создаём карточку «Снабжение» с точным перечнем. Карточку создаём САМИ (робот портала
