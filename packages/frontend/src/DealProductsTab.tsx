@@ -40,6 +40,7 @@ import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
+import { createDealStageActions } from './deal-stage-actions.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -70,7 +71,6 @@ import {
 	replaceDealPlanProduct,
 	updateDealStageItem,
 	removeDealStageItem,
-	renameDealStage,
 	createDealSupplyRequest,
 	realizeCoreDraft,
 	realizeCoreSubmit,
@@ -431,6 +431,16 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		setVariantBusy,
 		setVariantError,
 	});
+	const { submitStageDialog } = createDealStageActions({
+		dealId,
+		stageDialog,
+		stageBusy,
+		onStage,
+		onReload,
+		setStageDialog,
+		setStageBusy,
+		setStageError,
+	});
 	/** Дефолтный склад строк (UI-выпадайки вверху больше нет — склад выбирается на самой строке).
 	 *  Дефолт = склад-источник сделки (из резервов заказа), если активен; иначе первый склад.
 	 *  Per-row селектор (rowStore) переопределяет его на конкретной строке. */
@@ -487,24 +497,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		} finally {
 			setRemoving(null);
 		}
-	};
-	const submitStageDialog = async (): Promise<void> => {
-		if (!stageDialog || stageBusy) return;
-		const name = stageDialog.value.trim();
-		if (!name) { setStageError('Укажи название этапа.'); return; }
-		if (stageDialog.kind === 'create') {
-			setStageDialog(null);
-			onStage(name);
-			return;
-		}
-		if (dealId == null || !stageDialog.stageId) return;
-		setStageBusy(true); setStageError(null);
-		try {
-			await renameDealStage(dealId, stageDialog.stageId, name);
-			setStageDialog(null);
-			await onReload();
-		} catch (error) { setStageError(String(error instanceof Error ? error.message : error)); }
-		finally { setStageBusy(false); }
 	};
 	const {
 		goods,
