@@ -42,10 +42,12 @@ import {
 	type DealProductReplacement,
 } from './DealProductsPicker.js';
 import {
-	PRODUCT_PICKER_MIN_HEIGHT,
-	dealContentHeight,
 	requestB24FitWindow,
 } from './deal-products-placement-sizing.js';
+import {
+	useDealProductsLoadedPlacementFit,
+	useDealProductsPlacementFrame,
+} from './useDealProductsPlacementSizing.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	isPlanRow,
@@ -74,44 +76,7 @@ export function DealProductsTab(): JSX.Element {
 	const [kpVariantId, setKpVariantId] = useState<string | null>(null);
 	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
-	useEffect(() => {
-		if (!ctx.__mock) {
-			document.documentElement.classList.add('deal-placement-html');
-			document.body.classList.add('deal-placement-body');
-		}
-		requestB24FitWindow(80);
-		return () => {
-			document.documentElement.classList.remove('deal-placement-html');
-			document.body.classList.remove('deal-placement-body');
-		};
-	}, [ctx.__mock]);
-
-	useEffect(() => {
-		if (ctx.__mock || !window.BX24 || typeof ResizeObserver === 'undefined') return;
-		const root = document.getElementById('root');
-		if (!root) return;
-		let timer: number | null = null;
-		let lastHeight = 0;
-		const syncHeight = (): void => {
-			if (timer != null) window.clearTimeout(timer);
-			timer = window.setTimeout(() => {
-				timer = null;
-				const height = dealContentHeight(adding ? PRODUCT_PICKER_MIN_HEIGHT : 0);
-				if (height <= 0 || Math.abs(height - lastHeight) < 2) return;
-				lastHeight = height;
-				try { window.BX24?.resizeWindow(document.documentElement.clientWidth, height); } catch { /* placement closed */ }
-			}, 80);
-		};
-		const observer = new ResizeObserver(syncHeight);
-		observer.observe(root);
-		window.addEventListener('resize', syncHeight);
-		syncHeight();
-		return () => {
-			observer.disconnect();
-			window.removeEventListener('resize', syncHeight);
-			if (timer != null) window.clearTimeout(timer);
-		};
-	}, [adding, replacing, ctx.__mock]);
+	useDealProductsPlacementFrame({ mock: ctx.__mock, adding, replacing });
 
 	useEffect(() => {
 		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
@@ -157,13 +122,7 @@ export function DealProductsTab(): JSX.Element {
 		});
 	}, [ctx]);
 
-	// Два отложенных замера после загрузки страхуют вкладку от поздних шрифтов и стилей.
-	// Последующие изменения содержимого ловит ограниченный по фактической высоте observer выше.
-	useEffect(() => {
-		if (ctx.__mock || state.phase === 'init' || state.phase === 'loading') return;
-		requestB24FitWindow(80);
-		requestB24FitWindow(360);
-	}, [ctx.__mock, state.phase]);
+	useDealProductsLoadedPlacementFit({ mock: ctx.__mock, phase: state.phase });
 
 	if (state.phase === 'init' || state.phase === 'loading') {
 		return (
