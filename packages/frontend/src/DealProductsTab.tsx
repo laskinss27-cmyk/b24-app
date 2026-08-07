@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { ProductBase } from './ProductBase.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
-import { plural, rub, stageLabel } from './deal-display-formatters.js';
+import { rub, stageLabel } from './deal-display-formatters.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
 import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
@@ -43,6 +43,7 @@ import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
 import { createDealStageActions } from './deal-stage-actions.js';
 import { createDealProductRowEditActions } from './deal-product-row-edit-actions.js';
 import { createDealProductRowRemovalActions } from './deal-product-row-removal-actions.js';
+import { createDealSupplyOrderActions, supplyMinimumDate } from './deal-supply-order-actions.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -67,7 +68,6 @@ import {
 import {
 	addProductsToDeal,
 	replaceDealPlanProduct,
-	createDealSupplyRequest,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 	setupDealFulfillment,
@@ -84,13 +84,6 @@ type State =
 	| { phase: 'loading' }
 	| { phase: 'error'; message: string }
 	| { phase: 'ready'; data: TableData; viewer: string; dev: boolean; canReturn: boolean };
-
-const todayYmd = (): string => {
-	const now = new Date();
-	return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-};
-
-
 
 export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
@@ -585,42 +578,30 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
 	const supplyGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
-	const doCreateSupply = async (): Promise<void> => {
-		if (dealId == null || !supplyGoods.length || supplyBusy || busy || hasPendingDrafts) return;
-		setSupplyFormError(null);
-		if (!supplyToStore) { setSupplyFormError('Выберите конечный склад.'); return; }
-		if (!supplyDeadline) { setSupplyFormError('Укажите крайнюю дату поставки.'); return; }
-		if (supplyDeadline < todayYmd()) { setSupplyFormError('Крайняя дата не может быть в прошлом.'); return; }
-		const quantities = new Map<string, number>();
-		for (const row of supplyGoods) {
-			const qty = Number(String(supplyQty[row.id] ?? '').replace(',', '.'));
-			if (!Number.isFinite(qty) || qty <= 0) {
-				setSupplyFormError(`Укажите количество для позиции «${row.name}».`);
-				return;
-			}
-			quantities.set(row.id, qty);
-		}
-		setSupplyBusy(true);
-		setNotice(null);
-		try {
-			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)!, note: String(supplyNotes[row.id] ?? '').trim() }));
-			await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, ...(supplyOrderNote.trim() ? { note: supplyOrderNote.trim() } : {}) });
-			setSelected({});
-			setSupplyNotes({});
-			setSupplyQty({});
-			setSupplyToStore('');
-			setSupplyDeadline('');
-			setSupplyOrderNote('');
-			setSupplyFormError(null);
-			setShowSupplyOrder(false);
-			setNotice({ kind: 'ok', text: `Заказ сформирован: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')} · ${supplyToStore} · до ${supplyDeadline}.` });
-			await onReload();
-		} catch (err) {
-			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });
-		} finally {
-			setSupplyBusy(false);
-		}
-	};
+	const { openSupplyOrder, doCreateSupply } = createDealSupplyOrderActions({
+		dealId,
+		supplyGoods,
+		supplyBusy,
+		busy,
+		hasPendingDrafts,
+		supplyNotes,
+		supplyQty,
+		supplyToStore,
+		supplyDeadline,
+		supplyOrderNote,
+		remaining,
+		onReload,
+		setSupplyBusy,
+		setShowSupplyOrder,
+		setSupplyNotes,
+		setSupplyQty,
+		setSupplyToStore,
+		setSupplyDeadline,
+		setSupplyOrderNote,
+		setSupplyFormError,
+		setSelected,
+		setNotice,
+	});
 
 	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре
 	// (по одному на склад для товаров; услуги входят в первый товарный документ,
@@ -720,14 +701,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				supplyGoodsCount={supplyGoods.length}
 				notice={notice}
 				onRealize={() => void (hasPendingDrafts ? doSubmit() : doDraft())}
-				onOrderSupply={() => {
-					setSupplyToStore('');
-					setSupplyDeadline('');
-					setSupplyOrderNote('');
-					setSupplyQty(Object.fromEntries(supplyGoods.map((row) => [row.id, String(remaining(row))])));
-					setSupplyFormError(null);
-					setShowSupplyOrder(true);
-				}}
+				onOrderSupply={openSupplyOrder}
 			/>}
 
 			{data.quoteVariants.enabled && <DealQuoteVariantTabs quoteVariants={data.quoteVariants} activeVariantId={activeVariantId} onActiveVariant={onActiveVariant} />}
@@ -816,7 +790,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 					busy={supplyBusy}
 					toStore={supplyToStore}
 					deadline={supplyDeadline}
-					minimumDate={todayYmd()}
+					minimumDate={supplyMinimumDate()}
 					orderNote={supplyOrderNote}
 					formError={supplyFormError}
 					quantities={supplyQty}
