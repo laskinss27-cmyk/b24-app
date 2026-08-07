@@ -31,6 +31,7 @@ import {
 	purchaseQuantities,
 	purchaseStatus,
 } from './supply-purchase-status.js';
+import { orderSearchValues, purchaseSearchValues, searchMatches, transferSearchValues } from './supply-search-values.js';
 import { SupplySearch, SupplyStatusPill } from './SupplyOverviewControls.js';
 import {
 	numericDraft,
@@ -179,33 +180,6 @@ const DEFAULT_SUPPLIERS = ['Поставщик не выбран', 'ТД Юно�
 const orderStatus = (order: SupplyOrderRow): Exclude<OrderStatusFilter, 'all'> =>
 	order.closed ? 'closed' : requestItemsForOrder(order).length > 0 ? 'needs_action' : 'in_progress';
 
-const searchMatches = (query: string, values: Array<string | number | undefined>): boolean => {
-	const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	if (!words.length) return true;
-	const haystack = values.map((value) => String(value ?? '')).join(' ').toLowerCase();
-	return words.every((word) => haystack.includes(word));
-};
-const orderSearchValues = (order: SupplyOrderRow): Array<string | number | undefined> => [
-	order.name,
-	order.dealId,
-	order.dealTitle,
-	order.toStore,
-	order.deadline,
-	order.note,
-	...requestItemsForOrder(order).flatMap((item) => [item.productId, item.itemName, ...Object.keys(item.stocks ?? {})]),
-	...(order.originalItems ?? []).flatMap((item) => [item.productId, item.itemName, ...Object.keys(item.stocks ?? {})]),
-	...(order.purchases ?? []).flatMap((purchase) => [purchase.name, purchase.supplier, ...purchase.lines.flatMap((line) => [line.productId, line.name])]),
-	...(order.transfers ?? []).flatMap((transfer) => [transfer.id, transfer.name, transfer.fromStore, transfer.toStore, ...transfer.lines.flatMap((line) => [line.productId, line.name])]),
-];
-const purchaseSearchValues = (order: SupplyOrderRow, purchase: SupplyPurchaseChild): Array<string | number | undefined> => [
-	order.name, order.dealId, order.dealTitle, order.toStore, purchase.name, purchase.supplier,
-	...purchase.lines.flatMap((line) => [line.productId, line.name, line.warehouse]),
-	...purchase.receipts.flatMap((receipt) => [receipt.name, ...receipt.lines.flatMap((line) => [line.productId, line.name, line.warehouse])]),
-];
-const transferSearchValues = (order: SupplyOrderRow, transfer: SupplyTransferChild): Array<string | number | undefined> => [
-	order.name, order.dealId, order.dealTitle, order.toStore, transfer.id, transfer.name, transfer.purchaseOrder, transfer.fromStore, transfer.toStore,
-	...transfer.lines.flatMap((line) => [line.productId, line.name, line.warehouse]),
-];
 function Metrics({ orders, view }: { orders: SupplyOrderRow[]; view: ViewKey }): JSX.Element {
 	const requests = orders.filter((order) => !order.standalone);
 	const purchases = orders.flatMap((order) => order.purchases ?? []);
