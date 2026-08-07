@@ -18,7 +18,6 @@ import {
 	dealProductShippedQuantity,
 } from './deal-product-fulfillment-values.js';
 import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
-import { DealWorkRow } from './DealWorkRow.js';
 import { DealGoodsStatusCell } from './DealGoodsStatusCell.js';
 import { DealGoodsRow } from './DealGoodsRow.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
@@ -46,6 +45,7 @@ import { createDealProductRowRemovalActions } from './deal-product-row-removal-a
 import { createDealSupplyOrderActions, supplyMinimumDate } from './deal-supply-order-actions.js';
 import { createDealRealizationActions } from './deal-realization-actions.js';
 import { buildDealRealizationSelection } from './deal-realization-selection.js';
+import { createDealWorkRowRenderer } from './deal-work-row-renderer.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -451,35 +451,30 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const dealDocumentCount = data.contracts.length + data.coreReals.length + data.supply.length + dealTransfers.length;
+	const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
+	const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
 
-	const renderWorkRow = (r: EnrichedRow): JSX.Element => {
-		const left = remaining(r);
-		const edit = editOf(r);
-		return <DealWorkRow
-			key={r.id}
-			row={r}
-			edit={edit}
-			left={left}
-			shipped={shippedForRow(r)}
-			selected={isSel(r)}
-			editable={rowEditable(r)}
-			workingMode={workingMode}
-			alternativeView={alternativeView}
-			drafted={realizedForRow(r) > shippedForRow(r)}
-			saving={savingRow === r.id}
-			removalBusy={removing != null}
-			removingThisRow={removing === r.id}
-			busy={busy}
-			hasPendingDrafts={hasPendingDrafts}
-			supplyBusy={supplyBusy}
-			batchQuantity={batchQty[r.id] ?? String(left)}
-			onRemove={() => void doRemove(r)}
-			onToggleSelected={() => toggleSel(r)}
-			onEdit={(patch) => setEdit(r, patch)}
-			onBlur={(event) => onRowBlur(r, event)}
-			onBatchQuantity={(value) => setBatchQty((current) => ({ ...current, [r.id]: value }))}
-		/>;
-	};
+	const renderWorkRow = createDealWorkRowRenderer({
+		remaining,
+		editOf,
+		shippedForRow,
+		realizedForRow,
+		isSelected: isSel,
+		isEditable: rowEditable,
+		workingMode,
+		alternativeView,
+		savingRow,
+		removing,
+		busy,
+		hasPendingDrafts,
+		supplyBusy,
+		batchQty,
+		onRemove: doRemove,
+		onToggleSelected: toggleSel,
+		onEdit: setEdit,
+		onRowBlur,
+		setBatchQty,
+	});
 
 	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
 	// под ними — строка остатка с селектором склада, полем кол-ва и кнопкой «Реализовать».
@@ -557,8 +552,6 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
 	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
 	// отдельный документ только с услугами.
-	const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
-	const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
 	const { blockedSelectedGoods, readyRows, readyWorks, realizeGroups, realizeDocumentCount } = buildDealRealizationSelection({
 		visibleGoods,
 		visibleWorks,
