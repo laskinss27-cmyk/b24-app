@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
-import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
+import { DealDocumentPreviewModal, documentPreviewAnchorY } from './DealDocumentPreviewModal.js';
 import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
@@ -25,6 +25,7 @@ import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.j
 import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
 import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
 import { useDealProductSelection } from './useDealProductSelection.js';
+import { useDealDocumentsState } from './useDealDocumentsState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -48,7 +49,6 @@ import {
 import {
 	openSupplyCard,
 	isWorkRow,
-	type StoredDealContractDocument,
 } from './b24.js';
 
 export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: { data: TableData; viewer: string; dev: boolean; canReturn: boolean; dealId: number | null; activeVariantId: string | null; workingVariantHasActivity: boolean; onActiveVariant: (id: string | null) => void; onAdd: () => void; onReplace: (row: EnrichedRow) => void; onStage: (stageName: string) => void; onAddToStage: (stageId: string, stageName: string) => void; onPrintDocument: (kind: DealPrintKind, variantId?: string) => void; onReload: () => Promise<void> }): JSX.Element {
@@ -118,9 +118,14 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	/** Открыто модальное окно возврата от клиента. */
 	const [showReturn, setShowReturn] = useState(false);
 	/** Исторические документы сделки, которые не нужны в рабочей таблице. */
-	const [showDealDocuments, setShowDealDocuments] = useState(false);
-	const [documentPreview, setDocumentPreview] = useState<DealDocumentPreview | null>(null);
-	const [contractPreview, setContractPreview] = useState<{ document: StoredDealContractDocument; anchorY: number } | null>(null);
+	const {
+		showDealDocuments,
+		setShowDealDocuments,
+		documentPreview,
+		setDocumentPreview,
+		contractPreview,
+		setContractPreview,
+	} = useDealDocumentsState();
 	const [summaryView, setSummaryView] = useState(false);
 	const segmentActionsBlocked = summaryView && data.stages.length > 0;
 	const rowEditable = (row: EnrichedRow): boolean =>
