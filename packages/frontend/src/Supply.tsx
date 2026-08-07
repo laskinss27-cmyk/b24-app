@@ -6,6 +6,7 @@ import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
+import { createSupplyOrderActions } from './supply-order-actions.js';
 import { ASSORTMENT_MATRIX_CANARY_IDS, SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
 import { SupplyPageHeader } from './SupplyPageHeader.js';
 import { SupplySearch } from './SupplyOverviewControls.js';
@@ -21,13 +22,8 @@ import { useSupplyOpenDocumentActions } from './useSupplyOpenDocumentActions.js'
 import { useSupplyOrderFiltering } from './useSupplyOrderFiltering.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
 import {
-	createSupplySupplier,
 	fetchSupplyOrders,
-	updateSupplyOrderNote,
-	updateSupplyOrderStore,
-	type SupplyOrderItem,
 	type SupplyOrderRow,
-	type SupplyPurchaseChild,
 } from './b24.js';
 
 type ViewKey = SupplyViewKey;
@@ -126,40 +122,22 @@ export function Supply(): JSX.Element {
 		setNotice,
 		reload,
 	});
-	const refreshAfterRequestLineEdit = async (order: SupplyOrderRow): Promise<void> => {
-		cancelReview();
-		clearOrderDecisions(order.name);
-		await reload();
-		setNotice(`${order.name}: позиция синхронизирована со сделкой.`);
-	};
-
-	const saveOrderNote = async (order: SupplyOrderRow, note: string): Promise<void> => {
-		const saved = ctx.__mock ? note.trim() : await updateSupplyOrderNote(order.name, note);
-		setOrders((current) => current.map((row) => row.name === order.name ? { ...row, note: saved } : row));
-		setNotice(`${order.name}: комментарий сохранён.`);
-	};
-
-	const saveOrderStore = async (order: SupplyOrderRow, toStore: string): Promise<void> => {
-		const saved = ctx.__mock ? toStore.trim() : await updateSupplyOrderStore(order.name, order.requestKey, toStore);
-		setOrders((current) => current.map((row) => row.name === order.name ? { ...row, toStore: saved } : row));
-		clearOrderDecisions(order.name);
-		cancelReview();
-		setNotice(`${order.name}: конечный склад изменён на «${saved}». Распределение товаров нужно проверить заново.`);
-	};
-
-	const addSupplier = async (name: string): Promise<string> => {
-		const clean = name.trim();
-		if (ctx.__mock) {
-			setSuppliers((current) => [...new Set([...current, clean])].sort((a, b) => a.localeCompare(b, 'ru')));
-			return clean;
-		}
-		const result = await createSupplySupplier(clean);
-		const next = [...new Set([...result.suppliers, ...DEFAULT_SUPPLIERS])].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru'));
-		setSuppliers(next);
-		setStockForm((current) => current ? { ...current, suppliers: next } : current);
-		setNotice(result.created ? `Поставщик «${result.name}» создан.` : `Поставщик «${result.name}» уже есть в справочнике.`);
-		return result.name;
-	};
+	const {
+		refreshAfterRequestLineEdit,
+		saveOrderNote,
+		saveOrderStore,
+		addSupplier,
+	} = createSupplyOrderActions({
+		mock: Boolean(ctx.__mock),
+		defaultSuppliers: DEFAULT_SUPPLIERS,
+		setOrders,
+		setSuppliers,
+		setStockForm,
+		setNotice,
+		reload,
+		cancelReview,
+		clearOrderDecisions,
+	});
 
 	const {
 		documentBusy,
