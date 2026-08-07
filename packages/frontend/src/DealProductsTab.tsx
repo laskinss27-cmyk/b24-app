@@ -45,6 +45,7 @@ import { createDealProductRowEditActions } from './deal-product-row-edit-actions
 import { createDealProductRowRemovalActions } from './deal-product-row-removal-actions.js';
 import { createDealSupplyOrderActions, supplyMinimumDate } from './deal-supply-order-actions.js';
 import { createDealRealizationActions } from './deal-realization-actions.js';
+import { buildDealRealizationSelection } from './deal-realization-selection.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -556,22 +557,17 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
 	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
 	// отдельный документ только с услугами.
-		const canRealize = (r: EnrichedRow): boolean => !segmentActionsBlocked && remaining(r) > 0 && (isWorkRow(r.type) || rowStatus(r) === 'ready');
-		const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
-		const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
-		// В реализацию идут ТОЛЬКО отмеченные галочкой строки (дефолт — ничего не отмечено).
-		const selectedRows = [...visibleGoods, ...visibleWorks].filter((r) => isSel(r) && remaining(r) > 0);
-		const blockedSelectedGoods = selectedRows.filter((r) => !isWorkRow(r.type) && !canRealize(r));
-		const readyRows = selectedRows.filter(canRealize);
-		const readyGoods = readyRows.filter((row) => !isWorkRow(row.type));
-		const readyWorks = readyRows.filter((row) => isWorkRow(row.type));
-	const realizeGroups = new Map<number, EnrichedRow[]>();
-	for (const r of readyGoods) {
-		const s = storeOf(r);
-		if (!realizeGroups.has(s)) realizeGroups.set(s, []);
-		realizeGroups.get(s)!.push(r);
-	}
-	const realizeDocumentCount = realizeGroups.size || (readyWorks.length ? 1 : 0);
+	const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
+	const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
+	const { blockedSelectedGoods, readyRows, readyWorks, realizeGroups, realizeDocumentCount } = buildDealRealizationSelection({
+		visibleGoods,
+		visibleWorks,
+		selected,
+		segmentActionsBlocked,
+		remaining,
+		rowStatus,
+		storeOf,
+	});
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
