@@ -11,6 +11,7 @@ import { ReturnModal } from './ReturnModal.js';
 import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
 import { DealProductRealizationRow, type DealProductRealizationPart } from './DealProductRealizationRow.js';
 import { DealProductStockDetailRow, DealProductStockSummary } from './DealProductStockDisplay.js';
+import { DealWorkRow } from './DealWorkRow.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
@@ -880,52 +881,31 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 
 	const renderWorkRow = (r: EnrichedRow): JSX.Element => {
 		const left = remaining(r);
-		const drafted = realizedForRow(r) > shippedForRow(r);
-		return (
-		<tr key={r.id} className={isSel(r) ? 'sel-row' : undefined}>
-			<td className="check-col">
-				<div className="row-controls">
-					{rowEditable(r) && <button
-						className="row-del-x"
-						disabled={busy || removing != null || hasPendingDrafts}
-						onClick={() => void doRemove(r)}
-						title={r.segmentKind === 'stage' ? 'Удалить работу из этого этапа' : 'Удалить работу из сделки'}
-					>{removing === r.id ? '…' : '✕'}</button>}
-					{workingMode && left > 0 && <input
-						type="checkbox"
-						className="row-check"
-						checked={isSel(r)}
-						disabled={hasPendingDrafts || busy || supplyBusy}
-						onChange={() => toggleSel(r)}
-						title="Отметить услугу для реализации — склад не требуется"
-					/>}
-				</div>
-			</td>
-			<td>{r.name}</td>
-			<td><span className="type-badge work">работа</span></td>
-			<td className="num cell-edit">
-				<input type="number" className="cell-inp" min={0} step="any" value={editOf(r).price} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { price: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Цена без скидки, ₽" />
-				<div className="cell-final">= {rub(finalUnitOf(r))}/ед{savingRow === r.id ? ' …' : ''}</div>
-			</td>
-			<td className="num">
-				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={editOf(r).disc} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { disc: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Скидка, %" /><span className="cell-pct">%</span></span>
-			</td>
-			<td className="num">
-				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={editOf(r).qty} disabled={savingRow === r.id || !rowEditable(r)} onChange={(e) => setEdit(r, { qty: e.target.value })} onBlur={(e) => onRowBlur(r, e)} title="Количество в сделке" /> {r.measure}
-			</td>
-			<td className="num">{workingMode ? <b className="realized-qty">{shippedForRow(r)}</b> : <span className="none">—</span>}</td>
-			<td className="num">
-				{workingMode && left > 0
-					? <input type="number" className="qty-input" min={0} max={left} step="any" value={batchQty[r.id] ?? String(left)} disabled={hasPendingDrafts || busy} onChange={(e) => setBatchQty((m) => ({ ...m, [r.id]: e.target.value }))} title={`Сколько услуг реализовать сейчас (остаток ${left})`} />
-					: <span className="none">—</span>}
-			</td>
-			<td className="num">{rub(finalUnitOf(r) * (Number(editOf(r).qty.replace(',', '.')) || 0))}</td>
-			<td><span className="muted small">не требуется</span></td>
-			<td>{workingMode
-				? <span className={`st-badge ${drafted ? 'requested' : left <= 0 ? 'ready' : 'proposal'}`}>{drafted ? 'черновик' : left <= 0 ? '✓ реализовано' : 'без склада'}</span>
-				: <span className="st-badge proposal">{alternativeView ? 'альтернатива' : 'расчёт'}</span>}</td>
-		</tr>
-		);
+		const edit = editOf(r);
+		return <DealWorkRow
+			key={r.id}
+			row={r}
+			edit={edit}
+			left={left}
+			shipped={shippedForRow(r)}
+			selected={isSel(r)}
+			editable={rowEditable(r)}
+			workingMode={workingMode}
+			alternativeView={alternativeView}
+			drafted={realizedForRow(r) > shippedForRow(r)}
+			saving={savingRow === r.id}
+			removalBusy={removing != null}
+			removingThisRow={removing === r.id}
+			busy={busy}
+			hasPendingDrafts={hasPendingDrafts}
+			supplyBusy={supplyBusy}
+			batchQuantity={batchQty[r.id] ?? String(left)}
+			onRemove={() => void doRemove(r)}
+			onToggleSelected={() => toggleSel(r)}
+			onEdit={(patch) => setEdit(r, patch)}
+			onBlur={(event) => onRowBlur(r, event)}
+			onBatchQuantity={(value) => setBatchQty((current) => ({ ...current, [r.id]: value }))}
+		/>;
 	};
 
 	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
