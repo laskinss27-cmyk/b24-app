@@ -11,6 +11,7 @@ import { Supply } from './Supply.js';
 import { ReportBuilder } from './ReportBuilder.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
 import './styles.css';
+import './inventory-count.css';
 import './inventory-count-print.css';
 import './product-catalog.css';
 import './assortment-matrix.css';
