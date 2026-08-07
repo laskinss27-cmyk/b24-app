@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
@@ -20,7 +20,6 @@ import {
 	type DealStageDialogState,
 	type DealVariantDialogState,
 } from './DealNameDialogs.js';
-import { DEAL_PRODUCTS_MOCK_DATA, dealProductsMockVariantData } from './deal-products-mock-data.js';
 import { DealProductsTable } from './DealProductsTable.js';
 import { loadDealProductsData } from './deal-products-data-loader.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
@@ -48,28 +47,24 @@ import {
 	useDealProductsLoadedPlacementFit,
 	useDealProductsPlacementFrame,
 } from './useDealProductsPlacementSizing.js';
+import {
+	useDealProductsInitialization,
+	type DealProductsState,
+} from './useDealProductsInitialization.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	isPlanRow,
 	type DealProductRowEdit,
 } from './deal-product-row-values.js';
 import {
-	setupDealFulfillment,
 	openSupplyCard,
-	call,
 	isWorkRow,
 	type StoredDealContractDocument,
 } from './b24.js';
 
-type State =
-	| { phase: 'init' }
-	| { phase: 'loading' }
-	| { phase: 'error'; message: string }
-	| { phase: 'ready'; data: TableData; viewer: string; dev: boolean; canReturn: boolean };
-
 export function DealProductsTab(): JSX.Element {
 	const [ctx] = useState<B24Context>(() => getContext());
-	const [state, setState] = useState<State>({ phase: 'init' });
+	const [state, setState] = useState<DealProductsState>({ phase: 'init' });
 	const [adding, setAdding] = useState<DealProductPickerRequest | null>(null);
 	const [replacing, setReplacing] = useState<DealProductReplacement | null>(null);
 	const [printKind, setPrintKind] = useState<DealPrintKind | null>(null);
@@ -77,50 +72,7 @@ export function DealProductsTab(): JSX.Element {
 	const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
 	useDealProductsPlacementFrame({ mock: ctx.__mock, adding, replacing });
-
-	useEffect(() => {
-		// dev / mock: BX24 нет — показываем таблицу на мок-данных, чтоб видеть UI
-		if (ctx.__mock) {
-			const params = new URLSearchParams(window.location.search);
-			const data = params.has('variants') ? dealProductsMockVariantData(params.has('selected'), params.has('activity')) : DEAL_PRODUCTS_MOCK_DATA;
-			setState({ phase: 'ready', data, viewer: 'dev (mock)', dev: true, canReturn: true });
-			setActiveVariantId(data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
-			return;
-		}
-		const bx24 = window.BX24;
-		if (!bx24) {
-			setState({ phase: 'error', message: 'BX24 SDK не загружен.' });
-			return;
-		}
-		if (ctx.dealId == null) {
-			setState({ phase: 'error', message: 'Не пришёл ID сделки из placement-контекста.' });
-			return;
-		}
-		const dealId = ctx.dealId;
-		bx24.init(() => {
-			call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current')
-				.then((user) => {
-					const viewerId = String(user.ID ?? '');
-					const viewerName = `${user.NAME ?? ''} ${user.LAST_NAME ?? ''}`.trim() || viewerId;
-					const setupKey = 'b24-fulfillment-setup-2026-07-20-v1';
-					if (window.BX24?.isAdmin() && window.localStorage.getItem(setupKey) !== 'done') {
-						void setupDealFulfillment('2026-07-20', dealId)
-							.then((result) => {
-								if (result.failed === 0) window.localStorage.setItem(setupKey, 'done');
-							})
-							.catch(() => undefined);
-					}
-					setState({ phase: 'loading' });
-					loadDealProductsData(dealId)
-						.then((data) => {
-							setState({ phase: 'ready', data, viewer: viewerName, dev: false, canReturn: true });
-							setActiveVariantId(data.quoteVariants.selectedId ?? data.quoteVariants.variants[0]?.id ?? null);
-						})
-						.catch((err: unknown) => setState({ phase: 'error', message: String(err instanceof Error ? err.message : err) }));
-				})
-				.catch((err: unknown) => setState({ phase: 'error', message: `user.current: ${String(err instanceof Error ? err.message : err)}` }));
-		});
-	}, [ctx]);
+	useDealProductsInitialization({ context: ctx, setState, setActiveVariantId });
 
 	useDealProductsLoadedPlacementFit({ mock: ctx.__mock, phase: state.phase });
 
