@@ -26,6 +26,7 @@ import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSumm
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
+import { DealSupplyOrderModal } from './DealSupplyOrderModal.js';
 import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
@@ -1242,50 +1243,25 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 			</div>}
 
 			{workingMode && showSupplyOrder && (
-				<div className="deal-supply-order-overlay" onClick={() => !supplyBusy && setShowSupplyOrder(false)}>
-					<section className="deal-supply-order-modal" role="dialog" aria-modal="true" aria-label="Заказ снабжению" onClick={(e) => e.stopPropagation()}>
-						<header>
-							<div><h2>Заказ снабжению</h2><span>{supplyGoods.length} {plural(supplyGoods.length, 'позиция', 'позиции', 'позиций')}</span></div>
-							<button type="button" aria-label="Закрыть" title="Закрыть" disabled={supplyBusy} onClick={() => setShowSupplyOrder(false)}>×</button>
-						</header>
-						<div className="deal-supply-order-fields">
-							<label><span>Конечный склад</span><select value={supplyToStore} disabled={supplyBusy} onChange={(e) => { setSupplyToStore(e.target.value); setSupplyFormError(null); }}><option value="">Выберите склад</option>{data.stores.map((store) => <option key={store.id} value={store.title}>{store.title}</option>)}</select></label>
-							<label><span>Привезти не позднее</span><input type="date" min={todayYmd()} value={supplyDeadline} disabled={supplyBusy} onChange={(e) => { setSupplyDeadline(e.target.value); setSupplyFormError(null); }} /></label>
-							<label className="wide"><span>Общий комментарий</span><textarea rows={2} maxLength={500} value={supplyOrderNote} disabled={supplyBusy} placeholder="Комментарий ко всему заказу" onChange={(e) => setSupplyOrderNote(e.target.value)} /></label>
-						</div>
-						<div className={`deal-supply-order-destination${supplyToStore ? '' : ' is-empty'}`}>
-							{supplyToStore ? <>Заказ будет доставлен на склад <b>{supplyToStore}</b>.</> : 'Выберите конечный склад вручную — он не берётся из отмеченных строк.'}
-						</div>
-						{supplyFormError && <div className="deal-supply-order-error">{supplyFormError}</div>}
-						<div className="deal-supply-order-lines">
-							{supplyGoods.map((row) => (
-								<label key={row.id} className="deal-supply-order-line">
-									<span className="deal-supply-order-line-head"><b>{row.name}</b><small>Нужно по сделке: {remaining(row)} {row.measure}</small></span>
-									<span className="deal-supply-order-qty"><small>Заказать</small><input
-										type="number"
-										min="0.001"
-										step="any"
-										value={supplyQty[row.id] ?? ''}
-										disabled={supplyBusy}
-										onChange={(e) => { setSupplyQty((qty) => ({ ...qty, [row.id]: e.target.value })); setSupplyFormError(null); }}
-									/></span>
-									<textarea
-										value={supplyNotes[row.id] ?? ''}
-										maxLength={500}
-										rows={2}
-										placeholder="Комментарий к позиции"
-										disabled={supplyBusy}
-										onChange={(e) => setSupplyNotes((notes) => ({ ...notes, [row.id]: e.target.value }))}
-									/>
-								</label>
-							))}
-						</div>
-						<footer>
-							<button type="button" disabled={supplyBusy} onClick={() => setShowSupplyOrder(false)}>Отмена</button>
-							<button className="primary" type="button" disabled={supplyBusy || !supplyToStore || !supplyDeadline} onClick={() => void doCreateSupply()}>{supplyBusy ? 'Создаю…' : 'Создать заказ'}</button>
-						</footer>
-					</section>
-				</div>
+				<DealSupplyOrderModal
+					rows={supplyGoods.map((row) => ({ id: row.id, name: row.name, measure: row.measure, remaining: remaining(row) }))}
+					stores={data.stores}
+					busy={supplyBusy}
+					toStore={supplyToStore}
+					deadline={supplyDeadline}
+					minimumDate={todayYmd()}
+					orderNote={supplyOrderNote}
+					formError={supplyFormError}
+					quantities={supplyQty}
+					notes={supplyNotes}
+					onClose={() => setShowSupplyOrder(false)}
+					onStoreChange={(value) => { setSupplyToStore(value); setSupplyFormError(null); }}
+					onDeadlineChange={(value) => { setSupplyDeadline(value); setSupplyFormError(null); }}
+					onOrderNoteChange={setSupplyOrderNote}
+					onQuantityChange={(rowId, value) => { setSupplyQty((quantities) => ({ ...quantities, [rowId]: value })); setSupplyFormError(null); }}
+					onNoteChange={(rowId, value) => setSupplyNotes((notes) => ({ ...notes, [rowId]: value }))}
+					onSubmit={() => void doCreateSupply()}
+				/>
 			)}
 
 			{workingMode && splitRow && dealId != null && (() => {
