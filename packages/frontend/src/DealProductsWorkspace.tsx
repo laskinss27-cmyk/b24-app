@@ -27,6 +27,7 @@ import { useDealDocumentsState } from './useDealDocumentsState.js';
 import { useDealNameDialogsState } from './useDealNameDialogsState.js';
 import { useDealProductRowMutationState } from './useDealProductRowMutationState.js';
 import { useDealProductsRefresh } from './useDealProductsRefresh.js';
+import { buildDealDocumentsView } from './deal-documents-view.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -234,9 +235,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
 
-	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
-	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
-	const dealDocumentCount = data.contracts.length + data.coreReals.length + data.supply.length + dealTransfers.length;
+	const { realizationDocuments, returnDocuments, dealDocumentCount } = buildDealDocumentsView(data, dealTransfers.length);
 	const renderWorkRow = createDealWorkRowRenderer({
 		remaining,
 		editOf,
