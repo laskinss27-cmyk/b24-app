@@ -11,6 +11,7 @@ import { Supply } from './Supply.js';
 import { ReportBuilder } from './ReportBuilder.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
 import './styles.css';
+import './deal-products-layout.css';
 import './deal-product-table.css';
 import './inventory.css';
 import './inventory-home.css';
