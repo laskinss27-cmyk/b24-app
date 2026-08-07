@@ -16,53 +16,31 @@ import {
 	type DecisionMap,
 	type DecisionState,
 } from './supply-decision-planning.js';
-import {
-	transferDocumentLabel,
-} from './supply-document-values.js';
 import { orderSearchValues, searchMatches } from './supply-search-values.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
 import { ASSORTMENT_MATRIX_CANARY_IDS, SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
 import { SupplyPageHeader } from './SupplyPageHeader.js';
 import { SupplySearch } from './SupplyOverviewControls.js';
-import {
-	PURCHASE_STAGE_OPTIONS,
-	SupplyDocumentDetail,
-	type OpenSupplyDocument,
-} from './SupplyDocumentDetail.js';
+import { SupplyDocumentDetail, type OpenSupplyDocument } from './SupplyDocumentDetail.js';
 import { orderStatus, SupplyMetrics, SupplyOrdersView, type OrderStatusFilter, type SortKey } from './SupplyOrdersView.js';
 import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
+import { useSupplyOpenDocumentActions } from './useSupplyOpenDocumentActions.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
 import {
-	cancelTransfer,
 	createSupplySupplier,
 	createSupplyDocuments,
-	createSupplyPurchaseTransfer,
-	deleteSupplyPurchaseOrder,
-	deleteTransfer,
 	fetchCurrentUserId,
 	fetchCurrentAppAccess,
 	fetchStockFormData,
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
-	receiveSupplyPurchase,
-	receiveTransfer,
-	collectTransfer,
-	postTransfer,
-	resolveTransferShortage,
-	shipTransfer,
-	updateTransferDestination,
-	updateTransferLines,
-	updateSupplyPurchaseOrder,
-	updateSupplyPurchaseStage,
 	updateSupplyOrderNote,
 	updateSupplyOrderStore,
 	type SupplyOrderItem,
 	type SupplyOrderRow,
 	type SupplyPurchaseChild,
-	type SupplyPurchaseStage,
-	type SupplyTransferChild,
 	withTimeout,
 } from './b24.js';
 
@@ -90,7 +68,6 @@ export function Supply(): JSX.Element {
 	const [busy, setBusy] = useState<string | null>(null);
 	const [reviewing, setReviewing] = useState('');
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
-	const [documentBusy, setDocumentBusy] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState('');
 	const [canDeleteDocuments, setCanDeleteDocuments] = useState(Boolean(ctx.__mock));
 	const [marketplaceOnly, setMarketplaceOnly] = useState(false);
@@ -161,119 +138,23 @@ export function Supply(): JSX.Element {
 		return result.name;
 	};
 
-	const refreshOpenDocument = async (target: OpenSupplyDocument): Promise<void> => {
-		const loaded = await fetchSupplyOrders();
-		setOrders(loaded);
-		const order = loaded.find((row) => row.name === target.order.name);
-		if (!order) { setOpenDocument(null); return; }
-		if (target.kind === 'purchase') {
-			const purchase = (order.purchases ?? []).find((row) => row.name === target.purchase.name);
-			setOpenDocument(purchase ? { kind: 'purchase', order, purchase } : null);
-			return;
-		}
-		const transfer = (order.transfers ?? []).find((row) => row.id === target.transfer.id);
-		setOpenDocument(transfer ? { kind: 'transfer', order, transfer } : null);
-	};
-
-	const saveOpenPurchase = async (supplier: string, lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>, stage: SupplyPurchaseStage, expectedAt: string): Promise<void> => {
-		const target = openDocument;
-		if (!target || target.kind !== 'purchase' || documentBusy) return;
-		setDocumentBusy(true);
-		try {
-			await updateSupplyPurchaseOrder(target.purchase.name, supplier, lines);
-			if (stage !== (target.purchase.supplyStage || 'draft') || expectedAt !== (target.purchase.expectedAt || '')) {
-				await updateSupplyPurchaseStage(target.purchase.name, stage, expectedAt);
-			}
-			await refreshOpenDocument(target);
-			setNotice(`${target.purchase.name}: сохранено, статус «${PURCHASE_STAGE_OPTIONS.find((option) => option.value === stage)?.label ?? stage}».`);
-		} catch (err) {
-			setNotice(err instanceof Error ? err.message : 'Не удалось сохранить заявку поставщику.');
-		} finally { setDocumentBusy(false); }
-	};
-
-	const receiveOpenPurchase = async (lines: Array<{ productId: number; qty: number; rate: number }>): Promise<void> => {
-		const target = openDocument;
-		if (!target || target.kind !== 'purchase' || documentBusy || !lines.length) return;
-		setDocumentBusy(true);
-		try {
-			const receipt = await receiveSupplyPurchase(target.order.name, target.order.requestKey, Number(target.order.dealId), target.purchase.name, lines);
-			await refreshOpenDocument(target);
-			setNotice(`${receipt}: оприходовано на Склад Прихода.`);
-		} catch (err) {
-			setNotice(err instanceof Error ? err.message : 'Не удалось оприходовать закупку.');
-		} finally { setDocumentBusy(false); }
-	};
-
-	const createOpenPurchaseTransfer = async (lines: Array<{ productId: number; qty: number }>): Promise<void> => {
-		const target = openDocument;
-		if (!target || target.kind !== 'purchase' || documentBusy || !lines.length) return;
-		setDocumentBusy(true);
-		try {
-			const transfer = await createSupplyPurchaseTransfer(target.order.name, target.order.requestKey, Number(target.order.dealId), target.purchase.name, lines);
-			await refreshOpenDocument(target);
-			setNotice(`${transferDocumentLabel(transfer)}: создан черновик перемещения на ${target.order.toStore}.`);
-		} catch (err) {
-			await refreshOpenDocument(target).catch(() => undefined);
-			setNotice(err instanceof Error ? err.message : 'Не удалось создать перемещение на точку.');
-		} finally { setDocumentBusy(false); }
-	};
-
-	const changeOpenTransferDestination = async (toStore: string): Promise<SupplyTransferChild> => {
-		const target = openDocument;
-		if (!target || target.kind !== 'transfer') throw new Error('перемещение больше не открыто');
-		const updated = ctx.__mock
-			? { ...target.transfer, toStore, name: `Перемещение #${target.order.dealId}: ${target.transfer.fromStore} → ${toStore}` }
-			: await updateTransferDestination(target.transfer.id, toStore);
-		const nextTransfer: SupplyTransferChild = { ...target.transfer, name: updated.name, toStore: updated.toStore };
-		const patchOrder = (order: SupplyOrderRow): SupplyOrderRow => ({
-			...order,
-			transfers: (order.transfers ?? []).map((transfer) => transfer.id === nextTransfer.id ? nextTransfer : transfer),
-		});
-		const nextOrder = patchOrder(target.order);
-		setOrders((current) => current.map(patchOrder));
-		setOpenDocument({ kind: 'transfer', order: nextOrder, transfer: nextTransfer });
-		setNotice(`${transferDocumentLabel(nextTransfer)}: склад назначения изменён на «${toStore}».`);
-		return nextTransfer;
-	};
-
-	const moveOpenTransfer = async (action: 'update' | 'collect' | 'ship' | 'receive' | 'post' | 'cancel' | 'resolve', lines: Array<{ productId: number; qty: number }> = []): Promise<void> => {
-		const target = openDocument;
-		if (!target || target.kind !== 'transfer' || documentBusy) return;
-		setDocumentBusy(true);
-		try {
-			const updated = action === 'update' ? await updateTransferLines(target.transfer.id, lines)
-				: action === 'collect' ? await collectTransfer(target.transfer.id, lines)
-					: action === 'ship' ? await shipTransfer(target.transfer.id)
-						: action === 'receive' ? await receiveTransfer(target.transfer.id, lines)
-							: action === 'post' ? await postTransfer(target.transfer.id)
-								: action === 'cancel' ? await cancelTransfer(target.transfer.id)
-								: await resolveTransferShortage(target.transfer.id);
-			await refreshOpenDocument(target);
-			setNotice(updated.actionWarning || `${transferDocumentLabel(target.transfer)}: статус обновлён.`);
-		} catch (err) {
-			setNotice(err instanceof Error ? err.message : 'Не удалось изменить статус перемещения.');
-		} finally { setDocumentBusy(false); }
-	};
-
-	const deleteOpenDocument = async (): Promise<void> => {
-		const target = openDocument;
-		if (!target || documentBusy || currentUserId !== '1858') return;
-		const title = target.kind === 'purchase' ? target.purchase.name : `Перемещение ${transferDocumentLabel(target.transfer)}`;
-		const detail = target.kind === 'purchase'
-			? 'Связанные оприходования будут отменены.'
-			: 'Все проведённые складские движения и связанные корректировки этого перемещения будут отменены и удалены.';
-		if (!window.confirm(`Удалить ${title}?\n\n${detail}`)) return;
-		setDocumentBusy(true);
-		try {
-			if (target.kind === 'purchase') await deleteSupplyPurchaseOrder(target.purchase.name);
-			else await deleteTransfer(target.transfer.id);
-			setOpenDocument(null);
-			await reload();
-			setNotice(`${title}: удалено.`);
-		} catch (err) {
-			setNotice(err instanceof Error ? err.message : 'Не удалось удалить документ.');
-		} finally { setDocumentBusy(false); }
-	};
+	const {
+		documentBusy,
+		saveOpenPurchase,
+		receiveOpenPurchase,
+		createOpenPurchaseTransfer,
+		changeOpenTransferDestination,
+		moveOpenTransfer,
+		deleteOpenDocument,
+	} = useSupplyOpenDocumentActions({
+		mock: Boolean(ctx.__mock),
+		openDocument,
+		setOpenDocument,
+		setOrders,
+		setNotice,
+		currentUserId,
+		reload,
+	});
 
 	useEffect(() => {
 		if (ctx.__mock) { setCurrentUserId('1858'); setPhase('ready'); return; }
