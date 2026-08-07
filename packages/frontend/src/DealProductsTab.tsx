@@ -8,13 +8,7 @@ import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
-import {
-	dealProductRealizedQuantity,
-	dealProductRealizedProductQuantity,
-	dealProductRemainingQuantity,
-	dealProductSelectedQuantity,
-	dealProductShippedQuantity,
-} from './deal-product-fulfillment-values.js';
+import { dealProductRealizedProductQuantity } from './deal-product-fulfillment-values.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
@@ -42,21 +36,12 @@ import { createDealRealizationActions } from './deal-realization-actions.js';
 import { buildDealRealizationSelection } from './deal-realization-selection.js';
 import { createDealWorkRowRenderer } from './deal-work-row-renderer.js';
 import { createDealGoodsRowRenderer } from './deal-goods-row-renderer.js';
+import { createDealProductRowContext } from './deal-product-row-context.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
 	requestB24FitWindow,
 } from './deal-products-placement-sizing.js';
-import {
-	dealProductActiveSupply,
-	dealProductActiveTransfer,
-	dealProductAvailabilityStatus,
-	dealProductReceivedTransfer,
-	dealProductSelectedStoreId,
-	dealProductStockAmount,
-	dealProductStoreName,
-	dealProductTotalStock,
-} from './deal-product-availability.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	isPlanRow,
@@ -70,7 +55,6 @@ import {
 	call,
 	isWorkRow,
 	type StoredDealContractDocument,
-	type TransferDoc,
 } from './b24.js';
 
 type State =
@@ -410,22 +394,20 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		return src != null && data.stores.some((s) => s.id === src) ? src : (data.stores[0]?.id ?? 0);
 	});
 
-	const realizedForRow = (row: EnrichedRow): number => dealProductRealizedQuantity(row, data.coreReals);
-	const shippedForRow = (row: EnrichedRow): number => dealProductShippedQuantity(row, data.coreReals);
-	const remaining = (row: EnrichedRow): number => dealProductRemainingQuantity(row, data.coreReals);
-	const qtyOf = (row: EnrichedRow): number => dealProductSelectedQuantity(row, data.coreReals, batchQty[row.id]);
-
-	// ── Склад на строке → статус → группировка по складам ──
-	const storeOf = (row: EnrichedRow): number => dealProductSelectedStoreId(row, rowStore, realizeStore);
-	const amountAt = (row: EnrichedRow, storeId: number): number => dealProductStockAmount(row, storeId);
-	const totalStock = (row: EnrichedRow): number => dealProductTotalStock(row);
-	const rowStatus = (row: EnrichedRow) => dealProductAvailabilityStatus(row, qtyOf(row), storeOf(row));
-	const storeName = (storeId: number): string => dealProductStoreName(data.stores, storeId);
-	/** Незакрытое перемещение по этому товару (запрошено/в пути) — чтобы показать статус вместо кнопки. */
-	const activeTransferOf = (row: EnrichedRow): TransferDoc | null => dealProductActiveTransfer(row, dealTransfers);
-	/** Полученное перемещение по товару: товар уже на складе Б, но остаток открытой вкладки мог не обновиться. */
-	const receivedTransferOf = (row: EnrichedRow): TransferDoc | null => dealProductReceivedTransfer(row, dealTransfers);
-	const activeSupplyOf = (row: EnrichedRow) => dealProductActiveSupply(row, data.supply);
+	const {
+		realizedForRow,
+		shippedForRow,
+		remaining,
+		qtyOf,
+		storeOf,
+		amountAt,
+		totalStock,
+		rowStatus,
+		storeName,
+		activeTransferOf,
+		receivedTransferOf,
+		activeSupplyOf,
+	} = createDealProductRowContext({ data, batchQty, rowStore, realizeStore, dealTransfers });
 
 	const {
 		goods,
