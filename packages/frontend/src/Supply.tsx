@@ -15,6 +15,14 @@ import {
 	type DecisionMap,
 	type DecisionState,
 } from './supply-decision-planning.js';
+import {
+	purchaseAmount,
+	purchaseIsCancelled,
+	purchaseIsShortage,
+	purchaseIsWaiting,
+	purchaseQuantities,
+	purchaseStatus,
+} from './supply-purchase-status.js';
 import { SupplySearch, SupplyStatusPill } from './SupplyOverviewControls.js';
 import { SupplySupplierField } from './SupplySupplierField.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
@@ -166,17 +174,6 @@ const compactStock = (item: { stocks: Record<string, number> }): string => {
 	return entries.map(([name, qty]) => `${name}: ${qty}`).join(' · ');
 };
 
-const purchaseStatus = (purchase: SupplyPurchaseChild): { label: string; tone: string } => {
-	const ordered = purchase.lines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
-	const received = purchase.receipts.reduce((sum, receipt) => sum + receipt.lines.reduce((a, line) => a + Number(line.qty || 0), 0), 0);
-	const stage = String(purchase.supplyStage ?? purchase.status ?? '').toLowerCase();
-	if (ordered > 0 && received >= ordered) return { label: 'Получено', tone: 'ok' };
-	if (received > 0) return { label: 'Частично получено', tone: 'warn' };
-	if (stage.includes('order') || stage.includes('submit') || stage.includes('receive')) return { label: 'Заказано', tone: 'info' };
-	if (stage.includes('approval')) return { label: 'На согласовании', tone: 'violet' };
-	return { label: 'Черновик', tone: 'muted' };
-};
-
 const sameStore = (left: string | undefined, right: string | undefined): boolean =>
 	Boolean(left?.trim() && right?.trim())
 	&& left!.trim().toLocaleLowerCase('ru-RU') === right!.trim().toLocaleLowerCase('ru-RU');
@@ -260,22 +257,6 @@ const transferDocumentLabel = (transfer: SupplyTransferChild): string => {
 
 const lineTitle = (line: { name?: string; itemName?: string; productId: number; qty: number }): string =>
 	`${line.name || line.itemName || `#${line.productId}`} ×${line.qty}`;
-const purchaseQuantities = (purchase: SupplyPurchaseChild): { ordered: number; received: number } => ({
-	ordered: purchase.lines.reduce((sum, line) => sum + Number(line.qty || 0), 0),
-	received: purchase.receipts.reduce((sum, receipt) => sum + receipt.lines.reduce((subtotal, line) => subtotal + Number(line.qty || 0), 0), 0),
-});
-const purchaseIsCancelled = (purchase: SupplyPurchaseChild): boolean => String(purchase.supplyStage ?? '').toLowerCase() === 'cancelled';
-const purchaseIsShortage = (purchase: SupplyPurchaseChild): boolean => {
-	const { ordered, received } = purchaseQuantities(purchase);
-	return !purchaseIsCancelled(purchase) && received > 0 && received < ordered;
-};
-const purchaseIsWaiting = (purchase: SupplyPurchaseChild): boolean => {
-	const { ordered, received } = purchaseQuantities(purchase);
-	return !purchaseIsCancelled(purchase) && ordered > 0 && received < ordered;
-};
-const purchaseAmount = (purchase: SupplyPurchaseChild): number =>
-	purchase.lines.reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.rate || 0), 0);
-
 const searchMatches = (query: string, values: Array<string | number | undefined>): boolean => {
 	const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 	if (!words.length) return true;
