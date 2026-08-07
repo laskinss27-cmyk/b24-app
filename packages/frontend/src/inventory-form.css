@@ -1,0 +1,145 @@
+/* Тег-инпут (оповещаемые): чипы + автокомплит */
+.tag-pick {
+	margin: 4px 0 8px;
+}
+.tag-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+.tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: #eaf1fd;
+	color: #1b4fa0;
+	border: 1px solid #c7dbfb;
+	border-radius: 14px;
+	padding: 3px 6px 3px 10px;
+	font-size: 13px;
+}
+.tag-x {
+	background: none;
+	border: none;
+	color: #1b4fa0;
+	font-size: 15px;
+	line-height: 1;
+	cursor: pointer;
+	padding: 0 2px;
+}
+.tag-x:hover {
+	color: #c0392b;
+}
+.tag-input-wrap {
+	position: relative;
+}
+.tag-dropdown {
+	position: absolute;
+	z-index: 10;
+	left: 0;
+	right: 0;
+	margin-top: 2px;
+	background: #fff;
+	border: 1px solid #ccc;
+	border-radius: 6px;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+	max-height: 200px;
+	overflow-y: auto;
+}
+.tag-option {
+	display: block;
+	width: 100%;
+	text-align: left;
+	background: none;
+	border: none;
+	padding: 8px 12px;
+	font-size: 14px;
+	cursor: pointer;
+}
+.tag-option:hover {
+	background: #f0f5ff;
+}
+.add-product {
+	margin: 8px 0 4px;
+}
+.add-product .inv-input {
+	border-style: dashed;
+}
+.added-group {
+	border: 1px solid #c7dbfb;
+	background: #f5f9ff;
+	border-radius: 8px;
+	padding: 4px 8px;
+	margin-bottom: 10px;
+}
+.added-group .group-head {
+	color: #1b4fa0;
+}
+.beta-banner.ok {
+	background: #eaf7ee;
+	border-color: #bfe3c9;
+	color: #1e6b34;
+}
+/* Закреплённые внизу кнопки «Сохранить/Отправить» — всегда на виду в длинном списке */
+.sticky-actions {
+	position: sticky;
+	bottom: 0;
+	background: #fff;
+	border-top: 1px solid #e2e2e2;
+	padding: 10px 0 8px;
+	margin-top: 8px;
+	z-index: 5;
+}
+.beta-banner.ok .doc-open {
+	margin: 6px 6px 0 0;
+}
+/* Закреплённая строка поиска сверху — искать в длинном списке, не мотая наверх */
+.inv-toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 6;
+	background: #fff;
+}
+.inv-field {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
+	margin-bottom: 8px;
+}
+.inv-date {
+	padding: 7px 10px;
+	border: 1px solid #ccc;
+	border-radius: 8px;
+	font-size: 14px;
+}
+.inv-date.invalid {
+	border-color: #d14343;
+	box-shadow: 0 0 0 1px #d14343;
+}
+.inv-validation-error {
+	margin: -2px 0 10px;
+	color: #c53030;
+	font-size: 13px;
+}
+.deadline {
+	font-size: 12px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	white-space: nowrap;
+}
+.deadline.ok {
+	color: #555;
+	background: #f0f0f0;
+}
+.deadline.soon {
+	color: #9a3412;
+	background: #fff7ed;
+	font-weight: 600;
+}
+.deadline.overdue {
+	color: #c0392b;
+	background: #fde8e8;
+	font-weight: 600;
+}
