@@ -37,6 +37,11 @@ import { DEAL_PRODUCTS_MOCK_DATA, dealProductsMockVariantData } from './deal-pro
 import { DealProductsTable } from './DealProductsTable.js';
 import { loadDealProductsData } from './deal-products-data-loader.js';
 import {
+	PRODUCT_PICKER_MIN_HEIGHT,
+	dealContentHeight,
+	requestB24FitWindow,
+} from './deal-products-placement-sizing.js';
+import {
 	dealProductActiveSupply,
 	dealProductActiveTransfer,
 	dealProductAvailabilityStatus,
@@ -89,28 +94,6 @@ type State =
 	| { phase: 'loading' }
 	| { phase: 'error'; message: string }
 	| { phase: 'ready'; data: TableData; viewer: string; dev: boolean; canReturn: boolean };
-
-const PRODUCT_PICKER_MIN_HEIGHT = 900;
-
-const dealContentHeight = (minHeight = 0): number => {
-	const root = document.getElementById('root');
-	return Math.ceil(Math.max(
-		minHeight,
-		root?.scrollHeight ?? 0,
-		document.body.scrollHeight,
-		document.documentElement.scrollHeight,
-	));
-};
-
-const requestB24FitWindow = (delay = 120): void => {
-	window.setTimeout(() => {
-		try {
-			const bx24 = window.BX24;
-			if (!bx24) return;
-			bx24.resizeWindow(document.documentElement.clientWidth, dealContentHeight());
-		} catch { /* outside placement context */ }
-	}, delay);
-};
 
 const todayYmd = (): string => {
 	const now = new Date();
