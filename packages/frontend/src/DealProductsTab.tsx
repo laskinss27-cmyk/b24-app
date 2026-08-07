@@ -9,6 +9,7 @@ import { TransferSplitModal } from './TransferSplitModal.js';
 import { ContractModal } from './ContractModal.js';
 import { ReturnModal } from './ReturnModal.js';
 import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
+import { DealProductRealizationRow, type DealProductRealizationPart } from './DealProductRealizationRow.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	dealProductBasePrice,
@@ -843,8 +844,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const profitability = profitGoods + profitWorks;
 
 	/** Партии этой строки — реализации ИЗ ЯДРА (черновики и проведённые), связь по productId. */
-	type Part = { name: string; submitted: boolean; isReturn: boolean; qty: number; storeName: string };
-	const partsOf = (r: EnrichedRow): Part[] => {
+	const partsOf = (r: EnrichedRow): DealProductRealizationPart[] => {
 		const matchesRow = (item: CoreRealization['items'][number]): boolean =>
 			item.productId === r.productId && (!r.segmentKind || (item.segmentId || 'base') === segmentIdOf(r));
 		const linkedReturns = new Map<string, number>();
@@ -859,7 +859,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		}
 		const parts = data.coreReals
 			.filter((rz) => !rz.isReturn)
-			.map((rz): Part | null => {
+			.map((rz): DealProductRealizationPart | null => {
 				const its = rz.items.filter(matchesRow);
 				if (!its.length) return null;
 				const gross = its.reduce((sum, item) => sum + item.qty, 0);
@@ -870,7 +870,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				if (qty <= 0.000001) return null;
 				return { name: rz.name, submitted: rz.submitted, isReturn: false, qty, storeName: its[0]!.storeTitle };
 			})
-			.filter((p): p is Part => p != null);
+			.filter((p): p is DealProductRealizationPart => p != null);
 		return parts;
 	};
 	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
@@ -932,27 +932,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 	const renderGoodsRows = (r: EnrichedRow): JSX.Element[] => {
 		const parts = partsOf(r);
 		const left = remaining(r);
-		const out: JSX.Element[] = parts.map((p) => (
-			<tr key={`${r.id}-${p.name}`} className="part-row">
-				<td className="check-col"></td>
-				<td className="part-name">↳ {r.name}</td>
-				<td><span className={`type-badge part${p.isReturn ? ' part-return' : ''}`}>{p.isReturn ? 'возврат' : p.submitted ? 'реализовано' : 'черновик'}</span></td>
-				<td className="num">{rub(r.price)}</td>
-				<td className="num"><span className="none">—</span></td>
-				<td className="num"><span className="none">—</span></td>
-				<td className="num">{p.submitted ? `${p.qty} ${r.measure}` : <span className="none">—</span>}</td>
-				<td className="num">{p.submitted ? <span className="none">—</span> : `${p.qty} ${r.measure}`}</td>
-				<td className="num">{rub(r.price * p.qty)}</td>
-				<td className="row-store part-store">
-					<span className="part-reserve" title="Склад списания в ядре">{p.storeName}</span>
-				</td>
-				<td className="realize-cell">
-					<span className="shipment-chip" title={p.isReturn ? 'возврат от клиента — товар вернулся на склад' : p.submitted ? 'проведена в ядре — остаток списан' : 'черновик в ядре — проверь и нажми «Провести»'}>
-						{p.name} {p.isReturn ? '↩ возврат' : p.submitted ? '✓ проведена' : '✎ черновик'}
-					</span>
-				</td>
-			</tr>
-		));
+		const out: JSX.Element[] = parts.map((p) => <DealProductRealizationRow key={`${r.id}-${p.name}`} row={r} part={p} />);
 		if (left > 0) {
 			const status = rowStatus(r);
 			const activeSupply = activeSupplyOf(r);
