@@ -23,6 +23,7 @@ import { DealProductsTable } from './DealProductsTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
 import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
+import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -92,14 +93,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	const [expandedStocks, setExpandedStocks] = useState<Record<string, boolean>>({});
 	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
 	const [busy, setBusy] = useState(false);
-	/** Имена только что созданных черновиков — до следующего перечитывания сделки. */
-	const [draftNames, setDraftNames] = useState<string[]>([]);
-	/** Черновики восстанавливаются из ядра после закрытия или перезагрузки карточки сделки. */
-	const persistedDraftNames = data.coreReals
-		.filter((document) => !document.submitted && !document.isReturn)
-		.map((document) => document.name);
-	const pendingDraftNames = [...new Set([...persistedDraftNames, ...draftNames])];
-	const hasPendingDrafts = pendingDraftNames.length > 0;
+	const { pendingDraftNames, hasPendingDrafts, setDraftNames } = useDealRealizationDrafts(data.coreReals);
 	const {
 		supplyBusy,
 		setSupplyBusy,
