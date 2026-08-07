@@ -2,9 +2,6 @@ import type { DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY } from './DealDocumentPreviewModal.js';
 import { DealContractDocumentModal } from './DealContractDocumentModal.js';
-import { TransferSplitModal } from './TransferSplitModal.js';
-import { ContractModal } from './ContractModal.js';
-import { ReturnModal } from './ReturnModal.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
@@ -32,8 +29,7 @@ import {
 	useDealProductStockExpansion,
 } from './useDealProductStockState.js';
 import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
-import { buildDealReturnableProducts } from './deal-returnable-products.js';
-import { buildDealTransferSplitSources } from './deal-transfer-split-view.js';
+import { DealOperationalDialogs } from './DealOperationalDialogs.js';
 import {
 	useDealContractModalState,
 	useDealReturnModalState,
@@ -518,35 +514,25 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				/>
 			)}
 
-			{workingMode && splitRow && dealId != null && (() => {
-				const dest = storeOf(splitRow);
-				const srcs = buildDealTransferSplitSources(splitRow, dest);
-				return <TransferSplitModal dealId={dealId} productId={splitRow.productId} name={splitRow.name} need={remaining(splitRow)} destName={storeName(dest)} sources={srcs}
-					onClose={() => setSplitRow(null)}
-					onDone={async (msg) => { setSplitRow(null); setNotice({ kind: 'ok', text: msg }); await refreshDealTransfers(); }} />;
-			})()}
-
-			{workingMode && showReturn && dealId != null && (
-				<ReturnModal
-					dealId={dealId}
-					stores={data.stores}
-					returnable={buildDealReturnableProducts(goods, data.coreReals)}
-					onClose={() => setShowReturn(false)}
-					onDone={async (msg) => { setShowReturn(false); setNotice({ kind: 'ok', text: msg }); await onReload(); }}
-				/>
-			)}
-
-			{workingMode && showContract && dealId != null && (
-				<ContractModal
-					dealId={dealId}
-					onClose={() => setShowContract(false)}
-					onDone={async (message) => {
-						setShowContract(false);
-						setNotice({ kind: 'ok', text: message });
-						await onReload();
-					}}
-				/>
-			)}
+			<DealOperationalDialogs
+				workingMode={workingMode}
+				dealId={dealId}
+				splitRow={splitRow}
+				showReturn={showReturn}
+				showContract={showContract}
+				stores={data.stores}
+				goods={goods}
+				documents={data.coreReals}
+				storeOf={storeOf}
+				remaining={remaining}
+				storeName={storeName}
+				onCloseTransfer={() => setSplitRow(null)}
+				onTransferDone={async (message) => { setSplitRow(null); setNotice({ kind: 'ok', text: message }); await refreshDealTransfers(); }}
+				onCloseReturn={() => setShowReturn(false)}
+				onReturnDone={async (message) => { setShowReturn(false); setNotice({ kind: 'ok', text: message }); await onReload(); }}
+				onCloseContract={() => setShowContract(false)}
+				onContractDone={async (message) => { setShowContract(false); setNotice({ kind: 'ok', text: message }); await onReload(); }}
+			/>
 
 			{variantDialog && (
 				<DealVariantNameDialog
