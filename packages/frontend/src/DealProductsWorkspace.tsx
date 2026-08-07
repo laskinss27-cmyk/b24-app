@@ -26,6 +26,7 @@ import { useDealProductSelection } from './useDealProductSelection.js';
 import { useDealDocumentsState } from './useDealDocumentsState.js';
 import { useDealNameDialogsState } from './useDealNameDialogsState.js';
 import { useDealProductRowMutationState } from './useDealProductRowMutationState.js';
+import { useDealProductsRefresh } from './useDealProductsRefresh.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -145,10 +146,9 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		stageError,
 		setStageError,
 	} = useDealNameDialogsState();
-	const [refreshing, setRefreshing] = useState(false);
+	const { refreshing, refresh: doRefresh } = useDealProductsRefresh(onReload);
 	const { exportBusy, exportXlsx, exportDocx } = useDealProposalExports({ dealId, variantId: documentVariantId, dev, onNotice: setNotice });
 	const [showContract, setShowContract] = useState(false);
-	const doRefresh = async (): Promise<void> => { if (refreshing) return; setRefreshing(true); try { await onReload(); } finally { setRefreshing(false); } };
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const { dealTransfers, refreshDealTransfers } = useDealTransfers(dealId);
 	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
