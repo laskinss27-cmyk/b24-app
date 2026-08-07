@@ -8,10 +8,6 @@ import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import { DealSupplyOrderModal } from './DealSupplyOrderModal.js';
 import { DealActionsBar } from './DealActionsBar.js';
-import {
-	DealStageNameDialog,
-	DealVariantNameDialog,
-} from './DealNameDialogs.js';
 import { DealProductsTable } from './DealProductsTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
@@ -30,6 +26,7 @@ import {
 } from './useDealProductStockState.js';
 import { useDealProductsSummaryView } from './useDealProductsSummaryView.js';
 import { DealOperationalDialogs } from './DealOperationalDialogs.js';
+import { DealPlanningDialogs } from './DealPlanningDialogs.js';
 import {
 	useDealContractModalState,
 	useDealReturnModalState,
@@ -534,29 +531,22 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onContractDone={async (message) => { setShowContract(false); setNotice({ kind: 'ok', text: message }); await onReload(); }}
 			/>
 
-			{variantDialog && (
-				<DealVariantNameDialog
-					dialog={variantDialog}
-					quoteVariantsEnabled={data.quoteVariants.enabled}
-					activeVariantName={activeVariant?.name ?? ''}
-					busy={variantBusy}
-					error={variantError}
-					onClose={() => setVariantDialog(null)}
-					onValueChange={(value) => { setVariantDialog({ ...variantDialog, value }); setVariantError(null); }}
-					onSubmit={() => void submitVariantDialog()}
-				/>
-			)}
-
-			{stageDialog && (
-				<DealStageNameDialog
-					dialog={stageDialog}
-					busy={stageBusy}
-					error={stageError}
-					onClose={() => setStageDialog(null)}
-					onValueChange={(value) => { setStageDialog({ ...stageDialog, value }); setStageError(null); }}
-					onSubmit={() => void submitStageDialog()}
-				/>
-			)}
+			<DealPlanningDialogs
+				variantDialog={variantDialog}
+				quoteVariantsEnabled={data.quoteVariants.enabled}
+				activeVariantName={activeVariant?.name ?? ''}
+				variantBusy={variantBusy}
+				variantError={variantError}
+				onCloseVariant={() => setVariantDialog(null)}
+				onVariantValueChange={(value) => { setVariantDialog({ ...variantDialog!, value }); setVariantError(null); }}
+				onSubmitVariant={() => void submitVariantDialog()}
+				stageDialog={stageDialog}
+				stageBusy={stageBusy}
+				stageError={stageError}
+				onCloseStage={() => setStageDialog(null)}
+				onStageValueChange={(value) => { setStageDialog({ ...stageDialog!, value }); setStageError(null); }}
+				onSubmitStage={() => void submitStageDialog()}
+			/>
 
 		</div>
 	);
