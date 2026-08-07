@@ -11,6 +11,13 @@ import { ReturnModal } from './ReturnModal.js';
 import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableBands.js';
 import { DealProductRealizationRow } from './DealProductRealizationRow.js';
 import { dealProductRealizationParts } from './deal-product-realization-parts.js';
+import {
+	dealProductRealizedQuantity,
+	dealProductRealizedProductQuantity,
+	dealProductRemainingQuantity,
+	dealProductSelectedQuantity,
+	dealProductShippedQuantity,
+} from './deal-product-fulfillment-values.js';
 import { DealProductStockDetailRow } from './DealProductStockDisplay.js';
 import { DealWorkRow } from './DealWorkRow.js';
 import { DealGoodsStatusCell, type DealGoodsRowStatus } from './DealGoodsStatusCell.js';
@@ -601,32 +608,10 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 		return src != null && data.stores.some((s) => s.id === src) ? src : (data.stores[0]?.id ?? 0);
 	});
 
-	// Сколько уже реализовано по товару — из ЯДРА (черновики + проведённые). Связь — по productId:
-	// документ ядра хранит item_code=productId без rowId, а в типичной сделке товар уникален по строкам.
-	const realizedOf = (productId: number): number =>
-		data.coreReals.reduce((a, rz) => a + rz.items.filter((it) => it.productId === productId).reduce((s, it) => s + it.qty, 0), 0);
-	/** Фактически проведено: черновики сюда не входят, возвраты уменьшают итог. */
-	const shippedOf = (productId: number): number =>
-		Math.max(0, data.coreReals.filter((document) => document.submitted).reduce((sum, document) => sum + document.items.filter((item) => item.productId === productId).reduce((itemSum, item) => itemSum + item.qty, 0), 0));
-	const segmentIdOf = (r: EnrichedRow): string =>
-		r.segmentKind === 'stage' && r.stageId ? `stage:${r.stageId}` : 'base';
-	const realizedForRow = (r: EnrichedRow): number => r.segmentKind
-		? data.coreReals.reduce((sum, document) =>
-			sum + document.items
-				.filter((item) => item.productId === r.productId && (item.segmentId || 'base') === segmentIdOf(r))
-				.reduce((itemSum, item) => itemSum + item.qty, 0), 0)
-		: realizedOf(r.productId);
-	const shippedForRow = (r: EnrichedRow): number => r.segmentKind
-		? Math.max(0, data.coreReals.filter((document) => document.submitted).reduce((sum, document) =>
-			sum + document.items
-				.filter((item) => item.productId === r.productId && (item.segmentId || 'base') === segmentIdOf(r))
-				.reduce((itemSum, item) => itemSum + item.qty, 0), 0))
-		: shippedOf(r.productId);
-	const remaining = (r: EnrichedRow): number => Math.max(0, r.quantity - realizedForRow(r));
-	const qtyOf = (r: EnrichedRow): number => {
-		const v = Number(String(batchQty[r.id] ?? remaining(r)).replace(',', '.')) || 0;
-		return Math.min(Math.max(0, v), remaining(r)); // нельзя реализовать больше, чем осталось в строке
-	};
+	const realizedForRow = (row: EnrichedRow): number => dealProductRealizedQuantity(row, data.coreReals);
+	const shippedForRow = (row: EnrichedRow): number => dealProductShippedQuantity(row, data.coreReals);
+	const remaining = (row: EnrichedRow): number => dealProductRemainingQuantity(row, data.coreReals);
+	const qtyOf = (row: EnrichedRow): number => dealProductSelectedQuantity(row, data.coreReals, batchQty[row.id]);
 
 	// ── Склад на строке → статус → группировка по складам ──
 	const storeOf = (r: EnrichedRow): number => rowStore[r.id] ?? realizeStore;
@@ -1423,7 +1408,7 @@ function RealTable({ data, viewer, dev, canReturn, dealId, activeVariantId, work
 				<ReturnModal
 					dealId={dealId}
 					stores={data.stores}
-					returnable={goods.filter((r) => realizedOf(r.productId) > 0).map((r) => ({ productId: r.productId, name: r.name, shipped: realizedOf(r.productId), measure: r.measure }))}
+					returnable={goods.filter((r) => dealProductRealizedProductQuantity(r.productId, data.coreReals) > 0).map((r) => ({ productId: r.productId, name: r.name, shipped: dealProductRealizedProductQuantity(r.productId, data.coreReals), measure: r.measure }))}
 					onClose={() => setShowReturn(false)}
 					onDone={async (msg) => { setShowReturn(false); setNotice({ kind: 'ok', text: msg }); await onReload(); }}
 				/>
