@@ -5,17 +5,6 @@ import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
-import {
-	decisionGroups,
-	decisionLinesForOrder,
-	decisionReady,
-	decisionsForRow,
-	makeDecision,
-	requestItemsForOrder,
-	rowKey,
-	type DecisionMap,
-	type DecisionState,
-} from './supply-decision-planning.js';
 import { orderSearchValues, searchMatches } from './supply-search-values.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
 import { ASSORTMENT_MATRIX_CANARY_IDS, SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
@@ -26,11 +15,11 @@ import { orderStatus, SupplyMetrics, SupplyOrdersView, type OrderStatusFilter, t
 import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
+import { useSupplyDecisionActions } from './useSupplyDecisionActions.js';
 import { useSupplyOpenDocumentActions } from './useSupplyOpenDocumentActions.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab } from './StockLedger.js';
 import {
 	createSupplySupplier,
-	createSupplyDocuments,
 	fetchCurrentUserId,
 	fetchCurrentAppAccess,
 	fetchStockFormData,
@@ -64,16 +53,12 @@ export function Supply(): JSX.Element {
 	const [sort, setSort] = useState<SortKey>('dateDesc');
 	const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
 	const [expanded, setExpanded] = useState('');
-	const [decisions, setDecisions] = useState<DecisionMap>({});
-	const [busy, setBusy] = useState<string | null>(null);
-	const [reviewing, setReviewing] = useState('');
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
 	const [currentUserId, setCurrentUserId] = useState('');
 	const [canDeleteDocuments, setCanDeleteDocuments] = useState(Boolean(ctx.__mock));
 	const [marketplaceOnly, setMarketplaceOnly] = useState(false);
 	const [canOpenMarketplaces, setCanOpenMarketplaces] = useState(Boolean(ctx.__mock));
 	const [notice, setNotice] = useState<string | null>(null);
-	const [creationErrors, setCreationErrors] = useState<Record<string, string>>({});
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
 	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', inventory: '' });
@@ -103,9 +88,27 @@ export function Supply(): JSX.Element {
 		const loaded = await fetchSupplyOrders();
 		setOrders(loaded);
 	};
+	const {
+		decisions,
+		busy,
+		reviewing,
+		creationErrors,
+		patchDecision,
+		addDecision,
+		removeDecision,
+		clearOrderDecisions,
+		startReview,
+		cancelReview,
+		createDocs,
+	} = useSupplyDecisionActions({
+		mock: Boolean(ctx.__mock),
+		setOrders,
+		setNotice,
+		reload,
+	});
 	const refreshAfterRequestLineEdit = async (order: SupplyOrderRow): Promise<void> => {
-		setReviewing('');
-		setDecisions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${order.name}:`))));
+		cancelReview();
+		clearOrderDecisions(order.name);
 		await reload();
 		setNotice(`${order.name}: позиция синхронизирована со сделкой.`);
 	};
@@ -119,8 +122,8 @@ export function Supply(): JSX.Element {
 	const saveOrderStore = async (order: SupplyOrderRow, toStore: string): Promise<void> => {
 		const saved = ctx.__mock ? toStore.trim() : await updateSupplyOrderStore(order.name, order.requestKey, toStore);
 		setOrders((current) => current.map((row) => row.name === order.name ? { ...row, toStore: saved } : row));
-		setDecisions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${order.name}:`))));
-		setReviewing('');
+		clearOrderDecisions(order.name);
+		cancelReview();
 		setNotice(`${order.name}: конечный склад изменён на «${saved}». Распределение товаров нужно проверить заново.`);
 	};
 
@@ -252,81 +255,6 @@ export function Supply(): JSX.Element {
 		[orderStatusFilter, sortedOrders, searches.orders],
 	);
 
-	const patchDecision = (key: string, id: string, patch: Partial<DecisionState>): void => {
-		setReviewing('');
-		setDecisions((current) => {
-			const rows = current[key] ?? [{ ...makeDecision(key, 1), id }];
-			return { ...current, [key]: rows.map((row) => row.id === id ? { ...row, ...patch } : row) };
-		});
-	};
-
-	const addDecision = (key: string, qty: number): void => {
-		setReviewing('');
-		setDecisions((current) => ({ ...current, [key]: [...(current[key] ?? [{ ...makeDecision(key, qty), id: `${key}:initial` }]), makeDecision(key, qty)] }));
-	};
-
-	const removeDecision = (key: string, id: string): void => {
-		setReviewing('');
-		setDecisions((current) => {
-			const nextRows = (current[key] ?? []).filter((row) => row.id !== id);
-			return { ...current, [key]: nextRows.length ? nextRows : [makeDecision(key, 1)] };
-		});
-	};
-
-	const createDocs = async (order: SupplyOrderRow): Promise<void> => {
-		const lines = decisionLinesForOrder(order, decisions);
-		if (!lines.length) {
-			setNotice('Выбери действие хотя бы по одной строке заявки.');
-			return;
-		}
-		setBusy(order.name);
-		setCreationErrors((current) => ({ ...current, [order.name]: '' }));
-		try {
-			const transferPlan = decisionGroups(lines, 'transfer');
-			const purchasePlan = decisionGroups(lines, 'purchase');
-			let createdTransferCount = transferPlan.length;
-			let createdPurchaseCount = purchasePlan.length;
-			let updatedPurchaseCount = 0;
-			if (ctx.__mock) {
-				setOrders((current) => current.map((row) => row.name === order.name ? {
-					...row,
-					items: row.items.map((item) => {
-						const covered = lines.filter((line) => line.productId === item.productId).reduce((sum, line) => sum + line.qty, 0);
-						return { ...item, qty: Math.max(item.qty - covered, 0) };
-					}).filter((item) => item.qty > 0),
-					transfers: [...(row.transfers ?? []), ...transferPlan.map((group, i) => ({ id: Date.now() + i, name: `TRN-DEMO-${i + 1}`, status: 'in_transit', fromStore: group.key, toStore: row.toStore, lines: group.lines.map((line) => ({ productId: line.productId, name: line.itemName, qty: line.qty })), receivedLines: [], shortageLines: [] }))],
-					purchases: [...(row.purchases ?? []), ...purchasePlan.map((group, i) => ({ name: `PUR-DEMO-${i + 1}`, supplier: group.key, status: 'Draft', supplyStage: 'draft', lines: group.lines.map((line) => ({ productId: line.productId, name: line.itemName, qty: line.qty, rate: 0 })), receipts: [] }))],
-				} : row));
-			} else {
-				const created = await createSupplyDocuments({ requestName: order.name, requestKey: order.requestKey, dealId: Number(order.dealId), toStore: order.toStore, lines });
-				createdTransferCount = created.transfers.length;
-				createdPurchaseCount = created.purchases.length;
-				updatedPurchaseCount = created.updatedPurchases.length;
-				await reload();
-			}
-			setDecisions((current) => {
-				const next = { ...current };
-				requestItemsForOrder(order).forEach((item, index) => { delete next[rowKey(order.name, item.productId, index)]; });
-				return next;
-			});
-			setReviewing('');
-			setCreationErrors((current) => ({ ...current, [order.name]: '' }));
-			const parts = [
-				createdTransferCount ? `Создано перемещений: ${createdTransferCount} (товар в транзите)` : '',
-				createdPurchaseCount ? `Создано заявок поставщику: ${createdPurchaseCount} (черновики)` : '',
-				updatedPurchaseCount ? `Дополнено черновиков: ${updatedPurchaseCount}` : '',
-			].filter(Boolean);
-			setNotice(`Готово. ${parts.join('; ')}.`);
-		} catch (err) {
-			if (!ctx.__mock) await reload().catch(() => undefined);
-			const message = err instanceof Error ? err.message : String(err);
-			setCreationErrors((current) => ({ ...current, [order.name]: message }));
-			setNotice(message);
-		} finally {
-			setBusy(null);
-		}
-	};
-
 	if (phase === 'init') return <div className="supply-proto-state">Загрузка...</div>;
 	if (phase === 'manager-link' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
 	if (phase === 'manager-link' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
@@ -343,7 +271,7 @@ export function Supply(): JSX.Element {
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <SupplyOrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { setReviewing(''); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={(name) => { setCreationErrors((current) => ({ ...current, [name]: '' })); setReviewing(name); }} onCancelReview={() => setReviewing('')} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
+				{view === 'orders' && <SupplyOrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { cancelReview(); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={startReview} onCancelReview={cancelReview} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
 				{view === 'purchase' && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>
