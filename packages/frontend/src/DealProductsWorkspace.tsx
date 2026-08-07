@@ -25,6 +25,7 @@ import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
 import { useDealProductSelection } from './useDealProductSelection.js';
 import { useDealDocumentsState } from './useDealDocumentsState.js';
 import { useDealNameDialogsState } from './useDealNameDialogsState.js';
+import { useDealProductRowMutationState } from './useDealProductRowMutationState.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -43,7 +44,6 @@ import {
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import {
 	isPlanRow,
-	type DealProductRowEdit,
 } from './deal-product-row-values.js';
 import {
 	openSupplyCard,
@@ -67,12 +67,14 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	// строкой-записью, под ней живёт остаток со своим складом, полем кол-ва и кнопкой.
 	const [batchQty, setBatchQty] = useState<Record<string, string>>({});
 	const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-	/** id удаляемой строки (блокирует её кнопку на время запроса). */
-	const [removing, setRemoving] = useState<string | null>(null);
-	/** Инлайн-правки строк: rowId → {кол-во, базовая цена, скидка %} (строками, пока редактируется). */
-	const [rowEdits, setRowEdits] = useState<Record<string, DealProductRowEdit>>({});
-	/** rowId, по которому идёт сохранение правки (блокирует поля). */
-	const [savingRow, setSavingRow] = useState<string | null>(null);
+	const {
+		removing,
+		setRemoving,
+		rowEdits,
+		setRowEdits,
+		savingRow,
+		setSavingRow,
+	} = useDealProductRowMutationState();
 	const { editOf, setEdit, onRowBlur } = createDealProductRowEditActions({
 		dealId,
 		data,
