@@ -4,6 +4,7 @@ import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
+import { SupplySearch, SupplyStatusPill } from './SupplyOverviewControls.js';
 import { SupplySupplierField } from './SupplySupplierField.js';
 import { LedgerTab, StockLedger, StockMovementsTab, StockTransfersTab, TransferRequestsTab, TurnoverReportTab, type StockMovementKind } from './StockLedger.js';
 import {
@@ -344,10 +345,6 @@ const documentAmount = (lines: Array<{ qty: number }>): string => {
 	return `${lines.length} поз. · ${qty} шт`;
 };
 
-function Pill({ tone, children }: { tone: string; children: string }): JSX.Element {
-	return <span className={`supply-proto-pill ${tone}`}>{children}</span>;
-}
-
 function Metrics({ orders, view }: { orders: SupplyOrderRow[]; view: ViewKey }): JSX.Element {
 	const requests = orders.filter((order) => !order.standalone);
 	const purchases = orders.flatMap((order) => order.purchases ?? []);
@@ -375,19 +372,10 @@ function Metrics({ orders, view }: { orders: SupplyOrderRow[]; view: ViewKey }):
 	);
 }
 
-function SupplySearch({ value, onChange }: { value: string; onChange: (value: string) => void }): JSX.Element {
-	return (
-		<label className="supply-proto-search">
-			<span>Поиск</span>
-			<input type="search" value={value} placeholder="Сделка, склад, товар или поставщик" onChange={(event) => onChange(event.target.value)} />
-		</label>
-	);
-}
-
 function documentsSummary(order: SupplyOrderRow): JSX.Element {
 	const docs = (order.transfers?.length ?? 0) + (order.purchases?.length ?? 0);
-	if (!docs) return <Pill tone="muted">документов нет</Pill>;
-	return <Pill tone="info">{`${docs} документ(а)`}</Pill>;
+	if (!docs) return <SupplyStatusPill tone="muted">документов нет</SupplyStatusPill>;
+	return <SupplyStatusPill tone="info">{`${docs} документ(а)`}</SupplyStatusPill>;
 }
 
 type OpenSupplyDocument =
@@ -1091,7 +1079,7 @@ function OrdersView({
 									<p title={order.note.trim()}>{order.note.trim() || 'Комментария нет'}</p>
 								</div>
 								<div className="supply-order-head-meta">
-									<Pill tone={requestState.tone}>{requestState.label}</Pill>
+									<SupplyStatusPill tone={requestState.tone}>{requestState.label}</SupplyStatusPill>
 									{documentsSummary(order)}
 								</div>
 							</button>
@@ -1173,7 +1161,7 @@ function OrdersView({
 									<div className="supply-order-review">
 										<div className="supply-order-review-head">
 											<div><h3>Проверь документы</h3></div>
-											<Pill tone="info">{`${documentCount} документ(а)`}</Pill>
+											<SupplyStatusPill tone="info">{`${documentCount} документ(а)`}</SupplyStatusPill>
 										</div>
 										<div className="supply-order-review-list">
 											{transferGroups.map((group) => (
@@ -1224,7 +1212,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 					<div key={order.name} className="supply-proto-deal">
 						<div className="supply-proto-deal-head">
 							<div><b>{order.displayTitle || order.name}</b><small>{order.name} · #{order.dealId} · {order.dealTitle || order.toStore}</small></div>
-							<Pill tone={order.closed ? 'ok' : 'info'}>{order.closed ? 'закрыто' : requestItemsForOrder(order).length ? 'требует решения' : 'в исполнении'}</Pill>
+							<SupplyStatusPill tone={order.closed ? 'ok' : 'info'}>{order.closed ? 'закрыто' : requestItemsForOrder(order).length ? 'требует решения' : 'в исполнении'}</SupplyStatusPill>
 						</div>
 						<div className="supply-proto-thread">
 							{(order.purchases ?? []).map((purchase) => {
@@ -1233,7 +1221,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 									<div key={`${order.name}-${purchase.name}`} className="supply-proto-node">
 									<div className="node-top">
 										<div><span className="kind">заявка поставщику</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenPurchase(order, purchase)}>{purchase.displayTitle || purchase.name}</button> · {purchase.name}</div>
-										<Pill tone={status.tone}>{status.label}</Pill>
+										<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill>
 										</div>
 										<p>{purchase.lines.map(lineTitle).join(' · ')}</p>
 										{purchase.receipts.map((receipt) => <p key={receipt.name} className="subline">{receipt.displayTitle || `Приход ${receipt.name}`} · {receipt.name}: {receipt.lines.map(lineTitle).join(' · ')}</p>)}
@@ -1246,7 +1234,7 @@ function TreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOr
 									<div key={`${order.name}-${transfer.id}`} className={`supply-proto-node${transfer.correctionOf ? ' correction' : ''}`}>
 									<div className="node-top">
 										<div><span className="kind">{transfer.correctionOf ? 'корректировка' : 'перемещение'}</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transfer.displayTitle || transferDocumentLabel(transfer)}</button> · {transferDocumentLabel(transfer)}</div>
-											<div className="supply-status-pair">{transferHasDiscrepancy(transfer) && <Pill tone="warn">Расхождение</Pill>}<Pill tone={status.tone}>{status.label}</Pill></div>
+											<div className="supply-status-pair">{transferHasDiscrepancy(transfer) && <SupplyStatusPill tone="warn">Расхождение</SupplyStatusPill>}<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></div>
 										</div>
 										<p>{transfer.lines.map(lineTitle).join(' · ')}</p>
 									</div>
@@ -1287,10 +1275,10 @@ function RegistryView({ orders, kind, search, onOpenPurchase, onOpenTransfer }: 
 							{rows.length === 0 ? <tr><td colSpan={5} className="empty">{search.trim() ? 'Ничего не найдено.' : 'Пока пусто.'}</td></tr> : rows.map((row) => {
 								if (row.kind === 'purchase') {
 									const status = purchaseStatus(row.purchase);
-									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><Pill tone={status.tone}>{status.label}</Pill></td></tr>;
+									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></td></tr>;
 								}
 								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><div className="supply-status-pair">{transferHasDiscrepancy(row.transfer) && <Pill tone="warn">Расхождение</Pill>}<Pill tone={status.tone}>{status.label}</Pill></div></td></tr>;
+								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><div className="supply-status-pair">{transferHasDiscrepancy(row.transfer) && <SupplyStatusPill tone="warn">Расхождение</SupplyStatusPill>}<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></div></td></tr>;
 							})}
 						</tbody>
 					</table>
