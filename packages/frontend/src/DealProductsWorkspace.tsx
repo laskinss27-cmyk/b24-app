@@ -24,6 +24,7 @@ import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
 import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
 import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
+import { useDealProductSelection } from './useDealProductSelection.js';
 import { useDealTransfers } from './useDealTransfers.js';
 import { useDealProposalExports } from './useDealProposalExports.js';
 import { createDealQuoteVariantActions } from './deal-quote-variant-actions.js';
@@ -88,7 +89,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	/** Склад на КАЖДОЙ строке (реализация группируется по складу). */
 	const [rowStore, setRowStore] = useState<Record<string, number>>({});
 	/** Отмеченные галочкой строки — универсальный выбор для действий: реализация, заказ и дальше. */
-	const [selected, setSelected] = useState<Record<string, boolean>>({});
+	const { selected, setSelected, isSelected: isSel, toggleSelected: toggleSel } = useDealProductSelection();
 	/** Раскрытые остатки по складам: не распираем товарную строку при наведении. */
 	const [expandedStocks, setExpandedStocks] = useState<Record<string, boolean>>({});
 	/** Идёт обращение к ядру (draft/submit) — кнопки заблокированы. */
@@ -222,9 +223,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	const realizationDocuments = data.coreReals.filter((document) => !document.isReturn);
 	const returnDocuments = data.coreReals.filter((document) => document.isReturn);
 	const dealDocumentCount = data.contracts.length + data.coreReals.length + data.supply.length + dealTransfers.length;
-	const isSel = (r: EnrichedRow): boolean => selected[r.id] ?? false;
-	const toggleSel = (r: EnrichedRow): void => setSelected((m) => ({ ...m, [r.id]: !(m[r.id] ?? false) }));
-
 	const renderWorkRow = createDealWorkRowRenderer({
 		remaining,
 		editOf,
