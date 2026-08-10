@@ -3,7 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureTransferRequestsEntity, ensureTransfersEntity, TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { assertDealQuoteVariantSelected, completeTransferFromTransit, fetchErpStocksFor, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
+import { assertDealQuoteVariantSelected, completeTransferFromTransit, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
 import { appPermission } from '../access-policy.js';
 import {
@@ -23,6 +23,7 @@ import { newSupplyRequestData, newTransferRequestData, type SupplyRequestLine } 
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
+import { validateTransferReservation as validateReservation } from './transfer-reservation-service.js';
 import { loadTransfer as loadOne, loadTransfers as loadAll, saveTransferData as saveData } from './transfer-storage.js';
 import { createTransferRequestTask, formatTransferLines } from './transfer-task-service.js';
 import { canDeleteTransferDocuments, currentUser, type CurrentUser } from './transfer-user-access.js';
@@ -52,28 +53,6 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		if (!body.domain || !body.accessToken) return null;
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
-	};
-
-	const validateReservation = async (
-		erp: ErpClient,
-		client: B24Client,
-		docId: number,
-		fromStore: string,
-		lines: TransferLine[],
-	): Promise<void> => {
-		const stocks = await fetchErpStocksFor(erp, lines.map((line) => line.productId));
-		const reserved = new Map<number, number>();
-		for (const transfer of await loadAll(client)) {
-			if (transfer.id === docId || transfer.fromStore !== fromStore || (transfer.status !== 'draft' && transfer.status !== 'collected')) continue;
-			for (const line of transfer.lines) reserved.set(line.productId, (reserved.get(line.productId) ?? 0) + line.qty);
-		}
-		for (const line of lines) {
-			const actual = Number(stocks.get(line.productId)?.[fromStore] ?? 0);
-			const available = Math.max(actual - (reserved.get(line.productId) ?? 0), 0);
-			if (line.qty > available + 0.000001) {
-				throw new Error(`на складе «${fromStore}» для «${line.name || `#${line.productId}`}» свободно ${available}, указано ${line.qty}`);
-			}
-		}
 	};
 
 	const notifyStore = async (
