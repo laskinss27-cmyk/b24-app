@@ -29,6 +29,17 @@ import {
 import { registerRepairFileRoutes } from './repair-file-routes.js';
 import { registerRepairContactSearchRoutes } from './repair-contact-search-routes.js';
 import { registerRepairStoreStockRoute } from './repair-store-stock-route.js';
+import {
+	CLIENT_ORDER,
+	PRESALE_ORDER,
+	isLocked,
+	normalizeStatus,
+	statusOrder,
+	type RepairKind,
+	type RepairStatus,
+} from './repair-status.js';
+
+export type { RepairKind, RepairStatus } from './repair-status.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -50,41 +61,6 @@ interface AuthBody {
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
-}
-
-// Два потока ремонта (kind):
-//  client  — клиентский RMA: принято на ТТ → в офисе → в ремонт → на ТТ → готово к выдаче → выдано.
-//  presale — предпродажный (наш товар со склада): в офисе → в ремонт → с ремонта в офис → на точку → принято на ТТ.
-export type RepairKind = 'client' | 'presale';
-export type RepairStatus =
-	| 'received_tt' | 'received_office' | 'sent' | 'sent_to_tt' | 'ready_tt' | 'issued'   // клиентский
-	| 'pre_office' | 'pre_sent' | 'pre_back_office' | 'pre_to_point' | 'pre_at_tt';        // предпродажный
-const CLIENT_ORDER: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
-const PRESALE_ORDER: RepairStatus[] = ['pre_office', 'pre_sent', 'pre_back_office', 'pre_to_point', 'pre_at_tt'];
-const statusOrder = (kind: RepairKind): RepairStatus[] => kind === 'presale' ? PRESALE_ORDER : CLIENT_ORDER;
-
-/** Со статуса «принято в офисе» КЛИЕНТСКАЯ карточка ЗАМОРОЖЕНА: правит только снабжение+ (canEditPrice).
- * Предпродажный не замораживаем (нет цен/клиента) — isLocked для его статусов вернёт false. */
-const LOCK_FROM_INDEX = CLIENT_ORDER.indexOf('received_office');
-function isLocked(s: RepairStatus): boolean {
-	const i = CLIENT_ORDER.indexOf(s);
-	return i >= 0 && i >= LOCK_FROM_INDEX;
-}
-
-/** Маппинг старых статусов (до разделения приёма ТТ/офис) на новые — чтобы прежние карточки не сломались. */
-const LEGACY_STATUS: Record<string, RepairStatus> = {
-	received: 'received_tt',
-	sent: 'sent',
-	returned: 'ready_tt',
-	issued: 'issued',
-};
-
-function normalizeStatus(s: unknown, kind: RepairKind = 'client'): RepairStatus {
-	const v = String(s ?? '');
-	const order = statusOrder(kind);
-	if (order.includes(v as RepairStatus)) return v as RepairStatus;
-	if (kind === 'client' && LEGACY_STATUS[v]) return LEGACY_STATUS[v]!;
-	return order[0]!;
 }
 
 /** Кто может РЕДАКТИРОВАТЬ цену ремонта: Вова(1), Сергей(1858), Бекасов(986) + отдел Снабжение(10).
