@@ -1,3 +1,7 @@
+/**
+ * ctv_inv хранит все точки одной инвентаризации в одной JSON-записи. Поэтому
+ * параллельные read-modify-write обновления одной записи идут последовательно.
+ */
 const inventoryUpdateLocks = new Map<string, Promise<void>>();
 
 export async function withInventoryUpdateLock<T>(inventoryId: string, work: () => Promise<T>): Promise<T> {
