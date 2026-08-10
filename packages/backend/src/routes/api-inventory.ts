@@ -5,14 +5,13 @@ import { ErpClient } from '../erp/client.js';
 import {
 	createInventoryRecoDraft,
 	deleteInventoryRecoDraft,
-	fetchErpItemNames,
-	fetchErpStoreStock,
 	submitInventoryReco,
 	type InventoryRecoLine,
 } from '../erp/operations.js';
 import { registerInventoryCreateRoute } from './api-inventory-create-route.js';
 import { inventoryClientFrom, inventoryErrorInfo as errInfo } from './api-inventory-route-helpers.js';
 import { registerInventoryReadRoutes } from './api-inventory-read-routes.js';
+import { computeInventoryReconciliationLines, loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import type { InventoryAuthBody as AuthBody } from './api-inventory-types.js';
 import { registerInventoryUpdateRoute } from './api-inventory-update-route.js';
 
@@ -44,44 +43,6 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 		// «Провести» (submit ядра). Гейт: env ERPNEXT_URL.
 		// Книга для документа ядра = остатки ЯДРА (факты выравнивают ERPNext, не Б24).
 
-		/** Точка инвентаризации по id+storeId (свежее чтение entity). */
-		const loadPoint = async (client: B24Client, inventoryId: string, storeId: number) => {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
-			const item = (items ?? []).find((it) => String(it['ID']) === String(inventoryId));
-			if (!item) throw new Error('инвентаризация не найдена');
-			const data = item['DETAIL_TEXT'] ? (JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown>) : {};
-			const points = Array.isArray(data['points']) ? (data['points'] as Array<Record<string, unknown>>) : [];
-			const pt = points.find((p) => Number(p['storeId']) === Number(storeId));
-			if (!pt) throw new Error('точка не найдена');
-			return { item, data, points, pt };
-		};
-
-		/** Строки болванки: ВСЕ факты точки против книги ЯДРА (draft = полный набор фактов раунда). */
-		const computeRecoLines = async (erp: ErpClient, pt: Record<string, unknown>) => {
-			const facts = (pt['draft'] ?? {}) as Record<string, number>;
-			const factIds = Object.keys(facts).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-			if (!factIds.length) throw new Error('у точки нет фактов подсчёта (draft пуст)');
-			const storeName = String(pt['storeName'] ?? '');
-			const book = await fetchErpStoreStock(erp, storeName);
-			const resultLines = ((pt['result'] ?? {}) as { lines?: Array<{ productId: number; name?: string }> }).lines ?? [];
-			const nameByid = new Map(resultLines.map((l) => [Number(l.productId), String(l.name ?? '')]));
-			const lines: Array<{ productId: number; name: string; bookErp: number; fact: number; diff: number; valuation: number }> = [];
-			for (const productId of factIds) {
-				const fact = Number(facts[productId] ?? 0);
-				const b = book.get(productId);
-				const bookErp = b?.qty ?? 0;
-				if (Math.abs(fact - bookErp) < 1e-9) continue;
-				lines.push({ productId, name: nameByid.get(productId) ?? '', bookErp, fact, diff: fact - bookErp, valuation: b?.valuation ?? 0 });
-			}
-			const unnamed = lines.filter((l) => !l.name).map((l) => l.productId);
-			if (unnamed.length) {
-				const names = await fetchErpItemNames(erp, unnamed);
-				for (const l of lines) if (!l.name) l.name = names.get(l.productId) ?? `товар #${l.productId}`;
-			}
-			lines.sort((a, b2) => a.name.localeCompare(b2.name, 'ru'));
-			return { lines, storeName };
-		};
-
 		// Болванка: посчитать строки документа ядра, НИЧЕГО не записывая (1С: «не сохранил — пропала»).
 		app.post('/api/inventory/erp-doc-preview', async (req, reply) => {
 			const b = (req.body ?? {}) as AuthBody & { inventoryId?: string; storeId?: number };
@@ -91,9 +52,9 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 			try {
-				const { pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
+				const { pt } = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
 				if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
-				const { lines, storeName } = await computeRecoLines(erp, pt);
+				const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
 				app.log.info({ storeId: b.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
 				return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null };
 			} catch (err) {
@@ -111,7 +72,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 			try {
-				const { item, data, points, pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
+				const { item, data, points, pt } = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
 				if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
 				const prev = pt['erpDoc'] as { name?: string; status?: string } | undefined;
 				if (prev?.name && prev.status === 'submitted') return reply.code(200).send({ ok: false, error: `документ ${prev.name} уже проведён`, doc: prev });
@@ -119,7 +80,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 					if (!b.recreate) return reply.code(200).send({ ok: false, error: `черновик ${prev.name} уже записан (recreate — пересоздать)`, doc: prev });
 					await deleteInventoryRecoDraft(erp, prev.name); // «передумал»: пересоздаём от свежей болванки
 				}
-				const { lines, storeName } = await computeRecoLines(erp, pt);
+				const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
 				const recoLines: InventoryRecoLine[] = lines.map((l) => ({ productId: l.productId, qty: l.fact, valuation: l.valuation }));
 				const { name } = await createInventoryRecoDraft(erp, {
 					invRef: `inv${b.inventoryId}:store${b.storeId}`,
@@ -147,7 +108,7 @@ export function registerApiInventoryRoute(app: FastifyInstance): void {
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 			try {
-				const { item, data, points, pt } = await loadPoint(client, b.inventoryId, Number(b.storeId));
+				const { item, data, points, pt } = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
 				const doc = pt['erpDoc'] as { name?: string; status?: string; lines?: number } | undefined;
 				if (!doc?.name) return reply.code(200).send({ ok: false, error: 'сначала «Записать» (черновика ядра нет)' });
 				// ИДЕМПОТЕНТНО: проведение в ядре может пережить таймаут фронта, а entity-запись — нет.
