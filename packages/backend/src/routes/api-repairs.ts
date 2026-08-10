@@ -40,6 +40,7 @@ import {
 } from './repair-status.js';
 import { assignRepairNo, fetchAllRepairs } from './repair-storage.js';
 import { parseItem, type RepairData, type RepairFile, type RepairPhoto } from './repair-record.js';
+import { currentUser } from './repair-user-access.js';
 
 export type { RepairKind, RepairStatus } from './repair-status.js';
 
@@ -65,10 +66,6 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-/** Кто может РЕДАКТИРОВАТЬ цену ремонта: Вова(1), Сергей(1858), Бекасов(986) + отдел Снабжение(10).
- * Остальные цену видят, но не меняют. Б24 не отдаёт флаг «админ» на бэке — главные админы в списке поимённо. */
-const PRICE_EDITOR_IDS = new Set(['1', '1858', '986']);
-const PRICE_EDITOR_DEPTS = new Set([10]);
 const SUPPLY_DEPT = 10;
 
 let supplyHeadCache: number | null = null;
@@ -123,7 +120,6 @@ async function resolveNames(client: B24Client, ids: Set<string>): Promise<void> 
 	}
 }
 
-interface CurrentUser { id: string; name: string; canEditPrice: boolean }
 interface TaskSyncResult { taskId: number | null; error: string | null }
 
 function repairNotifyTitle(data: RepairData, repairId: number): string {
@@ -147,16 +143,6 @@ async function findRepairNotifyTask(client: B24Client, data: RepairData, repairI
 	const tasks = Array.isArray(res?.tasks) ? res.tasks : [];
 	const exact = tasks.find((task) => String(task.title ?? '') === title) ?? tasks[0];
 	return Number(exact?.id ?? 0) || null;
-}
-
-/** Текущий пользователь (по его токену) + право на правку цены. user.current отдаёт UF_DEPARTMENT. */
-async function currentUser(client: B24Client): Promise<CurrentUser> {
-	const me = await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
-	const id = String(me?.ID ?? '');
-	const name = `${me?.NAME ?? ''} ${me?.LAST_NAME ?? ''}`.trim();
-	const depts = Array.isArray(me?.UF_DEPARTMENT) ? (me?.UF_DEPARTMENT as unknown[]).map(Number) : [];
-	const canEditPrice = PRICE_EDITOR_IDS.has(id) || depts.some((d) => PRICE_EDITOR_DEPTS.has(d));
-	return { id, name, canEditPrice };
 }
 
 async function createRepairNotifyTask(
