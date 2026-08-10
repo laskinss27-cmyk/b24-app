@@ -22,6 +22,13 @@ import {
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { catalogAccessForUser, type CatalogAccess, type CatalogAccessUser } from '../catalog-access.js';
 import { appPermission } from '../access-policy.js';
+import type {
+	AuthBody,
+	CacheEntry,
+	CatalogCandidate,
+	CatalogStore,
+	CoreProductBaseRow,
+} from './api-catalog-types.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -34,31 +41,11 @@ import { appPermission } from '../access-policy.js';
  * открытия отдаются мгновенно. Кэш хранится в памяти конкретного контейнера;
  * force=true запускает принудительную пересборку.
  */
-interface AuthBody {
-	domain?: string;
-	accessToken?: string;
-	force?: boolean;
-	marketplaceMode?: boolean;
-}
-
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-interface CatalogStore {
-	id: number;
-	title: string;
-	active: boolean;
-}
-type CoreProductBaseRow = ProductBaseData['rows'][number] & {
-	marketplaceOldId: string;
-	isMarketplaceBundle: boolean;
-};
-interface CacheEntry {
-	data: ProductBaseData;
-	expires: number;
-}
 const baseCache = new Map<string, CacheEntry>();
 
 export function invalidateCatalogCache(domain: string): void {
@@ -66,28 +53,6 @@ export function invalidateCatalogCache(domain: string): void {
 }
 
 const CATALOG_COMPARISON_USER_IDS = new Set([1858, 986, 1]);
-
-interface CatalogCandidate {
-	id: number;
-	iblockId: number;
-	name: string;
-	isService: boolean;
-	article?: string;
-	model?: string;
-	manufacturer?: string;
-	sectionId?: number;
-	sectionName?: string;
-	status?: string;
-	description?: string;
-	content?: CatalogProductContent;
-	filterCategory?: string;
-	photoPath?: string;
-	marketplaceOldId?: string;
-	retail: number | null;
-	purchase: number | null;
-	total: number;
-	stockByStore: Record<number, number>;
-}
 
 function cleanText(value: unknown): string {
 	return String(value ?? '').trim().replace(/\s+/g, ' ');
