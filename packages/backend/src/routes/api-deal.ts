@@ -7,7 +7,6 @@ import { ErpClient } from '../erp/client.js';
 import { appendDealStage, appendDealStageItems, calculateDealPlanTotal, syncDealRealizationPrices, upsertDealPlan, listDealPlan, listDealStages, listDealQuoteVariants, updateDealQuoteVariantItems, assertDealQuoteVariantSelected, type DealQuoteVariantItem } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import {
-	CORE_ENGINEER_VISIT_SERVICE_ID,
 	fetchBasePrices,
 	fetchServiceProductIds,
 	legacyB24CompositionDisabled,
@@ -24,6 +23,7 @@ import { registerDealPlanExportRoute } from './deal-plan-export-route.js';
 import { registerDealPlanProductReplacementRoute } from './deal-plan-product-replacement-route.js';
 import { registerDealPlanRoute } from './deal-plan-route.js';
 import { registerDealPlanUpdateRoute } from './deal-plan-update-route.js';
+import { registerDealProductSearchRoute } from './deal-product-search-route.js';
 import { registerDealQuoteVariantRoutes } from './deal-quote-variant-routes.js';
 import { registerDealStageRoutes } from './deal-stage-routes.js';
 import { registerDealSupplyRoutes } from './deal-supply-routes.js';
@@ -108,42 +108,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	registerDealCoreRealizationRoute(app, clientFrom, syncDealTechnicalFields);
 
-	// Поиск товара по названию + розничная цена (для пикера «Добавить товар»).
-	app.post('/api/deal/search-products', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { q?: string };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const q = String(b.q ?? '').trim();
-		if (q.length < 2) return { ok: true, products: [] as Array<{ id: number; name: string; price: number }> };
-		try {
-			const byName = new Map<string, { id: number; name: string }>();
-			for (const iblockId of [24, 26]) {
-				const res = await client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', {
-					filter: { iblockId, '%name': q },
-					select: ['id', 'iblockId', 'name'], // iblockId обязателен в select
-					order: { id: 'ASC' },
-				});
-				for (const p of res?.products ?? []) {
-					const name = String(p['name'] ?? '');
-					const id = Number(p['id']);
-					if (id === VYEZD_PRODUCT_ID) continue;
-					if (name && id > 0 && !byName.has(name)) byName.set(name, { id, name });
-				}
-			}
-			const list = [...byName.values()];
-			if ('выезд инженера'.includes(q.toLowerCase()) || q.toLowerCase().includes('выезд') || q.toLowerCase().includes('инженер')) {
-				list.unshift({ id: CORE_ENGINEER_VISIT_SERVICE_ID, name: 'Выезд инженера' });
-			}
-			const limited = list.slice(0, 30);
-			const prices = await fetchBasePrices(client, limited.filter((p) => p.id !== CORE_ENGINEER_VISIT_SERVICE_ID).map((p) => p.id));
-			const products = limited.map((p) => ({ ...p, price: p.id === CORE_ENGINEER_VISIT_SERVICE_ID ? 0 : (prices.get(p.id) ?? 0) }));
-			app.log.info({ count: products.length }, '[api/deal/search-products] ok');
-			return { ok: true, products };
-		} catch (err) {
-			app.log.error({}, `[api/deal/search-products] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerDealProductSearchRoute(app, clientFrom);
 
 	// Добавить НЕСКОЛЬКО товарных строк в сделку за раз (корзина из пикера «Готово»).
 	app.post('/api/deal/add-products', async (req, reply) => {
