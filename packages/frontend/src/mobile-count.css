@@ -18,6 +18,14 @@
 	box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
 	text-align: center;
 }
+.erp-doc-modal {
+	box-sizing: border-box;
+	max-width: 900px;
+	max-height: calc(100vh - 32px);
+	max-height: calc(100dvh - 32px);
+	overflow: auto;
+	text-align: left;
+}
 .qr-head {
 	display: flex;
 	align-items: center;
