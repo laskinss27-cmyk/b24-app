@@ -19,9 +19,10 @@ import {
 	type TransferLine,
 	type TransferStatus,
 } from '../transfers/model.js';
-import { newSupplyRequestData, newTransferRequestData, parseTransferRequestItem, type StoredTransferRequest, type SupplyRequestLine, type TransferRequestData } from '../transfers/request-model.js';
+import { newSupplyRequestData, newTransferRequestData, type StoredTransferRequest, type SupplyRequestLine } from '../transfers/request-model.js';
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
+import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
 import { canDeleteTransferDocuments, currentUser, type CurrentUser } from './transfer-user-access.js';
 
 /**
@@ -65,22 +66,6 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	const loadAll = async (client: B24Client): Promise<StoredTransfer[]> => {
 		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 		return (items ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);
-	};
-
-	const loadTransferRequest = async (client: B24Client, id: number): Promise<StoredTransferRequest | null> => {
-		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFER_REQUESTS_ENTITY, FILTER: { ID: id } });
-		const raw = (items ?? [])[0];
-		return raw ? parseTransferRequestItem(raw) : null;
-	};
-
-	const loadTransferRequests = async (client: B24Client): Promise<StoredTransferRequest[]> => {
-		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFER_REQUESTS_ENTITY, SORT: { ID: 'DESC' } });
-		return (items ?? []).map(parseTransferRequestItem).filter((item): item is StoredTransferRequest => item != null);
-	};
-
-	const saveTransferRequest = async (client: B24Client, request: StoredTransferRequest | TransferRequestData & { id: number; name: string }): Promise<void> => {
-		const { id, name, ...data } = request;
-		await client.call('entity.item.update', { ENTITY: TRANSFER_REQUESTS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 	};
 
 	const createRequestTask = async (client: B24Client, request: StoredTransferRequest, me: CurrentUser): Promise<void> => {
