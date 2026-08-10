@@ -2,25 +2,15 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
+import { StockDealCell } from './StockDealCell.js';
 import {
-	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements, openDeal,
+	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements,
 	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createSupplyTtRequest, createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
 	fetchDocDetail, fetchItemHistory,
 	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type CoreDocDetail, type ItemMovement, type SupplyRequestLineDto,
 } from './b24.js';
-
-/** Кликабельная ссылка на сделку + ФИО ответственного (общий вид для всех складских документов). */
-function DealCell({ dealId, ownerName }: { dealId: string; ownerName?: string | undefined }): JSX.Element {
-	if (!dealId) return <span style={{ color: '#7a8699' }}>—</span>;
-	return (
-		<div>
-			<a href="#" onClick={(e) => { e.preventDefault(); openDeal(Number(dealId)); }} style={{ color: '#185fa5', textDecoration: 'none' }}>Сделка #{dealId}</a>
-			{ownerName ? <div style={{ color: '#7a8699', fontSize: 12 }}>{ownerName}</div> : null}
-		</div>
-	);
-}
 
 /**
  * Окно «Складской учёт» (левое меню, view='stock'). Вкладки:
@@ -246,7 +236,7 @@ function DocDetailModal({ doctype, name, onClose }: { doctype: string; name: str
 						<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>
 							{d.date} · {d.submitted ? 'проведён' : 'черновик'}{d.supplier ? ` · ${d.supplier}` : ''}{d.reason ? ` · ${d.reason}` : ''}{d.note ? ` · 📝 ${d.note}` : ''}
 						</div>
-						{d.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={d.dealId} ownerName={d.ownerName} /></div> : null}
+						{d.dealId ? <div style={{ marginBottom: 8 }}><StockDealCell dealId={d.dealId} ownerName={d.ownerName} /></div> : null}
 						<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 							<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>Цена ₽</th></tr></thead>
 							<tbody>
@@ -339,7 +329,7 @@ function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinati
 				{destinationError && <p className="error">⛔ {destinationError}</p>}
 				{lineError && <p className="error">⛔ {lineError}</p>}
 				<StockBlank doc={transferToPrint(t)} />
-				{t.dealId ? <div style={{ marginBottom: 8 }}><DealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
+				{t.dealId ? <div style={{ marginBottom: 8 }}><StockDealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Наименование</th><th style={TH}>Количество</th><th style={TH}>Собрано</th><th style={TH}>Принято</th></tr></thead>
 					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{canEditLines ? <input type="number" min="0" step="any" style={{ ...inp, width: 90 }} value={lineQty[l.productId] ?? ''} onChange={(event) => setLineQty((current) => ({ ...current, [l.productId]: event.target.value === '' ? '' : Math.max(Number(event.target.value), 0) }))} /> : l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
@@ -377,7 +367,7 @@ function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc
 	} else if (requestMatch?.[1]) {
 		basis = <span>Заказ на перемещение #{requestMatch[1]}</span>;
 	} else if (transfer.dealId) {
-		basis = <DealCell dealId={transfer.dealId} ownerName={transfer.ownerName} />;
+		basis = <StockDealCell dealId={transfer.dealId} ownerName={transfer.ownerName} />;
 	} else if (transfer.purchaseOrder) {
 		basis = <span>Заявка поставщику {transfer.purchaseOrder}</span>;
 	} else if (transfer.supplyRequest) {
@@ -917,7 +907,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 					<tbody>
 						{shown.map((m) => (
 							<tr key={m.name}>
-								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc(m.name); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><DealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc(m.name); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
 								{canPost && <td style={TD}>{!m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}</td>}
 							</tr>
 						))}
