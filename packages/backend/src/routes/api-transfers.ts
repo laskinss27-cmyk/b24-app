@@ -20,12 +20,13 @@ import {
 import { newSupplyRequestData, newTransferRequestData, type SupplyRequestLine } from '../transfers/request-model.js';
 import { receivingChatStore } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
+import { createTransferDraftService } from './transfer-draft-service.js';
 import { createTransferNotificationService } from './transfer-notification-service.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
 import { validateTransferReservation as validateReservation } from './transfer-reservation-service.js';
 import { loadTransfer as loadOne, loadTransfers as loadAll, saveTransferData as saveData } from './transfer-storage.js';
 import { createTransferRequestTask, formatTransferLines } from './transfer-task-service.js';
-import { canDeleteTransferDocuments, currentUser, type CurrentUser } from './transfer-user-access.js';
+import { canDeleteTransferDocuments, currentUser } from './transfer-user-access.js';
 
 /**
  * API модуля «Перемещения» (складской учёт). Документ перемещения — в нашем entity-store
@@ -48,59 +49,13 @@ function errInfo(err: unknown): string {
 
 export function registerApiTransfersRoute(app: FastifyInstance): void {
 	const operationLocks = new Set<string>();
-	const { notifyStore, transferLinks } = createTransferNotificationService(app);
+	const notifications = createTransferNotificationService(app);
+	const { notifyStore, transferLinks } = notifications;
+	const createDraftTransfer = createTransferDraftService(app, notifications);
 	const clientFrom = (body: AuthBody): B24Client | null => {
 		if (!body.domain || !body.accessToken) return null;
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
-	};
-
-	const createDraftTransfer = async (args: {
-		client: B24Client;
-		erp: ErpClient;
-		me: CurrentUser;
-		fromStore: string;
-		toStore: string;
-		lines: TransferLine[];
-		note?: string;
-		supplyRequest?: string;
-		supplyRequestKey?: string;
-		historyNote: string;
-		taskId?: number | null;
-	}): Promise<TransferData & { id: number; name: string }> => {
-		await validateReservation(args.erp, args.client, 0, args.fromStore, args.lines);
-		const now = new Date().toISOString();
-		const data = newTransferData({
-			fromStore: args.fromStore,
-			toStore: args.toStore,
-			lines: args.lines,
-			...(args.note ? { note: args.note } : {}),
-			...(args.supplyRequest ? { supplyRequest: args.supplyRequest } : {}),
-			...(args.supplyRequestKey ? { supplyRequestKey: args.supplyRequestKey } : {}),
-			createdAt: now,
-			createdById: args.me.id,
-			createdByName: args.me.name,
-			historyNote: args.historyNote,
-		});
-		data.taskId = args.taskId ?? null;
-		const itemName = `Перемещение: ${args.fromStore} → ${args.toStore}`;
-		const added = await args.client.call<number | { id?: number }>('entity.item.add', {
-			ENTITY: TRANSFERS_ENTITY, NAME: itemName, DETAIL_TEXT: JSON.stringify(data),
-		});
-		const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-		if (!id) throw new Error('entity.item.add не вернул id');
-		const notification = await notifyStore(
-			args.client,
-			args.fromStore,
-			`[B]Нужно собрать перемещение #${id}[/B]\n${args.fromStore} → ${args.toStore}\n\n${formatTransferLines(args.lines)}\n\n${transferLinks(id)}`,
-			'draft',
-			args.me,
-		);
-		if (notification.event) {
-			data.history.push(notification.event);
-			await saveData(args.client, id, itemName, data).catch((error) => app.log.warn({ id }, `[transfers] notification history failed — ${errInfo(error)}`));
-		}
-		return { id, name: itemName, ...data };
 	};
 
 	// ── Заказы на перемещение: просьба без резерва и складских движений ──────────

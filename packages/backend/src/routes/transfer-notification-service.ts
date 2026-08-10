@@ -52,3 +52,5 @@ export function createTransferNotificationService(app: FastifyInstance): {
 
 	return { notifyStore, transferLinks };
 }
+
+export type TransferNotificationService = ReturnType<typeof createTransferNotificationService>;
