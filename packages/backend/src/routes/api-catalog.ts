@@ -23,7 +23,6 @@ import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { appPermission } from '../access-policy.js';
 import type {
 	AuthBody,
-	CacheEntry,
 	CatalogCandidate,
 	CatalogStore,
 	CoreProductBaseRow,
@@ -35,6 +34,9 @@ import {
 	catalogClientFrom,
 	errInfo,
 } from './api-catalog-route-helpers.js';
+import { baseCache, CACHE_TTL_MS } from './api-catalog-cache.js';
+
+export { invalidateCatalogCache } from './api-catalog-cache.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -47,13 +49,6 @@ import {
  * открытия отдаются мгновенно. Кэш хранится в памяти конкретного контейнера;
  * force=true запускает принудительную пересборку.
  */
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const baseCache = new Map<string, CacheEntry>();
-
-export function invalidateCatalogCache(domain: string): void {
-	baseCache.delete(normalizeDomain(domain));
-}
-
 function cleanText(value: unknown): string {
 	return String(value ?? '').trim().replace(/\s+/g, ' ');
 }
