@@ -27,6 +27,7 @@ import { SalesReport } from './SalesReport.js';
 import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
 import { CatalogPriceEditorModal } from './CatalogPriceEditorModal.js';
 import { prepareCatalogPhoto, type PreparedCatalogPhoto } from './catalog-product-photo.js';
+import { formatCatalogNumber as fmt, productStatuses, PRODUCT_STATUS_OPTIONS } from './catalog-product-display.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -51,9 +52,6 @@ function shortStore(title: string): string {
 }
 function normalizeStoreTitle(title: string): string {
 	return title.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
-}
-function fmt(n: number | null | undefined): string {
-	return n == null ? '—' : n.toLocaleString('ru-RU');
 }
 /** Время сборки базы в HH:MM (для метки свежести/кэша). */
 function hhmm(iso: string): string {
@@ -92,16 +90,6 @@ const MOCK_ROWS: BaseRow[] = [
 
 type SortKey = 'id' | 'marketplaceOldId' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
 type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number; qty: number }> };
-
-function productStatuses(status: string | undefined): string[] {
-	return String(status ?? '').split(',').map((value) => value.trim()).filter(Boolean);
-}
-
-const PRODUCT_STATUS_OPTIONS = [
-	'После ремонта', 'Снят с производства', 'Недоступен к заказу', 'К удалению',
-	'Уценка', 'Витринный', 'Б/у', 'Распродажа', 'Повреждённый',
-	'Некондиция', 'Демо', 'Образец', 'Сток',
-] as const;
 
 /**
  * Поле ввода количества с локальным состоянием: можно очистить и вписать своё, не теряя
