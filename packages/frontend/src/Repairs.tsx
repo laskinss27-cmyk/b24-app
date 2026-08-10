@@ -33,6 +33,15 @@ import {
 	type RepairFile,
 	type RepairDealSyncResult,
 } from './b24.js';
+import {
+	repairCompleteness,
+	repairDate as ruDate,
+	repairDateTime as ruDateTime,
+	repairDisplayNumber as repairNo,
+	repairFileHref,
+	repairMoney as money,
+	repairPointLabel,
+} from './repair-display.js';
 
 /**
  * Модуль «Ремонты» (RMA) — приём оборудования и сдача поставщику-производителю.
@@ -99,35 +108,6 @@ const MOCK: Repair[] = [
 		history: [],
 	},
 ];
-
-function pad2(n: number): string { return n < 10 ? `0${n}` : String(n); }
-function ruDate(s: string): string {
-	if (!s) return '';
-	const d = new Date(s);
-	return Number.isNaN(d.getTime()) ? s : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
-function ruDateTime(s: string): string {
-	if (!s) return '';
-	const d = new Date(s);
-	return Number.isNaN(d.getTime()) ? s : `${ruDate(s)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
-
-/** Отображаемый номер: наш короткий (со 100), для старых карточек без него — технический ID. */
-function repairNo(r: Repair): number { return r.repairNo && r.repairNo > 0 ? r.repairNo : r.id; }
-function money(n: number | null): string { return n == null ? '' : `${n.toLocaleString('ru-RU')} ₽`; }
-function repairPointLabel(r: Repair): string {
-	if (r.point) return r.point;
-	if (r.kind === 'presale') return r.sourceStore ?? r.issueStore ?? '';
-	return '';
-}
-function repairCompleteness(r: Repair): string {
-	const value = String(r.appearance ?? '').trim();
-	const match = value.match(/(?:комплект(?:ация)?|в комплекте)\s*[:—-]?\s*(.+)$/i);
-	return match?.[1]?.trim() || value || '—';
-}
-function repairFileHref(file: RepairFile | RepairPhoto): string {
-	return file.id > 0 ? `/api/repairs/file/${file.id}` : file.url;
-}
 
 async function openRepairFile(file: RepairFile): Promise<void> {
 	const win = window.open('', '_blank');
