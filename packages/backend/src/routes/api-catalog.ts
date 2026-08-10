@@ -42,6 +42,7 @@ import {
 } from './api-catalog-value-helpers.js';
 import { buildCoreProductBase } from './api-catalog-core-base.js';
 import { freshExactCandidates, rankedCandidates } from './api-catalog-candidates.js';
+import { serializeProductCreate } from './api-catalog-product-creation-queue.js';
 
 export { invalidateCatalogCache } from './api-catalog-cache.js';
 
@@ -56,15 +57,6 @@ export { invalidateCatalogCache } from './api-catalog-cache.js';
  * открытия отдаются мгновенно. Кэш хранится в памяти конкретного контейнера;
  * force=true запускает принудительную пересборку.
  */
-let createProductQueue: Promise<void> = Promise.resolve();
-async function serializeProductCreate<T>(action: () => Promise<T>): Promise<T> {
-	const previous = createProductQueue;
-	let release!: () => void;
-	createProductQueue = new Promise<void>((resolve) => { release = resolve; });
-	await previous;
-	try { return await action(); } finally { release(); }
-}
-
 export function registerApiCatalogRoute(app: FastifyInstance): void {
 	const clientFrom = (body: AuthBody): B24Client | null => catalogClientFrom(app, body);
 
