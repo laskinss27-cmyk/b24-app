@@ -3,12 +3,10 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { calculateDealPlanTotal } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import {
 	fetchBasePrices,
 	legacyB24CompositionDisabled,
-	setDealB24Service,
 } from '../deal-product-catalog.js';
 import { syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { syncDealServiceSum } from '../deal-service-sum.js';
@@ -98,26 +96,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	registerDealProductSearchRoute(app, clientFrom);
 
 	registerDealProductManagementRoutes(app, clientFrom, syncDealTechnicalFields);
-
-	// Повторно записать в Б24 единственную служебную строку по сумме состава из ядра.
-	app.post('/api/deal/collapse-service', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const dealId = Number(b.dealId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		try {
-			const erp = ErpClient.fromEnv();
-			if (!erp) throw new Error('ядро склада не подключено — сумму сделки нельзя определить');
-			const total = await calculateDealPlanTotal(erp, dealId);
-			await setDealB24Service(client, dealId, total);
-			app.log.info({ dealId, total }, '[api/deal/collapse-service] core total synchronized');
-			return { ok: true, total };
-		} catch (err) {
-			app.log.error({ dealId }, `[api/deal/collapse-service] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
 
 	registerDealPlanRoute(app, clientFrom);
 

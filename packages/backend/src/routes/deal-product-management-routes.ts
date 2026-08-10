@@ -253,4 +253,25 @@ export function registerDealProductManagementRoutes(
 		}
 	});
 
+
+	// Повторно записать в Б24 единственную служебную строку по сумме состава из ядра.
+	app.post('/api/deal/collapse-service', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const erp = ErpClient.fromEnv();
+			if (!erp) throw new Error('ядро склада не подключено — сумму сделки нельзя определить');
+			const total = await calculateDealPlanTotal(erp, dealId);
+			await setDealB24Service(client, dealId, total);
+			app.log.info({ dealId, total }, '[api/deal/collapse-service] core total synchronized');
+			return { ok: true, total };
+		} catch (err) {
+			app.log.error({ dealId }, `[api/deal/collapse-service] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
 }
