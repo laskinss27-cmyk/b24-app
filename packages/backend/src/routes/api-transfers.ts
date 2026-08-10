@@ -23,6 +23,7 @@ import { newSupplyRequestData, newTransferRequestData, type SupplyRequestLine } 
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
+import { loadTransfer as loadOne, loadTransfers as loadAll, saveTransferData as saveData } from './transfer-storage.js';
 import { createTransferRequestTask, formatTransferLines } from './transfer-task-service.js';
 import { canDeleteTransferDocuments, currentUser, type CurrentUser } from './transfer-user-access.js';
 
@@ -53,18 +54,6 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
 
-	/** Прочитать один документ перемещения из хранилища. */
-	const loadOne = async (client: B24Client, id: number): Promise<StoredTransfer | null> => {
-		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, FILTER: { ID: id } });
-		const raw = (items ?? [])[0];
-		return raw ? parseTransferItem(raw) : null;
-	};
-
-	const loadAll = async (client: B24Client): Promise<StoredTransfer[]> => {
-		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
-		return (items ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);
-	};
-
 	const validateReservation = async (
 		erp: ErpClient,
 		client: B24Client,
@@ -85,11 +74,6 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 				throw new Error(`на складе «${fromStore}» для «${line.name || `#${line.productId}`}» свободно ${available}, указано ${line.qty}`);
 			}
 		}
-	};
-
-	/** Сохранить изменённый JSON документа. */
-	const saveData = async (client: B24Client, id: number, name: string, data: TransferData): Promise<void> => {
-		await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 	};
 
 	const notifyStore = async (
