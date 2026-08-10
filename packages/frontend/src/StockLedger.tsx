@@ -3,14 +3,15 @@ import { getContext, type B24Context } from './b24-context.js';
 import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import { StockDealCell } from './StockDealCell.js';
-import { StockBlank, docToPrint, transferToPrint } from './StockDocumentPrint.js';
+import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
+import { StockBlank, transferToPrint } from './StockDocumentPrint.js';
 import {
 	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements,
 	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createSupplyTtRequest, createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
-	fetchDocDetail, fetchItemHistory,
-	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type CoreDocDetail, type ItemMovement, type SupplyRequestLineDto,
+	fetchItemHistory,
+	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type ItemMovement, type SupplyRequestLineDto,
 } from './b24.js';
 
 /**
@@ -123,47 +124,6 @@ function ProductFilter({ value, onChange, placeholder }: { value: StockItem | nu
 }
 
 
-/** Раскрытие складского документа ядра (строки + шапка). */
-function DocDetailModal({ doctype, name, onClose }: { doctype: string; name: string; onClose: () => void }): JSX.Element {
-	const [d, setD] = useState<CoreDocDetail | null>(null);
-	const [err, setErr] = useState<string | null>(null);
-	useEffect(() => {
-		let alive = true;
-		fetchDocDetail(doctype, name).then((x) => { if (alive) setD(x); }).catch((e) => { if (alive) setErr(errText(e)); });
-		return () => { alive = false; };
-	}, [doctype, name]);
-	const printKind: 'issue' | 'receipt' | null = doctype === 'Purchase Receipt' ? 'receipt' : doctype === 'Stock Entry' ? 'issue' : null;
-	return (
-		<div style={{ ...overlay, zIndex: 1100 }}>
-			<div style={modalCard}>
-				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-					<h2 style={{ fontSize: 16, margin: 0 }}>{name}</h2>
-					<div style={{ display: 'flex', gap: 8 }}>
-						{d && printKind && <button style={btnGhost} onClick={() => window.print()}>🖨 Печать</button>}
-						<button style={btnGhost} onClick={onClose}>✕</button>
-					</div>
-				</div>
-				{err ? <p className="error">⛔ {err}</p> : !d ? <p>Загрузка…</p> : (
-					<>
-						<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>
-							{d.date} · {d.submitted ? 'проведён' : 'черновик'}{d.supplier ? ` · ${d.supplier}` : ''}{d.reason ? ` · ${d.reason}` : ''}{d.note ? ` · 📝 ${d.note}` : ''}
-						</div>
-						{d.dealId ? <div style={{ marginBottom: 8 }}><StockDealCell dealId={d.dealId} ownerName={d.ownerName} /></div> : null}
-						<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-							<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>Цена ₽</th></tr></thead>
-							<tbody>
-								{d.items.map((it, i) => (
-									<tr key={i}><td style={TD}>{it.itemName || ('#' + it.productId)}</td><td style={TD}>{it.qty}</td><td style={TD}>{it.store || '—'}</td><td style={TD}>{it.rate ? it.rate.toLocaleString('ru-RU') : '—'}</td></tr>
-								))}
-							</tbody>
-						</table>
-						{printKind && <StockBlank doc={docToPrint(d, printKind)} />}
-					</>
-				)}
-			</div>
-		</div>
-	);
-}
 
 /** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
 function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onLinesChange, onDelete, onClose }: {
@@ -381,7 +341,7 @@ export function LedgerTab(): JSX.Element {
 						</tbody>
 					</table>
 				)}
-			{openDoc && <DocDetailModal doctype={openDoc.doctype} name={openDoc.name} onClose={() => setOpenDoc(null)} />}
+			{openDoc && <StockDocumentDetailModal doctype={openDoc.doctype} name={openDoc.name} onClose={() => setOpenDoc(null)} />}
 		</>
 	);
 }
@@ -826,7 +786,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 					</tbody>
 				</table>
 			)}
-			{openDoc && <DocDetailModal doctype={KIND_DOCTYPE[kind]} name={openDoc} onClose={() => setOpenDoc(null)} />}
+			{openDoc && <StockDocumentDetailModal doctype={KIND_DOCTYPE[kind]} name={openDoc} onClose={() => setOpenDoc(null)} />}
 			{showForm && form && kind === 'receipt' && <ReceiptForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 			{showForm && form && kind === 'issue' && <IssueForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 		</>
