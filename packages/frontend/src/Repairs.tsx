@@ -27,6 +27,7 @@ import { PresaleRepairForm } from './PresaleRepairForm.js';
 import { RepairForm } from './RepairForm.js';
 import { RepairCard } from './RepairCard.js';
 import { MOCK_REPAIRS } from './repair-mock-data.js';
+import { RepairsShell } from './RepairsShell.js';
 
 /**
  * Модуль «Ремонты» (RMA) — приём оборудования и сдача поставщику-производителю.
@@ -110,7 +111,7 @@ export function Repairs(): JSX.Element {
 		setScreen({ k: 'card', repair });
 	}, [ctx.repairId, deepLinkHandled, queryRepairId, repairs]);
 
-	if (phase.k === 'init') return <Shell><p className="base-load">Загрузка…</p></Shell>;
+	if (phase.k === 'init') return <RepairsShell><p className="base-load">Загрузка…</p></RepairsShell>;
 
 	if (screen.k === 'print') return <RepairIntakeBlank repair={screen.repair} onBack={() => setScreen({ k: 'card', repair: screen.repair })} />;
 	if (screen.k === 'issue-print') return <RepairIssueBlank repair={screen.repair} onBack={() => setScreen({ k: 'card', repair: screen.repair })} />;
@@ -131,7 +132,7 @@ export function Repairs(): JSX.Element {
 			history: initial?.history ?? [{ at: new Date().toISOString(), status: 'received_tt', byId: 'dev' }],
 		});
 		return (
-			<Shell>
+			<RepairsShell>
 				<RepairForm
 					mock={Boolean(ctx.__mock)}
 					canEditPrice={canEditPrice}
@@ -143,25 +144,25 @@ export function Repairs(): JSX.Element {
 					}}
 					onDone={async (r) => { await load(); setScreen({ k: 'card', repair: r }); }}
 				/>
-			</Shell>
+			</RepairsShell>
 		);
 	}
 
 	if (screen.k === 'presale') {
 		return (
-			<Shell>
+			<RepairsShell>
 				<PresaleRepairForm
 					mock={Boolean(ctx.__mock)}
 					onCancel={() => setScreen({ k: 'list' })}
 					onDone={async (r) => { await load(); setScreen({ k: 'card', repair: r }); }}
 				/>
-			</Shell>
+			</RepairsShell>
 		);
 	}
 
 	if (screen.k === 'card') {
 		return (
-			<Shell>
+			<RepairsShell>
 				<RepairCard
 					repair={screen.repair}
 					mock={Boolean(ctx.__mock)}
@@ -225,12 +226,12 @@ export function Repairs(): JSX.Element {
 						setScreen({ k: 'list' });
 					}}
 				/>
-			</Shell>
+			</RepairsShell>
 		);
 	}
 
 	return (
-		<Shell>
+		<RepairsShell>
 			<RepairList
 				repairs={repairs}
 				loading={loading}
@@ -241,18 +242,6 @@ export function Repairs(): JSX.Element {
 				onPrintSelected={(selected) => { void openDispatchPrint(selected); }}
 				onReload={() => void load()}
 			/>
-		</Shell>
-	);
-}
-
-function Shell({ children }: { children: JSX.Element }): JSX.Element {
-	return (
-		<div className="inv repairs-shell">
-			<header>
-				<h1>🔧 Ремонты</h1>
-				<p className="subtitle">Приём оборудования и сдача в ремонт · приём → отправлено → вернулось → выдано</p>
-			</header>
-			<section>{children}</section>
-		</div>
+		</RepairsShell>
 	);
 }
