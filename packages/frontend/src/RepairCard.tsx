@@ -287,4 +287,3 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 		</div>
 	);
 }
-

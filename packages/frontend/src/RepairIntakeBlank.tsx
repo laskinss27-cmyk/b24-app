@@ -58,4 +58,3 @@ export function RepairIntakeBlank({ repair, onBack }: { repair: Repair; onBack: 
 		</div>
 	);
 }
-
