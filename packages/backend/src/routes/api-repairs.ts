@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { ensureRepairsEntity, REPAIRS_ENTITY } from '../b24/placement.js';
+import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import { registerRepairFileRoutes } from './repair-file-routes.js';
@@ -15,8 +15,8 @@ import {
 	type RepairKind,
 	type RepairStatus,
 } from './repair-status.js';
-import { assignRepairNo, fetchAllRepairs } from './repair-storage.js';
-import { parseItem, type RepairData, type RepairFile, type RepairPhoto } from './repair-record.js';
+import { assignRepairNo } from './repair-storage.js';
+import { type RepairData, type RepairFile, type RepairPhoto } from './repair-record.js';
 import { currentUser } from './repair-user-access.js';
 import { registerRepairDeleteRoute } from './repair-delete-route.js';
 import { registerRepairIssueStoreRoute } from './repair-issue-store-route.js';
@@ -27,7 +27,8 @@ import { resolveOrCreateContact } from './repair-contact-service.js';
 import { movePresaleForStatus, moveRepairForStatus, syncRepairStock, writeOffRepairOnIssue } from './repair-stock-service.js';
 import { registerRepairPaymentRoute } from './repair-payment-route.js';
 import { registerRepairPriceApprovalRoute } from './repair-price-approval-route.js';
-import { createRepairNotifyTask, ensureRepairNotifyTask, isFinishedRepair, resolveNames, userNameCache } from './repair-notification-service.js';
+import { createRepairNotifyTask } from './repair-notification-service.js';
+import { registerRepairListRoute } from './repair-list-route.js';
 
 export type { RepairKind, RepairStatus } from './repair-status.js';
 
@@ -103,36 +104,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 			);
 		}
 	};
-	// Список ремонтов (+ идемпотентно создаёт хранилище, если его ещё нет).
-	app.post('/api/repairs/list', async (req, reply) => {
-		const client = clientFrom((req.body ?? {}) as AuthBody);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		await ensureRepairsEntity(client);
-		try {
-			const items = await fetchAllRepairs(client); // ВСЕ записи постранично — чтобы список не обрезался на 50
-			const repairs = items.map(parseItem).filter((r): r is RepairData & { id: number; name: string } => r != null);
-			// Дорезолвить имена в истории для старых записей (где сохранён только byId).
-			const needIds = new Set<string>();
-			for (const r of repairs) for (const h of r.history) if (!h.byName && h.byId) needIds.add(h.byId);
-			if (needIds.size) {
-				await resolveNames(client, needIds);
-				for (const r of repairs) for (const h of r.history) {
-					if (h.byName || !h.byId) continue;
-					const nm = userNameCache.get(h.byId);
-					if (nm) h.byName = nm;
-				}
-			}
-			for (const r of repairs) {
-				if (r.taskId || isFinishedRepair(r)) continue;
-				await ensureRepairNotifyTask(client, r, app.log);
-			}
-			const me = await currentUser(client);
-			return { ok: true, repairs, canEditPrice: appPermission(req, 'repairs.edit_prices', me.canEditPrice) };
-		} catch (err) {
-			app.log.error({}, `[api/repairs/list] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerRepairListRoute(app, clientFrom);
 
 	// Принять в ремонт — новая карточка (статус «Принято»).
 	app.post('/api/repairs/create', async (req, reply) => {
