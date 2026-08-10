@@ -2,9 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import {
-	listCoreMovements, searchErpItems, listActiveStoreTitles, fetchErpStocksFor,
+	searchErpItems, listActiveStoreTitles, fetchErpStocksFor,
 	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
-	fetchCoreDocDetail, itemStockLedger, updateCoreCatalogPrices,
+	updateCoreCatalogPrices,
 } from '../erp/operations.js';
 import { buildTurnoverReport } from '../erp/turnover-report.js';
 import { buildTurnoverXlsx, type TurnoverExportFilters } from '../erp/turnover-report-xlsx.js';
@@ -13,11 +13,11 @@ import {
 	saveAssortmentMatrixItem,
 	type MatrixSalesScope,
 } from '../erp/assortment-matrix.js';
-import { resolveDealOwners } from '../b24/deal-info.js';
 import { appPermission } from '../access-policy.js';
 import { canManageStock, canUseAssortmentMatrix, stockAccess } from './api-stock-access.js';
 import { validateFreeStock } from './api-stock-availability.js';
 import { matrixCategories } from './api-stock-matrix-categories.js';
+import { registerStockMovementRoutes } from './api-stock-movement-routes.js';
 import { moscowDate, stockClientFrom, stockErrorInfo as errInfo } from './api-stock-route-helpers.js';
 import { fetchSupplierCompanies } from './api-stock-suppliers.js';
 import type { StockAuthBody as AuthBody, StockIssueLine as IssueLine, StockReceiptLine as ReceiptLine } from './api-stock-types.js';
@@ -37,67 +37,7 @@ export { validateFreeStock } from './api-stock-availability.js';
  */
 export function registerApiStockRoute(app: FastifyInstance): void {
 	const clientFrom = (body: AuthBody): B24Client | null => stockClientFrom(app, body);
-
-	// body: { domain, accessToken, kind: 'issue'|'receipt'|'delivery', from?, to? (YYYY-MM-DD) }
-	app.post('/api/stock/movements', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { kind?: unknown; from?: unknown; to?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const kind = b.kind === 'receipt' ? 'receipt' : b.kind === 'delivery' ? 'delivery' : b.kind === 'return' ? 'return' : 'issue';
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-		const period: { from?: string; to?: string; productId?: number } = {};
-		if (isDate(b.from)) period.from = b.from;
-		if (isDate(b.to)) period.to = b.to;
-		const pid = Number((b as { productId?: unknown }).productId);
-		if (Number.isInteger(pid) && pid > 0) period.productId = pid;
-		try {
-			const movements = await listCoreMovements(erp, kind, period);
-			const owners = await resolveDealOwners(client, movements.map((m) => m.dealId));
-			return { ok: true, kind, movements: movements.map((m) => ({ ...m, ownerName: owners.get(m.dealId) ?? '' })) };
-		} catch (e) {
-			app.log.error({}, `[api/stock/movements] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
-
-	// Содержимое одного документа (раскрытие строки журнала). body: { doctype, name }
-	app.post('/api/stock/doc', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { doctype?: unknown; name?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		const doctype = String(b.doctype ?? '').trim();
-		const name = String(b.name ?? '').trim();
-		if (!doctype || !name) return reply.code(400).send({ ok: false, error: 'нужны doctype и name' });
-		try {
-			const detail = await fetchCoreDocDetail(erp, doctype, name);
-			const owners = await resolveDealOwners(client, [detail.dealId]);
-			return { ok: true, detail: { ...detail, ownerName: owners.get(detail.dealId) ?? '' } };
-		} catch (e) {
-			app.log.error({}, `[api/stock/doc] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
-
-	// История движений по товару (Stock Ledger Entry). body: { productId }
-	app.post('/api/stock/item-history', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { productId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		const productId = Number(b.productId);
-		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'bad productId' });
-		try {
-			return { ok: true, movements: await itemStockLedger(erp, productId) };
-		} catch (e) {
-			app.log.error({}, `[api/stock/item-history] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
+	registerStockMovementRoutes(app);
 
 	// Отчёт оборачиваемости по всем товарным позициям. Только чтение данных ядра.
 	app.post('/api/stock/turnover-report', async (req, reply) => {
