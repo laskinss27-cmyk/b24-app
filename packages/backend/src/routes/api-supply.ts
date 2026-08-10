@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { B24Client, B24ApiError } from '../b24/client.js';
+import { B24Client } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, updateSupplyRequestStore, updateSupplyRequestLineAndDeal, createPurchaseOrderDraft, updatePurchaseOrderDraft, createSupplyPurchaseReceipt, updateSupplyPurchaseStage, assertDealQuoteVariantSelected, calculateDealPlanTotal, SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_PURCHASE_REQUEST_QTY_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD, type SupplyPurchaseStage, type SupplyRequest } from '../erp/operations.js';
@@ -7,8 +7,6 @@ import { canManageStock } from './api-stock.js';
 import { appPermission } from '../access-policy.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData, type TransferData } from '../transfers/model.js';
-import { sendStoreChatMessage } from '../transfers/chats.js';
-import { supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { directReceiptFulfillment } from '../supply/progress.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { setDealB24CollapsedService } from '../deal-service.js';
@@ -28,6 +26,12 @@ import {
 	STANDALONE_SUPPLY_REQUEST,
 	transferBelongsToRequest,
 } from './api-supply-request-progress.js';
+import {
+	currentUser,
+	errInfo,
+	notifyTransferCreated as notifyTransferCreatedWithApp,
+	supplyClientFrom,
+} from './api-supply-route-helpers.js';
 
 /**
  * API рабочего места «Снаб». Источник спроса — ЗАЯВКИ (Material Request) ядра по сделкам:
@@ -39,55 +43,19 @@ import {
 // «Обеспечено» — снабженец отработал заявку (статусы Material Request).
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 
-function errInfo(err: unknown): string {
-	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
-}
-
 const SUPPLY_DOCUMENT_DELETE_IDS = new Set(['1858']);
 
 const supplyCreationLocks = new Set<string>();
-async function currentUser(client: B24Client): Promise<CurrentUser> {
-	const me = await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current', {}).catch(() => null);
-	const id = String(me?.ID ?? '');
-	return { id, name: `${me?.NAME ?? ''} ${me?.LAST_NAME ?? ''}`.trim() };
-}
 
 export function registerApiSupplyRoute(app: FastifyInstance): void {
-	const clientFrom = (b: AuthBody): B24Client | null => {
-		if (!b.domain || !b.accessToken) return null;
-		if (normalizeDomain(b.domain) !== normalizeDomain(app.config.portalDomain)) return null;
-		return new B24Client({ auth: { kind: 'oauth', domain: b.domain, accessToken: b.accessToken } });
-	};
-	const transferLinks = (id: number): string => [
-		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'supply'), 'Ссылка для снабжения'),
-		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'manager'), 'Ссылка для менеджера'),
-	].join('\n');
+	const clientFrom = (body: AuthBody): B24Client | null => supplyClientFrom(app, body);
 	const notifyTransferCreated = async (
 		client: B24Client,
 		id: number,
 		name: string,
 		data: TransferData,
 		me: CurrentUser,
-	): Promise<TransferData> => {
-		const message = `[B]Нужно собрать перемещение #${id}[/B]\n${data.fromStore} → ${data.toStore}\n\n${data.lines.map((line) => `• ${line.name || `#${line.productId}`} × ${line.qty}`).join('\n')}\n\n${transferLinks(id)}`;
-		const at = new Date().toISOString();
-		let next = data;
-		try {
-			const notificationClient = app.config.devWebhook
-				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
-				: client;
-			const sent = await sendStoreChatMessage(notificationClient, data.fromStore, message);
-			if (sent) next = { ...data, history: [...data.history, { at, status: 'draft', byId: me.id, byName: me.name, action: 'notification_sent', note: `сообщение отправлено в чат склада «${data.fromStore}»` }] };
-		} catch (error) {
-			next = { ...data, history: [...data.history, { at, status: 'draft', byId: me.id, byName: me.name, action: 'notification_failed', note: `сообщение в чат склада «${data.fromStore}» не отправлено: ${errInfo(error)}` }] };
-			app.log.warn({ id, store: data.fromStore }, `[supply] transfer chat notification failed — ${errInfo(error)}`);
-		}
-		if (next !== data) {
-			await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(next) })
-				.catch((error) => app.log.warn({ id }, `[supply] transfer notification history failed — ${errInfo(error)}`));
-		}
-		return next;
-	};
+	): Promise<TransferData> => notifyTransferCreatedWithApp(app, client, id, name, data, me);
 
 	app.post('/api/supply/orders', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody;
