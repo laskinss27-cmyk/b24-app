@@ -6,12 +6,21 @@ import { listSupplyRequests, createSupplyRequest, updateSupplyRequestNote, updat
 import { canManageStock } from './api-stock.js';
 import { appPermission } from '../access-policy.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
-import { newTransferData, parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
+import { newTransferData, parseTransferItem, type TransferData } from '../transfers/model.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
 import { supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { directReceiptFulfillment } from '../supply/progress.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { setDealB24CollapsedService } from '../deal-service.js';
+import type {
+	AuthBody,
+	CurrentUser,
+	PurchaseChild,
+	PurchaseReceiptChild,
+	SupplyDecisionLine,
+	TransferLine,
+	TransferProgress,
+} from './api-supply-types.js';
 
 /**
  * API рабочего места «Снаб». Источник спроса — ЗАЯВКИ (Material Request) ядра по сделкам:
@@ -23,36 +32,11 @@ import { setDealB24CollapsedService } from '../deal-service.js';
 // «Обеспечено» — снабженец отработал заявку (статусы Material Request).
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 const STANDALONE_SUPPLY_REQUEST = '__standalone__';
-interface AuthBody { domain?: string; accessToken?: string }
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-interface TransferLine { productId: number; name: string; qty: number; rate?: number; warehouse?: string; requestQty?: number }
-type TransferProgress = StoredTransfer;
-interface PurchaseReceiptChild { name: string; displayTitle?: string; status: string; docstatus: number; purchaseOrder: string; lines: TransferLine[] }
-interface PurchaseChild {
-	name: string;
-	displayTitle?: string;
-	supplier: string;
-	status: string;
-	supplyStage: string;
-	orderedAt: string;
-	expectedAt: string;
-	total: number;
-	lines: TransferLine[];
-	receipts: PurchaseReceiptChild[];
-}
-interface SupplyDecisionLine {
-	productId: number;
-	itemName: string;
-	qty: number;
-	action: 'transfer' | 'purchase';
-	fromStore: string;
-	supplier: string;
-}
-interface CurrentUser { id: string; name: string }
 const SUPPLY_DOCUMENT_DELETE_IDS = new Set(['1858']);
 
 let supplierCatId: number | null = null;
