@@ -4,6 +4,7 @@ import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
+import { StockItemHistoryTab } from './StockItemHistoryTab.js';
 import { StockHint, StockProductFilter, stockEntries } from './StockProductFilter.js';
 import { StockTransferDetailModal } from './StockTransferDetailModal.js';
 import { StockTransferQuantityModal } from './StockTransferQuantityModal.js';
@@ -13,8 +14,7 @@ import {
 	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
 	fetchStockFormData, searchStockItems, createStockProduct, createReceiptDoc, createIssueDoc, submitStockDoc, createManualTransfer,
 	createSupplyTtRequest, createTransferRequest, listTransferRequests, cancelTransferRequest, convertTransferRequest,
-	fetchItemHistory,
-	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type ItemMovement, type SupplyRequestLineDto,
+	type TransferDoc, type TransferRequestDoc, type CoreMovement, type StockItem, type SupplyRequestLineDto,
 } from './b24.js';
 
 /**
@@ -103,49 +103,8 @@ function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc
 	return <div>{basis}<div style={{ color: '#7a8699', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
 }
 
-/** Вкладка «Отчёт по движению товара» — выбираешь товар, видишь всю его историю (Stock Ledger ядра). */
-export function LedgerTab(): JSX.Element {
-	const [prod, setProd] = useState<StockItem | null>(null);
-	const [list, setList] = useState<ItemMovement[] | null>(null);
-	const [err, setErr] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [openDoc, setOpenDoc] = useState<{ doctype: string; name: string } | null>(null);
-	useEffect(() => {
-		if (!prod) { setList(null); return; }
-		let alive = true; setLoading(true); setErr(null); setList(null);
-		fetchItemHistory(prod.productId).then((m) => { if (alive) setList(m); }).catch((e) => { if (alive) setErr(errText(e)); }).finally(() => { if (alive) setLoading(false); });
-		return () => { alive = false; };
-	}, [prod]);
-	return (
-		<>
-			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
-				<StockProductFilter value={prod} onChange={setProd} />
-			</div>
-			{!prod ? <p className="empty">Выбери товар — покажу всю историю движений: приход, списание, перемещение, реализация, инвентаризация.</p>
-				: loading ? <p>Загрузка…</p>
-				: err ? <p className="error">⛔ {err}</p>
-				: !list || !list.length ? <p className="empty">Движений по этому товару нет.</p>
-				: (
-					<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-						<thead><tr><th style={TH}>Дата</th><th style={TH}>Тип</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>Документ</th></tr></thead>
-						<tbody>
-							{list.map((m, i) => (
-								<tr key={i}>
-									<td style={TD}>{m.date}</td>
-									<td style={TD}>{m.kind}</td>
-									<td style={{ ...TD, color: m.qty < 0 ? '#c0392b' : '#1a7f37', fontWeight: 600 }}>{m.qty > 0 ? '+' : ''}{m.qty}</td>
-									<td style={TD}>{m.store || '—'}</td>
-									<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ doctype: m.doctype, name: m.voucherNo }); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.voucherNo}</a></td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				)}
-			{openDoc && <StockDocumentDetailModal doctype={openDoc.doctype} name={openDoc.name} onClose={() => setOpenDoc(null)} />}
-		</>
-	);
-}
+export { StockItemHistoryTab as LedgerTab };
+
 
 export { TurnoverReportTab } from './StockTurnoverReportTab.js';
 
@@ -318,7 +277,7 @@ export function StockLedger(): JSX.Element {
 			{tab === 'inventory' ? <InventoryHome />
 				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
 				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
-				: tab === 'ledger' ? <LedgerTab />
+				: tab === 'ledger' ? <StockItemHistoryTab />
 				: <StockMovementsTab kind={tab} form={form} showCreate={false} />}
 		</div>
 	);
