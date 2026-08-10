@@ -27,6 +27,7 @@ import { formatCatalogNumber as fmt, productStatuses } from './catalog-product-d
 import { CatalogProductCard } from './CatalogProductCard.js';
 import { NewCatalogProductModal } from './NewCatalogProductModal.js';
 import { CatalogQuantityInput } from './CatalogQuantityInput.js';
+import { QuickSaleCartModal } from './QuickSaleCartModal.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -718,49 +719,21 @@ export function ProductBase({
 
 			{showPriceTags && <PriceTagsModal items={priceTagItems} onClose={() => setShowPriceTags(false)} />}
 
-				{!pickMode && showCart && (
-				<div className="cart-overlay" onClick={() => setShowCart(false)}>
-					<div className="cart-modal" onClick={(e) => e.stopPropagation()}>
-						<h2>🛒 Быстрая продажа</h2>
-						{cartList.length ? (
-							<>
-								<div className="cart-head">
-									<span>Товар</span><span>Цена</span><span>Кол-во</span><span>Скидка %</span><span>Сумма</span><span />
-								</div>
-								<div className="cart-items">
-									{cartList.map((c) => (
-										<div className="cart-item" key={c.row.id}>
-											<span className="cart-nm">{c.row.name}</span>
-											<span className="cart-unit money">{fmt(c.row.retail)} ₽</span>
-											<div className="qty-stepper">
-												<button onClick={() => setCartQty(c.row.id, c.qty - 1)} aria-label="меньше">−</button>
-														<CatalogQuantityInput value={c.qty} onChange={(n) => setCartQty(c.row.id, n)} />
-												<button onClick={() => setCartQty(c.row.id, c.qty + 1)} aria-label="больше">+</button>
-											</div>
-											<input className="disc-input sm" type="number" min={0} max={99} value={discOf(c.row.id)} onChange={(e) => setItemDiscount(c.row.id, Number(e.target.value))} />
-											<span className="cart-line money">{fmt(lineFinal(c.row, c.qty))} ₽</span>
-											<button className="cart-del" onClick={() => setCartQty(c.row.id, 0)} aria-label="убрать">✕</button>
-										</div>
-									))}
-								</div>
-								<div className="cart-total">
-									{cartSaved > 0 && <div className="cart-disc-line">Скидка суммарно: −{fmt(cartSaved)} ₽ (без скидки {fmt(cartSum)} ₽)</div>}
-									<div className="cart-grand">К оплате: <b>{fmt(cartFinal)} ₽</b></div>
-								</div>
-								{saleErr && <div className="cart-err">⛔ {saleErr}</div>}
-								<div className="cart-actions">
-									<button className="btn-secondary" onClick={clearCart}>Очистить</button>
-									<button className="btn-secondary" onClick={() => setShowCart(false)}>Закрыть</button>
-									<button className="btn-primary" disabled={creatingSale} onClick={() => void createSale()}>{creatingSale ? 'Создаю…' : 'Создать продажу'}</button>
-								</div>
-								<p className="cart-hint muted">Создастся сделка в воронке «Быстрая продажа» (стадия «Подбор оборудования») с этими позициями и сразу откроется. Оплату/кассу проводишь в сделке нативно, клиента добавишь в карточке.</p>
-							</>
-						) : (
-							<p className="muted">Корзина пуста.</p>
-						)}
-					</div>
-				</div>
-			)}
+			{!pickMode && showCart && <QuickSaleCartModal
+				items={cartList}
+				discountPercent={discOf}
+				lineFinal={lineFinal}
+				cartSum={cartSum}
+				cartFinal={cartFinal}
+				cartSaved={cartSaved}
+				error={saleErr}
+				creatingSale={creatingSale}
+				onQuantityChange={setCartQty}
+				onDiscountChange={setItemDiscount}
+				onClear={clearCart}
+				onClose={() => setShowCart(false)}
+				onCreate={createSale}
+			/>}
 		</div>
 	);
 }
