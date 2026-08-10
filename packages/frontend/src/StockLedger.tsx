@@ -5,6 +5,7 @@ import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
 import { StockBlank, transferToPrint } from './StockDocumentPrint.js';
+import { TRANSFER_STATUS, transferStatusText } from './StockTransferStatus.js';
 import {
 	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements,
 	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
@@ -523,10 +524,6 @@ export function StockLedger(): JSX.Element {
 	);
 }
 
-const TRANSFER_STATUS: Record<string, string> = { draft: 'Черновик', collected: 'Собрано', requested: 'Запрошено', in_transit: 'В пути', accepted: 'На проверке', posted: 'Принято', received: 'Получено', shortage: 'Недовоз', canceled: 'Отменено' };
-const transferStatusText = (transfer: TransferDoc): string => transfer.status === 'posted' && transfer.correctionOf
-	? 'Завершено'
-	: TRANSFER_STATUS[transfer.status] ?? transfer.status;
 const transferHasFinalDiscrepancy = (transfer: TransferDoc): boolean => {
 	const shipped = new Map((transfer.shippedLines.length ? transfer.shippedLines : transfer.lines).map((line) => [line.productId, line.qty]));
 	const accepted = new Map(transfer.acceptedLines.map((line) => [line.productId, line.qty]));
