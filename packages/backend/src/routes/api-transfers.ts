@@ -15,13 +15,12 @@ import {
 	type StoredTransfer,
 	type TransferData,
 	type TransferHistoryChange,
-	type TransferHistoryEvent,
 	type TransferLine,
-	type TransferStatus,
 } from '../transfers/model.js';
 import { newSupplyRequestData, newTransferRequestData, type SupplyRequestLine } from '../transfers/request-model.js';
-import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
+import { receivingChatStore } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
+import { createTransferNotificationService } from './transfer-notification-service.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
 import { validateTransferReservation as validateReservation } from './transfer-reservation-service.js';
 import { loadTransfer as loadOne, loadTransfers as loadAll, saveTransferData as saveData } from './transfer-storage.js';
@@ -49,42 +48,12 @@ function errInfo(err: unknown): string {
 
 export function registerApiTransfersRoute(app: FastifyInstance): void {
 	const operationLocks = new Set<string>();
+	const { notifyStore, transferLinks } = createTransferNotificationService(app);
 	const clientFrom = (body: AuthBody): B24Client | null => {
 		if (!body.domain || !body.accessToken) return null;
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
-
-	const notifyStore = async (
-		fallbackClient: B24Client,
-		store: string,
-		message: string,
-		status: TransferStatus,
-		by: CurrentUser,
-	): Promise<{ event: TransferHistoryEvent | null; warning?: string }> => {
-		const dialogId = storeChat(store);
-		if (!dialogId) return { event: null };
-		const at = new Date().toISOString();
-		try {
-			const notificationClient = app.config.devWebhook
-				? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
-				: fallbackClient;
-			await sendStoreChatMessage(notificationClient, store, message);
-			return { event: { at, status, byId: by.id, byName: by.name, action: 'notification_sent', note: `сообщение отправлено в чат склада «${store}»` } };
-		} catch (error) {
-			const warning = `Действие выполнено, но сообщение в чат склада «${store}» не отправлено`;
-			app.log.warn({ store, dialogId }, `[transfers] chat notification failed — ${errInfo(error)}`);
-			return {
-				warning,
-				event: { at, status, byId: by.id, byName: by.name, action: 'notification_failed', note: `${warning}: ${errInfo(error)}` },
-			};
-		}
-	};
-
-	const transferLinks = (id: number): string => [
-		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'supply'), 'Ссылка для снабжения'),
-		taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, { transfer: id }, 'manager'), 'Ссылка для менеджера'),
-	].join('\n');
 
 	const createDraftTransfer = async (args: {
 		client: B24Client;
