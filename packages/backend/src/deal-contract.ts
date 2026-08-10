@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import JSZip from 'jszip';
 import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
@@ -22,6 +22,10 @@ import {
 } from './deal-contract-templates.js';
 import { KNOWN_OWN_COMPANIES } from './deal-contract-own-companies.js';
 import {
+	allocatePersistentContractNumber,
+	contractNumberStartByInn,
+} from './deal-contract-numbering.js';
+import {
 	contractFilenameFromCompanyName,
 	saveDealContractDocument,
 } from './deal-contract-storage.js';
@@ -31,6 +35,10 @@ export {
 	readDealContractDocument,
 	saveDealContractDocument,
 } from './deal-contract-storage.js';
+export {
+	allocatePersistentContractNumber,
+	contractNumberStartByInn,
+} from './deal-contract-numbering.js';
 export type {
 	ContractContext,
 	ContractDurationUnit,
@@ -53,17 +61,6 @@ const CONTRACT_SEQUENCE_PATH = process.env['CONTRACT_SEQUENCE_PATH']
 		: resolve(process.cwd(), '.tmp', 'contract-sequences.json'));
 const B24_COLLAPSE_PRODUCT_ID = 9814;
 const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
-const CONTRACT_NUMBER_START_BY_INN: Readonly<Record<string, number>> = {
-	'780525373242': 520, // ИП Поляков Д. Ю.
-	'7816473082': 250, // ООО «Дом Бизнес Строй»
-	'470379634080': 120, // ИП Нагайцев О. А.
-	'7816287495': 450, // ООО «Новый Дом»
-	'7816268460': 200, // ООО «РА Анемоне»
-	'7842177523': 450, // ООО «И-ОН»
-};
-export function contractNumberStartByInn(inn: string): number {
-	return CONTRACT_NUMBER_START_BY_INN[clean(inn)] ?? 1;
-}
 const CONTRACT_FIELD_SPECS = [
 	{ fieldName: CONTRACT_NUMBER_FIELD, name: 'CONTRACT_NUMBER', xmlId: 'B24_APP_CONTRACT_NUMBER', label: 'Номер договора' },
 	{ fieldName: CONTRACT_COMPANY_FIELD, name: 'CONTRACT_COMPANY', xmlId: 'B24_APP_CONTRACT_COMPANY', label: 'Юрлицо договора' },
@@ -874,43 +871,6 @@ async function ensureContractFields(client: B24Client): Promise<void> {
 				IS_SEARCHABLE: 'Y',
 			},
 		});
-	}
-}
-
-let contractSequenceQueue: Promise<void> = Promise.resolve();
-
-export async function allocatePersistentContractNumber(args: {
-	path: string;
-	key: string;
-	baseline: number;
-	previousKeys?: string[];
-	requested?: string;
-}): Promise<string> {
-	let release!: () => void;
-	const previous = contractSequenceQueue;
-	contractSequenceQueue = new Promise<void>((resolveQueue) => { release = resolveQueue; });
-	await previous;
-	try {
-		let state: Record<string, number> = {};
-		try {
-			state = JSON.parse(await readFile(args.path, 'utf8')) as Record<string, number>;
-		} catch (error) {
-			if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-		}
-		const previousValues = (args.previousKeys ?? [])
-			.map((key) => Number(state[key] ?? 0))
-			.filter(Number.isFinite);
-		const current = Math.max(Number(state[args.key] ?? 0), args.baseline, ...previousValues);
-		const requested = Number.parseInt(args.requested ?? '', 10);
-		const next = Number.isInteger(requested) && requested > current ? requested : current + 1;
-		state[args.key] = next;
-		await mkdir(dirname(args.path), { recursive: true });
-		const temporaryPath = `${args.path}.${process.pid}.tmp`;
-		await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-		await rename(temporaryPath, args.path);
-		return String(next);
-	} finally {
-		release();
 	}
 }
 
