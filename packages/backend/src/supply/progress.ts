@@ -16,6 +16,16 @@ export interface SupplyRequestProgress<T> {
 	closed: boolean;
 }
 
+/** Quantities in purchase-origin transfers that are not already represented by their purchases. */
+export function coverageBeyondBaseline(
+	coverage: ReadonlyMap<number, number>,
+	baseline: ReadonlyMap<number, number>,
+): SupplyProgressLine[] {
+	return [...coverage.entries()]
+		.map(([productId, qty]) => ({ productId, qty: Math.max(qty - (baseline.get(productId) ?? 0), 0) }))
+		.filter((line) => line.qty > 0);
+}
+
 /**
  * Operational progress of a supply request.
  *

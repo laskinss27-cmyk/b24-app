@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateRequestProgress, directReceiptFulfillment } from './progress.js';
+import { calculateRequestProgress, coverageBeyondBaseline, directReceiptFulfillment } from './progress.js';
+
+test('purchase transfer covers lines missing from its changed or cancelled purchase', () => {
+	assert.deepEqual(
+		coverageBeyondBaseline(
+			new Map([[101, 1], [202, 1], [303, 1], [404, 1]]),
+			new Map([[101, 1], [202, 1]]),
+		),
+		[{ productId: 303, qty: 1 }, { productId: 404, qty: 1 }],
+	);
+});
 
 test('cancelled purchase quantity resolves demand instead of reopening it', () => {
 	const progress = calculateRequestProgress(

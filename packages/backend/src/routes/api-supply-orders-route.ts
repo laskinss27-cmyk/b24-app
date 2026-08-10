@@ -3,7 +3,7 @@ import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { listSupplyRequests, type SupplyRequest } from '../erp/operations.js';
-import { calculateRequestProgress, directReceiptFulfillment } from '../supply/progress.js';
+import { calculateRequestProgress, coverageBeyondBaseline, directReceiptFulfillment } from '../supply/progress.js';
 import {
 	addCovered,
 	listPurchaseChildren,
@@ -40,6 +40,8 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			const planned = new Map<string, Map<number, number>>();
 			const fulfilled = new Map<string, Map<number, number>>();
 			const cancelled = new Map<string, Map<number, number>>();
+			const purchaseCovered = new Map<string, Map<number, number>>();
+			const purchaseTransferCoverage = new Map<string, Map<number, number>>();
 			const transfersByRequest = new Map<string, TransferProgress[]>();
 			const standaloneTransfers: TransferProgress[] = [];
 			const reservations = new Map<string, number>();
@@ -62,7 +64,9 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 					if (t.correctionOf) continue;
 					// Перемещение, созданное из закупки, — следующий этап тех же единиц,
 					// а не дополнительное обеспечение заявки.
-					if (t.status !== 'canceled' && !t.purchaseOrder) addCovered(planned, request.requestKey, t.lines);
+					if (t.status !== 'canceled') {
+						addCovered(t.purchaseOrder ? purchaseTransferCoverage : planned, request.requestKey, t.lines);
+					}
 					const lines = t.status === 'shortage' ? t.receivedLines : (t.status === 'received' || t.status === 'posted') ? t.lines : [];
 					addCovered(fulfilled, request.requestKey, lines);
 				}
@@ -72,8 +76,13 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			const purchasesByRequest = await listPurchaseChildren(erp, [...reqs, standaloneRequest]);
 			for (const [requestKey, purchases] of purchasesByRequest.entries()) {
 				for (const purchase of purchases) {
-					addCovered(purchase.supplyStage === 'cancelled' ? cancelled : planned, requestKey, purchaseRequestLines(purchase.lines));
+					const requestLines = purchaseRequestLines(purchase.lines);
+					addCovered(purchaseCovered, requestKey, requestLines);
+					addCovered(purchase.supplyStage === 'cancelled' ? cancelled : planned, requestKey, requestLines);
 				}
+			}
+			for (const [requestKey, transferCoverage] of purchaseTransferCoverage.entries()) {
+				addCovered(planned, requestKey, coverageBeyondBaseline(transferCoverage, purchaseCovered.get(requestKey) ?? new Map()));
 			}
 			// Если поставщик привёз товар сразу на склад назначения заявки, физического
 			// перемещения не будет и оно не нужно. Проведённый приход сам завершает эту
