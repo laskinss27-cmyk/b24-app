@@ -15,6 +15,7 @@ import {
 	type TransferLine,
 } from '../transfers/model.js';
 import { receivingChatStore } from '../transfers/chats.js';
+import { registerTransferCollectRoute } from './transfer-collect-route.js';
 import { registerTransferCreateRoutes } from './transfer-create-routes.js';
 import { registerTransferEditRoutes } from './transfer-edit-routes.js';
 import { registerTransferListRoute } from './transfer-list-route.js';
@@ -63,60 +64,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	registerTransferCreateRoutes(app, clientFrom, notifications, createDraftTransfer);
 	registerTransferListRoute(app, clientFrom);
 	registerTransferEditRoutes(app, clientFrom);
-
-	// Менеджер склада отправки фиксирует фактически собранное. Движения товара еще нет.
-	app.post('/api/transfers/collect', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { id?: unknown; lines?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const id = Number(b.id);
-		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
-		try {
-			const [doc, me] = await Promise.all([loadOne(client, id), currentUser(client)]);
-			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (doc.status !== 'draft' && doc.status !== 'requested') return reply.code(409).send({ ok: false, error: `нельзя отметить сборку из статуса ${doc.status}` });
-			const raw = normalizeTransferLines(b.lines);
-			const actual = new Map(raw.map((line) => [line.productId, line.qty]));
-			const collectedLines = doc.lines.map((line) => ({ ...line, qty: Math.max(0, Math.min(actual.get(line.productId) ?? 0, line.qty)) }));
-			const plannedMap = transferLineMap(doc.lines);
-			const changes: TransferHistoryChange[] = collectedLines
-				.filter((line) => Math.abs(line.qty - (plannedMap.get(line.productId)?.qty ?? 0)) > 0.000001)
-				.map((line) => ({
-					productId: line.productId,
-					name: line.name,
-					field: 'collected',
-					from: plannedMap.get(line.productId)?.qty ?? 0,
-					to: line.qty,
-				}));
-			const mismatch = !sameTransferQuantities(doc.lines, collectedLines);
-			const now = new Date().toISOString();
-			let data: TransferData = {
-				...doc,
-				status: 'collected',
-				collectedLines,
-				history: [...doc.history, {
-					at: now, status: 'collected', byId: me.id, byName: me.name, action: 'collected', changes,
-					note: mismatch ? 'собрано с расхождениями' : 'собрано полностью',
-				}],
-			};
-			await saveData(client, id, doc.name, data);
-			const notification = await notifyStore(
-				client,
-				doc.fromStore,
-				`[B]Перемещение #${id} ${mismatch ? 'собрано с расхождениями' : 'собрано полностью'}[/B]\n${doc.fromStore} → ${doc.toStore}\n\n${formatTransferLines(collectedLines)}\n\n${transferLinks(id)}`,
-				'collected',
-				me,
-			);
-			if (notification.event) {
-				data = { ...data, history: [...data.history, notification.event] };
-				await saveData(client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/collect] notification history failed — ${errInfo(error)}`));
-			}
-			return { ok: true, transfer: { id, name: doc.name, ...data }, ...(notification.warning ? { warning: notification.warning } : {}) };
-		} catch (err) {
-			app.log.error({ id }, `[api/transfers/collect] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerTransferCollectRoute(app, clientFrom, notifications);
 
 	// «Отправлено»: только после полной сверки плана и сборки, проводка А→транзит.
 	app.post('/api/transfers/ship', async (req, reply) => {
