@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { B24Client, B24ApiError } from '../b24/client.js';
+import { B24Client } from '../b24/client.js';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
-import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	coreStoreId,
@@ -15,6 +14,11 @@ import {
 	submitInventoryReco,
 	type InventoryRecoLine,
 } from '../erp/operations.js';
+import { inventoryClientFrom, inventoryErrorInfo as errInfo } from './api-inventory-route-helpers.js';
+import type { InventoryAuthBody as AuthBody } from './api-inventory-types.js';
+import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
+
+export { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 
 /**
  * API инвентаризации для фронта. Фронтовый BX24 ВИСНЕТ на entity.* — поэтому
@@ -24,15 +28,6 @@ import {
  * Эндпоинты read/write только в нашей сущности ctv_inv; токен — самого юзера,
  * поэтому права Битрикса соблюдаются. Домен сверяем с порталом (allowlist).
  */
-interface AuthBody {
-	domain?: string;
-	accessToken?: string;
-}
-
-function errInfo(err: unknown): string {
-	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
-}
-
 /**
  * ctv_inv хранит все точки одной инвентаризации в одной JSON-записи. Поэтому
  * параллельные read-modify-write двух складов обязаны идти последовательно,
@@ -40,29 +35,8 @@ function errInfo(err: unknown): string {
  * Production работает одним backend-контейнером, так что очередь на процесс надёжно
  * закрывает конкурентные автосохранения внутри текущей архитектуры хранения.
  */
-const inventoryUpdateLocks = new Map<string, Promise<void>>();
-
-export async function withInventoryUpdateLock<T>(inventoryId: string, work: () => Promise<T>): Promise<T> {
-	const previous = inventoryUpdateLocks.get(inventoryId) ?? Promise.resolve();
-	let release = (): void => undefined;
-	const gate = new Promise<void>((resolve) => { release = resolve; });
-	const tail = previous.catch(() => undefined).then(() => gate);
-	inventoryUpdateLocks.set(inventoryId, tail);
-	await previous.catch(() => undefined);
-	try {
-		return await work();
-	} finally {
-		release();
-		if (inventoryUpdateLocks.get(inventoryId) === tail) inventoryUpdateLocks.delete(inventoryId);
-	}
-}
-
 export function registerApiInventoryRoute(app: FastifyInstance): void {
-	const clientFrom = (body: AuthBody): B24Client | null => {
-		if (!body.domain || !body.accessToken) return null;
-		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
-		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
-	};
+	const clientFrom = (body: AuthBody): B24Client | null => inventoryClientFrom(app, body);
 
 	// Список инвентаризаций (+ идемпотентно создаёт хранилище, если его ещё нет).
 	app.post('/api/inventory/list', async (req, reply) => {
