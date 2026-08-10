@@ -3,10 +3,7 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureTransfersEntity, TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { appPermission } from '../access-policy.js';
-import {
-	type TransferData,
-} from '../transfers/model.js';
+import { registerTransferCancelRoute } from './transfer-cancel-route.js';
 import { registerTransferCollectRoute } from './transfer-collect-route.js';
 import { registerTransferCreateRoutes } from './transfer-create-routes.js';
 import { registerTransferEditRoutes } from './transfer-edit-routes.js';
@@ -20,7 +17,7 @@ import { registerTransferRequestCreateRoutes } from './transfer-request-create-r
 import { registerTransferRequestManagementRoutes } from './transfer-request-management-routes.js';
 import { registerTransferReceiveRoute } from './transfer-receive-route.js';
 import { loadTransferRequest } from './transfer-request-storage.js';
-import { loadTransfer as loadOne, loadTransfers as loadAll, saveTransferData as saveData } from './transfer-storage.js';
+import { loadTransfers as loadAll } from './transfer-storage.js';
 import { canDeleteTransferDocuments, currentUser } from './transfer-user-access.js';
 
 /**
@@ -62,33 +59,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	registerTransferReceiveRoute(app, clientFrom, notifications);
 	registerTransferPostRoute(app, clientFrom, operationLocks);
 	registerTransferShortageRoute(app, clientFrom);
-
-	app.post('/api/transfers/cancel', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const id = Number(b.id);
-		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
-		try {
-			const [doc, me] = await Promise.all([loadOne(client, id), currentUser(client)]);
-			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (!appPermission(req, 'transfers.cancel', me.isSupply)) {
-				return reply.code(403).send({ ok: false, error: 'отменять перемещение может только снабжение' });
-			}
-			if (!['draft', 'collected', 'requested'].includes(doc.status)) return reply.code(409).send({ ok: false, error: `нельзя отменить из статуса ${doc.status}` });
-			const now = new Date().toISOString();
-			const data: TransferData = {
-				...doc,
-				status: 'canceled',
-				history: [...doc.history, { at: now, status: 'canceled', byId: me.id, byName: me.name, action: 'canceled', note: 'резерв освобождён' }],
-			};
-			await saveData(client, id, doc.name, data);
-			return { ok: true, transfer: { id, name: doc.name, ...data } };
-		} catch (err) {
-			app.log.error({ id }, `[api/transfers/cancel] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerTransferCancelRoute(app, clientFrom);
 
 	app.post('/api/transfers/delete', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
