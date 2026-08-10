@@ -99,45 +99,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	registerDealProductManagementRoutes(app, clientFrom, syncDealTechnicalFields);
 
-	// Удалить ОДНУ товарную строку из сделки по её rowId (crm.item.productrow.delete).
-	app.post('/api/deal/remove-product', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; rowId?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (legacyB24CompositionDisabled()) return reply.code(410).send({ ok: false, error: 'товарный состав сделки редактируется только в ядре' });
-		const dealId = Number(b.dealId);
-		const rowId = Number(b.rowId);
-		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-		if (!Number.isInteger(rowId) || rowId <= 0) return reply.code(400).send({ ok: false, error: 'bad rowId' });
-		try {
-			// Читаем текущие строки тем же API, что и таблица (productrows.get), убираем нужную по ID,
-			// пересохраняем остальные (productrows.set) — гарантированно тот же id-простор, без рисков
-			// расхождения нового/старого API. Пустой список = у сделки не остаётся товаров (ок).
-			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
-			const all = rows ?? [];
-			const remaining = all.filter((r) => Number(r['ID']) !== rowId);
-			if (remaining.length === all.length) return reply.code(404).send({ ok: false, error: 'строка не найдена' });
-			const setRows = remaining.map((r) => ({
-				PRODUCT_ID: Number(r['PRODUCT_ID'] ?? 0),
-				PRODUCT_NAME: String(r['PRODUCT_NAME'] ?? ''),
-				PRICE: Number(r['PRICE'] ?? 0),
-				QUANTITY: Number(r['QUANTITY'] ?? 0),
-				DISCOUNT_TYPE_ID: Number(r['DISCOUNT_TYPE_ID'] ?? 2),
-				DISCOUNT_RATE: Number(r['DISCOUNT_RATE'] ?? 0),
-				DISCOUNT_SUM: Number(r['DISCOUNT_SUM'] ?? 0),
-				TAX_RATE: r['TAX_RATE'] ?? null,
-				TAX_INCLUDED: String(r['TAX_INCLUDED'] ?? 'N'),
-				MEASURE_CODE: Number(r['MEASURE_CODE'] ?? 796),
-			}));
-			await client.call('crm.deal.productrows.set', { id: dealId, rows: setRows });
-			app.log.info({ dealId, rowId, left: setRows.length }, '[api/deal/remove-product] ok');
-			return { ok: true };
-		} catch (err) {
-			app.log.error({ dealId, rowId }, `[api/deal/remove-product] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
-
 	// Изменить кол-во, БАЗОВУЮ цену и СКИДКУ % одной строки сделки. Тот же надёжный путь, что и удаление:
 	// productrows.get → правим нужную строку → productrows.set всех (один id-простор).
 	// Модель Б24: PRICE = итог за ед. (после скидки), DISCOUNT_SUM = скидка за ед., DISCOUNT_RATE = %.
