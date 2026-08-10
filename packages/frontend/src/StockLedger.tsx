@@ -5,6 +5,7 @@ import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
 import { IssueForm, ReceiptForm, TransferForm } from './StockDocumentForms.js';
 import { StockItemHistoryTab } from './StockItemHistoryTab.js';
+import { StockListFilterBar, mkPeriod } from './StockListFilterBar.js';
 import { StockHint, StockProductFilter, stockEntries } from './StockProductFilter.js';
 import { StockTransferDetailModal } from './StockTransferDetailModal.js';
 import { StockTransferQuantityModal } from './StockTransferQuantityModal.js';
@@ -40,8 +41,6 @@ const TABS: Array<{ key: Tab; label: string }> = [
 /** doctype ядра по типу вкладки (для раскрытия документа). */
 const KIND_DOCTYPE: Record<'issue' | 'receipt' | 'delivery' | 'return', string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note', return: 'Delivery Note' };
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-/** Период без явных undefined (exactOptionalPropertyTypes). */
-const mkPeriod = (from: string, to: string): { from?: string; to?: string } => ({ ...(from ? { from } : {}), ...(to ? { to } : {}) });
 
 const tabStyle = (active: boolean): CSSProperties => ({
 	padding: '9px 16px', border: 'none', borderBottom: active ? '2px solid #185fa5' : '2px solid transparent',
@@ -54,29 +53,6 @@ const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' 
 const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
 
 
-/** Общая панель фильтров: поиск+статус (мгновенно, на клиенте) и период (с/по → перезапрос в ядро). */
-function FilterBar(props: {
-	search: string; onSearch: (v: string) => void;
-	status: string; onStatus: (v: string) => void; statusOptions: Array<{ value: string; label: string }>;
-	from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void;
-	onApply: () => void; onReset: () => void;
-	loading: boolean; shown: number; total: number;
-}): JSX.Element {
-	const { search, onSearch, status, onStatus, statusOptions, from, to, onFrom, onTo, onApply, onReset, loading, shown, total } = props;
-	return (
-		<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-			<input style={{ ...inp, flex: '1 1 240px' }} placeholder="🔎 поиск: документ, #сделка, ответственный…" value={search} onChange={(e) => onSearch(e.target.value)} />
-			<select style={inp} value={status} onChange={(e) => onStatus(e.target.value)}>
-				{statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-			</select>
-			<label style={{ fontSize: 12, color: '#7a8699', display: 'flex', alignItems: 'center', gap: 4 }}>с<input type="date" style={inp} value={from} onChange={(e) => onFrom(e.target.value)} /></label>
-			<label style={{ fontSize: 12, color: '#7a8699', display: 'flex', alignItems: 'center', gap: 4 }}>по<input type="date" style={inp} value={to} onChange={(e) => onTo(e.target.value)} /></label>
-			<button className="btn-primary" disabled={loading} onClick={onApply}>{loading ? '…' : 'Применить'}</button>
-			<button style={btnGhost} onClick={onReset}>Сброс</button>
-			<span style={{ fontSize: 12, color: '#7a8699', marginLeft: 'auto' }}>{shown} из {total}</span>
-		</div>
-	);
-}
 
 
 
@@ -301,7 +277,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
 				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
-			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={TRANSFER_STATUS_OPTS}
+			<StockListFilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={TRANSFER_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
 			{notice && <p style={{ color: '#9a6700', fontSize: 13 }}>{notice}</p>}
@@ -403,7 +379,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
 				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
-			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={MOVE_STATUS_OPTS}
+			<StockListFilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={MOVE_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
 			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
