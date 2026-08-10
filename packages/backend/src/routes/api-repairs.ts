@@ -7,7 +7,6 @@ import { ErpClient } from '../erp/client.js';
 import {
 	calculateDealPlanTotal,
 	deliverRepairUnit,
-	fetchErpStoreStockFull,
 	listDealPlan,
 	locateRepairUnit,
 	moveRepairUnit,
@@ -29,6 +28,7 @@ import {
 } from '../repair-deal-sync.js';
 import { registerRepairFileRoutes } from './repair-file-routes.js';
 import { registerRepairContactSearchRoutes } from './repair-contact-search-routes.js';
+import { registerRepairStoreStockRoute } from './repair-store-stock-route.js';
 
 /**
  * API модуля «Ремонты» (RMA). Всё наше: карточки лежат в нашем entity-store ctv_repairs,
@@ -920,24 +920,7 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		}
 	});
 
-	// Остатки склада из ядра — пикер аппарата для предпродажного (выбираем товар со склада-источника).
-	// Ремонтные позиции (строковый код) сюда не попадают — fetchErpStoreStockFull берёт только числовые коды.
-	app.post('/api/repairs/store-stock', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { store?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		const store = String(b.store ?? '').trim();
-		if (!store) return reply.code(400).send({ ok: false, error: 'не указан склад' });
-		try {
-			const rows = await fetchErpStoreStockFull(erp, store);
-			return { ok: true, items: rows.map((r) => ({ productId: r.productId, name: r.name, qty: r.book })) };
-		} catch (err) {
-			app.log.error({}, `[api/repairs/store-stock] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerRepairStoreStockRoute(app, clientFrom);
 
 	// Принять в ПРЕДПРОДАЖНЫЙ ремонт: наш товар со склада-источника (productId из остатков) уходит в ремонт.
 	// Без клиента/цен/сделки. Создаётся в статусе «принято в офисе» + перемещение источник→Измайловский.
