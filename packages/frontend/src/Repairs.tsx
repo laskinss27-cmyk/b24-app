@@ -43,6 +43,7 @@ import {
 	repairPointLabel,
 } from './repair-display.js';
 import { RepairDispatchBlank, type RepairDispatchContact as DispatchContact } from './RepairDispatchBlank.js';
+import { REPAIR_ACT_REQUISITE as ACT_REQUISITE, REPAIR_COPY_LABELS as COPY_LABELS } from './repair-print-settings.js';
 
 /**
  * Модуль «Ремонты» (RMA) — приём оборудования и сдача поставщику-производителю.
@@ -73,11 +74,6 @@ const flowFor = (kind: RepairKind | undefined): RepairStatus[] => kind === 'pres
 /** Со статуса «принято в офисе» КЛИЕНТСКАЯ карточка заморожена — правит только снабжение+. Предпродажный не замораживаем. */
 const LOCK_FROM_IDX = STATUS_FLOW.indexOf('received_office');
 function isLockedStatus(s: RepairStatus): boolean { const i = STATUS_FLOW.indexOf(s); return i >= 0 && i >= LOCK_FROM_IDX; }
-
-/** Реквизит исполнителя для печатного акта (один на все). */
-const ACT_REQUISITE = 'ИП Поляков Д. Ю.';
-/** Назначение экземпляров акта (клиент · на точке · для сервиса). */
-const COPY_LABELS = ['экземпляр клиента', 'экземпляр точки', 'для сервисного центра'];
 
 const MOCK: Repair[] = [
 	{
