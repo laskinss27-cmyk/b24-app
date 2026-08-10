@@ -9,6 +9,7 @@ import { StockHint, StockProductFilter, stockEntries } from './StockProductFilte
 import { StockTransferDetailModal } from './StockTransferDetailModal.js';
 import { StockTransferQuantityModal } from './StockTransferQuantityModal.js';
 import { transferStatusText } from './StockTransferStatus.js';
+import type { StockForm, StockMovementKind } from './StockWorkspaceTypes.js';
 import {
 	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements,
 	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
@@ -24,7 +25,7 @@ import {
  *  - Реализации — read-only журнал (создаются из сделки).
  *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
  */
-export type StockMovementKind = 'issue' | 'receipt' | 'delivery' | 'return';
+export type { StockMovementKind } from './StockWorkspaceTypes.js';
 type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'requests', label: 'Заявки ТТ' },
@@ -52,9 +53,6 @@ const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', bo
 const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
 const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
 
-
-/** Справочники окна (склады/поставщики/право создавать). Поставщики — Б24-воронка контрагентов. */
-interface StockForm { stores: string[]; suppliers: string[]; canCreate: boolean }
 
 /** Общая панель фильтров: поиск+статус (мгновенно, на клиенте) и период (с/по → перезапрос в ядро). */
 function FilterBar(props: {
