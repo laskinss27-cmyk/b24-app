@@ -4,8 +4,8 @@ import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
-import { StockBlank, transferToPrint } from './StockDocumentPrint.js';
-import { TRANSFER_STATUS, transferStatusText } from './StockTransferStatus.js';
+import { StockTransferDetailModal } from './StockTransferDetailModal.js';
+import { transferStatusText } from './StockTransferStatus.js';
 import {
 	listTransfers, cancelTransfer, collectTransfer, shipTransfer, receiveTransfer, postTransfer, resolveTransferShortage, updateTransferDestination, updateTransferLines, deleteTransfer, fetchMovements,
 	fetchCurrentUserId, fetchCurrentAppAccess, withTimeout,
@@ -126,111 +126,6 @@ function ProductFilter({ value, onChange, placeholder }: { value: StockItem | nu
 
 
 
-/** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
-function TransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onLinesChange, onDelete, onClose }: {
-	t: TransferDoc;
-	stores: string[];
-	editable: boolean;
-	canDelete: boolean;
-	busy: boolean;
-	onDestinationChange: (toStore: string) => Promise<TransferDoc>;
-	onLinesChange: (lines: Array<{ productId: number; qty: number }>) => Promise<TransferDoc>;
-	onDelete: () => void;
-	onClose: () => void;
-}): JSX.Element {
-	const [toStore, setToStore] = useState(t.toStore);
-	const [saving, setSaving] = useState(false);
-	const [savingLines, setSavingLines] = useState(false);
-	const [historyOpen, setHistoryOpen] = useState(false);
-	const [destinationError, setDestinationError] = useState<string | null>(null);
-	const [lineError, setLineError] = useState<string | null>(null);
-	const [lineQty, setLineQty] = useState<Record<number, number | ''>>(() => Object.fromEntries(t.lines.map((line) => [line.productId, line.qty])));
-	useEffect(() => setToStore(t.toStore), [t.toStore]);
-	useEffect(() => setLineQty(Object.fromEntries(t.lines.map((line) => [line.productId, line.qty]))), [t.lines]);
-	const canEditDestination = editable && ['draft', 'collected', 'requested'].includes(t.status);
-	const canEditLines = editable && ['draft', 'collected', 'accepted', 'requested'].includes(t.status);
-	const linesDirty = t.lines.some((line) => Math.abs(Number(lineQty[line.productId] || 0) - line.qty) > 0.000001);
-	const collected = new Map(t.collectedLines.map((line) => [line.productId, line.qty]));
-	const accepted = new Map(t.acceptedLines.map((line) => [line.productId, line.qty]));
-	const saveDestination = async (): Promise<void> => {
-		if (!canEditDestination || !toStore || toStore === t.toStore || saving) return;
-		setSaving(true);
-		setDestinationError(null);
-		try {
-			const updated = await onDestinationChange(toStore);
-			setToStore(updated.toStore);
-		} catch (error) {
-			setDestinationError(errText(error));
-		} finally {
-			setSaving(false);
-		}
-	};
-	const saveLines = async (): Promise<void> => {
-		if (!canEditLines || !linesDirty || savingLines) return;
-		setSavingLines(true);
-		setLineError(null);
-		try {
-			const updated = await onLinesChange(t.lines.map((line) => ({ productId: line.productId, qty: Math.max(Number(lineQty[line.productId] || 0), 0) })));
-			setLineQty(Object.fromEntries(updated.lines.map((line) => [line.productId, line.qty])));
-		} catch (error) {
-			setLineError(errText(error));
-		} finally {
-			setSavingLines(false);
-		}
-	};
-	return (
-		<div style={{ ...overlay, zIndex: 1100 }}>
-			<div style={modalCard}>
-				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-					<h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2>
-					<div style={{ display: 'flex', gap: 8 }}>
-						{canDelete && <button className="btn-danger" disabled={busy} onClick={onDelete}>Удалить</button>}
-						<button style={btnGhost} onClick={() => setHistoryOpen((open) => !open)}>История</button>
-						<button style={btnGhost} onClick={() => window.print()}>Печать</button>
-						<button style={btnGhost} onClick={onClose}>Закрыть</button>
-					</div>
-				</div>
-				<div className="transfer-destination">
-					<div className="transfer-destination-field"><span>Откуда</span><strong>{t.fromStore}</strong></div>
-					<span className="transfer-destination-arrow" aria-hidden="true">→</span>
-					<div className="transfer-destination-field"><span>Куда</span>{canEditDestination
-						? <select value={toStore} disabled={saving} onChange={(event) => setToStore(event.target.value)}>{stores.filter((store) => store !== t.fromStore).map((store) => <option key={store} value={store}>{store}</option>)}</select>
-						: <strong>{t.toStore}</strong>}</div>
-					{canEditDestination && <button className="transfer-destination-save" type="button" disabled={saving || !toStore || toStore === t.toStore} onClick={() => void saveDestination()}>{saving ? 'Сохраняю...' : 'Изменить'}</button>}
-				</div>
-				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{transferStatusText(t)}{t.note ? ` · 📝 ${t.note}` : ''}</div>
-				{destinationError && <p className="error">⛔ {destinationError}</p>}
-				{lineError && <p className="error">⛔ {lineError}</p>}
-				<StockBlank doc={transferToPrint(t)} />
-				{t.dealId ? <div style={{ marginBottom: 8 }}><StockDealCell dealId={t.dealId} ownerName={t.ownerName} /></div> : null}
-				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-					<thead><tr><th style={TH}>Наименование</th><th style={TH}>Количество</th><th style={TH}>Собрано</th><th style={TH}>Принято</th></tr></thead>
-					<tbody>{t.lines.map((l, i) => <tr key={i}><td style={TD}>{l.name || ('#' + l.productId)}</td><td style={TD}>{canEditLines ? <input type="number" min="0" step="any" style={{ ...inp, width: 90 }} value={lineQty[l.productId] ?? ''} onChange={(event) => setLineQty((current) => ({ ...current, [l.productId]: event.target.value === '' ? '' : Math.max(Number(event.target.value), 0) }))} /> : l.qty}</td><td style={TD}>{collected.get(l.productId) ?? '—'}</td><td style={TD}>{accepted.get(l.productId) ?? '—'}</td></tr>)}</tbody>
-				</table>
-				{canEditLines && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}><button className="btn-primary" disabled={busy || savingLines || !linesDirty} onClick={() => void saveLines()}>{savingLines ? 'Сохраняю...' : 'Сохранить количество'}</button></div>}
-				{t.receivedLines?.length ? (
-					<div style={{ marginTop: 10 }}>
-						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>Принято на склад:</div>
-						{t.receivedLines.map((l, i) => <div key={i} style={{ fontSize: 13 }}>✓ {l.name || ('#' + l.productId)} × {l.qty}</div>)}
-					</div>
-				) : null}
-				{t.shortageLines?.length ? (
-					<div style={{ marginTop: 10, color: '#9a3412' }}>
-						<div style={{ fontSize: 12, marginBottom: 2 }}>Недовоз, осталось в транзите:</div>
-						{t.shortageLines.map((l, i) => <div key={i} style={{ fontSize: 13 }}>⚠ {l.name || ('#' + l.productId)} × {l.qty}</div>)}
-					</div>
-				) : null}
-				{t.shortageReturnEntry ? <div style={{ marginTop: 10, fontSize: 13, color: '#1a7f37' }}>Хвост возвращен на склад отправки: {t.shortageReturnEntry}</div> : null}
-				{historyOpen && t.history && t.history.length > 0 ? (
-					<div style={{ marginTop: 10 }}>
-						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>История:</div>
-						{[...t.history].reverse().map((h, i) => <div key={i} style={{ fontSize: 13, marginBottom: 6 }}><b>{new Date(h.at).toLocaleString('ru-RU')} · {h.byName || 'Система'}</b><div>{h.note || TRANSFER_STATUS[h.status] || h.status}</div>{h.changes?.length ? <div style={{ color: '#7a8699' }}>{h.changes.map((change) => `${change.name}: ${change.from} → ${change.to}`).join(' · ')}</div> : null}</div>)}
-					</div>
-				) : null}
-			</div>
-		</div>
-	);
-}
 
 function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc; onOpenTransfer: (id: number) => void }): JSX.Element {
 	const requestMatch = /^transfer-request:(\d+)$/.exec(transfer.supplyRequestKey ?? '');
@@ -694,7 +589,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 					</tbody>
 				</table>
 			)}
-			{openT && <TransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete && !openT.correctionOf} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
+			{openT && <StockTransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete && !openT.correctionOf} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
 			{collectT && <ReceiveTransferModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
 			{receiveT && <ReceiveTransferModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}
