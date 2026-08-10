@@ -19,10 +19,11 @@ import {
 	type TransferLine,
 	type TransferStatus,
 } from '../transfers/model.js';
-import { newSupplyRequestData, newTransferRequestData, type StoredTransferRequest, type SupplyRequestLine } from '../transfers/request-model.js';
+import { newSupplyRequestData, newTransferRequestData, type SupplyRequestLine } from '../transfers/request-model.js';
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
+import { createTransferRequestTask, formatTransferLines } from './transfer-task-service.js';
 import { canDeleteTransferDocuments, currentUser, type CurrentUser } from './transfer-user-access.js';
 
 /**
@@ -44,10 +45,6 @@ function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 }
 
-function formatTransferLines(lines: TransferLine[]): string {
-	return lines.map((line) => `• ${line.name || `#${line.productId}`} × ${line.qty}`).join('\n');
-}
-
 export function registerApiTransfersRoute(app: FastifyInstance): void {
 	const operationLocks = new Set<string>();
 	const clientFrom = (body: AuthBody): B24Client | null => {
@@ -66,40 +63,6 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	const loadAll = async (client: B24Client): Promise<StoredTransfer[]> => {
 		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 		return (items ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);
-	};
-
-	const createRequestTask = async (client: B24Client, request: StoredTransferRequest, me: CurrentUser): Promise<void> => {
-		try {
-			const isTransfer = request.kind === 'transfer';
-			const lines = isTransfer
-				? formatTransferLines(request.lines)
-				: request.supplyLines.map((line) => `• ${line.name || (line.productId ? `#${line.productId}` : 'позиция')} × ${line.qty}${line.link ? `\n  ${line.link}` : ''}${line.note ? `\n  ${line.note}` : ''}`).join('\n');
-			const linkParams = { request: request.id };
-			const title = isTransfer ? `Заказ на перемещение #${request.id}` : `Заявка снабжению #${request.id}`;
-			const route = isTransfer ? `${request.fromStore} → ${request.toStore}` : `Привезти на: ${request.toStore}`;
-			const result = await createSupplyTask(client, {
-				title: `${title}: ${isTransfer ? request.fromStore : request.toStore}`,
-				description: [
-					title,
-					route,
-					request.note ? `Комментарий: ${request.note}` : '',
-					'',
-					lines,
-					'',
-					taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, linkParams, 'supply'), 'Ссылка для снабжения'),
-					taskLink(supplyTaskUrl(app.config.portalDomain, app.config.appClientId, linkParams, 'manager'), 'Ссылка для менеджера'),
-				].filter(Boolean).join('\n'),
-				authorId: me.id,
-			});
-			if (result.taskId) {
-				request.taskId = result.taskId;
-				await saveTransferRequest(client, request);
-			} else {
-				app.log.warn({ requestId: request.id, error: result.error }, '[transfer-requests] supply task was not created');
-			}
-		} catch (error) {
-			app.log.warn({ requestId: request.id, error: errInfo(error) }, '[transfer-requests] supply task sync failed');
-		}
 	};
 
 	const validateReservation = async (
@@ -230,7 +193,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			const name = `Заказ на перемещение #${id}: ${fromStore} → ${toStore}`;
 			const request = { id, name, ...data };
 			await saveTransferRequest(client, request);
-			await createRequestTask(client, request, me);
+			await createTransferRequestTask(app, client, request, me);
 			app.log.info({ id, fromStore, toStore, lines: lines.length }, '[api/transfer-requests/create] ok');
 			return { ok: true, request };
 		} catch (err) {
@@ -269,7 +232,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 			if (!id) throw new Error('entity.item.add не вернул id');
 			const request = { id, name: `Заявка снабжению #${id}: ${toStore}`, ...data };
 			await saveTransferRequest(client, request);
-			await createRequestTask(client, request, me);
+			await createTransferRequestTask(app, client, request, me);
 			app.log.info({ id, toStore, lines: lines.length }, '[api/transfer-requests/create-supply] ok');
 			return { ok: true, request };
 		} catch (err) {
