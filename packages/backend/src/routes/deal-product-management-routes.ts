@@ -10,6 +10,7 @@ import {
 	calculateDealPlanTotal,
 	listDealPlan,
 	listDealQuoteVariants,
+	syncDealRealizationPrices,
 	updateDealQuoteVariantItems,
 	upsertDealPlan,
 } from '../erp/operations.js';
@@ -179,4 +180,77 @@ export function registerDealProductManagementRoutes(
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
+
+	// Изменить кол-во, БАЗОВУЮ цену и СКИДКУ % одной строки сделки. Тот же надёжный путь, что и удаление:
+	// productrows.get → правим нужную строку → productrows.set всех (один id-простор).
+	// Модель Б24: PRICE = итог за ед. (после скидки), DISCOUNT_SUM = скидка за ед., DISCOUNT_RATE = %.
+	// База (без скидки) приходит от фронта в `price`; итог и скидку считаем тут.
+	app.post('/api/deal/update-product', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; rowId?: unknown; quantity?: unknown; price?: unknown; discountRate?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (legacyB24CompositionDisabled()) return reply.code(410).send({ ok: false, error: 'товарный состав сделки редактируется только в ядре' });
+		const dealId = Number(b.dealId);
+		const rowId = Number(b.rowId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		if (!Number.isInteger(rowId) || rowId <= 0) return reply.code(400).send({ ok: false, error: 'bad rowId' });
+		const newQty = Number(b.quantity);
+		const basePrice = Number(b.price);
+		const rate = Number(b.discountRate);
+		if (!Number.isFinite(newQty) || newQty <= 0) return reply.code(400).send({ ok: false, error: 'bad quantity' });
+		if (!Number.isFinite(basePrice) || basePrice < 0) return reply.code(400).send({ ok: false, error: 'bad price' });
+		if (!Number.isFinite(rate) || rate < 0 || rate > 100) return reply.code(400).send({ ok: false, error: 'bad discount' });
+		const r2 = (n: number): number => Math.round(n * 100) / 100;
+		const discSum = r2(basePrice * rate / 100); // скидка за единицу
+		const finalPrice = r2(basePrice - discSum);  // итоговая цена за единицу
+		try {
+			const rows = await client.call<Array<Record<string, unknown>>>('crm.deal.productrows.get', { id: dealId });
+			const all = rows ?? [];
+			let found = false;
+			let productId = 0;
+			let previousFinalPrice = 0;
+			const setRows = all.map((r) => {
+				const isTarget = Number(r['ID']) === rowId;
+				if (isTarget) {
+					found = true;
+					productId = Number(r['PRODUCT_ID'] ?? 0);
+					previousFinalPrice = Number(r['PRICE'] ?? 0);
+				}
+				return {
+					PRODUCT_ID: Number(r['PRODUCT_ID'] ?? 0),
+					PRODUCT_NAME: String(r['PRODUCT_NAME'] ?? ''),
+					PRICE: isTarget ? finalPrice : Number(r['PRICE'] ?? 0),
+					QUANTITY: isTarget ? newQty : Number(r['QUANTITY'] ?? 0),
+					DISCOUNT_TYPE_ID: isTarget ? 2 : Number(r['DISCOUNT_TYPE_ID'] ?? 2),
+					DISCOUNT_RATE: isTarget ? rate : Number(r['DISCOUNT_RATE'] ?? 0),
+					DISCOUNT_SUM: isTarget ? discSum : Number(r['DISCOUNT_SUM'] ?? 0),
+					TAX_RATE: r['TAX_RATE'] ?? null,
+					TAX_INCLUDED: String(r['TAX_INCLUDED'] ?? 'N'),
+					MEASURE_CODE: Number(r['MEASURE_CODE'] ?? 796),
+				};
+			});
+			if (!found) return reply.code(404).send({ ok: false, error: 'строка не найдена' });
+			const erp = ErpClient.fromEnv();
+			const priceChanged = Number.isInteger(productId) && productId > 0 && Math.abs(finalPrice - previousFinalPrice) >= 0.005;
+			let realizationPriceSynced = false;
+			if (erp && priceChanged) {
+				await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: 'base', rate: finalPrice }]);
+				realizationPriceSynced = true;
+			}
+			try {
+				await client.call('crm.deal.productrows.set', { id: dealId, rows: setRows });
+			} catch (error) {
+				if (erp && realizationPriceSynced) {
+					await syncDealRealizationPrices(erp, dealId, [{ productId, segmentId: 'base', rate: previousFinalPrice }]);
+				}
+				throw error;
+			}
+			app.log.info({ dealId, rowId, newQty, basePrice, rate, finalPrice }, '[api/deal/update-product] ok');
+			return { ok: true };
+		} catch (err) {
+			app.log.error({ dealId, rowId }, `[api/deal/update-product] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		}
+	});
+
 }
