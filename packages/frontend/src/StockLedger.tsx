@@ -16,6 +16,12 @@ import { fetchStockFormData, withTimeout } from './b24.js';
  *  - Инвентаризация — самостоятельный модуль подсчёта и сверки остатков.
  */
 export type { StockMovementKind } from './StockWorkspaceTypes.js';
+export { StockItemHistoryTab as LedgerTab };
+export { StockMovementsTab };
+export { TransferRequestsTab };
+export { StockTransfersTab };
+export { TurnoverReportTab } from './StockTurnoverReportTab.js';
+
 type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'requests', label: 'Заявки ТТ' },
@@ -31,22 +37,6 @@ const tabStyle = (active: boolean): CSSProperties => ({
 	padding: '9px 16px', border: 'none', borderBottom: active ? '2px solid #185fa5' : '2px solid transparent',
 	background: 'none', cursor: 'pointer', fontSize: 14, fontWeight: active ? 600 : 400, color: active ? '#185fa5' : '#1a2231',
 });
-
-
-
-
-
-
-
-
-export { StockItemHistoryTab as LedgerTab };
-
-
-export { TurnoverReportTab } from './StockTurnoverReportTab.js';
-
-
-export { TransferRequestsTab };
-
 
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
 
@@ -97,8 +87,3 @@ export function StockLedger(): JSX.Element {
 		</div>
 	);
 }
-
-export { StockTransfersTab };
-
-
-export { StockMovementsTab };
