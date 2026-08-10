@@ -4,6 +4,7 @@ import { InventoryHome } from './InventoryHome.js';
 import { ProductBase, type ProductPickItem } from './ProductBase.js';
 import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
+import { StockHint, StockProductFilter, stockEntries } from './StockProductFilter.js';
 import { StockTransferDetailModal } from './StockTransferDetailModal.js';
 import { StockTransferQuantityModal } from './StockTransferQuantityModal.js';
 import { transferStatusText } from './StockTransferStatus.js';
@@ -51,15 +52,6 @@ const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', bo
 const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
 const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
 
-/** Склады с остатком (qty>0) по убыванию. */
-const stockEntries = (it: StockItem): Array<[string, number]> => Object.entries(it.stocks ?? {}).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]);
-/** Краткая строка наличия для строки результата поиска (всего + топ-склады). */
-function StockHint({ it }: { it: StockItem }): JSX.Element {
-	const e = stockEntries(it);
-	if (!e.length) return <span style={{ color: '#c0392b', fontSize: 12 }}>нет на складах</span>;
-	const total = it.total ?? e.reduce((a, [, q]) => a + q, 0);
-	return <span style={{ color: '#1a7f37', fontSize: 12 }}>Σ {total} · {e.slice(0, 3).map(([s, q]) => `${s}: ${q}`).join(' · ')}{e.length > 3 ? ' …' : ''}</span>;
-}
 
 /** Справочники окна (склады/поставщики/право создавать). Поставщики — Б24-воронка контрагентов. */
 interface StockForm { stores: string[]; suppliers: string[]; canCreate: boolean }
@@ -88,42 +80,6 @@ function FilterBar(props: {
 	);
 }
 
-/** Поиск+выбор товара (чип) — фильтр по позиции в журнале и выбор в отчёте. */
-function ProductFilter({ value, onChange, placeholder }: { value: StockItem | null; onChange: (v: StockItem | null) => void; placeholder?: string }): JSX.Element {
-	const [q, setQ] = useState('');
-	const [res, setRes] = useState<StockItem[] | null>(null);
-	const [busy, setBusy] = useState(false);
-	const search = async (): Promise<void> => {
-		if (q.trim().length < 1) return;
-		setBusy(true);
-		try { setRes(await searchStockItems(q)); } catch { setRes([]); } finally { setBusy(false); }
-	};
-	if (value) return (
-		<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: '#eef3fb', border: '1px solid #cdd9ee', borderRadius: 16, fontSize: 13 }}>
-			📦 {value.name || ('#' + value.productId)}
-			<a href="#" onClick={(e) => { e.preventDefault(); onChange(null); setQ(''); setRes(null); }} style={{ color: '#7a8699', textDecoration: 'none' }}>✕</a>
-		</span>
-	);
-	return (
-		<div style={{ position: 'relative', flex: '1 1 260px' }}>
-			<div style={{ display: 'flex', gap: 6 }}>
-				<input style={{ ...inp, flex: 1 }} placeholder={placeholder || '🔎 товар: id / название / артикул'} value={q}
-					onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void search(); } }} />
-				<button style={btnGhost} disabled={busy} onClick={() => void search()}>{busy ? '…' : 'Найти'}</button>
-			</div>
-			{res && (res.length ? (
-				<div style={{ position: 'absolute', zIndex: 5, left: 0, right: 0, background: '#fff', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: 200, overflow: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
-					{res.map((it) => (
-						<div key={it.productId} onClick={() => { onChange(it); setRes(null); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
-							{it.name || ('#' + it.productId)} <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
-							<div><StockHint it={it} /></div>
-						</div>
-					))}
-				</div>
-			) : <p className="empty" style={{ marginTop: 4 }}>Ничего не найдено.</p>)}
-		</div>
-	);
-}
 
 
 
@@ -164,7 +120,7 @@ export function LedgerTab(): JSX.Element {
 		<>
 			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
 				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
-				<ProductFilter value={prod} onChange={setProd} />
+				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
 			{!prod ? <p className="empty">Выбери товар — покажу всю историю движений: приход, списание, перемещение, реализация, инвентаризация.</p>
 				: loading ? <p>Загрузка…</p>
@@ -507,7 +463,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 			)}
 			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
 				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
-				<ProductFilter value={prod} onChange={setProd} />
+				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
 			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={TRANSFER_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
@@ -609,7 +565,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 			)}
 			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
 				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
-				<ProductFilter value={prod} onChange={setProd} />
+				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
 			<FilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={MOVE_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
