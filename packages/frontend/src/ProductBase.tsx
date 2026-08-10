@@ -22,7 +22,7 @@ import {
 import { SalesReport } from './SalesReport.js';
 import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
 import { CatalogPriceEditorModal } from './CatalogPriceEditorModal.js';
-import { formatCatalogNumber as fmt } from './catalog-product-display.js';
+import { catalogGeneratedTime as hhmm, formatCatalogNumber as fmt, normalizeStoreTitle, shortStoreTitle as shortStore } from './catalog-product-display.js';
 import { CatalogProductCard } from './CatalogProductCard.js';
 import { NewCatalogProductModal } from './NewCatalogProductModal.js';
 import { QuickSaleCartModal } from './QuickSaleCartModal.js';
@@ -44,20 +44,6 @@ type Mode = 'loading' | 'base' | 'report';
 
 const ALL = 'all';
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
-
-/** Короткое имя склада для чипов «остатки по складам». */
-function shortStore(title: string): string {
-	return title.replace(/^Максидом\s*/i, '').replace(/^ул\.\s*/i, '').replace(/,?\s*секция\s*/i, ' с.').trim() || title;
-}
-function normalizeStoreTitle(title: string): string {
-	return title.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
-}
-/** Время сборки базы в HH:MM (для метки свежести/кэша). */
-function hhmm(iso: string): string {
-	if (!iso) return '';
-	const d = new Date(iso);
-	return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 
 const MOCK_STORES: StoreInfo[] = [
 	{ id: 8, title: 'Максидом Дунайский 64', active: true },
