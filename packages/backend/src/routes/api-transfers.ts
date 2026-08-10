@@ -4,21 +4,19 @@ import { ensureTransfersEntity, TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } fro
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { completeTransferFromTransit, listActiveStoreTitles, receiveTransferFromTransit, shipTransferToTransit } from '../erp/operations.js';
-import { resolveDealOwners } from '../b24/deal-info.js';
 import { appPermission } from '../access-policy.js';
 import {
 	newTransferData,
 	normalizeTransferLines,
-	parseTransferItem,
 	sameTransferQuantities,
 	transferLineMap,
-	type StoredTransfer,
 	type TransferData,
 	type TransferHistoryChange,
 	type TransferLine,
 } from '../transfers/model.js';
 import { receivingChatStore } from '../transfers/chats.js';
 import { registerTransferCreateRoutes } from './transfer-create-routes.js';
+import { registerTransferListRoute } from './transfer-list-route.js';
 import { createTransferDraftService } from './transfer-draft-service.js';
 import { createTransferNotificationService } from './transfer-notification-service.js';
 import { registerTransferRequestCreateRoutes } from './transfer-request-create-routes.js';
@@ -62,35 +60,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	registerTransferRequestCreateRoutes(app, clientFrom);
 	registerTransferRequestManagementRoutes(app, clientFrom, operationLocks, createDraftTransfer);
 	registerTransferCreateRoutes(app, clientFrom, notifications, createDraftTransfer);
-
-	// ── Список перемещений (по сделке — для вкладки; без — все для окна закупки) ──
-	app.post('/api/transfers/list', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; from?: unknown; to?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		await ensureTransfersEntity(client);
-		const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-		const from = isDate(b.from) ? b.from : '';
-		const to = isDate(b.to) ? b.to : '';
-		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
-			let transfers = (items ?? []).map(parseTransferItem).filter((t): t is StoredTransfer => t != null);
-			const dealId = String(b.dealId ?? '').trim();
-			if (dealId) transfers = transfers.filter((t) => t.dealId === dealId);
-			if (from) transfers = transfers.filter((t) => (t.createdAt || '').slice(0, 10) >= from);
-			if (to) transfers = transfers.filter((t) => (t.createdAt || '').slice(0, 10) <= to);
-			const me = await currentUser(client);
-			const owners = await resolveDealOwners(client, transfers.map((t) => t.dealId));
-			return {
-				ok: true,
-				transfers: transfers.map((t) => ({ ...t, ownerName: owners.get(t.dealId) ?? '' })),
-				isSupply: appPermission(req, 'transfers.manage_requests', me.isSupply),
-			};
-		} catch (err) {
-			app.log.error({}, `[api/transfers/list] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerTransferListRoute(app, clientFrom);
 
 	// Склад назначения можно поменять, пока товар ещё не отправлен.
 	app.post('/api/transfers/update-destination', async (req, reply) => {
