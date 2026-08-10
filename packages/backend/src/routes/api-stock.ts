@@ -2,17 +2,16 @@ import type { FastifyInstance } from 'fastify';
 import { B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import {
-	searchErpItems, listActiveStoreTitles, fetchErpStocksFor,
-	ensureSupplier, ensureCoreItem, createReceiptDraft, createWriteOffDraft, submitDoc,
+	listActiveStoreTitles, ensureSupplier, createReceiptDraft, createWriteOffDraft, submitDoc,
 	updateCoreCatalogPrices,
 } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
-import { canManageStock, stockAccess } from './api-stock-access.js';
+import { canManageStock } from './api-stock-access.js';
 import { registerStockAssortmentRoutes } from './api-stock-assortment-routes.js';
 import { validateFreeStock } from './api-stock-availability.js';
+import { registerStockCatalogRoutes } from './api-stock-catalog-routes.js';
 import { registerStockMovementRoutes } from './api-stock-movement-routes.js';
 import { stockClientFrom, stockErrorInfo as errInfo } from './api-stock-route-helpers.js';
-import { fetchSupplierCompanies } from './api-stock-suppliers.js';
 import { registerStockTurnoverRoutes } from './api-stock-turnover-routes.js';
 import type { StockAuthBody as AuthBody, StockIssueLine as IssueLine, StockReceiptLine as ReceiptLine } from './api-stock-types.js';
 
@@ -34,78 +33,7 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 	registerStockMovementRoutes(app);
 	registerStockTurnoverRoutes(app);
 	registerStockAssortmentRoutes(app);
-
-	// Справочники для форм: склады, поставщики, право создавать по учётной записи.
-	app.post('/api/stock/form-data', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody;
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		try {
-			const [stores, suppliers, access] = await Promise.all([
-				listActiveStoreTitles(erp), fetchSupplierCompanies(client, app.log), stockAccess(client),
-			]);
-			const canCreate = appPermission(req, 'stock.create_receipt', access.canManage)
-				|| appPermission(req, 'stock.create_issue', access.canManage);
-			const isSupply = appPermission(req, 'supply.view', access.isSupply);
-			return { ok: true, stores, suppliers, canCreate, isSupply };
-		} catch (e) {
-			app.log.error({}, `[api/stock/form-data] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
-
-	// Поиск товаров каталога ядра (по id / имени / артикулу) — пикер позиций в формах.
-	app.post('/api/stock/search-items', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { q?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		try {
-			const items = await searchErpItems(erp, String(b.q ?? ''));
-			// Обогащаем остатками по складам (один батч-запрос Bin) — чтобы в пикере было видно наличие
-			// и «живую» карточку среди дублей.
-			const stockMap = await fetchErpStocksFor(erp, items.map((i) => i.productId));
-			const enriched = items.map((i) => {
-				const stocks = stockMap.get(i.productId) ?? {};
-				const total = Object.values(stocks).reduce((a, b) => a + b, 0);
-				return { ...i, stocks, total };
-			});
-			return { ok: true, items: enriched };
-		} catch (e) {
-			app.log.error({}, `[api/stock/search-items] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
-
-	// Создать НОВЫЙ товар (которого нет в каталоге): продукт в каталоге Б24 (iblock 24, простой, штуки)
-	// → productId → зеркало Item в ядре. Возвращает {productId, name} для добавления в приход. Доступ — снабжение.
-	app.post('/api/stock/create-product', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { name?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
-		const name = String(b.name ?? '').trim();
-		if (name.length < 2) return reply.code(400).send({ ok: false, error: 'имя товара слишком короткое' });
-		try {
-			if (!appPermission(req, 'stock.create_product', await canManageStock(client))) {
-				return reply.code(403).send({ ok: false, error: 'создавать товар может только снабжение' });
-			}
-			// iblock 24 = базовый каталог CRM (productIblockId=null); type 1 = простой товар; measure 9 = штуки (дефолт портала).
-			const r = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', { fields: { iblockId: 24, name, type: 1, measure: 9, active: 'Y' } });
-			const productId = Number(r?.element?.id ?? 0) || 0;
-			if (!productId) throw new Error('catalog.product.add не вернул id');
-			await ensureCoreItem(erp, { productId, name });
-			app.log.info({ productId, name }, '[api/stock/create-product] ok');
-			return { ok: true, productId, name };
-		} catch (e) {
-			app.log.error({}, `[api/stock/create-product] failed — ${errInfo(e)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(e) });
-		}
-	});
+	registerStockCatalogRoutes(app);
 
 	// Создать ЧЕРНОВИК: kind 'receipt' (Приход) | 'issue' (Списание). Перемещения — /api/transfers.
 	app.post('/api/stock/create', async (req, reply) => {
