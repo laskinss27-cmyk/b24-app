@@ -10,6 +10,7 @@ import {
 	currentRequest,
 	listPurchaseChildren,
 	parseTransferProgress,
+	purchaseRequestLines,
 	transferBelongsToRequest,
 } from './api-supply-request-progress.js';
 import {
@@ -82,8 +83,9 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 			}
 			const existingPurchases = (await listPurchaseChildren(erp, [request])).get(request.requestKey) ?? [];
 			for (const purchase of existingPurchases) {
-				if (purchase.supplyStage === 'cancelled') continue;
-				for (const line of purchase.lines) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
+				// Cancellation is a terminal resolution of the attached demand, not a
+				// release back into allocation. Keep those quantities protected too.
+				for (const line of purchaseRequestLines(purchase.lines)) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
 			}
 			const incomingProducts = new Set(lines.map((line) => line.productId));
 			const incomingTransfers = new Map<number, number>();

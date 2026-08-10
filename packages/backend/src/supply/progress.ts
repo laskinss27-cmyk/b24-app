@@ -10,6 +10,34 @@ export interface SupplyProgressPurchase {
 	receipts: Array<{ docstatus?: number; lines: SupplyProgressLine[] }>;
 }
 
+export interface SupplyRequestProgress<T> {
+	remaining: T[];
+	unfulfilled: T[];
+	closed: boolean;
+}
+
+/**
+ * Operational progress of a supply request.
+ *
+ * A cancelled purchase removes its attached quantity from the demand: it must
+ * neither return to allocation nor keep the request open. The purchase itself
+ * remains available as history.
+ */
+export function calculateRequestProgress<T extends { productId: number; qty: number }>(
+	items: readonly T[],
+	planned: ReadonlyMap<number, number>,
+	fulfilled: ReadonlyMap<number, number>,
+	cancelled: ReadonlyMap<number, number>,
+): SupplyRequestProgress<T> {
+	const uncovered = (item: T, covered: ReadonlyMap<number, number>): T => ({
+		...item,
+		qty: Math.max(item.qty - (covered.get(item.productId) ?? 0) - (cancelled.get(item.productId) ?? 0), 0),
+	});
+	const remaining = items.map((item) => uncovered(item, planned)).filter((item) => item.qty > 0);
+	const unfulfilled = items.map((item) => uncovered(item, fulfilled)).filter((item) => item.qty > 0);
+	return { remaining, unfulfilled, closed: items.length > 0 && unfulfilled.length === 0 };
+}
+
 const storeKey = (value: string | undefined): string =>
 	String(value ?? '').trim().toLocaleLowerCase('ru-RU');
 

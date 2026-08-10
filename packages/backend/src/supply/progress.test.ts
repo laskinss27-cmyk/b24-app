@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { directReceiptFulfillment } from './progress.js';
+import { calculateRequestProgress, directReceiptFulfillment } from './progress.js';
+
+test('cancelled purchase quantity resolves demand instead of reopening it', () => {
+	const progress = calculateRequestProgress(
+		[{ productId: 101, qty: 5 }, { productId: 202, qty: 2 }],
+		new Map([[101, 3]]),
+		new Map([[101, 3]]),
+		new Map([[101, 2], [202, 2]]),
+	);
+	assert.deepEqual(progress.remaining, []);
+	assert.deepEqual(progress.unfulfilled, []);
+	assert.equal(progress.closed, true);
+});
+
+test('active order hides allocated demand but keeps request open until fulfillment', () => {
+	const progress = calculateRequestProgress(
+		[{ productId: 101, qty: 5 }],
+		new Map([[101, 5]]),
+		new Map(),
+		new Map(),
+	);
+	assert.deepEqual(progress.remaining, []);
+	assert.deepEqual(progress.unfulfilled, [{ productId: 101, qty: 5 }]);
+	assert.equal(progress.closed, false);
+});
 
 test('полный прямой приход закрывает количество заявки', () => {
 	assert.deepEqual(directReceiptFulfillment('Склад Прихода', [{

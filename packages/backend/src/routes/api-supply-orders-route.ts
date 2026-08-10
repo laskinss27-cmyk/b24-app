@@ -3,7 +3,7 @@ import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { listSupplyRequests, type SupplyRequest } from '../erp/operations.js';
-import { directReceiptFulfillment } from '../supply/progress.js';
+import { calculateRequestProgress, directReceiptFulfillment } from '../supply/progress.js';
 import {
 	addCovered,
 	listPurchaseChildren,
@@ -39,6 +39,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			}
 			const planned = new Map<string, Map<number, number>>();
 			const fulfilled = new Map<string, Map<number, number>>();
+			const cancelled = new Map<string, Map<number, number>>();
 			const transfersByRequest = new Map<string, TransferProgress[]>();
 			const standaloneTransfers: TransferProgress[] = [];
 			const reservations = new Map<string, number>();
@@ -71,7 +72,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			const purchasesByRequest = await listPurchaseChildren(erp, [...reqs, standaloneRequest]);
 			for (const [requestKey, purchases] of purchasesByRequest.entries()) {
 				for (const purchase of purchases) {
-					if (purchase.supplyStage !== 'cancelled') addCovered(planned, requestKey, purchaseRequestLines(purchase.lines));
+					addCovered(purchase.supplyStage === 'cancelled' ? cancelled : planned, requestKey, purchaseRequestLines(purchase.lines));
 				}
 			}
 			// Если поставщик привёз товар сразу на склад назначения заявки, физического
@@ -87,18 +88,17 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			const enriched = reqs.map((o) => {
 				const byProduct = planned.get(o.requestKey) ?? new Map<number, number>();
 				const fulfilledByProduct = fulfilled.get(o.requestKey) ?? new Map<number, number>();
+				const cancelledByProduct = cancelled.get(o.requestKey) ?? new Map<number, number>();
 				const withFreeStocks = (item: SupplyRequest['items'][number]): SupplyRequest['items'][number] => ({
 					...item,
 					stocks: Object.fromEntries(Object.entries(item.stocks).map(([store, qty]) => [store, Math.max(qty - (reservations.get(`${item.productId}:${store}`) ?? 0), 0)])),
 				});
-				const remaining = o.items
-					.map(withFreeStocks)
-					.map((item) => ({ ...item, qty: Math.max(item.qty - (byProduct.get(item.productId) ?? 0), 0) }))
-					.filter((item) => item.qty > 0);
-				const unfulfilled = o.items
-					.map((item) => ({ ...item, qty: Math.max(item.qty - (fulfilledByProduct.get(item.productId) ?? 0), 0) }))
-					.filter((item) => item.qty > 0);
-				const closedByProgress = o.items.length > 0 && unfulfilled.length === 0;
+				const { remaining, closed: closedByProgress } = calculateRequestProgress(
+					o.items.map(withFreeStocks),
+					byProduct,
+					fulfilledByProduct,
+					cancelledByProduct,
+				);
 				const purchases = (purchasesByRequest.get(o.requestKey) ?? []).map((purchase) => ({
 					...purchase,
 					displayTitle: readableDocumentTitle({
