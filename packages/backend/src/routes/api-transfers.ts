@@ -3,7 +3,6 @@ import { B24Client, B24ApiError } from '../b24/client.js';
 import { ensureTransfersEntity, TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { receiveTransferFromTransit } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
 import {
 	type TransferData,
@@ -14,6 +13,7 @@ import { registerTransferEditRoutes } from './transfer-edit-routes.js';
 import { registerTransferListRoute } from './transfer-list-route.js';
 import { registerTransferPostRoute } from './transfer-post-route.js';
 import { registerTransferShipRoute } from './transfer-ship-route.js';
+import { registerTransferShortageRoute } from './transfer-shortage-route.js';
 import { createTransferDraftService } from './transfer-draft-service.js';
 import { createTransferNotificationService } from './transfer-notification-service.js';
 import { registerTransferRequestCreateRoutes } from './transfer-request-create-routes.js';
@@ -61,52 +61,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	registerTransferShipRoute(app, clientFrom, operationLocks, notifications);
 	registerTransferReceiveRoute(app, clientFrom, notifications);
 	registerTransferPostRoute(app, clientFrom, operationLocks);
-
-	app.post('/api/transfers/resolve-shortage', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
-		const client = clientFrom(b);
-		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const id = Number(b.id);
-		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
-		const erp = ErpClient.fromEnv();
-		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
-		try {
-			const doc = await loadOne(client, id);
-			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
-			if (doc.status !== 'shortage') return reply.code(409).send({ ok: false, error: `нельзя скорректировать недовоз из статуса ${doc.status}` });
-			if (!doc.shortageLines.length) return reply.code(409).send({ ok: false, error: 'у перемещения нет хвоста недовоза' });
-			const me = await currentUser(client);
-			if (!appPermission(req, 'transfers.resolve_shortage', me.isSupply)) {
-				return reply.code(403).send({ ok: false, error: 'корректировать недовоз может только снабжение (закупка)' });
-			}
-			const did = Number(doc.dealId) || 0;
-			const { name: returnEntry } = await receiveTransferFromTransit(erp, {
-				transferId: id,
-				...(did ? { dealId: did } : {}),
-				...(doc.supplyRequest ? { supplyRequest: doc.supplyRequest } : {}),
-				...(doc.supplyRequestKey ? { supplyRequestKey: doc.supplyRequestKey } : {}),
-				...(doc.purchaseOrder ? { purchaseOrder: doc.purchaseOrder } : {}),
-				lines: doc.shortageLines.map((l) => ({ productId: l.productId, qty: l.qty, toStore: doc.fromStore })),
-			});
-			const now = new Date().toISOString();
-			const correctedLines = doc.receivedLines.length ? doc.receivedLines : doc.lines.map((l) => ({ ...l, qty: Math.max(l.qty - (doc.shortageLines.find((s) => s.productId === l.productId)?.qty ?? 0), 0) })).filter((l) => l.qty > 0);
-			const returnedText = doc.shortageLines.map((l) => `${l.name || '#' + l.productId} ×${l.qty}`).join(', ');
-			const data: TransferData = {
-				...doc,
-				status: 'received',
-				lines: correctedLines,
-				shortageReturnEntry: returnEntry,
-				shortageLines: [],
-				history: [...doc.history, { at: now, status: 'received', byId: me.id, byName: me.name, note: `недовоз скорректирован: ${returnedText} возвращено ${doc.toStore ? 'из транзита' : ''} на ${doc.fromStore}; Stock Entry ${returnEntry}` }],
-			};
-			await saveData(client, id, doc.name, data);
-			app.log.info({ id, returnEntry }, '[api/transfers/resolve-shortage] ok');
-			return { ok: true, transfer: { id, name: doc.name, ...data } };
-		} catch (err) {
-			app.log.error({}, `[api/transfers/resolve-shortage] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
-		}
-	});
+	registerTransferShortageRoute(app, clientFrom);
 
 	app.post('/api/transfers/cancel', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { id?: unknown };
