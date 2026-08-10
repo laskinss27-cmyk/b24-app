@@ -25,7 +25,6 @@ import {
 	type NewRepairInput,
 	type StoreInfo,
 	type Repair,
-	type RepairKind,
 	type RepairStatus,
 	type RepairContact,
 	type RepairPhoto,
@@ -44,6 +43,12 @@ import {
 import { RepairDispatchBlank, type RepairDispatchContact as DispatchContact } from './RepairDispatchBlank.js';
 import { RepairIssueBlank } from './RepairIssueBlank.js';
 import { RepairIntakeBlank } from './RepairIntakeBlank.js';
+import {
+	CLIENT_REPAIR_STATUS_FLOW as STATUS_FLOW,
+	isRepairStatusLocked as isLockedStatus,
+	REPAIR_STATUS_LABELS as STATUS_LABEL,
+	repairStatusFlow as flowFor,
+} from './repair-status.js';
 
 /**
  * Модуль «Ремонты» (RMA) — приём оборудования и сдача поставщику-производителю.
@@ -51,29 +56,6 @@ import { RepairIntakeBlank } from './RepairIntakeBlank.js';
  * store (ctv_repairs). От Б24 берём клиента (поиск контакта) и Диск (фото).
  * Вход: пункт левого меню (view='repairs'). Канарейка — как у Базы/Реализаций.
  */
-
-const STATUS_LABEL: Record<RepairStatus, string> = {
-	received_tt: 'Принято на ТТ',
-	received_office: 'Принято в офисе',
-	sent: 'Отправлено в ремонт',
-	sent_to_tt: 'Отправлено на ТТ',
-	ready_tt: 'Готово к выдаче',
-	issued: 'Выдано',
-	// предпродажный
-	pre_office: 'Принято в офисе',
-	pre_sent: 'Отправлено в ремонт',
-	pre_back_office: 'Принято с ремонта в офис',
-	pre_to_point: 'Отправлено на точку',
-	pre_at_tt: 'Принято на ТТ',
-};
-const STATUS_FLOW: RepairStatus[] = ['received_tt', 'received_office', 'sent', 'sent_to_tt', 'ready_tt', 'issued'];
-const PRESALE_FLOW: RepairStatus[] = ['pre_office', 'pre_sent', 'pre_back_office', 'pre_to_point', 'pre_at_tt'];
-/** Цепочка статусов по потоку ремонта. */
-const flowFor = (kind: RepairKind | undefined): RepairStatus[] => kind === 'presale' ? PRESALE_FLOW : STATUS_FLOW;
-
-/** Со статуса «принято в офисе» КЛИЕНТСКАЯ карточка заморожена — правит только снабжение+. Предпродажный не замораживаем. */
-const LOCK_FROM_IDX = STATUS_FLOW.indexOf('received_office');
-function isLockedStatus(s: RepairStatus): boolean { const i = STATUS_FLOW.indexOf(s); return i >= 0 && i >= LOCK_FROM_IDX; }
 
 const MOCK: Repair[] = [
 	{
