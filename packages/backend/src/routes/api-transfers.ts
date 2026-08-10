@@ -22,6 +22,7 @@ import {
 import { newSupplyRequestData, newTransferRequestData, parseTransferRequestItem, type StoredTransferRequest, type SupplyRequestLine, type TransferRequestData } from '../transfers/request-model.js';
 import { receivingChatStore, sendStoreChatMessage, storeChat } from '../transfers/chats.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
+import { canDeleteTransferDocuments, currentUser, type CurrentUser } from './transfer-user-access.js';
 
 /**
  * API модуля «Перемещения» (складской учёт). Документ перемещения — в нашем entity-store
@@ -44,21 +45,6 @@ function errInfo(err: unknown): string {
 
 function formatTransferLines(lines: TransferLine[]): string {
 	return lines.map((line) => `• ${line.name || `#${line.productId}`} × ${line.qty}`).join('\n');
-}
-
-/** Закупка = отдел Снабжение (UF_DEPARTMENT 10) + главные админы поимённо (как в ремонтах).
- *  Только они двигают статусы перемещения (В пути/Получено). */
-const SUPPLY_DEPT = 10;
-const SUPPLY_ADMIN_IDS = new Set(['1', '1858', '986']);
-const TRANSFER_DELETE_IDS = new Set(['1858']);
-
-interface CurrentUser { id: string; name: string; isSupply: boolean }
-async function currentUser(client: B24Client): Promise<CurrentUser> {
-	const me = await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string; UF_DEPARTMENT?: unknown }>('user.current', {}).catch(() => null);
-	const id = String(me?.ID ?? '');
-	const depts = Array.isArray(me?.UF_DEPARTMENT) ? (me?.UF_DEPARTMENT as unknown[]).map(Number) : [];
-	const isSupply = SUPPLY_ADMIN_IDS.has(id) || depts.includes(SUPPLY_DEPT);
-	return { id, name: `${me?.NAME ?? ''} ${me?.LAST_NAME ?? ''}`.trim(), isSupply };
 }
 
 export function registerApiTransfersRoute(app: FastifyInstance): void {
@@ -1068,7 +1054,7 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		const me = await currentUser(client);
-		if (!TRANSFER_DELETE_IDS.has(me.id)) return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
+		if (!canDeleteTransferDocuments(me.id)) return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		try {
