@@ -17,7 +17,9 @@ import { resolveDealOwners } from '../b24/deal-info.js';
 import { appPermission } from '../access-policy.js';
 import { canManageStock, canUseAssortmentMatrix, stockAccess } from './api-stock-access.js';
 import { validateFreeStock } from './api-stock-availability.js';
+import { matrixCategories } from './api-stock-matrix-categories.js';
 import { moscowDate, stockClientFrom, stockErrorInfo as errInfo } from './api-stock-route-helpers.js';
+import { fetchSupplierCompanies } from './api-stock-suppliers.js';
 import type { StockAuthBody as AuthBody, StockIssueLine as IssueLine, StockReceiptLine as ReceiptLine } from './api-stock-types.js';
 
 export { canManageStock } from './api-stock-access.js';
@@ -33,79 +35,6 @@ export { validateFreeStock } from './api-stock-availability.js';
  * Перемещения — отдельный роут /api/transfers/*.
  * Авторизация — Б24-oauth (домен из allowlist). Создание/проведение — снабжение и руководители.
  */
-let matrixCategoryCache: { expiresAt: number; names: string[] } | null = null;
-
-function fieldValue(value: unknown): unknown {
-	return value && typeof value === 'object' && 'value' in value
-		? (value as { value?: unknown }).value
-		: value;
-}
-
-/** Категории первого уровня старого каталога Б24 для независимой разметки матрицы. */
-async function matrixCategories(client: B24Client): Promise<string[]> {
-	if (matrixCategoryCache && matrixCategoryCache.expiresAt > Date.now()) return matrixCategoryCache.names;
-	const names = new Set<string>();
-	for (const iblockId of [24, 26]) {
-		const all: Array<Record<string, unknown>> = [];
-		const seenIds = new Set<string>();
-		for (let start = 0; start < 5000; start += 50) {
-			const result = await client.call<{ sections?: Array<Record<string, unknown>> }>('catalog.section.list', {
-				filter: { iblockId }, select: ['id', 'name', 'iblockSectionId'], order: { id: 'ASC' }, start,
-			});
-			const sections = result?.sections ?? [];
-			const fresh = sections.filter((section) => {
-				const id = String(fieldValue(section['id']) ?? '');
-				if (!id || seenIds.has(id)) return false;
-				seenIds.add(id);
-				return true;
-			});
-			all.push(...fresh);
-			// catalog.section.list на total, кратном 50, повторяет последнюю страницу
-			// для слишком большого start. Останавливаемся, как только новых ID больше нет.
-			if (sections.length < 50 || fresh.length === 0) break;
-		}
-		const roots = all.filter((section) => Number(fieldValue(section['iblockSectionId']) ?? 0) <= 0);
-		for (const section of roots.length ? roots : all) {
-			const name = String(fieldValue(section['name']) ?? '').trim();
-			if (name) names.add(name);
-		}
-	}
-	const sorted = [...names].sort((left, right) => left.localeCompare(right, 'ru'));
-	matrixCategoryCache = { expiresAt: Date.now() + 10 * 60_000, names: sorted };
-	return sorted;
-}
-
-/** Поставщики Б24 = CRM-компании в воронке «Поставщики» (складские контрагенты, code CATALOG_CONTRACTOR_COMPANY).
- *  Обычный crm.company.list их НЕ отдаёт (не дефолтная категория) — берём через универсальный crm.item.list. */
-let supplierCatId: number | null = null;
-async function supplierCategoryId(client: B24Client): Promise<number> {
-	if (supplierCatId !== null) return supplierCatId;
-	try {
-		const r = await client.call<{ categories?: Array<{ id?: number; code?: string }> }>('crm.category.list', { entityTypeId: 4 });
-		const cat = (r?.categories ?? []).find((c) => c.code === 'CATALOG_CONTRACTOR_COMPANY');
-		supplierCatId = cat ? Number(cat.id) : 8;
-	} catch { supplierCatId = 8; }
-	return supplierCatId;
-}
-
-async function fetchSupplierCompanies(client: B24Client, log: FastifyInstance['log']): Promise<string[]> {
-	const out: string[] = [];
-	try {
-		const categoryId = await supplierCategoryId(client);
-		for (let start = 0; start < 2000; start += 50) {
-			const r = await client.call<{ items?: Array<{ title?: string }> }>('crm.item.list', { entityTypeId: 4, filter: { categoryId }, select: ['id', 'title'], start });
-			const items = r?.items ?? [];
-			if (!items.length) break;
-			for (const it of items) { const t = String(it.title ?? '').trim(); if (t) out.push(t); }
-			if (items.length < 50) break;
-		}
-	} catch (e) {
-		log.warn({}, `[api/stock] список поставщиков (воронка контрагентов) недоступен — ${errInfo(e)}`);
-	}
-	return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'ru'));
-}
-
-
 export function registerApiStockRoute(app: FastifyInstance): void {
 	const clientFrom = (body: AuthBody): B24Client | null => stockClientFrom(app, body);
 
