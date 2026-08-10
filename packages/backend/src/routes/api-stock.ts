@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { B24Client, B24ApiError } from '../b24/client.js';
-import { normalizeDomain } from '../security.js';
+import { B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	listCoreMovements, searchErpItems, listActiveStoreTitles, fetchErpStocksFor,
@@ -18,6 +17,8 @@ import { resolveDealOwners } from '../b24/deal-info.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
 import { appPermission } from '../access-policy.js';
+import { moscowDate, stockClientFrom, stockErrorInfo as errInfo } from './api-stock-route-helpers.js';
+import type { StockAuthBody as AuthBody, StockIssueLine as IssueLine, StockReceiptLine as ReceiptLine } from './api-stock-types.js';
 
 /**
  * API окна «Складской учёт».
@@ -29,20 +30,6 @@ import { appPermission } from '../access-policy.js';
  * Перемещения — отдельный роут /api/transfers/*.
  * Авторизация — Б24-oauth (домен из allowlist). Создание/проведение — снабжение и руководители.
  */
-interface AuthBody { domain?: string; accessToken?: string }
-
-function errInfo(err: unknown): string {
-	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
-}
-
-function moscowDate(): string {
-	const parts = new Intl.DateTimeFormat('en-GB', {
-		timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit',
-	}).formatToParts(new Date());
-	const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((item) => item.type === type)?.value ?? '';
-	return `${part('year')}-${part('month')}-${part('day')}`;
-}
-
 const SUPPLY_DEPARTMENT_ID = 10;
 const STOCK_ADMIN_IDS = new Set(['1', '986', '1858']);
 const ASSORTMENT_MATRIX_CANARY_IDS = new Set(['1858']);
@@ -183,15 +170,8 @@ async function fetchSupplierCompanies(client: B24Client, log: FastifyInstance['l
 }
 
 
-interface ReceiptLine { productId: number; qty: number; purchase: number; retail: number }
-interface IssueLine { productId: number; qty: number }
-
 export function registerApiStockRoute(app: FastifyInstance): void {
-	const clientFrom = (body: AuthBody): B24Client | null => {
-		if (!body.domain || !body.accessToken) return null;
-		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
-		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
-	};
+	const clientFrom = (body: AuthBody): B24Client | null => stockClientFrom(app, body);
 
 	// body: { domain, accessToken, kind: 'issue'|'receipt'|'delivery', from?, to? (YYYY-MM-DD) }
 	app.post('/api/stock/movements', async (req, reply) => {
