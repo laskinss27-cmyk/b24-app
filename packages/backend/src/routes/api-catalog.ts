@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { B24Client, B24ApiError } from '../b24/client.js';
+import { B24Client } from '../b24/client.js';
 import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
 import {
@@ -20,7 +20,6 @@ import {
 	type CatalogProductContent,
 } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
-import { catalogAccessForUser, type CatalogAccess, type CatalogAccessUser } from '../catalog-access.js';
 import { appPermission } from '../access-policy.js';
 import type {
 	AuthBody,
@@ -29,6 +28,13 @@ import type {
 	CatalogStore,
 	CoreProductBaseRow,
 } from './api-catalog-types.js';
+import {
+	canEditCatalogPrices,
+	canExportCatalogComparison,
+	catalogAccess,
+	catalogClientFrom,
+	errInfo,
+} from './api-catalog-route-helpers.js';
 
 /**
  * API «Базы товаров» для фронта. Сборка каталога — на бэкенде (фронтовый BX24
@@ -41,18 +47,12 @@ import type {
  * открытия отдаются мгновенно. Кэш хранится в памяти конкретного контейнера;
  * force=true запускает принудительную пересборку.
  */
-function errInfo(err: unknown): string {
-	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
-}
-
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const baseCache = new Map<string, CacheEntry>();
 
 export function invalidateCatalogCache(domain: string): void {
 	baseCache.delete(normalizeDomain(domain));
 }
-
-const CATALOG_COMPARISON_USER_IDS = new Set([1858, 986, 1]);
 
 function cleanText(value: unknown): string {
 	return String(value ?? '').trim().replace(/\s+/g, ' ');
@@ -151,20 +151,6 @@ async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): 
 	rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 	stores.sort((a, b) => a.title.localeCompare(b.title, 'ru'));
 	return { data: { rows, generatedAt: new Date().toISOString() }, stores };
-}
-
-async function catalogAccess(client: B24Client): Promise<CatalogAccess> {
-	const me = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
-	return catalogAccessForUser(me);
-}
-
-async function canEditCatalogPrices(client: B24Client): Promise<boolean> {
-	return (await catalogAccess(client)).canEditPrices;
-}
-
-async function canExportCatalogComparison(client: B24Client): Promise<boolean> {
-	const me = await client.call<{ ID?: string | number }>('user.current', {}).catch(() => null);
-	return CATALOG_COMPARISON_USER_IDS.has(Number(me?.ID)) || canEditCatalogPrices(client);
 }
 
 function productTitle(productType: string, manufacturer: string, model: string): string {
@@ -267,11 +253,7 @@ async function serializeProductCreate<T>(action: () => Promise<T>): Promise<T> {
 }
 
 export function registerApiCatalogRoute(app: FastifyInstance): void {
-	const clientFrom = (body: AuthBody): B24Client | null => {
-		if (!body.domain || !body.accessToken) return null;
-		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
-		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
-	};
+	const clientFrom = (body: AuthBody): B24Client | null => catalogClientFrom(app, body);
 
 	app.post('/api/catalog/stores', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody;
