@@ -67,3 +67,5 @@ export function createTransferDraftService(
 		return { id, name: itemName, ...data };
 	};
 }
+
+export type TransferDraftCreator = ReturnType<typeof createTransferDraftService>;
