@@ -26,6 +26,7 @@ import { CatalogPriceEditorModal } from './CatalogPriceEditorModal.js';
 import { formatCatalogNumber as fmt, productStatuses } from './catalog-product-display.js';
 import { CatalogProductCard } from './CatalogProductCard.js';
 import { NewCatalogProductModal } from './NewCatalogProductModal.js';
+import { CatalogQuantityInput } from './CatalogQuantityInput.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -88,35 +89,6 @@ const MOCK_ROWS: BaseRow[] = [
 
 type SortKey = 'id' | 'marketplaceOldId' | 'name' | 'model' | 'manufacturer' | 'section' | 'retail' | 'purchase' | 'stock' | 'total';
 type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number; qty: number }> };
-
-/**
- * Поле ввода количества с локальным состоянием: можно очистить и вписать своё, не теряя
- * позицию. В корзину уходит только валидное число ≥1 (пустое/0 при редактировании не
- * трогает корзину — иначе backspace удалял бы товар). На blur пустое возвращается к value.
- */
-function QtyInput({ value, onChange }: { value: number; onChange: (n: number) => void }): JSX.Element {
-	const [text, setText] = useState(String(value));
-	useEffect(() => { setText(String(value)); }, [value]);
-	return (
-		<input
-			className="qty-input"
-			type="number"
-			min={1}
-			value={text}
-			onClick={(e) => e.stopPropagation()}
-			onChange={(e) => {
-				const t = e.target.value;
-				setText(t);
-				const n = Math.floor(Number(t));
-				if (t !== '' && Number.isFinite(n) && n >= 1) onChange(n);
-			}}
-			onBlur={() => {
-				const n = Math.floor(Number(text));
-				if (!(Number.isFinite(n) && n >= 1)) setText(String(value));
-			}}
-		/>
-	);
-}
 
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
 export interface ProductPickItem {
@@ -685,7 +657,7 @@ export function ProductBase({
 											{cart.has(d.id) ? (
 												<div className="qty-stepper">
 													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 1) - 1)} aria-label="меньше">−</button>
-													<QtyInput value={cart.get(d.id) ?? 1} onChange={(n) => setCartQty(d.id, n)} />
+															<CatalogQuantityInput value={cart.get(d.id) ?? 1} onChange={(n) => setCartQty(d.id, n)} />
 													<button onClick={() => setCartQty(d.id, (cart.get(d.id) ?? 0) + 1)} aria-label="больше">+</button>
 												</div>
 											) : (
@@ -698,7 +670,7 @@ export function ProductBase({
 											{d.isService ? <span className="muted">—</span> : priceTagQty.has(d.id) ? (
 												<div className="qty-stepper">
 													<button onClick={() => setPriceTagCopies(d.id, (priceTagQty.get(d.id) ?? 1) - 1)} aria-label="меньше">−</button>
-													<QtyInput value={priceTagQty.get(d.id) ?? 1} onChange={(n) => setPriceTagCopies(d.id, n)} />
+															<CatalogQuantityInput value={priceTagQty.get(d.id) ?? 1} onChange={(n) => setPriceTagCopies(d.id, n)} />
 													<button onClick={() => setPriceTagCopies(d.id, (priceTagQty.get(d.id) ?? 0) + 1)} aria-label="больше">+</button>
 												</div>
 											) : <button className="btn-add" onClick={() => setPriceTagCopies(d.id, 1)} title="Добавить ценник">＋</button>}
@@ -762,7 +734,7 @@ export function ProductBase({
 											<span className="cart-unit money">{fmt(c.row.retail)} ₽</span>
 											<div className="qty-stepper">
 												<button onClick={() => setCartQty(c.row.id, c.qty - 1)} aria-label="меньше">−</button>
-												<QtyInput value={c.qty} onChange={(n) => setCartQty(c.row.id, n)} />
+														<CatalogQuantityInput value={c.qty} onChange={(n) => setCartQty(c.row.id, n)} />
 												<button onClick={() => setCartQty(c.row.id, c.qty + 1)} aria-label="больше">+</button>
 											</div>
 											<input className="disc-input sm" type="number" min={0} max={99} value={discOf(c.row.id)} onChange={(e) => setItemDiscount(c.row.id, Number(e.target.value))} />
