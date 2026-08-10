@@ -27,6 +27,7 @@ import { CatalogProductCard } from './CatalogProductCard.js';
 import { NewCatalogProductModal } from './NewCatalogProductModal.js';
 import { QuickSaleCartModal } from './QuickSaleCartModal.js';
 import { CatalogProductTable, type CatalogSortKey as SortKey } from './CatalogProductTable.js';
+import { buildCatalogView, catalogSections, indexCatalogRows } from './catalog-product-view.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -85,8 +86,6 @@ const MOCK_ROWS: BaseRow[] = [
 	{ id: 2050, iblockId: 24, name: 'Компьютерный кабель UTP 5E (Cu) 305м', isService: false, article: 'UTP5E-IN', model: 'UTP5E-IN', manufacturer: 'Eletec', sectionId: 103, sectionName: 'Кабель и расходники', retail: 6200, purchase: 4800, total: 814, stockByStore: { 8: 514, 22: 300 } },
 	{ id: 3001, iblockId: 24, name: 'Монтаж видеокамеры (работа)', isService: true, article: '', model: '', manufacturer: '', sectionId: 104, sectionName: 'Услуги', retail: 1500, purchase: null, total: 0, stockByStore: {} },
 ];
-
-type IndexedRow = { d: BaseRow; search: string; stockEntries: Array<{ id: number; qty: number }> };
 
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
 export interface ProductPickItem {
@@ -228,69 +227,24 @@ export function ProductBase({
 	const visibleStoreIds = useMemo(() => new Set(visibleStores.map((item) => item.id)), [visibleStores]);
 	const isAll = store === ALL;
 	const sid = isAll ? null : Number(store);
-	const indexedRows = useMemo<IndexedRow[]>(() => rows
-		.filter((d) => d.id !== B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID)
-		.filter((d) =>
-			!allowedStoreTitles.length
-			|| d.isService
-			|| Object.entries(d.stockByStore).some(([storeId, qty]) =>
-				visibleStoreIds.has(Number(storeId)) && qty > 0))
-		.map((d) => ({
-			d,
-			search: `${d.id} ${marketplaceMode ? d.marketplaceOldId ?? '' : ''} ${d.name} ${d.article ?? ''} ${d.manufacturer ?? ''} ${d.model ?? ''} ${d.sectionName ?? ''} ${d.status ?? ''}`.toLowerCase(),
-			stockEntries: Object.entries(d.stockByStore)
-				.map(([s, n]) => ({ id: Number(s), qty: n }))
-				.filter((o) => o.qty > 0 && (!allowedStoreTitles.length || visibleStoreIds.has(o.id)))
-				.sort((a, b) => b.qty - a.qty),
-		})), [rows, allowedStoreTitles, visibleStoreIds, marketplaceMode]);
-	const sections = useMemo(() => {
-		const byId = new Map<number, string>();
-		for (const row of rows) {
-			if (row.sectionId && row.sectionName) byId.set(row.sectionId, row.sectionName);
-		}
-		return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-	}, [rows]);
-
-	const view = useMemo(() => {
-		const words = deferredQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
-		let list = indexedRows;
-		// Фильтр остатка к услугам не применяем — у работ остатка нет (иначе «Услуги» давали бы пусто).
-		if (kind === 'goods') list = list.filter((r) => !r.d.isService);
-		else if (kind === 'services') list = list.filter((r) => r.d.isService);
-		if (section !== ALL) list = list.filter((r) => r.d.sectionId === Number(section));
-		if (words.length) {
-			list = list.filter((r) => words.every((w) => r.search.includes(w)));
-		}
-		const allStoresQty = (row: BaseRow): number =>
-			allowedStoreTitles.length
-				? visibleStores.reduce((sum, item) => sum + Number(row.stockByStore[item.id] ?? 0), 0)
-				: row.total;
-		if (onlyStock && kind !== 'services') {
-			list = list.filter((r) => (isAll ? allStoresQty(r.d) : (r.d.stockByStore[sid as number] ?? 0)) > 0 || r.d.isService);
-		}
-		const withQty = list.map((r) => ({ d: r.d, qty: isAll ? allStoresQty(r.d) : (r.d.stockByStore[sid as number] ?? 0), others: r.stockEntries }));
-		const val = (r: { d: BaseRow; qty: number }): string | number => {
-			switch (sortKey) {
-				case 'id': return r.d.id;
-				case 'marketplaceOldId': return r.d.marketplaceOldId ?? '';
-				case 'name': return r.d.name;
-				case 'model': return r.d.model ?? r.d.article ?? '';
-				case 'manufacturer': return r.d.manufacturer ?? '';
-				case 'section': return r.d.sectionName ?? '';
-				case 'retail': return r.d.retail ?? -1;
-				case 'purchase': return r.d.purchase ?? -1;
-				case 'stock': return r.qty;
-				case 'total': return r.d.total;
-			}
-		};
-		withQty.sort((a, b) => {
-			const x = val(a);
-			const y = val(b);
-			if (typeof x === 'number' && typeof y === 'number') return (x - y) * sortDir;
-			return String(x).localeCompare(String(y), 'ru') * sortDir;
-		});
-		return withQty;
-	}, [indexedRows, deferredQ, onlyStock, kind, section, isAll, sid, sortKey, sortDir, allowedStoreTitles, visibleStores]);
+	const indexedRows = useMemo(
+		() => indexCatalogRows(rows, allowedStoreTitles, visibleStoreIds, marketplaceMode, B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID),
+		[rows, allowedStoreTitles, visibleStoreIds, marketplaceMode],
+	);
+	const sections = useMemo(() => catalogSections(rows), [rows]);
+	const view = useMemo(() => buildCatalogView({
+		indexedRows,
+		query: deferredQ,
+		onlyStock,
+		kind,
+		section,
+		isAll,
+		storeId: sid,
+		sortKey,
+		sortDirection: sortDir,
+		restrictStores: allowedStoreTitles.length > 0,
+		visibleStores,
+	}), [indexedRows, deferredQ, onlyStock, kind, section, isAll, sid, sortKey, sortDir, allowedStoreTitles, visibleStores]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
