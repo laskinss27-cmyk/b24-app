@@ -4,7 +4,6 @@ import { resolve } from 'node:path';
 import JSZip from 'jszip';
 import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
-import { listDealPlan, type PlanItem } from './erp/operations.js';
 import type {
 	ContractContext,
 	ContractDurationUnit,
@@ -21,6 +20,7 @@ import {
 	CONTRACT_TEMPLATES,
 } from './deal-contract-templates.js';
 import { KNOWN_OWN_COMPANIES } from './deal-contract-own-companies.js';
+import { loadContractLines } from './deal-contract-lines.js';
 import {
 	allocatePersistentContractNumber,
 	contractNumberStartByInn,
@@ -39,6 +39,7 @@ export {
 	allocatePersistentContractNumber,
 	contractNumberStartByInn,
 } from './deal-contract-numbering.js';
+export { contractLinesFromB24ProductRows } from './deal-contract-lines.js';
 export type {
 	ContractContext,
 	ContractDurationUnit,
@@ -59,8 +60,6 @@ const CONTRACT_SEQUENCE_PATH = process.env['CONTRACT_SEQUENCE_PATH']
 	?? (process.env['NODE_ENV'] === 'production'
 		? '/app/state/contract-sequences.json'
 		: resolve(process.cwd(), '.tmp', 'contract-sequences.json'));
-const B24_COLLAPSE_PRODUCT_ID = 9814;
-const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена на сумму';
 const CONTRACT_FIELD_SPECS = [
 	{ fieldName: CONTRACT_NUMBER_FIELD, name: 'CONTRACT_NUMBER', xmlId: 'B24_APP_CONTRACT_NUMBER', label: 'Номер договора' },
 	{ fieldName: CONTRACT_COMPANY_FIELD, name: 'CONTRACT_COMPANY', xmlId: 'B24_APP_CONTRACT_COMPANY', label: 'Юрлицо договора' },
@@ -895,48 +894,6 @@ async function allocateContractNumber(
 		previousKeys: key === legacyKey ? [] : [legacyKey],
 		requested,
 	});
-}
-
-function linesFromPlan(plan: PlanItem[]): ContractLine[] {
-	return plan
-		.filter((item) => item.qty > 0)
-		.map((item) => {
-			const price = Math.round(item.rate * 100) / 100;
-			return {
-				name: item.itemName || `#${item.productId}`,
-				price,
-				quantity: item.qty,
-				total: Math.round(price * item.qty * 100) / 100,
-			};
-		});
-}
-
-export function contractLinesFromB24ProductRows(rows: Array<Record<string, unknown>>): ContractLine[] {
-	return rows.flatMap((row): ContractLine[] => {
-		const productId = Number(row['PRODUCT_ID'] ?? row['productId'] ?? 0);
-		const name = clean(row['PRODUCT_NAME'] ?? row['productName']);
-		const quantity = Number(row['QUANTITY'] ?? row['quantity'] ?? 0);
-		const price = Number(row['PRICE'] ?? row['price'] ?? 0);
-		if (
-			productId === B24_COLLAPSE_PRODUCT_ID
-			|| name === B24_COLLAPSE_SERVICE_NAME
-			|| !Number.isFinite(quantity)
-			|| quantity <= 0
-			|| !Number.isFinite(price)
-			|| price < 0
-		) return [];
-		return [{
-			name: name || (productId > 0 ? `#${productId}` : 'Позиция сделки'),
-			price: Math.round(price * 100) / 100,
-			quantity,
-			total: Math.round(price * quantity * 100) / 100,
-		}];
-	});
-}
-
-async function loadContractLines(client: B24Client, erp: ErpClient, dealId: number): Promise<ContractLine[]> {
-	void client;
-	return linesFromPlan(await listDealPlan(erp, dealId));
 }
 
 export async function generateDealContract(
