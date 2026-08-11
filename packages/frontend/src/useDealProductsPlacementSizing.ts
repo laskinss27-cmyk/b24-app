@@ -3,6 +3,7 @@ import type { DealProductPickerRequest, DealProductReplacement } from './DealPro
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
+	dealWorkspaceFrameHeight,
 	requestB24FitWindow,
 } from './deal-products-placement-sizing.js';
 
@@ -15,7 +16,10 @@ export function useDealProductsPlacementFrame({
 	adding: DealProductPickerRequest | null;
 	replacing: DealProductReplacement | null;
 }): void {
-	const initialFrameHeight = useRef(Math.ceil(Math.max(document.documentElement.clientHeight, window.innerHeight)));
+	const initialFrameHeight = useRef(dealWorkspaceFrameHeight(
+		Math.max(document.documentElement.clientHeight, window.innerHeight),
+		window.screen?.availHeight ?? 0,
+	));
 
 	useEffect(() => {
 		const root = document.getElementById('root');

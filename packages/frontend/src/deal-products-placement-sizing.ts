@@ -1,4 +1,15 @@
 export const PRODUCT_PICKER_MIN_HEIGHT = 900;
+export const DEAL_WORKSPACE_MIN_HEIGHT = 760;
+export const DEAL_PLACEMENT_VERTICAL_RESERVE = 280;
+
+export const dealWorkspaceFrameHeight = (
+	currentFrameHeight: number,
+	availableScreenHeight: number,
+): number => Math.ceil(Math.max(
+	currentFrameHeight,
+	DEAL_WORKSPACE_MIN_HEIGHT,
+	availableScreenHeight - DEAL_PLACEMENT_VERTICAL_RESERVE,
+));
 
 export const dealContentHeight = (minHeight = 0): number => {
 	const root = document.getElementById('root');
@@ -13,7 +24,10 @@ export const dealContentHeight = (minHeight = 0): number => {
 const dealFrameHeight = (): number => {
 	const root = document.getElementById('root');
 	if (!root?.classList.contains('deal-placement-root')) return dealContentHeight();
-	return Math.ceil(Math.max(root.clientHeight, document.documentElement.clientHeight, window.innerHeight));
+	return dealWorkspaceFrameHeight(
+		Math.max(root.clientHeight, document.documentElement.clientHeight, window.innerHeight),
+		window.screen?.availHeight ?? 0,
+	);
 };
 
 export const requestB24FitWindow = (delay = 120): void => {
