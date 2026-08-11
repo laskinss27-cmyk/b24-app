@@ -1,9 +1,10 @@
 import { type SupplyViewKey } from './SupplyNavigation.js';
 import { type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
+import { SupplyCustomizableHeader } from './SupplyCustomizableHeader.js';
 
 export function SupplyPageHeader({ view, onCreate }: { view: SupplyViewKey; onCreate: (kind: StandaloneDocumentKind) => void }): JSX.Element {
 	return (
-		<header className="supply-proto-top">
+		<SupplyCustomizableHeader view={view} onCreate={onCreate}>
 			<div>
 				<h1>Снабжение</h1>
 				<p>{view === 'marketplaces'
@@ -32,12 +33,6 @@ export function SupplyPageHeader({ view, onCreate }: { view: SupplyViewKey; onCr
 										? 'Возвраты клиентов с исходной сделкой и составом документа.'
 										: 'Заявка раскрывается в строки, снабжение вручную выбирает закупку или перемещение.'}</p>
 			</div>
-			<div className="supply-proto-actions">
-				{view === 'purchase' && <button className="primary" type="button" onClick={() => onCreate('purchase')}>Создать заявку поставщику</button>}
-				{view === 'logistics' && <button className="primary" type="button" onClick={() => onCreate('transfer')}>Создать перемещение</button>}
-				{view === 'issue' && <button className="primary" type="button" onClick={() => onCreate('issue')}>Создать списание</button>}
-				{view === 'receipt' && <button className="primary" type="button" onClick={() => onCreate('receipt')}>Создать оприходование</button>}
-			</div>
-		</header>
+		</SupplyCustomizableHeader>
 	);
 }

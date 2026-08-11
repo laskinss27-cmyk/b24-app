@@ -1,0 +1,59 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+	DEFAULT_SUPPLY_UI_LAYOUT,
+	SUPPLY_UI_LAYOUT_STORAGE_KEY,
+	loadSupplyUiLayout,
+	moveSupplyAction,
+	normalizeSupplyUiLayout,
+	saveSupplyUiLayout,
+} from './supply-ui-layout.js';
+
+function memoryStorage(initial?: string): Pick<Storage, 'getItem' | 'setItem'> & { value: string | undefined } {
+	return {
+		value: initial,
+		getItem(key) {
+			return key === SUPPLY_UI_LAYOUT_STORAGE_KEY ? this.value ?? null : null;
+		},
+		setItem(key, value) {
+			if (key === SUPPLY_UI_LAYOUT_STORAGE_KEY) this.value = value;
+		},
+	};
+}
+
+test('loads the default layout when nothing has been saved', () => {
+	assert.deepEqual(loadSupplyUiLayout(memoryStorage()), DEFAULT_SUPPLY_UI_LAYOUT);
+});
+
+test('moves and reorders actions without losing them', () => {
+	let layout = moveSupplyAction(DEFAULT_SUPPLY_UI_LAYOUT, 'create-transfer', 'toolbar');
+	layout = moveSupplyAction(layout, 'create-receipt', 'toolbar', 0);
+
+	assert.deepEqual(layout.zones.header, ['create-purchase', 'create-issue']);
+	assert.deepEqual(layout.zones.toolbar, ['create-receipt', 'create-transfer']);
+});
+
+test('saves a layout and restores it on the same browser storage', () => {
+	const storage = memoryStorage();
+	const expected = moveSupplyAction(DEFAULT_SUPPLY_UI_LAYOUT, 'create-purchase', 'toolbar');
+
+	saveSupplyUiLayout(expected, storage);
+	assert.deepEqual(loadSupplyUiLayout(storage), expected);
+});
+
+test('recovers from damaged stored JSON', () => {
+	assert.deepEqual(loadSupplyUiLayout(memoryStorage('{broken')), DEFAULT_SUPPLY_UI_LAYOUT);
+});
+
+test('ignores obsolete entries and adds newly known actions to the default zone', () => {
+	const normalized = normalizeSupplyUiLayout({
+		version: 1,
+		zones: {
+			header: ['obsolete-action', 'create-purchase', 'create-purchase'],
+			toolbar: ['create-transfer'],
+		},
+	});
+
+	assert.deepEqual(normalized.zones.header, ['create-purchase', 'create-issue', 'create-receipt']);
+	assert.deepEqual(normalized.zones.toolbar, ['create-transfer']);
+});
