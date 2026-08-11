@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import type { BaseRow } from './b24/catalog.js';
+import { isCatalogStoreId } from './catalog-store-ids.js';
 
 export interface MarketplaceCatalogExportStore {
 	id: number;
@@ -31,7 +32,7 @@ export function marketplaceCatalogItemType(row: Pick<BaseRow, 'isMarketplaceBund
 
 export function createMarketplaceCatalogWorkbook(input: MarketplaceCatalogExportInput): ExcelJS.Workbook {
 	const createdAt = input.createdAt ?? new Date();
-	const stores = input.stores.filter((store) => Number.isInteger(store.id) && store.id > 0);
+	const stores = input.stores.filter((store) => isCatalogStoreId(store.id));
 	const rows = input.rows.filter((row) => !row.isService);
 	const workbook = new ExcelJS.Workbook();
 	workbook.creator = 'Умный дом';

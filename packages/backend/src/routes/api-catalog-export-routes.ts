@@ -7,6 +7,7 @@ import { createMarketplaceCatalogWorkbook } from '../marketplace-catalog-xlsx.js
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import type { AuthBody, CoreProductBaseRow } from './api-catalog-types.js';
+import { catalogExportStoreIds } from '../catalog-store-ids.js';
 import {
 	canExportCatalogComparison,
 	catalogAccess,
@@ -78,9 +79,7 @@ export function registerCatalogExportRoutes(app: FastifyInstance): void {
 			.map(Number)
 			.filter((value) => Number.isInteger(value) && value > 0))]
 			.slice(0, 10_000);
-		const storeIds = new Set((Array.isArray(body['storeIds']) ? body['storeIds'] : [])
-			.map(Number)
-			.filter((value) => Number.isInteger(value) && value > 0));
+		const storeIds = catalogExportStoreIds(body['storeIds']);
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 		const startedAt = Date.now();

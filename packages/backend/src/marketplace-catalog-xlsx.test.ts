@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { catalogExportStoreIds } from './catalog-store-ids.js';
 import { createMarketplaceCatalogWorkbook, marketplaceCatalogItemType } from './marketplace-catalog-xlsx.js';
+
+const CORE_STORE_ID = -1366325545;
+
+test('marketplace catalog export accepts negative core warehouse ids', () => {
+	assert.deepEqual(
+		[...catalogExportStoreIds([CORE_STORE_ID, '-1473378028', 12, 0, 1.5, 'bad', CORE_STORE_ID])],
+		[CORE_STORE_ID, -1473378028, 12],
+	);
+	assert.deepEqual([...catalogExportStoreIds(null)], []);
+});
 
 test('marketplace catalog export keeps bundle type and selected warehouse stocks', async () => {
 	const workbook = createMarketplaceCatalogWorkbook({
@@ -16,7 +27,7 @@ test('marketplace catalog export keeps bundle type and selected warehouse stocks
 				retail: 1000,
 				purchase: 700,
 				total: 8,
-				stockByStore: { 11: 3, 12: 5 },
+				stockByStore: { [CORE_STORE_ID]: 3, 12: 5 },
 			},
 			{
 				id: 202,
@@ -29,10 +40,10 @@ test('marketplace catalog export keeps bundle type and selected warehouse stocks
 				retail: 2500,
 				purchase: 1400,
 				total: 2,
-				stockByStore: { 11: 2, 12: 0 },
+				stockByStore: { [CORE_STORE_ID]: 2, 12: 0 },
 			},
 		],
-		stores: [{ id: 11, title: 'Маркетплейс' }],
+		stores: [{ id: CORE_STORE_ID, title: 'Маркетплейс' }],
 		selectedStoreLabel: 'Маркетплейс',
 		selectedSectionLabel: 'Все группы',
 		search: '',
