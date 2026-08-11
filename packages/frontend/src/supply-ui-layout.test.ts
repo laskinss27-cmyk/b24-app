@@ -7,6 +7,7 @@ import {
 	moveSupplyAction,
 	normalizeSupplyUiLayout,
 	saveSupplyUiLayout,
+	supplyActionIdsForView,
 } from './supply-ui-layout.js';
 
 function memoryStorage(initial?: string): Pick<Storage, 'getItem' | 'setItem'> & { value: string | undefined } {
@@ -56,4 +57,10 @@ test('ignores obsolete entries and adds newly known actions to the default zone'
 
 	assert.deepEqual(normalized.zones.header, ['create-purchase', 'create-issue', 'create-receipt']);
 	assert.deepEqual(normalized.zones.toolbar, ['create-transfer']);
+});
+
+test('offers only actions that actually belong to the current supply page', () => {
+	assert.deepEqual(supplyActionIdsForView('orders'), []);
+	assert.deepEqual(supplyActionIdsForView('issue'), ['create-issue']);
+	assert.deepEqual(supplyActionIdsForView('receipt'), ['create-receipt']);
 });

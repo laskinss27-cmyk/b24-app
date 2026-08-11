@@ -1,3 +1,5 @@
+import { type SupplyViewKey } from './SupplyNavigation.js';
+
 export const SUPPLY_UI_LAYOUT_STORAGE_KEY = 'b24-app:supply-ui-layout:v1';
 
 export const SUPPLY_ACTION_IDS = [
@@ -9,6 +11,17 @@ export const SUPPLY_ACTION_IDS = [
 
 export type SupplyActionId = (typeof SUPPLY_ACTION_IDS)[number];
 export type SupplyActionZone = 'header' | 'toolbar';
+
+const SUPPLY_ACTION_VIEWS: Record<SupplyActionId, SupplyViewKey> = {
+	'create-purchase': 'purchase',
+	'create-transfer': 'logistics',
+	'create-issue': 'issue',
+	'create-receipt': 'receipt',
+};
+
+export function supplyActionIdsForView(view: SupplyViewKey): SupplyActionId[] {
+	return SUPPLY_ACTION_IDS.filter((actionId) => SUPPLY_ACTION_VIEWS[actionId] === view);
+}
 
 export interface SupplyUiLayout {
 	version: 1;

@@ -6,6 +6,7 @@ import {
 	moveSupplyAction,
 	resetSupplyUiLayout,
 	saveSupplyUiLayout,
+	supplyActionIdsForView,
 	type SupplyActionId,
 	type SupplyActionZone,
 	type SupplyUiLayout,
@@ -14,12 +15,11 @@ import {
 const ACTIONS: Record<SupplyActionId, {
 	label: string;
 	kind: StandaloneDocumentKind;
-	view: SupplyViewKey;
 }> = {
-	'create-purchase': { label: 'Создать заявку поставщику', kind: 'purchase', view: 'purchase' },
-	'create-transfer': { label: 'Создать перемещение', kind: 'transfer', view: 'logistics' },
-	'create-issue': { label: 'Создать списание', kind: 'issue', view: 'issue' },
-	'create-receipt': { label: 'Создать оприходование', kind: 'receipt', view: 'receipt' },
+	'create-purchase': { label: 'Создать заявку поставщику', kind: 'purchase' },
+	'create-transfer': { label: 'Создать перемещение', kind: 'transfer' },
+	'create-issue': { label: 'Создать списание', kind: 'issue' },
+	'create-receipt': { label: 'Создать оприходование', kind: 'receipt' },
 };
 
 function isEditableElement(target: EventTarget | null): boolean {
@@ -41,8 +41,11 @@ export function SupplyCustomizableHeader({
 	const [editing, setEditing] = useState(false);
 	const [draggedAction, setDraggedAction] = useState<SupplyActionId | null>(null);
 	const visibleLayout = editing ? draft : layout;
+	const pageActionIds = supplyActionIdsForView(view);
+	const hasCustomizableActions = pageActionIds.length > 0;
 
 	const beginEditing = (): void => {
+		if (!hasCustomizableActions) return;
 		setDraft(layout);
 		setEditing(true);
 	};
@@ -55,14 +58,20 @@ export function SupplyCustomizableHeader({
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent): void => {
-			if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== 'e' || isEditableElement(event.target)) return;
+			if (!hasCustomizableActions || !event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== 'e' || isEditableElement(event.target)) return;
 			event.preventDefault();
 			if (editing) cancelEditing();
 			else beginEditing();
 		};
 		window.addEventListener('keydown', handleKeyDown);
 		return () => window.removeEventListener('keydown', handleKeyDown);
-	}, [editing, layout]);
+	}, [editing, hasCustomizableActions, layout]);
+
+	useEffect(() => {
+		setDraft(layout);
+		setDraggedAction(null);
+		setEditing(false);
+	}, [view]);
 
 	const saveEditing = (): void => {
 		const saved = saveSupplyUiLayout(draft);
@@ -88,7 +97,7 @@ export function SupplyCustomizableHeader({
 	};
 
 	const renderZone = (zone: SupplyActionZone): JSX.Element | null => {
-		const actionIds = visibleLayout.zones[zone].filter((actionId) => editing || ACTIONS[actionId].view === view);
+		const actionIds = visibleLayout.zones[zone].filter((actionId) => pageActionIds.includes(actionId));
 		if (!editing && actionIds.length === 0) return null;
 
 		return (
@@ -149,7 +158,7 @@ export function SupplyCustomizableHeader({
 				{children}
 				<div className="supply-ui-header-controls">
 					{renderZone('header')}
-					{!editing && (
+					{!editing && hasCustomizableActions && (
 						<button
 							className="supply-ui-settings-button"
 							title="Настроить расположение кнопок (Ctrl+Shift+E)"
