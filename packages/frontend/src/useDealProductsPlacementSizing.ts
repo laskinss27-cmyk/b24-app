@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { DealProductPickerRequest, DealProductReplacement } from './DealProductsPicker.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
@@ -15,6 +15,8 @@ export function useDealProductsPlacementFrame({
 	adding: DealProductPickerRequest | null;
 	replacing: DealProductReplacement | null;
 }): void {
+	const initialFrameHeight = useRef(Math.ceil(Math.max(document.documentElement.clientHeight, window.innerHeight)));
+
 	useEffect(() => {
 		const root = document.getElementById('root');
 		root?.classList.add('deal-placement-root');
@@ -40,7 +42,9 @@ export function useDealProductsPlacementFrame({
 			if (timer != null) window.clearTimeout(timer);
 			timer = window.setTimeout(() => {
 				timer = null;
-				const height = dealContentHeight(adding ? PRODUCT_PICKER_MIN_HEIGHT : 0);
+				const height = adding
+					? dealContentHeight(PRODUCT_PICKER_MIN_HEIGHT)
+					: initialFrameHeight.current;
 				if (height <= 0 || Math.abs(height - lastHeight) < 2) return;
 				lastHeight = height;
 				try { window.BX24?.resizeWindow(document.documentElement.clientWidth, height); } catch { /* placement closed */ }

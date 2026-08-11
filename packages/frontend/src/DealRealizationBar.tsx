@@ -45,7 +45,7 @@ export function DealRealizationBar({
 	onOrderSupply: () => void;
 }): JSX.Element {
 	return (
-		<div className="realize-bar deal-sticky-actions">
+		<div className="realize-bar">
 			{hasPendingDrafts ? (
 				<div className="realize-plan">
 					<b>Черновики в ядре: {pendingDraftCount} — проверь партии ниже и проведи.</b>
