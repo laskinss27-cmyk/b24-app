@@ -35,6 +35,7 @@ import { registerPlacementReportBuilderRoute } from './routes/placement-report-b
 import { registerAccessPolicyHook } from './access-policy-hook.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
+import { registerOperationLog } from './operation-log/register.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -104,6 +105,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	// Новые правила доступа включаются по сотрудникам и отделам. Для ещё не
 	// настроенных записей хук оставляет прежние ролевые проверки без изменений.
 	registerAccessPolicyHook(app);
+	registerOperationLog(app);
 
 	registerHealthRoute(app);
 	registerInstallRoute(app);

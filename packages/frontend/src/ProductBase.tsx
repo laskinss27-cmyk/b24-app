@@ -29,6 +29,7 @@ import { QuickSaleCartModal } from './QuickSaleCartModal.js';
 import { CatalogProductTable, type CatalogSortKey as SortKey } from './CatalogProductTable.js';
 import { buildCatalogView, catalogSections, indexCatalogRows } from './catalog-product-view.js';
 import { MOCK_CATALOG_ROWS, MOCK_CATALOG_STORES } from './catalog-product-mock-data.js';
+import { OperationLog } from './OperationLog.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -41,7 +42,7 @@ import { MOCK_CATALOG_ROWS, MOCK_CATALOG_STORES } from './catalog-product-mock-d
  */
 
 type Gate = 'checking' | 'ready' | 'error';
-type Mode = 'loading' | 'base' | 'report';
+type Mode = 'loading' | 'base' | 'report' | 'operationLog';
 
 const ALL = 'all';
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
@@ -237,6 +238,7 @@ export function ProductBase({
 	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canEditPrices);
 	const canExportComparison = permissionAllows('catalog.export_comparison', canEditPrices || canQuickSale);
 	const canViewSalesReport = permissionAllows('reports.sales', !readOnly);
+	const canViewOperationLog = permissionAllows('realizations.view', !readOnly);
 	const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 	const cartList = useMemo(
 		() => [...cart.entries()].map(([id, qty]) => ({ row: rowById.get(id), qty })).filter((c): c is { row: BaseRow; qty: number } => Boolean(c.row)),
@@ -435,6 +437,9 @@ export function ProductBase({
 	if (mode === 'report') {
 		return <SalesReport onBack={() => setMode('base')} />;
 	}
+	if (mode === 'operationLog') {
+		return <OperationLog onBack={() => setMode('base')} />;
+	}
 	if (mode === 'loading') {
 		return (
 			<div className="base">
@@ -505,6 +510,7 @@ export function ProductBase({
 				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && canViewSalesReport && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
+				{!pickMode && canViewOperationLog && <button className="btn-secondary" onClick={() => setMode('operationLog')}>Журнал операций</button>}
 			</div>
 			{comparisonError && <p className="cart-err">{comparisonError}</p>}
 			{marketplaceExportError && <p className="cart-err">{marketplaceExportError}</p>}

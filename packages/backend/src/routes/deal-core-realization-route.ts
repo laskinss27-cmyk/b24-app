@@ -16,6 +16,7 @@ import {
 	submitRealization,
 } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
+import { recordRealizationEvent } from '../operation-log/realization-events.js';
 
 interface AuthBody {
 	domain?: string;
@@ -46,6 +47,8 @@ export function registerDealCoreRealizationRoute(
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		const action = String(b.action ?? '');
+		const logDealId = Number(b.dealId);
+		const loggedDocuments: string[] = [];
 		try {
 			if (action === 'list') {
 				// Что уже реализовано по сделке — из ЯДРА (Delivery Note по b24_deal_id), а не из
@@ -118,9 +121,11 @@ export function registerDealCoreRealizationRoute(
 					if (!lines.length) continue;
 					const { name } = await createRealizationDraft(erp, { dealId, lines });
 					drafts.push({ name, storeTitle: storeTitle || 'Услуги' });
+					loggedDocuments.push(name);
 				}
 				if (!drafts.length) return reply.code(400).send({ ok: false, error: 'нет валидных строк для реализации' });
 				app.log.info({ dealId, drafts: drafts.length }, '[api/deal/realize-core] drafts created');
+				await recordRealizationEvent(app, req, { operation: 'draft', dealId, documents: loggedDocuments });
 				return { ok: true, drafts };
 			}
 			if (action === 'return') {
@@ -137,6 +142,7 @@ export function registerDealCoreRealizationRoute(
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0 && l.storeTitle);
 				if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций возврата' });
 				const { names, returned } = await createClientReturns(erp, { dealId, ...(note ? { note } : {}), lines });
+				loggedDocuments.push(...names);
 				// Возвращённый товар больше не должен снова появляться в сделке как неотгруженный.
 				// Уменьшаем именно основную строку или конкретный этап, из которого был возврат.
 				const today = new Date().toISOString().slice(0, 10);
@@ -145,6 +151,7 @@ export function registerDealCoreRealizationRoute(
 				await setDealB24Service(client, dealId, total);
 				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, returns: names.length, planLines: savedPlan.length, total }, '[api/deal/realize-core] returns created, deal plan reduced');
+				await recordRealizationEvent(app, req, { operation: 'return', dealId, documents: loggedDocuments });
 				return { ok: true, returns: names };
 			}
 			if (action === 'submit') {
@@ -156,15 +163,20 @@ export function registerDealCoreRealizationRoute(
 				const allowedDrafts = new Set(dealDocuments.filter((document) => !document.submitted).map((document) => document.name));
 				if (names.some((name) => !allowedDrafts.has(name))) throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
 				const submitted: string[] = [];
-				for (const name of names) { await submitRealization(erp, name); submitted.push(name); }
+				for (const name of names) { await submitRealization(erp, name); submitted.push(name); loggedDocuments.push(name); }
 				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, submitted: submitted.length }, '[api/deal/realize-core] submitted');
+				await recordRealizationEvent(app, req, { operation: 'submit', dealId, documents: loggedDocuments });
 				return { ok: true, submitted };
 			}
 			return reply.code(400).send({ ok: false, error: 'bad action' });
 		} catch (err) {
-			app.log.error({ action }, `[api/deal/realize-core] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
+			const error = errInfo(err);
+			app.log.error({ action }, `[api/deal/realize-core] failed — ${error}`);
+			if ((action === 'draft' || action === 'submit' || action === 'return') && Number.isInteger(logDealId) && logDealId > 0) {
+				await recordRealizationEvent(app, req, { operation: action, dealId: logDealId, documents: loggedDocuments, error });
+			}
+			return reply.code(200).send({ ok: false, error });
 		}
 	});
 }

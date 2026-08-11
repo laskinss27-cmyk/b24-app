@@ -45,6 +45,7 @@ import './stock-ledger.css';
 import './supply-responsive.css';
 import './marketplaces.css';
 import './access-control.css';
+import './operation-log.css';
 import './print.css';
 
 const root = document.getElementById('root');
