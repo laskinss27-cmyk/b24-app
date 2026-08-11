@@ -1,25 +1,42 @@
 /* ── Сделка: строгая рабочая вкладка товаров ─────────────────────────────── */
 html.deal-placement-html,
 body.deal-placement-body {
-	height: auto;
+	height: 100%;
 	min-height: 0;
 	overflow-y: hidden;
 }
 
 body.deal-placement-body #root {
-	height: auto;
+	height: 100%;
 	min-height: 0;
-	overflow: visible;
+	overflow: hidden;
+}
+
+#root.deal-placement-root {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	min-height: 0;
+	overflow: hidden;
+}
+
+#root.deal-placement-root > .low-vision-toolbar {
+	flex: 0 0 auto;
 }
 
 .deal-products-tab {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	height: auto;
 	max-width: none;
 	min-height: 0;
 	margin: 0;
-	padding: 24px 28px 36px;
+	padding: 24px 28px 12px;
 	background: #f5f6f8;
 	color: #111827;
 	box-sizing: border-box;
+	overflow: hidden;
 }
 .deal-head {
 	display: flex;
@@ -211,11 +228,6 @@ body.deal-placement-body #root {
 	border-color: #0f558d;
 	background: #0f558d;
 	color: #fff;
-}
-.deal-stage-addbar {
-	display: flex;
-	justify-content: flex-start;
-	padding: 10px 0 2px;
 }
 .products-table input:disabled {
 	color: #26364d;
@@ -536,7 +548,8 @@ body.deal-placement-body #root {
 	text-align: right;
 }
 .deal-products-tab .btn-primary,
-.deal-products-tab .btn-secondary {
+.deal-products-tab .btn-secondary,
+.deal-products-tab .btn-stage {
 	border-radius: 7px;
 	padding: 9px 13px;
 	font-size: 13px;
@@ -553,6 +566,12 @@ body.deal-placement-body #root {
 	color: #374151;
 	border: 1px solid #cfd6e3;
 }
+.deal-products-tab .btn-stage {
+	border: 1px solid #d75b0b;
+	background: #e96a17;
+	color: #fff;
+	box-shadow: 0 2px 7px rgba(217, 91, 11, .24);
+}
 .deal-products-tab .btn-primary:hover:not(:disabled) {
 	background: #195fc8;
 }
@@ -560,13 +579,19 @@ body.deal-placement-body #root {
 	background: #f8fafc;
 	border-color: #aeb8c7;
 }
+.deal-products-tab .btn-stage:hover:not(:disabled) {
+	border-color: #b94700;
+	background: #c85208;
+}
 .deal-products-tab .btn-primary:disabled,
 .deal-products-tab .btn-secondary:disabled {
 	opacity: .45;
 	cursor: not-allowed;
 }
 .deal-products-tab .table-wrap {
-	max-height: 560px;
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: none;
 	background: #fff;
 	border: 1px solid #d9dee7;
 	border-radius: 8px;
@@ -735,7 +760,7 @@ body.deal-placement-body #root {
 
 @media (max-width: 980px) {
 	.deal-products-tab {
-		padding: 18px 14px 28px;
+		padding: 18px 14px 10px;
 	}
 	.deal-head,
 	.deal-addbar,
@@ -747,7 +772,8 @@ body.deal-placement-body #root {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 	.deal-products-tab .table-wrap {
-		max-height: 480px;
+		min-height: 0;
+		max-height: none;
 	}
 	.deal-products-tab .deal-sticky-actions {
 		position: static;

@@ -16,12 +16,15 @@ export function useDealProductsPlacementFrame({
 	replacing: DealProductReplacement | null;
 }): void {
 	useEffect(() => {
+		const root = document.getElementById('root');
+		root?.classList.add('deal-placement-root');
 		if (!mock) {
 			document.documentElement.classList.add('deal-placement-html');
 			document.body.classList.add('deal-placement-body');
 		}
 		requestB24FitWindow(80);
 		return () => {
+			root?.classList.remove('deal-placement-root');
 			document.documentElement.classList.remove('deal-placement-html');
 			document.body.classList.remove('deal-placement-body');
 		};

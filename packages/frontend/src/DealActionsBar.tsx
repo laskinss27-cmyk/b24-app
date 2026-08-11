@@ -21,6 +21,7 @@ export function DealActionsBar({
 	dealDocumentCount,
 	alternativeView,
 	onAddProduct,
+	onAddStage,
 	onOpenVariants,
 	onAddVariant,
 	onCopyVariant,
@@ -56,6 +57,7 @@ export function DealActionsBar({
 	dealDocumentCount: number;
 	alternativeView: boolean;
 	onAddProduct: () => void;
+	onAddStage: () => void;
 	onOpenVariants: () => void;
 	onAddVariant: () => void;
 	onCopyVariant: () => void;
@@ -75,6 +77,7 @@ export function DealActionsBar({
 		<div className="deal-addbar">
 			<div className="deal-actions">
 				{showAddProduct && <button className="btn-primary" onClick={onAddProduct}>Добавить товар</button>}
+				{workingMode && <button className="btn-stage" onClick={onAddStage}>+ Добавить этап</button>}
 				{!quoteVariantsEnabled && <button className="btn-secondary" onClick={onOpenVariants}>Варианты КП</button>}
 				{quoteVariantsEnabled && <>
 					<button className="btn-secondary" disabled={variantBusy} onClick={onAddVariant}>Добавить вариант</button>

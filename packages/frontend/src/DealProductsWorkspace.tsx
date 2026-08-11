@@ -430,6 +430,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				dealDocumentCount={dealDocumentCount}
 				alternativeView={alternativeView}
 				onAddProduct={onAdd}
+				onAddStage={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}
 				onOpenVariants={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: 'Вариант 1' }); }}
 				onAddVariant={() => { setVariantError(null); setVariantDialog({ kind: 'create', value: nextVariantName() }); }}
 				onCopyVariant={() => { if (activeVariant) { setVariantError(null); setVariantDialog({ kind: 'copy', value: availableVariantName(`Копия ${activeVariant.name}`) }); } }}
@@ -476,7 +477,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				renderWorkRow={renderWorkRow}
 				onAddToStage={onAddToStage}
 				onRenameStage={(stageId, stageName) => { setStageError(null); setStageDialog({ kind: 'rename', value: stageName, stageId }); }}
-				onAddStage={() => { setStageError(null); setStageDialog({ kind: 'create', value: `Этап ${data.stages.length + 1}` }); }}
 			/>
 
 			<DealSupplyOrderDialog
