@@ -8,7 +8,7 @@ import {
 	serializeFilterAttributes,
 } from './catalog-content.js';
 import { splitCatalogProductNameStatus } from './catalog-product-status.js';
-import { catalogAccessForUser } from './catalog-access.js';
+import { canDelegateCatalogProductCreation, catalogAccessForUser } from './catalog-access.js';
 
 const source = {
 	version: 1,
@@ -148,6 +148,16 @@ test('catalog card access is independent from price access', () => {
 		LAST_NAME: 'Сотрудник',
 		UF_DEPARTMENT: [5],
 	}), { canEditCard: false, canEditPrices: false });
+});
+
+test('delegated catalog creation is restricted to Konstantin Bitrix ID', () => {
+	assert.equal(canDelegateCatalogProductCreation({ ID: 1246 }), true);
+	assert.equal(canDelegateCatalogProductCreation({
+		ID: 77,
+		NAME: 'Константин',
+		LAST_NAME: 'Ласкин',
+	}), false);
+	assert.equal(canDelegateCatalogProductCreation({ ID: 1858, ADMIN: true }), false);
 });
 
 test('legacy stock marker is moved from the product name into status', () => {

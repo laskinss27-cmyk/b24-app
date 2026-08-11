@@ -13,7 +13,7 @@ export interface CatalogAccessUser {
 
 const SUPPLY_DEPARTMENT_ID = 10;
 const CATALOG_ADMIN_USER_IDS = new Set([1858, 986, 1]);
-const CATALOG_KONSTANTIN_LASKIN_USER_ID = 1246;
+export const CATALOG_KONSTANTIN_LASKIN_USER_ID = 1246;
 
 function normalized(value: unknown): string {
 	return String(value ?? '')
@@ -38,4 +38,12 @@ export function catalogAccessForUser(user: CatalogAccessUser | null): CatalogAcc
 		canEditPrices,
 		canEditCard: canEditPrices || isPortalAdmin || CATALOG_ADMIN_USER_IDS.has(Number(user?.ID)),
 	};
+}
+
+/**
+ * Системная запись в каталог — узкое исключение только для конкретной учётной
+ * записи Константина. Совпадения имени недостаточно для делегированной записи.
+ */
+export function canDelegateCatalogProductCreation(user: CatalogAccessUser | null): boolean {
+	return Number(user?.ID) === CATALOG_KONSTANTIN_LASKIN_USER_ID;
 }

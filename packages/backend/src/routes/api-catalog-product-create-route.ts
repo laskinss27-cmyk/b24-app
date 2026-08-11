@@ -1,7 +1,15 @@
 import type { FastifyInstance } from 'fastify';
+import { B24Client } from '../b24/client.js';
 import { ErpClient } from '../erp/client.js';
 import { ensureCoreItem, updateCoreCatalogPrices } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
+import { appPermission } from '../access-policy.js';
+import {
+	canDelegateCatalogProductCreation,
+	catalogAccessForUser,
+	type CatalogAccessUser,
+} from '../catalog-access.js';
+import { addCatalogProductWithAccessFallback } from '../catalog-product-writer.js';
 import {
 	createCatalogContent,
 	renderCatalogDescription,
@@ -20,6 +28,11 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = catalogClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const currentUser = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
+		const legacyAccess = catalogAccessForUser(currentUser);
+		if (!appPermission(req, 'catalog.create', legacyAccess.canEditCard)) {
+			return reply.code(403).send({ ok: false, error: 'нет права создавать карточки товаров' });
+		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 
@@ -78,8 +91,14 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 				let coreCreated = false;
 				let uploadedFileName = '';
 				let photoPath = '';
+				let productWriter = client;
+				let delegated = false;
 				try {
-					const created = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', {
+					const written = await addCatalogProductWithAccessFallback<{ element?: { id?: number | string } }>({
+						userClient: client,
+						systemClient: canDelegateCatalogProductCreation(currentUser) && app.config.devWebhook
+							? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+							: null,
 						fields: {
 							iblockId: 24,
 							name,
@@ -93,6 +112,9 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 							} : {}),
 						},
 					});
+					const created = written.result;
+					productWriter = written.client;
+					delegated = written.delegated;
 					productId = Number(created?.element?.id ?? 0) || 0;
 					if (!productId) throw new Error('catalog.product.add не вернул id');
 					if (await erp.get('Item', String(productId))) throw new Error(`в ядре уже существует товар с новым ID ${productId}`);
@@ -129,7 +151,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 				} catch (error) {
 					if (uploadedFileName) await erp.delete('File', uploadedFileName).catch(() => undefined);
 					if (coreCreated) await erp.delete('Item', String(productId)).catch(() => undefined);
-					if (productId) await client.call('catalog.product.delete', { id: productId }).catch(() => undefined);
+					if (productId) await productWriter.call('catalog.product.delete', { id: productId }).catch(() => undefined);
 					throw error;
 				}
 
@@ -154,7 +176,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 					total: 0,
 					stockByStore: {},
 				};
-				app.log.info({ productId, name, sectionId }, '[api/catalog/create-product] ok');
+				app.log.info({ productId, name, sectionId, delegated }, '[api/catalog/create-product] ok');
 				return { ok: true, status: 'created', name, product: row };
 			});
 		} catch (error) {
