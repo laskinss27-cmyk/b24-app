@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import type { AccessPermissionId } from '@b24-app/shared';
+import { OPERATION_LOG_VIEWER_USER_ID, type AccessPermissionId } from '@b24-app/shared';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
@@ -238,7 +238,8 @@ export function ProductBase({
 	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canEditPrices);
 	const canExportComparison = permissionAllows('catalog.export_comparison', canEditPrices || canQuickSale);
 	const canViewSalesReport = permissionAllows('reports.sales', !readOnly);
-	const canViewOperationLog = permissionAllows('realizations.view', !readOnly);
+	const canViewOperationLog = uid === OPERATION_LOG_VIEWER_USER_ID
+		&& permissionAllows('realizations.view', !readOnly);
 	const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 	const cartList = useMemo(
 		() => [...cart.entries()].map(([id, qty]) => ({ row: rowById.get(id), qty })).filter((c): c is { row: BaseRow; qty: number } => Boolean(c.row)),
