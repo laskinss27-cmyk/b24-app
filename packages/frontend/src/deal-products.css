@@ -20,6 +20,13 @@ body.deal-placement-body #root {
 	overflow-y: auto;
 }
 
+body.deal-placement-body #root.deal-placement-root {
+	height: 100%;
+	overflow-x: hidden;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
 .deal-products-tab {
 	display: block;
 	height: auto;
