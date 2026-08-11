@@ -96,8 +96,8 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 				try {
 					const written = await addCatalogProductWithAccessFallback<{ element?: { id?: number | string } }>({
 						userClient: client,
-						systemClient: canDelegateCatalogProductCreation(currentUser) && app.config.devWebhook
-							? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+						systemClient: canDelegateCatalogProductCreation(currentUser) && app.config.catalogWriteWebhook
+							? new B24Client({ auth: { kind: 'webhook', url: app.config.catalogWriteWebhook } })
 							: null,
 						fields: {
 							iblockId: 24,

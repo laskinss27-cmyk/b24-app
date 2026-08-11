@@ -18,6 +18,8 @@ const ConfigSchema = z.object({
 	appSecret: z.string().optional(),
 	autozadachiWebhook: z.string().url().optional(),
 	devWebhook: z.string().url().optional(),
+	/** Узкая системная запись карточки товара после Access Denied у разрешённого пользователя. */
+	catalogWriteWebhook: z.string().url().optional(),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 
@@ -36,6 +38,7 @@ export function loadConfig(): Config {
 		appSecret: process.env['APP_SECRET'],
 		autozadachiWebhook: process.env['AUTOZADACHI_WEBHOOK'],
 		devWebhook: process.env['DEV_WEBHOOK'],
+		catalogWriteWebhook: process.env['CATALOG_WRITE_WEBHOOK'],
 		nodeEnv: process.env['NODE_ENV'],
 	});
 
