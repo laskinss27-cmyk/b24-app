@@ -18,7 +18,7 @@ export function useDealProductsPlacementFrame({
 }): void {
 	const initialFrameHeight = useRef(dealWorkspaceFrameHeight(
 		Math.max(document.documentElement.clientHeight, window.innerHeight),
-		window.screen?.availHeight ?? 0,
+		window.outerHeight,
 	));
 
 	useEffect(() => {

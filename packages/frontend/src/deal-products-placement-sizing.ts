@@ -1,6 +1,6 @@
 export const PRODUCT_PICKER_MIN_HEIGHT = 900;
-export const DEAL_WORKSPACE_MIN_HEIGHT = 760;
-export const DEAL_PLACEMENT_VERTICAL_RESERVE = 280;
+export const DEAL_WORKSPACE_MIN_HEIGHT = 821;
+export const DEAL_PLACEMENT_VERTICAL_RESERVE = 219;
 
 export const dealWorkspaceFrameHeight = (
 	currentFrameHeight: number,
@@ -26,7 +26,7 @@ const dealFrameHeight = (): number => {
 	if (!root?.classList.contains('deal-placement-root')) return dealContentHeight();
 	return dealWorkspaceFrameHeight(
 		Math.max(root.clientHeight, document.documentElement.clientHeight, window.innerHeight),
-		window.screen?.availHeight ?? 0,
+		window.outerHeight,
 	);
 };
 
