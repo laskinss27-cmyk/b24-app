@@ -4,6 +4,7 @@ import { fetchOperationLog, type OperationLogEvent, type OperationLogOutcome } f
 
 export interface OperationLogProps {
 	onBack: () => void;
+	backLabel?: string;
 }
 
 function formatDate(value: string): string {
@@ -15,7 +16,7 @@ function operationLabel(operation: string): string {
 	return ({ draft: 'Черновик', submit: 'Проведение', return: 'Возврат' } as Record<string, string>)[operation] ?? operation;
 }
 
-export function OperationLog({ onBack }: OperationLogProps): JSX.Element {
+export function OperationLog({ onBack, backLabel = '← База товаров' }: OperationLogProps): JSX.Element {
 	const [outcome, setOutcome] = useState<OperationLogOutcome | undefined>();
 	const [events, setEvents] = useState<OperationLogEvent[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -39,7 +40,7 @@ export function OperationLog({ onBack }: OperationLogProps): JSX.Element {
 		<div className="operation-log">
 			<header className="operation-log-header">
 				<div>
-					<button type="button" className="btn-secondary" onClick={onBack}>← База товаров</button>
+					<button type="button" className="btn-secondary" onClick={onBack}>{backLabel}</button>
 					<h1>Журнал операций</h1>
 					<p>Понятная история действий нашего приложения. Сейчас здесь отображаются реализации и возвраты.</p>
 				</div>

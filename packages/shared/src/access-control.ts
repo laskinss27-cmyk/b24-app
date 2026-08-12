@@ -12,7 +12,8 @@ export type AccessDecision = 'inherit' | 'allow' | 'deny';
  * Это аварийно-простой слой до повторного включения редактора общей политики доступа.
  */
 export const DIRECT_MARKETPLACE_USER_IDS = ['760', '3608'] as const;
-export const OPERATION_LOG_VIEWER_USER_ID = '1858';
+export const APP_OWNER_USER_ID = '1858';
+export const OPERATION_LOG_VIEWER_USER_ID = APP_OWNER_USER_ID;
 
 export function hasDirectMarketplaceAccess(userId: unknown): boolean {
 	return (DIRECT_MARKETPLACE_USER_IDS as readonly string[]).includes(String(userId ?? '').trim());

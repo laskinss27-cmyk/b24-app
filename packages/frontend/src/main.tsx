@@ -46,6 +46,7 @@ import './supply-responsive.css';
 import './marketplaces.css';
 import './access-control.css';
 import './operation-log.css';
+import './admin-console.css';
 import './print.css';
 
 const root = document.getElementById('root');
