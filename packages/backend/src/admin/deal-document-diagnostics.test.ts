@@ -45,6 +45,17 @@ test('deal document search finds a deal by its ERP document number', async () =>
 	}]);
 });
 
+test('deal document summary never marks the editable Sales Order plan as an actionable draft', async () => {
+	assert.deepEqual(await searchAdminDealDocuments(erp, 'SAL-ORD-2026-00303'), [{
+		dealId: 37868,
+		planCount: 1,
+		realizationCount: 0,
+		draftCount: 0,
+		lastDocument: 'SAL-ORD-2026-00303',
+		lastModified: '2026-08-12 08:07:32',
+	}]);
+});
+
 test('deal document diagnostics explains an unsubmitted realization without changing it', async () => {
 	const client = {
 		async call(method: string) {

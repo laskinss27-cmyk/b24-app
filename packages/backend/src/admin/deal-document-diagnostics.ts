@@ -132,7 +132,7 @@ export async function searchAdminDealDocuments(erp: ErpClient, query: string, li
 				dealId,
 				planCount: documents.filter((document) => document.type === 'Sales Order').length,
 				realizationCount: documents.filter((document) => document.type === 'Delivery Note').length,
-				draftCount: documents.filter((document) => document.docstatus === 0).length,
+				draftCount: documents.filter((document) => document.type === 'Delivery Note' && document.docstatus === 0).length,
 				lastDocument: recent?.name ?? '',
 				lastModified: recent?.modified ?? '',
 			};
