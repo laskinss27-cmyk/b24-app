@@ -35,6 +35,14 @@
 .admin-repair-list em { padding: 2px 6px; border-radius: 999px; background: #fff2cc; color: #8a4b00; font-size: 11px; font-style: normal; }
 .admin-repair-list small { color: #667085; }
 
+.admin-document-layout { display: grid; grid-template-columns: minmax(270px, 340px) minmax(0, 1fr); gap: 14px; margin-top: 14px; align-items: start; }
+.admin-document-list { display: grid; gap: 7px; max-height: calc(100vh - 235px); overflow: auto; }
+.admin-document-list button { display: grid; gap: 5px; padding: 12px; border: 1px solid #d9e1ea; border-radius: 9px; background: white; color: inherit; text-align: left; cursor: pointer; }
+.admin-document-list button.active { border-color: #2878e3; box-shadow: 0 0 0 2px #dbeafe; }
+.admin-document-list button span:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.admin-document-list em { padding: 2px 6px; border-radius: 999px; background: #fff2cc; color: #8a4b00; font-size: 11px; font-style: normal; }
+.admin-document-list small { color: #667085; }
+
 .repair-diagnostic-details { display: grid; gap: 12px; }
 .admin-diagnostic-summary { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 1px; overflow: hidden; border: 1px solid #d9e1ea; border-radius: 10px; background: #d9e1ea; }
 .admin-diagnostic-summary div { display: grid; gap: 5px; padding: 12px; background: white; }
@@ -58,8 +66,27 @@
 .admin-raw-json summary { cursor: pointer; font-weight: 600; }
 .admin-raw-json pre { max-height: 440px; overflow: auto; padding: 12px; border-radius: 7px; background: #172033; color: #dce6f4; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+.deal-document-diagnostic-details, .admin-deal-documents { display: grid; gap: 12px; }
+.admin-deal-actions { display: flex; align-items: center; gap: 14px; }
+.admin-deal-actions span { color: #667085; }
+.admin-deal-document { overflow: hidden; border: 1px solid #d9e1ea; border-radius: 10px; background: white; }
+.admin-deal-document > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border-bottom: 1px solid #e4e9ef; background: #f8fafc; }
+.admin-deal-document > header div { display: grid; gap: 4px; }
+.admin-deal-document > header small { color: #667085; }
+.admin-document-status { padding: 4px 9px; border-radius: 999px; background: #fff2cc; color: #8a4b00; font-size: 12px; white-space: nowrap; }
+.admin-document-status.status-1 { background: #e9f9ef; color: #16713a; }
+.admin-document-status.status-2 { background: #f2f4f7; color: #667085; }
+.admin-document-meta { display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 15px; color: #475467; }
+.admin-document-items-wrap { overflow-x: auto; }
+.admin-document-items { width: 100%; border-collapse: collapse; }
+.admin-document-items th, .admin-document-items td { padding: 9px 12px; border-top: 1px solid #e4e9ef; text-align: left; white-space: nowrap; }
+.admin-document-items th { color: #667085; font-size: 11px; text-transform: uppercase; }
+.admin-document-items td:first-child { min-width: 220px; white-space: normal; }
+
 @media (max-width: 1050px) {
 	.admin-repair-layout { grid-template-columns: 1fr; }
 	.admin-repair-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 320px; }
+	.admin-document-layout { grid-template-columns: 1fr; }
+	.admin-document-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 320px; }
 	.admin-diagnostic-grid { grid-template-columns: 1fr; }
 }

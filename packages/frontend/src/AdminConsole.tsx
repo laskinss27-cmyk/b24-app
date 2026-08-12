@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { DealDocumentDiagnostics } from './DealDocumentDiagnostics.js';
 import { OperationLog } from './OperationLog.js';
 import { RepairDiagnostics } from './RepairDiagnostics.js';
 
-type AdminSection = 'repairs' | 'operationLog';
+type AdminSection = 'repairs' | 'dealDocuments' | 'operationLog';
 
 export function AdminConsole({ onBack }: { onBack: () => void }): JSX.Element {
 	const [section, setSection] = useState<AdminSection>('repairs');
@@ -18,9 +19,14 @@ export function AdminConsole({ onBack }: { onBack: () => void }): JSX.Element {
 			</header>
 			<nav className="admin-console-tabs">
 				<button type="button" className={section === 'repairs' ? 'active' : ''} onClick={() => setSection('repairs')}>Диагностика ремонтов</button>
+				<button type="button" className={section === 'dealDocuments' ? 'active' : ''} onClick={() => setSection('dealDocuments')}>Документы сделок</button>
 				<button type="button" className={section === 'operationLog' ? 'active' : ''} onClick={() => setSection('operationLog')}>Журнал операций</button>
 			</nav>
-			{section === 'repairs' ? <RepairDiagnostics /> : <OperationLog onBack={() => setSection('repairs')} backLabel="← Диагностика ремонтов" />}
+			{section === 'repairs'
+				? <RepairDiagnostics />
+				: section === 'dealDocuments'
+					? <DealDocumentDiagnostics />
+					: <OperationLog onBack={() => setSection('repairs')} backLabel="← Диагностика ремонтов" />}
 		</div>
 	);
 }

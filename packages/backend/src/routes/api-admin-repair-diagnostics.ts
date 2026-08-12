@@ -1,28 +1,17 @@
 import type { FastifyInstance } from 'fastify';
-import { B24Client } from '../b24/client.js';
-import { accessClientFrom, type AccessAuthBody } from '../access-policy.js';
+import type { AccessAuthBody } from '../access-policy.js';
 import { ErpClient } from '../erp/client.js';
-import { canUseAdminConsole } from '../admin/owner-access.js';
+import { adminOwnerClient } from '../admin/owner-client.js';
 import { diagnoseAdminRepair, searchAdminRepairs } from '../admin/repair-diagnostics-service.js';
 
 interface SearchBody extends AccessAuthBody { query?: unknown; limit?: unknown }
 interface DiagnoseBody extends AccessAuthBody { repairId?: unknown }
 
-async function ownerClient(app: FastifyInstance, body: AccessAuthBody): Promise<B24Client | null> {
-	const oauthClient = accessClientFrom(app, body);
-	if (!oauthClient) return null;
-	const user = await oauthClient.call<{ ID?: string | number }>('user.current', {});
-	if (!canUseAdminConsole(user?.ID)) return null;
-	return app.config.devWebhook
-		? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
-		: oauthClient;
-}
-
 export function registerApiAdminRepairDiagnosticsRoute(app: FastifyInstance): void {
 	app.post('/api/admin/repairs/search', async (req, reply) => {
 		const body = (req.body ?? {}) as SearchBody;
 		try {
-			const client = await ownerClient(app, body);
+			const client = await adminOwnerClient(app, body);
 			if (!client) return reply.code(403).send({ ok: false, error: 'Админка доступна только владельцу приложения.' });
 			const query = typeof body.query === 'string' ? body.query.slice(0, 200) : '';
 			const requestedLimit = Number(body.limit);
@@ -39,7 +28,7 @@ export function registerApiAdminRepairDiagnosticsRoute(app: FastifyInstance): vo
 		const repairId = Number(body.repairId);
 		if (!Number.isInteger(repairId) || repairId <= 0) return reply.code(400).send({ ok: false, error: 'Некорректный ID ремонта.' });
 		try {
-			const client = await ownerClient(app, body);
+			const client = await adminOwnerClient(app, body);
 			if (!client) return reply.code(403).send({ ok: false, error: 'Админка доступна только владельцу приложения.' });
 			const diagnostic = await diagnoseAdminRepair(client, ErpClient.fromEnv(), repairId);
 			if (!diagnostic) return reply.code(404).send({ ok: false, error: 'Ремонт не найден.' });

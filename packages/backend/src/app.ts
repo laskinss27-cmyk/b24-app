@@ -37,6 +37,7 @@ import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
 import { registerOperationLog } from './operation-log/register.js';
 import { registerApiAdminRepairDiagnosticsRoute } from './routes/api-admin-repair-diagnostics.js';
+import { registerApiAdminDealDocumentsRoute } from './routes/api-admin-deal-documents.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -125,6 +126,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerPlacementRepairsRoute(app);
 	registerApiRepairsRoute(app);
 	registerApiAdminRepairDiagnosticsRoute(app);
+	registerApiAdminDealDocumentsRoute(app);
 	registerApiTransfersRoute(app);
 	registerApiStockRoute(app);
 	registerPlacementStockRoute(app);
