@@ -21,6 +21,7 @@ import {
 	REPAIR_STATUS_LABELS as STATUS_LABEL,
 	repairStatusFlow as flowFor,
 } from './repair-status.js';
+import { RepairRefusalPanel } from './RepairRefusalPanel.js';
 
 async function openRepairFile(file: RepairFile): Promise<void> {
 	const win = window.open('', '_blank');
@@ -36,8 +37,8 @@ async function openRepairFile(file: RepairFile): Promise<void> {
 }
 
 
-export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternalComment, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSyncDeal, onSetIssueStore, onDelete }: {
-	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onSaveInternalComment: (comment: string) => Promise<void>; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<RepairDealSyncResult>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<RepairDealSyncResult>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<RepairDealSyncResult>; onSyncDeal: () => Promise<RepairDealSyncResult>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
+export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveInternalComment, onPrint, onIssuePrint, onStatus, onSetPay, onRequestPriceApproval, onSyncDeal, onRefuse, onSetIssueStore, onDelete }: {
+	repair: Repair; mock: boolean; canEditPrice: boolean; onBack: () => void; onEdit: () => void; onSaveInternalComment: (comment: string) => Promise<void>; onPrint: () => void; onIssuePrint: () => void; onStatus: (s: RepairStatus) => Promise<RepairDealSyncResult>; onSetPay: (p: 'warranty' | 'paid', cost: number | null, ourPrice: number | null) => Promise<RepairDealSyncResult>; onRequestPriceApproval: (cost: number | null, ourPrice: number | null) => Promise<RepairDealSyncResult>; onSyncDeal: () => Promise<RepairDealSyncResult>; onRefuse: (reason: string) => Promise<{ repair: Repair; warnings: string[] }>; onSetIssueStore: (store: string) => Promise<void>; onDelete: () => Promise<void>;
 }): JSX.Element {
 	const [busy, setBusy] = useState(false);
 	const [payBusy, setPayBusy] = useState(false);
@@ -53,6 +54,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 	const [commentVal, setCommentVal] = useState(repair.internalComment ?? '');
 	useEffect(() => { if (!mock) fetchStores().then((s) => setIssueStores(s.filter((x) => x.active))).catch(() => setIssueStores([])); }, [mock]);
 	const presale = repair.kind === 'presale';
+	const refused = Boolean(repair.clientRefusal);
 	const canPrintIssue = !presale && (repair.status === 'ready_tt' || repair.status === 'issued');
 	// Заморозка: с «принято в офисе» КЛИЕНТСКУЮ карточку трогает только снабжение+. Предпродажный не замораживаем.
 	const locked = isLockedStatus(repair.status) && !canEditPrice;
@@ -77,7 +79,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 		setBusy(true); setStErr(null);
 		try {
 			const result = await onStatus(s);
-			if (!presale) reactDeal(result);
+			if (!presale && !refused) reactDeal(result);
 		} catch (e: unknown) {
 			setStErr(String(e instanceof Error ? e.message : e));
 		} finally {
@@ -152,7 +154,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 		<div className="repair-card">
 			<div className="base-backbar"><button className="btn-secondary" onClick={onBack}>← К списку</button></div>
 			<div className="rc-head">
-				<h2>Ремонт #{repairNo(repair)}{repair.status === 'issued' && <span className="status-done"> · завершён</span>}</h2>
+				<h2>Ремонт #{repairNo(repair)}{refused && <span className="status-refused"> · клиент отказался</span>}{repair.status === 'issued' && <span className="status-done"> · завершён</span>}</h2>
 				<div className="rc-head-actions">
 					<button className="btn-secondary" onClick={() => presale ? setCommentEditing(true) : onEdit()} disabled={locked} title={locked ? 'Принят в офисе — правит только снабжение' : undefined}>✎ {presale ? 'Редактировать комментарий' : 'Редактировать'}</button>
 					<button className="btn-secondary" onClick={onPrint}>Акт приёма</button>
@@ -164,9 +166,10 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 			{(repair.taskId || !presale) && <div className="rc-related-links">
 				{repair.taskId ? <button type="button" className="rc-related-link" onClick={() => openTask(repair.taskId!)}><span>Задача</span><b>#{repair.taskId}</b></button> : null}
 				{!presale && repair.dealId ? <button type="button" className="rc-related-link" onClick={() => openDeal(repair.dealId!)}><span>Сделка</span><b>#{repair.dealId}</b></button> : null}
-				{!presale ? <button type="button" className="btn-secondary" disabled={payBusy} onClick={() => void repeatDealSync()}>↻ Синхронизировать сделку</button> : null}
+				{!presale && !refused ? <button type="button" className="btn-secondary" disabled={payBusy} onClick={() => void repeatDealSync()}>↻ Синхронизировать сделку</button> : null}
 			</div>}
 			{repair.taskWarning ? <p className="error">⚠ {repair.taskWarning}</p> : null}
+			{!presale && (repair.status !== 'issued' || refused) && <RepairRefusalPanel repair={repair} disabled={busy || locked} onRefuse={onRefuse} />}
 
 			<div className="rc-status">
 				<span className="rc-label">Статус</span>
@@ -187,7 +190,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 				{!issueVal.trim() && <span className="muted small">{presale ? 'выбери перед «Отправлено на точку»' : 'выбери перед «Готово к выдаче»'}</span>}
 			</div>
 
-			{!presale && (
+			{!presale && !refused && (
 				<div className="rc-pay">
 					<span className="rc-label">Вид ремонта</span>
 					<div className="rc-pay-toggle">

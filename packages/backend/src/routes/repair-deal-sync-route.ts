@@ -46,6 +46,9 @@ export function registerRepairDealSyncRoute(
 			if (data.kind === 'presale') {
 				return reply.code(400).send({ ok: false, error: 'у предпродажного ремонта нет клиентской сделки' });
 			}
+			if (data.clientRefusal) {
+				return reply.code(409).send({ ok: false, error: 'клиент отказался от ремонта — отменённая сделка не синхронизируется' });
+			}
 			const dealClient = systemClient() ?? client;
 			const dealSync = await syncRepairDeal(dealClient, data, app.log);
 			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);

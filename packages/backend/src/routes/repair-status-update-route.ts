@@ -15,6 +15,7 @@ import {
 } from './repair-status.js';
 import { movePresaleForStatus, moveRepairForStatus, writeOffRepairOnIssue } from './repair-stock-service.js';
 import { currentUser } from './repair-user-access.js';
+import { completeRefusedRepairTask } from './repair-refusal-effects.js';
 
 interface AuthBody {
 	domain?: string;
@@ -73,7 +74,16 @@ export function registerRepairStatusUpdateRoute(
 				// «Выдано» — списываем аппарат со склада (Delivery Note ядра, цена 0, привязка к сделке).
 				if (status === 'issued') await writeOffRepairOnIssue(data, app.log);
 			}
-			const dealSync = kind === 'client'
+			let taskWarning: string | null = null;
+			if (kind === 'client' && status === 'issued' && data.clientRefusal) {
+				try {
+					await completeRefusedRepairTask(systemClient() ?? client, data);
+				} catch (error) {
+					taskWarning = `оборудование выдано, но задача Б24 не закрылась: ${errInfo(error)}`;
+					app.log.warn({ id, taskId: data.taskId }, `[api/repairs/update-status] refused task completion failed — ${errInfo(error)}`);
+				}
+			}
+			const dealSync = kind === 'client' && !data.clientRefusal
 				? await syncRepairDeal(systemClient() ?? client, data, app.log)
 				: null;
 			if (dealSync) {
@@ -85,7 +95,7 @@ export function registerRepairStatusUpdateRoute(
 				ok: true,
 				dealCreated: dealSync?.created ?? false,
 				dealNoContact: dealSync?.noContact ?? false,
-				syncWarning: dealSync?.syncWarning ?? null,
+				syncWarning: taskWarning ?? dealSync?.syncWarning ?? null,
 			};
 		} catch (err) {
 			app.log.error({}, `[api/repairs/update-status] failed — ${errInfo(err)}`);

@@ -15,8 +15,9 @@ export function RepairIssueBlank({ repair, onBack }: { repair: Repair; onBack: (
 	const issuedAt = repairHistoryDate(repair, 'issued') || ruDate(new Date().toISOString());
 	const equipment = [repair.device, repair.model].filter(Boolean).join(' ') || '—';
 	const issuePoint = repair.issueStore || repair.point || '—';
-	const repairPrice = repair.payType === 'paid' && repair.ourPrice != null ? money(repair.ourPrice) : '0 ₽';
-	const workText = repair.comment.trim() || '—';
+	const refused = repair.clientRefusal;
+	const repairPrice = refused ? '0 ₽' : (repair.payType === 'paid' && repair.ourPrice != null ? money(repair.ourPrice) : '0 ₽');
+	const workText = refused ? `Ремонт не выполнялся. Клиент отказался: ${refused.reason}` : (repair.comment.trim() || '—');
 	const copy = (label: string): JSX.Element => (
 		<div className="blank-copy repair-issue-copy">
 			<div className="blank-head repair-issue-head">
@@ -28,7 +29,7 @@ export function RepairIssueBlank({ repair, onBack }: { repair: Repair; onBack: (
 				<span className="blank-copylabel">Ремонт № {repairNo(repair)} · {label}</span>
 			</div>
 
-			<div className="blank-title repair-issue-title">Акт выдачи оборудования после ремонта № {repairNo(repair)}</div>
+			<div className="blank-title repair-issue-title">{refused ? 'Акт возврата оборудования без ремонта' : 'Акт выдачи оборудования после ремонта'} № {repairNo(repair)}</div>
 			<div className="repair-issue-subtitle">Составлен {issuedAt} в двух экземплярах</div>
 
 			<div className="repair-issue-parties">
@@ -40,7 +41,7 @@ export function RepairIssueBlank({ repair, onBack }: { repair: Repair; onBack: (
 				<tbody>
 					<tr><th>Оборудование</th><td>{equipment}</td><th>Серийный номер</th><td>{repair.serial || '—'}</td></tr>
 					<tr><th>Принято от клиента</th><td>{acceptedAt || '—'}</td><th>Выдано клиенту</th><td>{issuedAt}</td></tr>
-					<tr><th>Ремонт завершён</th><td colSpan={3}>{completedAt || '—'}</td></tr>
+					<tr><th>{refused ? 'Результат' : 'Ремонт завершён'}</th><td colSpan={3}>{refused ? 'Клиент отказался от ремонта' : (completedAt || '—')}</td></tr>
 				</tbody>
 			</table>
 
@@ -53,12 +54,12 @@ export function RepairIssueBlank({ repair, onBack }: { repair: Repair; onBack: (
 				<p>{repair.appearance || '—'}</p>
 			</div>
 			<div className="repair-issue-section">
-				<span>Выполненные работы</span>
+				<span>{refused ? 'Основание возврата' : 'Выполненные работы'}</span>
 				<p>{workText}</p>
 			</div>
 
 			<div className="repair-issue-terms">
-				<div><span>Вид ремонта</span><b>{repair.payType === 'warranty' ? '☑ Гарантийный   ☐ Платный' : '☐ Гарантийный   ☑ Платный'}</b></div>
+				<div><span>Вид ремонта</span><b>{refused ? 'Ремонт не выполнялся' : (repair.payType === 'warranty' ? '☑ Гарантийный   ☐ Платный' : '☐ Гарантийный   ☑ Платный')}</b></div>
 				<div><span>Стоимость ремонта</span><b>{repairPrice}</b></div>
 			</div>
 
@@ -70,8 +71,8 @@ export function RepairIssueBlank({ repair, onBack }: { repair: Repair; onBack: (
 			</div>
 
 			<div className="repair-issue-receipt">
-				Оборудование и один экземпляр настоящего акта получил. Комплектность и внешний вид при выдаче проверены,
-				результат выполненных работ продемонстрирован в объёме, доступном в месте выдачи. Подпись подтверждает
+				Оборудование и один экземпляр настоящего акта получил. Комплектность и внешний вид при выдаче проверены,{' '}
+				{refused ? 'оборудование возвращено без выполнения ремонта.' : 'результат выполненных работ продемонстрирован в объёме, доступном в месте выдачи.'} Подпись подтверждает
 				факт передачи оборудования и зафиксированные выше обстоятельства, но не ограничивает права клиента
 				в отношении скрытых недостатков и иные права, предусмотренные законом.
 			</div>

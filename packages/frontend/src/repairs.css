@@ -17,6 +17,7 @@
 .repair-select-cell { width: 42px; min-width: 42px; text-align: center; padding-left: 8px !important; padding-right: 8px !important; }
 .repair-select-cell input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #2563eb; }
 .status-done { color: #6b7280; font-weight: 500; }
+.status-refused { color: #b42318; font-weight: 600; }
 .repair-st { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #eef2ff; color: #3730a3; }
 .repair-st.st-received_tt { background: #eef2ff; color: #3730a3; }
 .repair-st.st-received_office { background: #eff6ff; color: #1d4ed8; }
@@ -24,6 +25,7 @@
 .repair-st.st-sent_to_tt { background: #fefce8; color: #a16207; }
 .repair-st.st-ready_tt { background: #ecfdf5; color: #047857; }
 .repair-st.st-returned { background: #ecfdf5; color: #047857; }
+.repair-refusal-badge { display: block; width: fit-content; margin-bottom: 3px; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #fee4e2; color: #b42318; }
 .repair-comment { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #475569; font-size: 13px; }
 .pay-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .pay-badge.warranty { background: #ecfdf5; color: #047857; }
@@ -102,6 +104,12 @@
 .rc-pay-toggle .btn-secondary.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
 .rc-pay-cost { display: inline-flex; align-items: center; gap: 6px; }
 .rc-pay-cost input { width: 130px; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 9px; font-size: 14px; font-family: inherit; }
+.rc-refusal-action { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin: 10px 0 16px; }
+.rc-refusal-editor { width: min(620px, 100%); display: grid; gap: 8px; padding: 12px; border: 1px solid #f0b4ad; border-radius: 6px; background: #fff7f6; }
+.rc-refusal-editor label { display: grid; gap: 6px; color: #7a271a; font-size: 13px; }
+.rc-refusal-editor textarea { width: 100%; resize: vertical; border: 1px solid #d9a39c; border-radius: 6px; padding: 8px 10px; font: inherit; }
+.rc-refusal { display: grid; gap: 5px; max-width: 720px; margin: 10px 0 16px; padding: 12px 14px; border: 1px solid #f0b4ad; border-radius: 6px; background: #fff7f6; color: #7a271a; }
+.rc-refusal .btn-secondary { width: fit-content; margin-top: 4px; }
 
 .rc-files { margin: 14px 0; display: flex; flex-direction: column; gap: 6px; }
 .rc-files-list { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -84,6 +84,18 @@ async function setLegacyRepairDealRow(client: B24Client, dealId: number, payType
 }
 
 export async function syncRepairDeal(client: B24Client, data: RepairData, log: FastifyInstance['log']): Promise<DealSyncResult> {
+	if (data.clientRefusal) {
+		return {
+			dealId: data.dealId,
+			created: false,
+			noContact: false,
+			coreSynced: data.clientRefusal.dealCancelled,
+			b24Synced: data.clientRefusal.dealCancelled,
+			syncWarning: data.clientRefusal.dealCancelled
+				? null
+				: 'Клиент отказался от ремонта, но отмена сделки ещё не завершена. Повтори оформление отказа.',
+		};
+	}
 	// Сделка заводится на ЛЮБОЙ ремонт (даже гарантийный): сумма = «наша цена» у платного, 0 у гарантийного.
 	const price = data.payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : 0;
 	const contactId = data.client?.contactId ?? null;

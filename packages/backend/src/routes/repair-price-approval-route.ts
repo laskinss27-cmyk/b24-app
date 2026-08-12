@@ -46,6 +46,7 @@ export function registerRepairPriceApprovalRoute(
 			const raw = (items ?? [])[0];
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+			if (data.clientRefusal) return reply.code(409).send({ ok: false, error: 'клиент отказался от ремонта — согласование цены недоступно' });
 			const me = await currentUser(client);
 			if (!appPermission(req, 'repairs.request_price_approval', me.canEditPrice)) {
 				return reply.code(403).send({ ok: false, error: 'отправить цену на согласование может только снабжение / руководитель' });

@@ -44,6 +44,7 @@ export function registerRepairPresaleCreateRoute(app: FastifyInstance, clientFro
 				appearance: '', defect: '',
 				payType: 'warranty', cost: null, ourPrice: null, dealId: null,
 				taskId: null,
+				clientRefusal: null,
 				repairItemCode: null,
 				repairStore: sourceStore, // товар сейчас на источнике; первый статус сдвинет в офис
 				issueStore: null,

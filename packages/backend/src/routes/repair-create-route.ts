@@ -87,6 +87,7 @@ export function registerRepairCreateRoute(
 				ourPrice,
 				dealId: null,
 				taskId: null,
+				clientRefusal: null,
 				repairItemCode: null,
 				repairStore: null,
 				issueStore: null,

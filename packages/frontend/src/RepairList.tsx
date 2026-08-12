@@ -18,7 +18,8 @@ export function RepairList({ repairs, loading, err, onAdd, onPresale, onOpen, on
 			const status = STATUS_LABEL[r.status] ?? r.status;
 			const history = (r.history ?? []).map((h) => `${h.byName ?? h.byId ?? ''} ${h.note ?? ''} ${STATUS_LABEL[h.status] ?? h.status}`).join(' ');
 			const files = (r.files ?? []).map((file) => file.name).join(' ');
-			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment} ${r.internalComment ?? ''} ${r.createdByName} ${r.createdById} ${r.dealId ?? ''} ${r.taskId ?? ''} ${status} ${files} ${history}`.toLowerCase();
+			const refusal = r.clientRefusal ? `клиент отказался отказ ${r.clientRefusal.reason} ${r.clientRefusal.byName}` : '';
+			const hay = `${repairNo(r)} ${r.id} ${r.client.name} ${r.client.phone} ${repairPointLabel(r)} ${r.device} ${r.model} ${r.serial} ${r.defect} ${r.comment} ${r.internalComment ?? ''} ${r.createdByName} ${r.createdById} ${r.dealId ?? ''} ${r.taskId ?? ''} ${status} ${refusal} ${files} ${history}`.toLowerCase();
 			return words.every((w) => hay.includes(w));
 		});
 	}, [repairs, q, st]);
@@ -94,7 +95,9 @@ export function RepairList({ repairs, loading, err, onAdd, onPresale, onOpen, on
 									<td className="nowrap">{r.payType === 'paid' && r.ourPrice != null ? <b>{money(r.ourPrice)}</b> : <span className="muted">—</span>}</td>
 									<td className="repair-comment">{r.defect ? <span title={r.defect}>{r.defect}</span> : <span className="muted">—</span>}</td>
 									<td className="repair-comment">{r.internalComment ? <span title={r.internalComment}>{r.internalComment}</span> : <span className="muted">—</span>}</td>
-									<td>{r.status === 'issued' ? <span className="status-done">завершён</span> : <span className={`repair-st st-${r.status}`}>{STATUS_LABEL[r.status]}</span>}</td>
+									<td>{r.status === 'issued'
+										? <span className="status-done">{r.clientRefusal ? 'возвращён клиенту' : 'завершён'}</span>
+										: <>{r.clientRefusal && <span className="repair-refusal-badge">отказ клиента</span>}<span className={`repair-st st-${r.status}`}>{STATUS_LABEL[r.status]}</span></>}</td>
 									<td className="muted nowrap">{ruDate(r.createdAt)}</td>
 								</tr>
 							))}

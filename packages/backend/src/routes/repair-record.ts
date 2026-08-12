@@ -4,6 +4,15 @@ export interface RepairPhoto { id: number; name: string; url: string }
 /** Прикреплённый документ (Word/Excel/PDF) — хранится на Диске Б24, в карточке только ссылка. */
 export interface RepairFile { id: number; name: string; url: string; type: string }
 
+export interface RepairClientRefusal {
+	at: string;
+	reason: string;
+	byId: string;
+	byName: string;
+	dealCancelled: boolean;
+	taskReframed: boolean;
+}
+
 export interface RepairData {
 	/** Поток ремонта: 'client' (клиентский RMA) | 'presale' (предпродажный — наш товар со склада). */
 	kind: RepairKind;
@@ -27,6 +36,8 @@ export interface RepairData {
 	dealId: number | null;
 	/** ID задачи Б24 для снабжения/автора по этому ремонту. */
 	taskId: number | null;
+	/** Клиент отказался ждать ремонт. Физический статус аппарата при этом не меняется. */
+	clientRefusal: RepairClientRefusal | null;
 	/** Код позиции ремонтного аппарата на складе ядра (`REPAIR-<номер>`; null — ещё не заведена). */
 	repairItemCode: string | null;
 	/** Где аппарат лежит сейчас (название склада Б24) — чтобы перемещать «откуда» при смене статуса. */
@@ -78,6 +89,16 @@ export function parseItem(it: Record<string, unknown>): (RepairData & { id: numb
 		ourPrice: payType === 'paid' && typeof data.ourPrice === 'number' ? data.ourPrice : null,
 		dealId: typeof data.dealId === 'number' && data.dealId > 0 ? data.dealId : null,
 		taskId: typeof data.taskId === 'number' && data.taskId > 0 ? data.taskId : null,
+		clientRefusal: data.clientRefusal && typeof data.clientRefusal.reason === 'string'
+			? {
+				at: String(data.clientRefusal.at ?? ''),
+				reason: data.clientRefusal.reason,
+				byId: String(data.clientRefusal.byId ?? ''),
+				byName: String(data.clientRefusal.byName ?? ''),
+				dealCancelled: Boolean(data.clientRefusal.dealCancelled),
+				taskReframed: Boolean(data.clientRefusal.taskReframed),
+			}
+			: null,
 		repairItemCode: typeof data.repairItemCode === 'string' && data.repairItemCode ? data.repairItemCode : null,
 		repairStore: typeof data.repairStore === 'string' && data.repairStore ? data.repairStore : null,
 		issueStore: typeof data.issueStore === 'string' && data.issueStore ? data.issueStore : null,

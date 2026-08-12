@@ -10,6 +10,7 @@ import {
 	updateRepairStatus,
 	setRepairPayType,
 	requestRepairPriceApproval,
+	refuseRepair,
 	syncRepairDealNow,
 	setRepairIssueStore,
 	deleteRepair,
@@ -129,6 +130,7 @@ export function Repairs(): JSX.Element {
 			createdAt: initial?.createdAt ?? new Date().toISOString(),
 			createdById: initial?.createdById ?? 'dev',
 			createdByName: initial?.createdByName ?? 'dev (mock)',
+			clientRefusal: initial?.clientRefusal ?? null,
 			history: initial?.history ?? [{ at: new Date().toISOString(), status: 'received_tt', byId: 'dev' }],
 		});
 		return (
@@ -212,6 +214,14 @@ export function Repairs(): JSX.Element {
 						setScreen({ k: 'card', repair: res.repair });
 						setRepairs((prev) => prev.map((x) => (x.id === res.repair.id ? res.repair : x)));
 						return { dealCreated: res.dealCreated, dealNoContact: res.dealNoContact, syncWarning: res.syncWarning };
+					}}
+					onRefuse={async (reason) => {
+						const result = ctx.__mock
+							? { repair: { ...screen.repair, clientRefusal: { at: new Date().toISOString(), reason, byId: 'dev', byName: 'dev (mock)', dealCancelled: true, taskReframed: true } }, warnings: [] }
+							: await refuseRepair(screen.repair.id, reason);
+						setScreen({ k: 'card', repair: result.repair });
+						setRepairs((prev) => prev.map((row) => row.id === result.repair.id ? result.repair : row));
+						return result;
 					}}
 					onSetIssueStore={async (store) => {
 						const issueStore = ctx.__mock ? (store || null) : await setRepairIssueStore(screen.repair.id, store);

@@ -44,6 +44,7 @@ export function registerRepairPaymentRoute(
 			const raw = (items ?? [])[0];
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
+			if (data.clientRefusal) return reply.code(409).send({ ok: false, error: 'клиент отказался от ремонта — вид и цены больше не меняются' });
 			const me = await currentUser(client);
 			me.canEditPrice = appPermission(req, 'repairs.edit_prices', me.canEditPrice);
 			// Заморозка с «принято в офисе»: правит только снабжение+.

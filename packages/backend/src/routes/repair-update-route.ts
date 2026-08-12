@@ -69,12 +69,14 @@ export function registerRepairUpdateRoute(
 			data.appearance = s(b['appearance']);
 			data.defect = s(b['defect']);
 			data.internalComment = s(b['internalComment']);
-			data.payType = b['payType'] === 'paid' ? 'paid' : 'warranty';
+			if (!data.clientRefusal) data.payType = b['payType'] === 'paid' ? 'paid' : 'warranty';
 			// Цены меняет только тот, кому разрешено; иначе оставляем прежние (warranty всё обнуляет).
 			const reqCost = b['cost'] != null && b['cost'] !== '' && Number.isFinite(Number(b['cost'])) ? Number(b['cost']) : null;
 			const reqOur = b['ourPrice'] != null && b['ourPrice'] !== '' && Number.isFinite(Number(b['ourPrice'])) ? Number(b['ourPrice']) : null;
-			data.cost = data.payType !== 'paid' ? null : (me.canEditPrice ? reqCost : prevCost);
-			data.ourPrice = data.payType !== 'paid' ? null : (me.canEditPrice ? reqOur : prevOur);
+			if (!data.clientRefusal) {
+				data.cost = data.payType !== 'paid' ? null : (me.canEditPrice ? reqCost : prevCost);
+				data.ourPrice = data.payType !== 'paid' ? null : (me.canEditPrice ? reqOur : prevOur);
+			}
 			// Комментарий СЦ правит только снабжение+; у менеджера держим прежний.
 			data.comment = me.canEditPrice ? s(b['comment']) : (data.comment ?? '');
 			// Лог: если изменился вид/цены — пишем кто и что.

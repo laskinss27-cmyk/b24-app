@@ -17,6 +17,7 @@ import { registerRepairCreateRoute } from './repair-create-route.js';
 import { registerRepairPresaleCreateRoute } from './repair-presale-create-route.js';
 import { registerRepairUpdateRoute } from './repair-update-route.js';
 import { registerRepairStatusUpdateRoute } from './repair-status-update-route.js';
+import { registerRepairClientRefusalRoute } from './repair-client-refusal-route.js';
 
 export type { RepairKind, RepairStatus } from './repair-status.js';
 
@@ -113,6 +114,8 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 	registerRepairDeleteRoute(app, clientFrom);
 
 	registerRepairStatusUpdateRoute(app, clientFrom, systemClient, attachRepairLinkToCreatedDeal);
+
+	registerRepairClientRefusalRoute(app, clientFrom, systemClient);
 
 	registerRepairIssueStoreRoute(app, clientFrom);
 

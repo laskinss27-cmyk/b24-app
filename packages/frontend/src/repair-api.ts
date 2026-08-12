@@ -7,6 +7,14 @@ export type RepairStatus =
 export interface RepairPhoto { id: number; name: string; url: string }
 /** Прикреплённый документ (Word/Excel/PDF) — лежит на Диске Б24, в карточке ссылка. */
 export interface RepairFile { id: number; name: string; url: string; type: string }
+export interface RepairClientRefusal {
+	at: string;
+	reason: string;
+	byId: string;
+	byName: string;
+	dealCancelled: boolean;
+	taskReframed: boolean;
+}
 export interface Repair {
 	id: number;
 	name: string;
@@ -32,6 +40,8 @@ export interface Repair {
 	dealId: number | null;
 	/** ID задачи Б24 для снабжения/автора по этому ремонту. */
 	taskId?: number | null;
+	/** Отказ клиента от ремонта. Физический статус аппарата продолжает жить отдельно. */
+	clientRefusal?: RepairClientRefusal | null;
 	/** Временная подсказка после создания, если Б24 не дал создать задачу. В хранилище ремонта не пишется. */
 	taskWarning?: string;
 	/** Временное предупреждение о частичной синхронизации сделки. В хранилище ремонта не пишется. */
@@ -179,6 +189,16 @@ export async function updateRepairStatus(id: number, status: RepairStatus): Prom
 		dealNoContact: Boolean(json.dealNoContact),
 		syncWarning: json.syncWarning ?? null,
 	};
+}
+
+export async function refuseRepair(id: number, reason: string): Promise<{ repair: Repair; warnings: string[] }> {
+	const res = await fetch('/api/repairs/refuse', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), id, reason }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; warnings?: string[] };
+	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось оформить отказ клиента');
+	return { repair: json.repair, warnings: json.warnings ?? [] };
 }
 
 export async function searchRepairContacts(q: string): Promise<RepairContact[]> {

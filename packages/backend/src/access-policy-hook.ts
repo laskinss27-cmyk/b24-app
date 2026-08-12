@@ -105,6 +105,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/repairs/sync-deal': ['repairs.edit'],
 	'/api/repairs/delete': ['repairs.delete'],
 	'/api/repairs/update-status': ['repairs.change_status'],
+	'/api/repairs/refuse': ['repairs.change_status'],
 	'/api/repairs/set-issue-store': ['repairs.change_issue_store'],
 	'/api/repairs/find-by-phone': ['repairs.view'],
 	'/api/repairs/search-contacts': ['repairs.view'],

@@ -35,6 +35,7 @@ const {
 	findRepairContactByPhone,
 	getRepairFileUrl,
 	openTask,
+	refuseRepair,
 	requestRepairPriceApproval,
 	searchRepairContacts,
 	setRepairIssueStore,
@@ -142,6 +143,19 @@ test('repair status and contact lookups preserve boolean fallbacks and reject se
 		'/api/repairs/search-contacts',
 		'/api/repairs/find-by-phone',
 	]);
+});
+
+test('repair refusal sends a mandatory reason and returns partial-effect warnings', async () => {
+	const repair = { id: 1, clientRefusal: { reason: 'не хочет ждать' } };
+	const requests = captureResponses([{ ok: true, repair, warnings: ['задача пока не обновлена'] }]);
+	assert.deepEqual(await refuseRepair(1, 'не хочет ждать'), {
+		repair,
+		warnings: ['задача пока не обновлена'],
+	});
+	assert.deepEqual(requests, [{
+		url: '/api/repairs/refuse',
+		body: { domain: 'repairs.example', accessToken: 'repairs-token', id: 1, reason: 'не хочет ждать' },
+	}]);
 });
 
 test('repair payment and deal synchronization preserve result fallbacks', async () => {
