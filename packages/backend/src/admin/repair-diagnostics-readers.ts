@@ -97,28 +97,36 @@ export async function readDiagnosticTask(client: B24Client, taskId: number | nul
 interface ChildDocumentSpec {
 	type: DiagnosticStockDocument['type'];
 	childType: string;
-	fields: string[];
 }
 
 const DOCUMENT_SPECS: ChildDocumentSpec[] = [
-	{ type: 'Purchase Receipt', childType: 'Purchase Receipt Item', fields: ['parent', 'qty', 'warehouse'] },
-	{ type: 'Stock Entry', childType: 'Stock Entry Detail', fields: ['parent', 'qty', 's_warehouse', 't_warehouse'] },
-	{ type: 'Delivery Note', childType: 'Delivery Note Item', fields: ['parent', 'qty', 'warehouse'] },
+	{ type: 'Purchase Receipt', childType: 'Purchase Receipt Item' },
+	{ type: 'Stock Entry', childType: 'Stock Entry Detail' },
+	{ type: 'Delivery Note', childType: 'Delivery Note Item' },
 ];
 
 function shortWarehouse(value: unknown): string {
 	return String(value ?? '').replace(/\s+-\s+[^-]+$/, '');
 }
 
-async function readDocuments(erp: ErpClient, itemCode: string): Promise<DiagnosticStockDocument[]> {
+export async function readRepairStockDocuments(erp: ErpClient, itemCode: string): Promise<DiagnosticStockDocument[]> {
 	const documents: DiagnosticStockDocument[] = [];
+	const seen = new Set<string>();
 	for (const spec of DOCUMENT_SPECS) {
-		const children = await erp.list<Record<string, unknown>>(spec.childType, spec.fields, [['item_code', '=', itemCode]]);
-		for (const child of children) {
+		// Frappe list для дочерних таблиц фактически возвращает только `name`, даже если запросить parent/qty/warehouse.
+		// Поэтому каждую найденную строку читаем отдельно — так же, как рабочая логика выдачи ремонта.
+		const childHeads = await erp.list<Record<string, unknown>>(spec.childType, ['name'], [['item_code', '=', itemCode]]);
+		for (const childHead of childHeads) {
+			const childName = String(childHead['name'] ?? '');
+			const child = childName ? await erp.get<Record<string, unknown>>(spec.childType, childName) : null;
+			if (!child) continue;
 			const name = String(child['parent'] ?? '');
 			if (!name) continue;
+			const documentKey = `${spec.type}:${name}`;
+			if (seen.has(documentKey)) continue;
 			const parent = await erp.get<Record<string, unknown>>(spec.type, name);
 			if (!parent) continue;
+			seen.add(documentKey);
 			documents.push({
 				type: spec.type,
 				name,
@@ -158,7 +166,7 @@ export async function readDiagnosticErp(erp: ErpClient | null, data: RepairData)
 			stockError = error instanceof Error ? error.message : String(error);
 		}
 		try {
-			documents = await readDocuments(erp, itemCode);
+			documents = await readRepairStockDocuments(erp, itemCode);
 		} catch (error) {
 			documentsError = error instanceof Error ? error.message : String(error);
 		}
