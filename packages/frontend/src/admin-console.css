@@ -20,6 +20,7 @@
 .admin-console-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .admin-console-tabs button { padding: 10px 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; cursor: pointer; }
 .admin-console-tabs button.active { border-color: #2878e3; background: #2878e3; color: white; }
+.admin-control-return { margin-bottom: 14px; }
 
 .admin-control-overview { display: grid; gap: 14px; }
 .admin-control-intro { display: flex; align-items: center; justify-content: space-between; gap: 18px; }

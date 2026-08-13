@@ -11,8 +11,10 @@ export function AdminConsole({ onBack }: { onBack: () => void }): JSX.Element {
 	const [section, setSection] = useState<AdminSection>('control');
 	const [selectedRepairId, setSelectedRepairId] = useState<number | null>(null);
 	const [selectedDealId, setSelectedDealId] = useState<number | null>(null);
+	const [openedFromControl, setOpenedFromControl] = useState(false);
 
 	function openFinding(finding: AdminControlFinding): void {
+		setOpenedFromControl(true);
 		if (finding.area === 'deal') {
 			setSelectedDealId(finding.entityId);
 			setSection('dealDocuments');
@@ -20,6 +22,11 @@ export function AdminConsole({ onBack }: { onBack: () => void }): JSX.Element {
 			setSelectedRepairId(finding.entityId);
 			setSection('repairs');
 		}
+	}
+
+	function openSection(nextSection: AdminSection): void {
+		setOpenedFromControl(false);
+		setSection(nextSection);
 	}
 	return (
 		<div className="admin-console">
@@ -32,18 +39,20 @@ export function AdminConsole({ onBack }: { onBack: () => void }): JSX.Element {
 				<strong className="admin-readonly-badge">Действия с подтверждением</strong>
 			</header>
 			<nav className="admin-console-tabs">
-				<button type="button" className={section === 'control' ? 'active' : ''} onClick={() => setSection('control')}>Контроль проблем</button>
-				<button type="button" className={section === 'repairs' ? 'active' : ''} onClick={() => setSection('repairs')}>Диагностика ремонтов</button>
-				<button type="button" className={section === 'dealDocuments' ? 'active' : ''} onClick={() => setSection('dealDocuments')}>Документы сделок</button>
-				<button type="button" className={section === 'operationLog' ? 'active' : ''} onClick={() => setSection('operationLog')}>Журнал операций</button>
+				<button type="button" className={section === 'control' ? 'active' : ''} onClick={() => openSection('control')}>Контроль проблем</button>
+				<button type="button" className={section === 'repairs' ? 'active' : ''} onClick={() => openSection('repairs')}>Диагностика ремонтов</button>
+				<button type="button" className={section === 'dealDocuments' ? 'active' : ''} onClick={() => openSection('dealDocuments')}>Документы сделок</button>
+				<button type="button" className={section === 'operationLog' ? 'active' : ''} onClick={() => openSection('operationLog')}>Журнал операций</button>
 			</nav>
-			{section === 'control'
-				? <AdminControlOverview onOpenFinding={openFinding} />
-				: section === 'repairs'
+			<div hidden={section !== 'control'}><AdminControlOverview onOpenFinding={openFinding} /></div>
+			{section !== 'control' && openedFromControl && <div className="admin-control-return"><button type="button" className="btn-secondary" onClick={() => { setOpenedFromControl(false); setSection('control'); }}>← К результатам проверки</button></div>}
+			{section === 'repairs'
 				? <RepairDiagnostics initialRepairId={selectedRepairId} />
 				: section === 'dealDocuments'
 					? <DealDocumentDiagnostics initialDealId={selectedDealId} />
-					: <OperationLog onBack={() => setSection('repairs')} backLabel="← Диагностика ремонтов" />}
+					: section === 'operationLog'
+						? <OperationLog onBack={() => openSection('repairs')} backLabel="← Диагностика ремонтов" />
+						: null}
 		</div>
 	);
 }
