@@ -7,7 +7,8 @@ import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
 import { createSupplyOrderActions } from './supply-order-actions.js';
-import { ASSORTMENT_MATRIX_CANARY_IDS, SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
+import { SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
+import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 import { SupplyPageHeader } from './SupplyPageHeader.js';
 import { SupplySearch } from './SupplyOverviewControls.js';
 import { SupplyDocumentDetail, type OpenSupplyDocument } from './SupplyDocumentDetail.js';
@@ -184,7 +185,7 @@ export function Supply(): JSX.Element {
 				{(view === 'issue' || view === 'receipt' || view === 'delivery' || view === 'return') && <div className="supply-proto-card supply-stock-card"><StockMovementsTab key={`${view}-${stockRefresh}`} kind={view} form={stockForm} showCreate={false} /></div>}
 				{view === 'ledger' && <div className="supply-proto-card supply-stock-card"><LedgerTab /></div>}
 				{view === 'turnover' && <div className="supply-proto-card supply-stock-card"><TurnoverReportTab stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
-				{view === 'matrix' && ASSORTMENT_MATRIX_CANARY_IDS.has(currentUserId) && <div className="supply-proto-card supply-stock-card supply-matrix-card"><AssortmentMatrix stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
+				{view === 'matrix' && canOpenAssortmentMatrix(currentUserId) && <div className="supply-proto-card supply-stock-card supply-matrix-card"><AssortmentMatrix stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
 				{view === 'inventory' && <InventoryHome />}
 			</main>
 			{createKind && <SupplyStandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onCreateSupplier={addSupplier} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}

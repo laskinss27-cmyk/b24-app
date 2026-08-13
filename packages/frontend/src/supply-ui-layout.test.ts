@@ -9,6 +9,7 @@ import {
 	saveSupplyUiLayout,
 	supplyActionIdsForView,
 } from './supply-ui-layout.js';
+import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 
 function memoryStorage(initial?: string): Pick<Storage, 'getItem' | 'setItem'> & { value: string | undefined } {
 	return {
@@ -63,4 +64,10 @@ test('offers only actions that actually belong to the current supply page', () =
 	assert.deepEqual(supplyActionIdsForView('orders'), []);
 	assert.deepEqual(supplyActionIdsForView('issue'), ['create-issue']);
 	assert.deepEqual(supplyActionIdsForView('receipt'), ['create-receipt']);
+});
+
+test('order matrix is visible to Vladimir Dranishnikov and Sergey Laskin', () => {
+	assert.equal(canOpenAssortmentMatrix('1'), true);
+	assert.equal(canOpenAssortmentMatrix('1858'), true);
+	assert.equal(canOpenAssortmentMatrix('986'), false);
 });

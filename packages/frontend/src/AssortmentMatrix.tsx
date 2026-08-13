@@ -171,7 +171,7 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 	};
 
 	return <section className="assortment-matrix">
-		<div className="assortment-matrix-banner"><b>Канарейка</b><span>Матрица видна только Сергею #1858. Рекомендация рассчитывается на явный запас <strong>60 дней</strong>.</span></div>
+		<div className="assortment-matrix-banner"><b>Матрица заказов</b><span>Рекомендация рассчитывается на явный запас <strong>60 дней</strong>.</span></div>
 		<div className="assortment-matrix-filters">
 			<label>Продажи с<input type="date" max={today} value={from} onChange={(event) => setFrom(event.target.value)} /></label>
 			<label>по<input type="date" max={today} value={to} onChange={(event) => setTo(event.target.value)} /></label>

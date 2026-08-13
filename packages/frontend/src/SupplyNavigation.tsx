@@ -1,8 +1,7 @@
 import { type StockMovementKind } from './StockLedger.js';
+import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 
 export type SupplyViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'inventory';
-
-export const ASSORTMENT_MATRIX_CANARY_IDS = new Set(['1858']);
 
 export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMarketplaces, currentUserId, mock, onViewChange, onToggleReports }: {
 	view: SupplyViewKey;
@@ -47,7 +46,7 @@ export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMa
 						<div id="supply-reports-menu" className="supply-proto-subnav">
 							<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => onViewChange('ledger')}>Движение товаров</button>
 							<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => onViewChange('turnover')}>Оборачиваемость</button>
-							{ASSORTMENT_MATRIX_CANARY_IDS.has(currentUserId) && <button className={view === 'matrix' ? 'active' : ''} type="button" onClick={() => onViewChange('matrix')}>Матрица заказа <small>β</small></button>}
+							{canOpenAssortmentMatrix(currentUserId) && <button className={view === 'matrix' ? 'active' : ''} type="button" onClick={() => onViewChange('matrix')}>Матрица заказа <small>β</small></button>}
 						</div>
 					)}
 				</div>

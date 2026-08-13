@@ -17,7 +17,7 @@ export function registerStockAssortmentRoutes(app: FastifyInstance): void {
 		};
 		const client = stockClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!(await canUseAssortmentMatrix(client))) return reply.code(403).send({ ok: false, error: 'матрица пока доступна только канарейке' });
+		if (!(await canUseAssortmentMatrix(client))) return reply.code(403).send({ ok: false, error: 'нет доступа к матрице заказов' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		const from = String(b.from ?? '');
@@ -55,7 +55,7 @@ export function registerStockAssortmentRoutes(app: FastifyInstance): void {
 		};
 		const client = stockClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!(await canUseAssortmentMatrix(client))) return reply.code(403).send({ ok: false, error: 'матрица пока доступна только канарейке' });
+		if (!(await canUseAssortmentMatrix(client))) return reply.code(403).send({ ok: false, error: 'нет доступа к матрице заказов' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		const productId = Number(b.productId);

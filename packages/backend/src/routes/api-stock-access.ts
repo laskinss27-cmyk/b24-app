@@ -2,7 +2,7 @@ import type { B24Client } from '../b24/client.js';
 
 const SUPPLY_DEPARTMENT_ID = 10;
 const STOCK_ADMIN_IDS = new Set(['1', '986', '1858']);
-const ASSORTMENT_MATRIX_CANARY_IDS = new Set(['1858']);
+const ASSORTMENT_MATRIX_USER_IDS = new Set(['1', '1858']);
 
 export interface StockAccess {
 	canManage: boolean;
@@ -23,7 +23,7 @@ export async function canUseAssortmentMatrix(client: B24Client): Promise<boolean
 	const departments = Array.isArray(me?.UF_DEPARTMENT) ? (me.UF_DEPARTMENT as unknown[]).map(Number) : [];
 	const isSupply = departments.includes(SUPPLY_DEPARTMENT_ID);
 	const isAdmin = STOCK_ADMIN_IDS.has(id) || me?.ADMIN === true || String(me?.ADMIN ?? '').toUpperCase() === 'Y';
-	return ASSORTMENT_MATRIX_CANARY_IDS.has(id) && (isSupply || isAdmin);
+	return ASSORTMENT_MATRIX_USER_IDS.has(id) && (isSupply || isAdmin);
 }
 
 export async function canManageStock(client: B24Client): Promise<boolean> {
