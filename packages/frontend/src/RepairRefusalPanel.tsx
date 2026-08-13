@@ -50,7 +50,7 @@ export function RepairRefusalPanel({
 	return (
 		<div className="rc-refusal-action">
 			{!editing ? (
-				<button type="button" className="btn-danger" disabled={disabled} onClick={() => setEditing(true)}>Клиент отказался от ремонта</button>
+				<button type="button" className="btn-secondary" disabled={disabled} onClick={() => setEditing(true)}>Отмена ремонта</button>
 			) : (
 				<div className="rc-refusal-editor">
 					<label>Причина отказа
