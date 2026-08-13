@@ -13,16 +13,18 @@ export interface AdminControlFinding {
 
 export interface AdminControlReport {
 	generatedAt: string;
+	dateFrom: string;
+	dateTo: string;
 	checkedDeals: number;
 	checkedRepairs: number;
 	findings: AdminControlFinding[];
 }
 
-export async function checkAdminControl(): Promise<AdminControlReport> {
+export async function checkAdminControl(dateFrom: string, dateTo: string): Promise<AdminControlReport> {
 	const response = await fetch('/api/admin/control/check', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(bx24Auth()),
+		body: JSON.stringify({ ...bx24Auth(), dateFrom, dateTo }),
 	});
 	const json = await response.json() as { ok?: boolean; error?: string; report?: AdminControlReport };
 	if (!response.ok || !json.ok) throw new Error(json.error ?? 'Не удалось выполнить контрольную проверку.');

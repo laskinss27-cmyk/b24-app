@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
-import { diagnoseAdminDealDocuments, searchAdminDealDocuments } from './deal-document-diagnostics.js';
+import { dealIdsModifiedInPeriod, diagnoseAdminDealDocuments, searchAdminDealDocuments } from './deal-document-diagnostics.js';
 
 function fakeErp(documents: Record<string, Array<Record<string, unknown>>>): ErpClient {
 	return {
@@ -72,6 +72,17 @@ test('deal document search includes supply and warehouse core documents', async 
 		lastDocument: 'MAT-MR-2026-00002',
 		lastModified: '2026-08-13 09:00:00',
 	}]);
+});
+
+test('period search returns each deal once ordered by its latest changed document', async () => {
+	const periodErp = fakeErp({
+		'Sales Order': [
+			{ name: 'SO-1', b24_deal_id: '10', docstatus: 0, modified: '2026-08-02 10:00:00' },
+			{ name: 'SO-2', b24_deal_id: '20', docstatus: 0, modified: '2026-08-03 10:00:00' },
+		],
+		'Delivery Note': [{ name: 'DN-1', b24_deal_id: '10', docstatus: 1, modified: '2026-08-04 10:00:00' }],
+	});
+	assert.deepEqual(await dealIdsModifiedInPeriod(periodErp, '2026-08-01', '2026-08-05'), [10, 20]);
 });
 
 test('deal diagnostics reads Bitrix supply cards and application transfers without changing them', async () => {

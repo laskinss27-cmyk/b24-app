@@ -107,11 +107,30 @@ async function diagnoseRepairItems(client: B24Client, erp: ErpClient | null, ite
 	return results;
 }
 
-export async function diagnoseRecentAdminRepairs(client: B24Client, erp: ErpClient | null, limit = 10): Promise<AdminRepairDiagnostic[]> {
-	const safeLimit = Math.max(1, Math.min(20, limit));
+function dateValue(value: unknown): string {
+	const match = String(value ?? '').trim().match(/^(\d{4}-\d{2}-\d{2})/);
+	return match?.[1] ?? '';
+}
+
+export function repairActivityDate(item: Record<string, unknown>): string {
+	const repair = parseItem(item);
+	if (!repair) return '';
+	return [
+		dateValue(item['DATE_CREATE']),
+		dateValue(item['DATE_MODIFY']),
+		dateValue(item['TIMESTAMP_X']),
+		dateValue(repair.createdAt),
+		dateValue(repair.clientRefusal?.at),
+		...repair.history.map((entry) => dateValue(entry.at)),
+	].sort().at(-1) ?? '';
+}
+
+export async function diagnoseAdminRepairsInPeriod(client: B24Client, erp: ErpClient | null, dateFrom: string, dateTo: string): Promise<AdminRepairDiagnostic[]> {
 	const items = (await fetchAllRepairs(client))
-		.sort((left, right) => Number(right['ID'] ?? 0) - Number(left['ID'] ?? 0))
-		.slice(0, safeLimit);
+		.map((item) => ({ item, activityDate: repairActivityDate(item) }))
+		.filter(({ activityDate }) => activityDate >= dateFrom && activityDate <= dateTo)
+		.sort((left, right) => right.activityDate.localeCompare(left.activityDate) || Number(right.item['ID'] ?? 0) - Number(left.item['ID'] ?? 0))
+		.map(({ item }) => item);
 	return diagnoseRepairItems(client, erp, items);
 }
 

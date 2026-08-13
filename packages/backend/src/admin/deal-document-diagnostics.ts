@@ -156,6 +156,23 @@ export async function searchAdminDealDocuments(erp: ErpClient, query: string, li
 		.slice(0, safeLimit);
 }
 
+export async function dealIdsModifiedInPeriod(erp: ErpClient, dateFrom: string, dateTo: string): Promise<number[]> {
+	const filters = [
+		['modified', '>=', `${dateFrom} 00:00:00`],
+		['modified', '<=', `${dateTo} 23:59:59.999999`],
+		[DEAL_FIELD, '!=', ''],
+	];
+	const heads = (await Promise.all(DOCUMENT_SPECS.map((spec) => listHeads(erp, spec, filters, 0)))).flat();
+	const latestByDeal = new Map<number, string>();
+	for (const head of heads) {
+		const current = latestByDeal.get(head.dealId) ?? '';
+		if (head.modified > current) latestByDeal.set(head.dealId, head.modified);
+	}
+	return [...latestByDeal.entries()]
+		.sort((left, right) => right[1].localeCompare(left[1]) || right[0] - left[0])
+		.map(([dealId]) => dealId);
+}
+
 function shortWarehouse(value: unknown): string {
 	return String(value ?? '').replace(/\s+-\s+[^-]+$/, '');
 }
