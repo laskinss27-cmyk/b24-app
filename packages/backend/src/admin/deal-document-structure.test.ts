@@ -29,11 +29,11 @@ test('structure check verifies explicit links already present in the deal chain'
 
 test('structure check distinguishes a detached target from a missing target', async () => {
 	const documents = [document('Purchase Receipt', 'MAT-PRE-1', { purchaseOrder: 'PUR-ORD-OTHER', supplyRequest: 'MAT-MR-MISSING' })];
-	const result = await inspectDealDocumentStructure(erpWith({ 'Purchase Order:PUR-ORD-OTHER': { name: 'PUR-ORD-OTHER', b24_deal_id: '99' } }), 42, documents, applicationDocuments);
+	const result = await inspectDealDocumentStructure(erpWith({ 'Purchase Order:PUR-ORD-OTHER': { name: 'PUR-ORD-OTHER', b24_deal_id: '99', docstatus: 0 } }), 42, documents, applicationDocuments);
 	assert.equal(result.report.status, 'error');
-	assert.deepEqual(result.report.links.map((link) => [link.targetName, link.status, link.targetDealId]), [
-		['MAT-MR-MISSING', 'missing', null],
-		['PUR-ORD-OTHER', 'wrong_deal', 99],
+	assert.deepEqual(result.report.links.map((link) => [link.targetName, link.status, link.targetDealId, link.targetDocstatus]), [
+		['MAT-MR-MISSING', 'missing', null, null],
+		['PUR-ORD-OTHER', 'wrong_deal', 99, 0],
 	]);
 	assert.ok(result.issues.some((issue) => issue.title === 'Связанный документ не найден'));
 	assert.ok(result.issues.some((issue) => issue.title === 'Документ выпал из цепочки сделки'));

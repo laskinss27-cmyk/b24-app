@@ -79,7 +79,7 @@ export interface AdminDealDocumentDiagnostic {
 			fromType: string; fromName: string; relation: string;
 			targetType: AdminDealDocument['type']; targetName: string;
 			status: 'linked' | 'wrong_deal' | 'missing' | 'unreadable';
-			targetDealId: number | null; details: string;
+			targetDealId: number | null; targetDocstatus: number | null; details: string;
 		}>;
 	};
 	calculatedFulfillment: 'ДА' | 'НЕТ';
@@ -107,4 +107,15 @@ export async function diagnoseAdminDealDocuments(dealId: number): Promise<AdminD
 	const result = await post<{ diagnostic?: AdminDealDocumentDiagnostic }>('/api/admin/deal-documents/diagnose', { dealId });
 	if (!result.diagnostic) throw new Error('Сервер не вернул результат диагностики документов сделки.');
 	return result.diagnostic;
+}
+
+export async function restoreAdminDealDocumentLink(input: {
+	dealId: number;
+	targetType: AdminDealDocument['type'];
+	targetName: string;
+	comment: string;
+}): Promise<{ changed: boolean }> {
+	const result = await post<{ result?: { changed?: boolean } }>('/api/admin/deal-documents/restore-link', input);
+	if (!result.result) throw new Error('Сервер не подтвердил восстановление связи документа.');
+	return { changed: Boolean(result.result.changed) };
 }

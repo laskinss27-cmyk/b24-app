@@ -45,7 +45,7 @@ function DocumentCard({ document }: { document: AdminDealDocument }): JSX.Elemen
 	);
 }
 
-export function DealDocumentDiagnosticDetails({ diagnostic }: { diagnostic: AdminDealDocumentDiagnostic }): JSX.Element {
+export function DealDocumentDiagnosticDetails({ diagnostic, onDiagnosticChanged }: { diagnostic: AdminDealDocumentDiagnostic; onDiagnosticChanged: () => Promise<void> }): JSX.Element {
 	const { deal } = diagnostic;
 	const applicationCount = diagnostic.applicationDocuments.contracts.length + diagnostic.applicationDocuments.supplyCards.length + diagnostic.applicationDocuments.transfers.length;
 	return (
@@ -71,7 +71,7 @@ export function DealDocumentDiagnosticDetails({ diagnostic }: { diagnostic: Admi
 					: <div className="admin-issues">{diagnostic.issues.map((issue) => <article key={issue.code} className={`admin-issue ${issue.severity}`}><strong>{issue.title}</strong><p>{issue.details}</p></article>)}</div>}
 			</section>
 
-			<DealDocumentStructureReport structure={diagnostic.structure} />
+			<DealDocumentStructureReport dealId={deal.id} structure={diagnostic.structure} onRestored={onDiagnosticChanged} />
 
 			<section className="admin-deal-documents">
 				{diagnostic.documents.length === 0 ? <div className="admin-panel"><p>Связанных документов ядра не найдено.</p></div> : diagnostic.documents.map((document) => <DocumentCard key={`${document.type}-${document.name}`} document={document} />)}

@@ -40,6 +40,11 @@ export function DealDocumentDiagnostics(): JSX.Element {
 		}
 	}
 
+	async function refreshSelectedDeal(): Promise<void> {
+		if (selectedId === null) return;
+		setDiagnostic(await diagnoseAdminDealDocuments(selectedId));
+	}
+
 	return (
 		<div className="deal-document-diagnostics">
 			<form className="admin-search" onSubmit={(event) => { event.preventDefault(); void search(query); }}>
@@ -63,7 +68,7 @@ export function DealDocumentDiagnostics(): JSX.Element {
 						</button>
 					))}
 				</aside>
-				<main>{diagnostic ? <DealDocumentDiagnosticDetails diagnostic={diagnostic} /> : !loading && <p className="admin-empty-selection">Выберите сделку слева, чтобы увидеть всю цепочку документов.</p>}</main>
+				<main>{diagnostic ? <DealDocumentDiagnosticDetails diagnostic={diagnostic} onDiagnosticChanged={refreshSelectedDeal} /> : !loading && <p className="admin-empty-selection">Выберите сделку слева, чтобы увидеть всю цепочку документов.</p>}</main>
 			</div>
 		</div>
 	);

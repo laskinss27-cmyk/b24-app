@@ -14,6 +14,7 @@ export interface DealDocumentStructureLink {
 	targetName: string;
 	status: DealDocumentLinkStatus;
 	targetDealId: number | null;
+	targetDocstatus: number | null;
 	details: string;
 }
 
@@ -73,23 +74,26 @@ function targetDealId(raw: Record<string, unknown>): number | null {
 	return Number.isInteger(value) && value > 0 ? value : null;
 }
 
-async function inspectLink(erp: ErpClient, dealId: number, loaded: Set<string>, candidate: LinkCandidate): Promise<DealDocumentStructureLink> {
-	if (loaded.has(documentKey(candidate.targetType, candidate.targetName))) {
-		return { ...candidate, status: 'linked', targetDealId: dealId, details: 'Документ найден в цепочке этой сделки.' };
+async function inspectLink(erp: ErpClient, dealId: number, loaded: Map<string, AdminDealDocument>, candidate: LinkCandidate): Promise<DealDocumentStructureLink> {
+	const loadedTarget = loaded.get(documentKey(candidate.targetType, candidate.targetName));
+	if (loadedTarget) {
+		return { ...candidate, status: 'linked', targetDealId: dealId, targetDocstatus: loadedTarget.docstatus, details: 'Документ найден в цепочке этой сделки.' };
 	}
 	try {
 		const target = await erp.get<Record<string, unknown>>(candidate.targetType, candidate.targetName);
-		if (!target) return { ...candidate, status: 'missing', targetDealId: null, details: 'Указанный документ не существует в ядре.' };
+		if (!target) return { ...candidate, status: 'missing', targetDealId: null, targetDocstatus: null, details: 'Указанный документ не существует в ядре.' };
 		const linkedDealId = targetDealId(target);
-		if (linkedDealId === dealId) return { ...candidate, status: 'linked', targetDealId: linkedDealId, details: 'Документ существует и привязан к этой сделке.' };
+		const targetDocstatus = Number.isInteger(Number(target['docstatus'])) ? Number(target['docstatus']) : null;
+		if (linkedDealId === dealId) return { ...candidate, status: 'linked', targetDealId: linkedDealId, targetDocstatus, details: 'Документ существует и привязан к этой сделке.' };
 		return {
 			...candidate,
 			status: 'wrong_deal',
 			targetDealId: linkedDealId,
+			targetDocstatus,
 			details: linkedDealId ? `Документ привязан к другой сделке #${linkedDealId}.` : 'Документ существует, но не привязан к сделке.',
 		};
 	} catch (error) {
-		return { ...candidate, status: 'unreadable', targetDealId: null, details: `Не удалось проверить документ: ${error instanceof Error ? error.message : String(error)}` };
+		return { ...candidate, status: 'unreadable', targetDealId: null, targetDocstatus: null, details: `Не удалось проверить документ: ${error instanceof Error ? error.message : String(error)}` };
 	}
 }
 
@@ -108,7 +112,7 @@ export async function inspectDealDocumentStructure(
 	documents: AdminDealDocument[],
 	applicationDocuments: AdminDealApplicationDocuments,
 ): Promise<{ report: DealDocumentStructureReport; issues: DiagnosticIssue[] }> {
-	const loaded = new Set(documents.map((document) => documentKey(document.type, document.name)));
+	const loaded = new Map(documents.map((document) => [documentKey(document.type, document.name), document]));
 	const candidates = [...documentCandidates(documents), ...transferCandidates(applicationDocuments)];
 	const links = await Promise.all(candidates.map((candidate) => inspectLink(erp, dealId, loaded, candidate)));
 	const issues = links.flatMap((link, index) => {

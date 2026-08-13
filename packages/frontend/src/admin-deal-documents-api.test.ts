@@ -6,7 +6,7 @@ Object.defineProperty(globalThis, 'window', {
 	value: { __B24_CONTEXT__: { domain: 'portal.example', accessToken: 'token' } } as Window,
 });
 
-const { diagnoseAdminDealDocuments, searchAdminDealDocuments } = await import('./admin-deal-documents-api.js');
+const { diagnoseAdminDealDocuments, restoreAdminDealDocumentLink, searchAdminDealDocuments } = await import('./admin-deal-documents-api.js');
 
 test('admin deal document search preserves owner session and document query', async () => {
 	let url = '';
@@ -32,4 +32,19 @@ test('admin deal diagnostics sends the selected deal id and exposes server error
 
 	globalThis.fetch = (async () => new Response(JSON.stringify({ ok: false, error: 'Документы недоступны.' }), { status: 500, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
 	await assert.rejects(diagnoseAdminDealDocuments(37868), /Документы недоступны/);
+});
+
+test('admin link restoration preserves the selected document and mandatory comment', async () => {
+	let url = '';
+	let requestBody: Record<string, unknown> = {};
+	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		url = String(input);
+		requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+		return new Response(JSON.stringify({ ok: true, result: { changed: true } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+	}) as typeof fetch;
+	assert.deepEqual(await restoreAdminDealDocumentLink({ dealId: 42, targetType: 'Purchase Order', targetName: 'PUR-ORD-1', comment: 'Проверил цепочку вручную.' }), { changed: true });
+	assert.equal(url, '/api/admin/deal-documents/restore-link');
+	assert.deepEqual(requestBody, {
+		domain: 'portal.example', accessToken: 'token', dealId: 42, targetType: 'Purchase Order', targetName: 'PUR-ORD-1', comment: 'Проверил цепочку вручную.',
+	});
 });
