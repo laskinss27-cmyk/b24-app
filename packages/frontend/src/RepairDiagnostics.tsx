@@ -7,7 +7,7 @@ const STATUS_LABELS: Record<string, string> = {
 	pre_office: 'В офисе', pre_sent: 'В ремонте', pre_back_office: 'Вернулось в офис', pre_to_point: 'На точку', pre_at_tt: 'На точке',
 };
 
-export function RepairDiagnostics(): JSX.Element {
+export function RepairDiagnostics({ initialRepairId = null }: { initialRepairId?: number | null }): JSX.Element {
 	const [query, setQuery] = useState('');
 	const [repairs, setRepairs] = useState<AdminRepairSummary[]>([]);
 	const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -29,7 +29,20 @@ export function RepairDiagnostics(): JSX.Element {
 		}
 	}, []);
 
-	useEffect(() => { void search(''); }, [search]);
+	useEffect(() => {
+		if (initialRepairId === null) {
+			void search('');
+			return;
+		}
+		setQuery(String(initialRepairId));
+		setSelectedId(initialRepairId);
+		setLoading(true);
+		setError('');
+		void Promise.all([searchAdminRepairs(String(initialRepairId)), diagnoseAdminRepair(initialRepairId)])
+			.then(([foundRepairs, foundDiagnostic]) => { setRepairs(foundRepairs); setDiagnostic(foundDiagnostic); })
+			.catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : String(loadError)))
+			.finally(() => setLoading(false));
+	}, [initialRepairId, search]);
 
 	async function selectRepair(repairId: number): Promise<void> {
 		setSelectedId(repairId);

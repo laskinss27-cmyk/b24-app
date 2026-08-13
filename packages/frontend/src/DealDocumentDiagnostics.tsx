@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { diagnoseAdminDealDocuments, searchAdminDealDocuments, type AdminDealDocumentDiagnostic, type AdminDealDocumentSummary } from './admin-deal-documents-api.js';
 import { DealDocumentDiagnosticDetails } from './DealDocumentDiagnosticDetails.js';
 
-export function DealDocumentDiagnostics(): JSX.Element {
+export function DealDocumentDiagnostics({ initialDealId = null }: { initialDealId?: number | null }): JSX.Element {
 	const [query, setQuery] = useState('');
 	const [deals, setDeals] = useState<AdminDealDocumentSummary[]>([]);
 	const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -24,7 +24,20 @@ export function DealDocumentDiagnostics(): JSX.Element {
 		}
 	}, []);
 
-	useEffect(() => { void search(''); }, [search]);
+	useEffect(() => {
+		if (initialDealId === null) {
+			void search('');
+			return;
+		}
+		setQuery(String(initialDealId));
+		setSelectedId(initialDealId);
+		setLoading(true);
+		setError('');
+		void Promise.all([searchAdminDealDocuments(String(initialDealId)), diagnoseAdminDealDocuments(initialDealId)])
+			.then(([foundDeals, foundDiagnostic]) => { setDeals(foundDeals); setDiagnostic(foundDiagnostic); })
+			.catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : String(loadError)))
+			.finally(() => setLoading(false));
+	}, [initialDealId, search]);
 
 	async function selectDeal(dealId: number): Promise<void> {
 		setSelectedId(dealId);

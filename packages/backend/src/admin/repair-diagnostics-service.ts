@@ -75,9 +75,7 @@ export async function searchAdminRepairs(client: B24Client, query: string, limit
 		.map(summary);
 }
 
-export async function diagnoseAdminRepair(client: B24Client, erp: ErpClient | null, repairId: number): Promise<AdminRepairDiagnostic | null> {
-	const item = (await fetchAllRepairs(client)).find((row) => Number(row['ID']) === repairId);
-	if (!item) return null;
+async function diagnoseAdminRepairItem(client: B24Client, erp: ErpClient | null, item: Record<string, unknown>): Promise<AdminRepairDiagnostic> {
 	const repair = parseItem(item);
 	if (!repair) throw new Error('Карточка ремонта содержит повреждённые данные.');
 	const [erpState, deal, task] = await Promise.all([
@@ -99,4 +97,25 @@ export async function diagnoseAdminRepair(client: B24Client, erp: ErpClient | nu
 	if (task?.error && task.found !== false) issues.push({ code: 'task_read_error', severity: 'warning', title: 'Не удалось полностью прочитать задачу', details: task.error });
 	if (erpState.documentsError) issues.push({ code: 'documents_read_error', severity: 'warning', title: 'Не удалось прочитать все складские документы', details: erpState.documentsError });
 	return { repair, expectedStore: expectedRepairStore(repair), erp: erpState, deal, task, issues, rawRecord: rawDetail(item) };
+}
+
+async function diagnoseRepairItems(client: B24Client, erp: ErpClient | null, items: Array<Record<string, unknown>>): Promise<AdminRepairDiagnostic[]> {
+	const results: AdminRepairDiagnostic[] = [];
+	for (let index = 0; index < items.length; index += 2) {
+		results.push(...await Promise.all(items.slice(index, index + 2).map((item) => diagnoseAdminRepairItem(client, erp, item))));
+	}
+	return results;
+}
+
+export async function diagnoseRecentAdminRepairs(client: B24Client, erp: ErpClient | null, limit = 10): Promise<AdminRepairDiagnostic[]> {
+	const safeLimit = Math.max(1, Math.min(20, limit));
+	const items = (await fetchAllRepairs(client))
+		.sort((left, right) => Number(right['ID'] ?? 0) - Number(left['ID'] ?? 0))
+		.slice(0, safeLimit);
+	return diagnoseRepairItems(client, erp, items);
+}
+
+export async function diagnoseAdminRepair(client: B24Client, erp: ErpClient | null, repairId: number): Promise<AdminRepairDiagnostic | null> {
+	const item = (await fetchAllRepairs(client)).find((row) => Number(row['ID']) === repairId);
+	return item ? diagnoseAdminRepairItem(client, erp, item) : null;
 }
