@@ -6,6 +6,7 @@ import { DEAL_FIELD } from '../erp/erp-setup.js';
 import type { PlanItem } from '../erp/deal-plan-state.js';
 import type { DiagnosticIssue } from './repair-diagnostics-model.js';
 import { readDealApplicationDocuments, type AdminDealApplicationDocuments } from './deal-application-documents.js';
+import { inspectDealDocumentStructure, type DealDocumentStructureReport } from './deal-document-structure.js';
 
 type DealDocumentType = 'Sales Order' | 'Delivery Note' | 'Material Request' | 'Purchase Order' | 'Purchase Receipt' | 'Stock Entry';
 
@@ -83,6 +84,7 @@ export interface AdminDealDocumentDiagnostic {
 	};
 	documents: AdminDealDocument[];
 	applicationDocuments: AdminDealApplicationDocuments;
+	structure: DealDocumentStructureReport;
 	calculatedFulfillment: DealFulfillmentValue;
 	shortages: Array<{ productId: number; itemName: string; required: number; realized: number }>;
 	issues: DiagnosticIssue[];
@@ -267,6 +269,7 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 		readDocuments(erp, dealId),
 		readDealApplicationDocuments(client, dealId),
 	]);
+	const structureInspection = await inspectDealDocumentStructure(erp, dealId, documents, applicationDocuments);
 	let rawDeal: Record<string, unknown> | null = null;
 	let readError: string | null = null;
 	try {
@@ -281,7 +284,7 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 	const calculatedFulfillment = calculateDealFulfillment(currentPlan, dealRealizations);
 	const shortages = fulfillmentShortages(currentPlan, dealRealizations);
 	const fulfillmentField = String(rawDeal?.[DEAL_FULFILLMENT_FIELD] ?? '').trim().toLocaleUpperCase('ru-RU');
-	const issues: DiagnosticIssue[] = [];
+	const issues: DiagnosticIssue[] = [...structureInspection.issues];
 	if (!rawDeal) issues.push({ code: 'deal_read_error', severity: 'error', title: 'Не удалось прочитать сделку', details: readError ?? 'Битрикс24 не вернул карточку сделки.' });
 	if (!activePlan) issues.push({ code: 'missing_plan', severity: 'warning', title: 'Нет действующего плана сделки', details: 'В ядре не найден черновик Sales Order, который является текущим составом сделки.' });
 	if (activePlans.length > 1) issues.push({ code: 'multiple_plans', severity: 'warning', title: 'Несколько действующих планов', details: `Найдено черновиков Sales Order: ${activePlans.length}. Приложение использует самый новый.` });
@@ -310,6 +313,7 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 		},
 		documents,
 		applicationDocuments,
+		structure: structureInspection.report,
 		calculatedFulfillment,
 		shortages,
 		issues,

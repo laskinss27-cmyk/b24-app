@@ -1,6 +1,7 @@
 import { openDeal } from './b24.js';
 import type { AdminDealDocument, AdminDealDocumentDiagnostic } from './admin-deal-documents-api.js';
 import { DealRelatedDocumentSections } from './DealRelatedDocumentSections.js';
+import { DealDocumentStructureReport } from './DealDocumentStructureReport.js';
 
 function value(input: unknown): string {
 	return input === null || input === undefined || input === '' ? '—' : String(input);
@@ -69,6 +70,8 @@ export function DealDocumentDiagnosticDetails({ diagnostic }: { diagnostic: Admi
 					? <p className="admin-clean-state">Явных расхождений не найдено.</p>
 					: <div className="admin-issues">{diagnostic.issues.map((issue) => <article key={issue.code} className={`admin-issue ${issue.severity}`}><strong>{issue.title}</strong><p>{issue.details}</p></article>)}</div>}
 			</section>
+
+			<DealDocumentStructureReport structure={diagnostic.structure} />
 
 			<section className="admin-deal-documents">
 				{diagnostic.documents.length === 0 ? <div className="admin-panel"><p>Связанных документов ядра не найдено.</p></div> : diagnostic.documents.map((document) => <DocumentCard key={`${document.type}-${document.name}`} document={document} />)}

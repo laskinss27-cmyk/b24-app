@@ -31,6 +31,7 @@ export interface AdminDealTransferDocument {
 	createdAt: string;
 	createdByName: string;
 	supplyRequest: string;
+	supplyRequestKey: string;
 	purchaseOrder: string;
 	shipEntry: string;
 	receiveEntry: string;
@@ -93,6 +94,7 @@ export async function readDealApplicationDocuments(client: B24Client, dealId: nu
 			createdAt: item!.createdAt,
 			createdByName: item!.createdByName,
 			supplyRequest: item!.supplyRequest,
+			supplyRequestKey: item!.supplyRequestKey,
 			purchaseOrder: item!.purchaseOrder,
 			shipEntry: item!.shipEntry ?? '',
 			receiveEntry: item!.receiveEntry ?? '',

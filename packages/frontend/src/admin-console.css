@@ -87,6 +87,26 @@
 .admin-related-cards article { display: grid; gap: 5px; padding: 11px 13px; border: 1px solid #e4e9ef; border-radius: 9px; background: #f8fafc; }
 .admin-related-cards span, .admin-related-cards small { color: #475467; }
 
+.admin-structure-report > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.admin-structure-report > header h3 { margin-bottom: 4px; }
+.admin-structure-report > header p { color: #667085; }
+.admin-structure-status { padding: 5px 9px; border-radius: 999px; background: #e9f9ef; color: #16713a; font-size: 12px; white-space: nowrap; }
+.admin-structure-status.warning { background: #fff2cc; color: #8a4b00; }
+.admin-structure-status.error { background: #fff1f2; color: #b42318; }
+.admin-structure-links { display: grid; gap: 8px; margin-top: 12px; }
+.admin-structure-links article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; padding: 11px 13px; border-left: 4px solid #f59e0b; border-radius: 7px; background: #fffbeb; }
+.admin-structure-links article.missing { border-color: #e5484d; background: #fff1f2; }
+.admin-structure-links article div { display: grid; gap: 3px; }
+.admin-structure-links article span, .admin-structure-links article p { color: #475467; }
+.admin-structure-links article em { font-size: 12px; font-style: normal; }
+.admin-structure-links article p { grid-column: 1 / -1; margin: 0; }
+.admin-structure-all-links { margin-top: 12px; }
+.admin-structure-all-links summary { color: #475467; cursor: pointer; }
+.admin-structure-all-links ul { display: grid; gap: 5px; margin-bottom: 0; padding-left: 22px; }
+.admin-structure-all-links span { margin-left: 6px; color: #16713a; }
+.admin-structure-all-links span.wrong_deal, .admin-structure-all-links span.unreadable { color: #8a4b00; }
+.admin-structure-all-links span.missing { color: #b42318; }
+
 @media (max-width: 1050px) {
 	.admin-repair-layout { grid-template-columns: 1fr; }
 	.admin-repair-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 320px; }

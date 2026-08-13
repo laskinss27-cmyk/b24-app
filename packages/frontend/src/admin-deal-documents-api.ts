@@ -50,7 +50,7 @@ export interface AdminDealApplicationDocuments {
 	supplyCards: Array<{ id: number; title: string; stageId: string }>;
 	transfers: Array<{
 		id: number; name: string; status: string; fromStore: string; toStore: string; createdAt: string; createdByName: string;
-		supplyRequest: string; purchaseOrder: string; shipEntry: string; receiveEntry: string; note: string;
+		supplyRequest: string; supplyRequestKey: string; purchaseOrder: string; shipEntry: string; receiveEntry: string; note: string;
 		items: Array<{ productId: number; itemName: string; qty: number }>; historyCount: number;
 	}>;
 	errors: Array<{ source: 'contracts' | 'supply' | 'transfers'; message: string }>;
@@ -71,6 +71,17 @@ export interface AdminDealDocumentDiagnostic {
 	};
 	documents: AdminDealDocument[];
 	applicationDocuments: AdminDealApplicationDocuments;
+	structure: {
+		status: 'ok' | 'warning' | 'error';
+		checkedLinkCount: number;
+		brokenLinkCount: number;
+		links: Array<{
+			fromType: string; fromName: string; relation: string;
+			targetType: AdminDealDocument['type']; targetName: string;
+			status: 'linked' | 'wrong_deal' | 'missing' | 'unreadable';
+			targetDealId: number | null; details: string;
+		}>;
+	};
 	calculatedFulfillment: 'ДА' | 'НЕТ';
 	shortages: Array<{ productId: number; itemName: string; required: number; realized: number }>;
 	issues: Array<{ code: string; severity: 'info' | 'warning' | 'error'; title: string; details: string }>;
