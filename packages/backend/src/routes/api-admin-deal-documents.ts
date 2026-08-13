@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { AccessAuthBody } from '../access-policy.js';
 import { diagnoseAdminDealDocuments, searchAdminDealDocuments } from '../admin/deal-document-diagnostics.js';
 import {
@@ -7,7 +7,7 @@ import {
 	RESTORABLE_DOCUMENT_TYPES,
 	restoreUnlinkedDealDocument,
 } from '../admin/deal-document-link-restorer.js';
-import { adminOwnerClient } from '../admin/owner-client.js';
+import { adminOwnerClient, adminOwnerContext } from '../admin/owner-client.js';
 import { ErpClient } from '../erp/client.js';
 
 interface SearchBody extends AccessAuthBody { query?: unknown; limit?: unknown }
@@ -19,11 +19,9 @@ const ERP_ERROR = 'Ядро склада не настроено.';
 
 async function recordLinkRestore(
 	app: FastifyInstance,
-	req: FastifyRequest,
-	input: { dealId: number; targetType: string; targetName: string; comment: string; error?: string; changed?: boolean },
+	input: { dealId: number; targetType: string; targetName: string; comment: string; actor?: { id: string; name: string }; error?: string; changed?: boolean },
 ): Promise<void> {
 	const failed = Boolean(input.error);
-	const actor = req.appAccess?.user;
 	await app.operationLog.record({
 		area: 'admin',
 		operation: 'restore_deal_document_link',
@@ -32,7 +30,7 @@ async function recordLinkRestore(
 		summary: failed
 			? `Не удалось восстановить связь ${input.targetType} ${input.targetName} со сделкой №${input.dealId}: ${input.error}`
 			: `${input.changed ? 'Восстановлена' : 'Подтверждена'} связь ${input.targetType} ${input.targetName} со сделкой №${input.dealId}. Причина: ${input.comment}`,
-		...(actor ? { actor: { id: actor.id, name: actor.name } } : {}),
+		...(input.actor ? { actor: input.actor } : {}),
 		dealId: input.dealId,
 		documents: [`${input.targetType} ${input.targetName}`],
 		details: {
@@ -92,18 +90,20 @@ export function registerApiAdminDealDocumentsRoute(app: FastifyInstance): void {
 		} catch (error) {
 			return reply.code(400).send({ ok: false, error: error instanceof Error ? error.message : String(error) });
 		}
+		let actor: { id: string; name: string } | undefined;
 		try {
-			const client = await adminOwnerClient(app, body);
-			if (!client) return reply.code(403).send({ ok: false, error: ACCESS_ERROR });
+			const owner = await adminOwnerContext(app, body);
+			if (!owner) return reply.code(403).send({ ok: false, error: ACCESS_ERROR });
+			actor = owner.actor;
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(503).send({ ok: false, error: ERP_ERROR });
-			const diagnostic = await diagnoseAdminDealDocuments(client, erp, dealId);
+			const diagnostic = await diagnoseAdminDealDocuments(owner.client, erp, dealId);
 			const result = await restoreUnlinkedDealDocument(erp, { dealId, targetType, targetName, comment }, diagnostic.structure.links);
-			await recordLinkRestore(app, req, { dealId, targetType, targetName, comment, changed: result.changed });
+			await recordLinkRestore(app, { dealId, targetType, targetName, comment, ...(actor ? { actor } : {}), changed: result.changed });
 			return { ok: true, result };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			await recordLinkRestore(app, req, { dealId, targetType, targetName, comment, error: message });
+			await recordLinkRestore(app, { dealId, targetType, targetName, comment, ...(actor ? { actor } : {}), error: message });
 			app.log.error({ dealId, targetType, targetName, error: message }, '[admin/deal-documents/restore-link] failed');
 			if (error instanceof DealDocumentLinkRestoreError) return reply.code(409).send({ ok: false, error: message });
 			return reply.code(500).send({ ok: false, error: 'Не удалось восстановить связь документа. Подробности записаны в журнал операций.' });

@@ -119,3 +119,14 @@ export async function restoreAdminDealDocumentLink(input: {
 	if (!result.result) throw new Error('Сервер не подтвердил восстановление связи документа.');
 	return { changed: Boolean(result.result.changed) };
 }
+
+export async function synchronizeAdminDealFulfillment(input: {
+	dealId: number;
+	expectedCurrent: 'ДА' | 'НЕТ';
+	expectedValue: 'ДА' | 'НЕТ';
+	comment: string;
+}): Promise<{ previous: 'ДА' | 'НЕТ'; value: 'ДА' | 'НЕТ'; changed: boolean }> {
+	const result = await post<{ result?: { previous: 'ДА' | 'НЕТ'; value: 'ДА' | 'НЕТ'; changed?: boolean } }>('/api/admin/deal-documents/sync-fulfillment', input);
+	if (!result.result) throw new Error('Сервер не подтвердил синхронизацию технического поля сделки.');
+	return { ...result.result, changed: Boolean(result.result.changed) };
+}

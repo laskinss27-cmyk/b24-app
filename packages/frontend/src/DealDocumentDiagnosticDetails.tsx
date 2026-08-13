@@ -2,6 +2,7 @@ import { openDeal } from './b24.js';
 import type { AdminDealDocument, AdminDealDocumentDiagnostic } from './admin-deal-documents-api.js';
 import { DealRelatedDocumentSections } from './DealRelatedDocumentSections.js';
 import { DealDocumentStructureReport } from './DealDocumentStructureReport.js';
+import { DealFulfillmentSyncPanel } from './DealFulfillmentSyncPanel.js';
 
 function value(input: unknown): string {
 	return input === null || input === undefined || input === '' ? '—' : String(input);
@@ -70,6 +71,8 @@ export function DealDocumentDiagnosticDetails({ diagnostic, onDiagnosticChanged 
 					? <p className="admin-clean-state">Явных расхождений не найдено.</p>
 					: <div className="admin-issues">{diagnostic.issues.map((issue) => <article key={issue.code} className={`admin-issue ${issue.severity}`}><strong>{issue.title}</strong><p>{issue.details}</p></article>)}</div>}
 			</section>
+
+			<DealFulfillmentSyncPanel diagnostic={diagnostic} onSynchronized={onDiagnosticChanged} />
 
 			<DealDocumentStructureReport dealId={deal.id} structure={diagnostic.structure} onRestored={onDiagnosticChanged} />
 

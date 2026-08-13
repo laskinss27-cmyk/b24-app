@@ -15,7 +15,7 @@ export function AdminConsole({ onBack }: { onBack: () => void }): JSX.Element {
 					<h1>Админка приложения</h1>
 					<p>Диагностика связей между Битрикс24 и ядром склада.</p>
 				</div>
-				<strong className="admin-readonly-badge">Только просмотр</strong>
+				<strong className="admin-readonly-badge">Действия с подтверждением</strong>
 			</header>
 			<nav className="admin-console-tabs">
 				<button type="button" className={section === 'repairs' ? 'active' : ''} onClick={() => setSection('repairs')}>Диагностика ремонтов</button>

@@ -6,7 +6,7 @@ Object.defineProperty(globalThis, 'window', {
 	value: { __B24_CONTEXT__: { domain: 'portal.example', accessToken: 'token' } } as Window,
 });
 
-const { diagnoseAdminDealDocuments, restoreAdminDealDocumentLink, searchAdminDealDocuments } = await import('./admin-deal-documents-api.js');
+const { diagnoseAdminDealDocuments, restoreAdminDealDocumentLink, searchAdminDealDocuments, synchronizeAdminDealFulfillment } = await import('./admin-deal-documents-api.js');
 
 test('admin deal document search preserves owner session and document query', async () => {
 	let url = '';
@@ -47,4 +47,17 @@ test('admin link restoration preserves the selected document and mandatory comme
 	assert.deepEqual(requestBody, {
 		domain: 'portal.example', accessToken: 'token', dealId: 42, targetType: 'Purchase Order', targetName: 'PUR-ORD-1', comment: 'Проверил цепочку вручную.',
 	});
+});
+
+test('admin fulfillment synchronization sends only the expected transition and comment', async () => {
+	let url = '';
+	let requestBody: Record<string, unknown> = {};
+	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		url = String(input);
+		requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+		return new Response(JSON.stringify({ ok: true, result: { previous: 'НЕТ', value: 'ДА', changed: true } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+	}) as typeof fetch;
+	assert.deepEqual(await synchronizeAdminDealFulfillment({ dealId: 42, expectedCurrent: 'НЕТ', expectedValue: 'ДА', comment: 'Проверено вручную.' }), { previous: 'НЕТ', value: 'ДА', changed: true });
+	assert.equal(url, '/api/admin/deal-documents/sync-fulfillment');
+	assert.deepEqual(requestBody, { domain: 'portal.example', accessToken: 'token', dealId: 42, expectedCurrent: 'НЕТ', expectedValue: 'ДА', comment: 'Проверено вручную.' });
 });
