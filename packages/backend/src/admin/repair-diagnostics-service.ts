@@ -99,7 +99,7 @@ async function diagnoseAdminRepairItem(client: B24Client, erp: ErpClient | null,
 	return { repair, expectedStore: expectedRepairStore(repair), erp: erpState, deal, task, issues, rawRecord: rawDetail(item) };
 }
 
-async function diagnoseRepairItems(client: B24Client, erp: ErpClient | null, items: Array<Record<string, unknown>>): Promise<AdminRepairDiagnostic[]> {
+export async function diagnoseAdminRepairItems(client: B24Client, erp: ErpClient | null, items: Array<Record<string, unknown>>): Promise<AdminRepairDiagnostic[]> {
 	const results: AdminRepairDiagnostic[] = [];
 	for (let index = 0; index < items.length; index += 2) {
 		results.push(...await Promise.all(items.slice(index, index + 2).map((item) => diagnoseAdminRepairItem(client, erp, item))));
@@ -125,13 +125,12 @@ export function repairActivityDate(item: Record<string, unknown>): string {
 	].sort().at(-1) ?? '';
 }
 
-export async function diagnoseAdminRepairsInPeriod(client: B24Client, erp: ErpClient | null, dateFrom: string, dateTo: string): Promise<AdminRepairDiagnostic[]> {
-	const items = (await fetchAllRepairs(client))
+export async function listAdminRepairItemsInPeriod(client: B24Client, dateFrom: string, dateTo: string): Promise<Array<Record<string, unknown>>> {
+	return (await fetchAllRepairs(client))
 		.map((item) => ({ item, activityDate: repairActivityDate(item) }))
 		.filter(({ activityDate }) => activityDate >= dateFrom && activityDate <= dateTo)
 		.sort((left, right) => right.activityDate.localeCompare(left.activityDate) || Number(right.item['ID'] ?? 0) - Number(left.item['ID'] ?? 0))
 		.map(({ item }) => item);
-	return diagnoseRepairItems(client, erp, items);
 }
 
 export async function diagnoseAdminRepair(client: B24Client, erp: ErpClient | null, repairId: number): Promise<AdminRepairDiagnostic | null> {

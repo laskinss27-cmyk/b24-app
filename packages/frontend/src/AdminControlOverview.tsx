@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { checkAdminControl, type AdminControlFinding, type AdminControlReport } from './admin-control-api.js';
+import { checkAdminControl, type AdminControlFinding, type AdminControlProgress, type AdminControlReport } from './admin-control-api.js';
 
 function inputDate(date: Date): string {
 	const year = date.getFullYear();
@@ -21,17 +21,21 @@ export function AdminControlOverview({ onOpenFinding }: { onOpenFinding: (findin
 	const [dateTo, setDateTo] = useState(initialPeriod.dateTo);
 	const [report, setReport] = useState<AdminControlReport | null>(null);
 	const [loading, setLoading] = useState(false);
+	const [progress, setProgress] = useState<AdminControlProgress | null>(null);
 	const [error, setError] = useState('');
 
 	async function check(): Promise<void> {
 		setLoading(true);
 		setError('');
+		setProgress(null);
+		setReport(null);
 		try {
-			setReport(await checkAdminControl(dateFrom, dateTo));
+			setReport(await checkAdminControl(dateFrom, dateTo, setProgress));
 		} catch (checkError) {
 			setError(checkError instanceof Error ? checkError.message : String(checkError));
 		} finally {
 			setLoading(false);
+			setProgress(null);
 		}
 	}
 
@@ -47,7 +51,9 @@ export function AdminControlOverview({ onOpenFinding }: { onOpenFinding: (findin
 			</section>
 
 			{error && <p className="admin-state error">⛔ {error}</p>}
-			{loading && <p className="admin-state">Сверяю Битрикс24 и ядро склада…</p>}
+			{loading && <p className="admin-state">{progress
+				? `Проверено ${progress.checkedDeals + progress.checkedRepairs} из ${progress.totalDeals + progress.totalRepairs}: сделки ${progress.checkedDeals}/${progress.totalDeals}, ремонты ${progress.checkedRepairs}/${progress.totalRepairs}.`
+				: 'Собираю список сделок и ремонтов…'}</p>}
 			{report && !loading && <>
 				<section className="admin-control-summary">
 					<div><span>Сделок проверено</span><strong>{report.checkedDeals}</strong></div>

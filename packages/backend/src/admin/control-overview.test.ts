@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { AdminDealDocumentDiagnostic } from './deal-document-diagnostics.js';
 import type { AdminRepairDiagnostic } from './repair-diagnostics-service.js';
 import { repairActivityDate } from './repair-diagnostics-service.js';
-import { controlFindings, normalizeAdminControlPeriod } from './control-overview.js';
+import { controlFindings, normalizeAdminControlCursor, normalizeAdminControlPeriod } from './control-overview.js';
 
 test('control overview keeps actionable mismatches and ignores normal work in progress', () => {
 	const deals = [{ deal: { id: 37868 }, issues: [
@@ -28,6 +28,13 @@ test('control period is inclusive and rejects missing, reversed or impossible da
 	assert.throws(() => normalizeAdminControlPeriod('', '2026-08-13'), /обе даты/);
 	assert.throws(() => normalizeAdminControlPeriod('2026-08-14', '2026-08-13'), /начала периода/);
 	assert.throws(() => normalizeAdminControlPeriod('2026-02-31', '2026-08-13'), /обе даты/);
+});
+
+test('control batch cursor accepts only non-negative integer offsets', () => {
+	assert.deepEqual(normalizeAdminControlCursor(undefined, undefined), { dealOffset: 0, repairOffset: 0 });
+	assert.deepEqual(normalizeAdminControlCursor('4', 7), { dealOffset: 4, repairOffset: 7 });
+	assert.throws(() => normalizeAdminControlCursor(-1, 0), /позиция пакетной проверки/);
+	assert.throws(() => normalizeAdminControlCursor(0.5, 0), /позиция пакетной проверки/);
 });
 
 test('repair activity uses the latest system or stored history date', () => {
