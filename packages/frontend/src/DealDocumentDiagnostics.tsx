@@ -44,7 +44,7 @@ export function DealDocumentDiagnostics(): JSX.Element {
 		<div className="deal-document-diagnostics">
 			<form className="admin-search" onSubmit={(event) => { event.preventDefault(); void search(query); }}>
 				<label>Сделка или документ ядра
-					<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Например: 37868, SAL-ORD-2026-00303 или MAT-DN-2026-00451" />
+					<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Например: 37868, MAT-MR-…, PUR-ORD-… или MAT-DN-…" />
 				</label>
 				<button type="submit" className="btn-primary" disabled={loading}>Найти</button>
 			</form>
@@ -58,7 +58,7 @@ export function DealDocumentDiagnostics(): JSX.Element {
 					{deals.map((deal) => (
 						<button type="button" key={deal.dealId} className={selectedId === deal.dealId ? 'active' : ''} onClick={() => void selectDeal(deal.dealId)}>
 							<span><strong>Сделка #{deal.dealId}</strong>{deal.draftCount > 0 && <em>{deal.draftCount} черн.</em>}</span>
-							<small>Планы: {deal.planCount} · реализации/возвраты: {deal.realizationCount}</small>
+							<small>Планы: {deal.planCount} · реализации/возвраты: {deal.realizationCount} · снабжение/склад: {deal.relatedCount}</small>
 							<small>{deal.lastDocument || 'Связанных документов пока нет'}</small>
 						</button>
 					))}

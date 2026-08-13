@@ -39,6 +39,7 @@ test('deal document search finds a deal by its ERP document number', async () =>
 		dealId: 37868,
 		planCount: 0,
 		realizationCount: 1,
+		relatedCount: 0,
 		draftCount: 1,
 		lastDocument: 'MAT-DN-2026-00451',
 		lastModified: '2026-08-12 08:10:03',
@@ -50,10 +51,48 @@ test('deal document summary never marks the editable Sales Order plan as an acti
 		dealId: 37868,
 		planCount: 1,
 		realizationCount: 0,
+		relatedCount: 0,
 		draftCount: 0,
 		lastDocument: 'SAL-ORD-2026-00303',
 		lastModified: '2026-08-12 08:07:32',
 	}]);
+});
+
+test('deal document search includes supply and warehouse core documents', async () => {
+	const relatedErp = fakeErp({
+		'Material Request': [{ name: 'MAT-MR-2026-00002', b24_deal_id: '37402', docstatus: 0, modified: '2026-08-13 09:00:00' }],
+		'Purchase Order': [{ name: 'PUR-ORD-2026-00017', b24_deal_id: '37402', docstatus: 0, modified: '2026-08-13 09:10:00' }],
+	});
+	assert.deepEqual(await searchAdminDealDocuments(relatedErp, 'MAT-MR-2026-00002'), [{
+		dealId: 37402,
+		planCount: 0,
+		realizationCount: 0,
+		relatedCount: 1,
+		draftCount: 0,
+		lastDocument: 'MAT-MR-2026-00002',
+		lastModified: '2026-08-13 09:00:00',
+	}]);
+});
+
+test('deal diagnostics reads Bitrix supply cards and application transfers without changing them', async () => {
+	const client = {
+		async call(method: string) {
+			if (method === 'crm.item.list') return { items: [{ id: 44, title: 'Поставка № 44', stageId: 'DT1110_114:NEW' }] };
+			if (method === 'entity.item.get') return [{
+				ID: '81', NAME: 'Перемещение #81', DETAIL_TEXT: JSON.stringify({
+					dealId: '37868', status: 'in_transit', fromStore: 'Склад А', toStore: 'Склад Б', createdAt: '2026-08-13T09:00:00Z',
+					createdByName: 'Сергей', lines: [{ productId: 18448, name: 'Камера', qty: 1 }], history: [{ at: '2026-08-13T09:00:00Z', status: 'in_transit', byId: '1' }],
+				}),
+			}];
+			if (method === 'crm.deal.get') return { ID: '37868', TITLE: 'Камера', UF_CRM_ALL_REALIZED: 'НЕТ' };
+			throw new Error(`unexpected ${method}`);
+		},
+	} as unknown as B24Client;
+	const result = await diagnoseAdminDealDocuments(client, erp, 37868);
+	assert.equal(result.applicationDocuments.supplyCards[0]?.title, 'Поставка № 44');
+	assert.equal(result.applicationDocuments.transfers[0]?.name, 'Перемещение #81');
+	assert.equal(result.applicationDocuments.transfers[0]?.items[0]?.qty, 1);
+	assert.deepEqual(result.applicationDocuments.errors, []);
 });
 
 test('deal document diagnostics explains an unsubmitted realization without changing it', async () => {

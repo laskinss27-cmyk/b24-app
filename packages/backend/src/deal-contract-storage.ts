@@ -90,9 +90,10 @@ async function migrateStoredContractFilename(
 	return migrated;
 }
 
-export async function listDealContractDocuments(
+async function listStoredDealContractDocuments(
 	dealId: number,
-	basePath = CONTRACT_DOCUMENTS_PATH,
+	basePath: string,
+	migrateFilenames: boolean,
 ): Promise<StoredDealContractDocument[]> {
 	const directory = storedContractDealDirectory(dealId, basePath);
 	let entries;
@@ -110,7 +111,7 @@ export async function listDealContractDocuments(
 					JSON.parse(await readFile(resolve(directory, entry.name), 'utf8')),
 					dealId,
 				);
-				return migrateStoredContractFilename(document, basePath);
+				return migrateFilenames ? migrateStoredContractFilename(document, basePath) : document;
 			} catch {
 				return null;
 			}
@@ -118,6 +119,21 @@ export async function listDealContractDocuments(
 	return documents
 		.filter((document): document is StoredDealContractDocument => document != null)
 		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function listDealContractDocuments(
+	dealId: number,
+	basePath = CONTRACT_DOCUMENTS_PATH,
+): Promise<StoredDealContractDocument[]> {
+	return listStoredDealContractDocuments(dealId, basePath, true);
+}
+
+/** Административная диагностика не должна даже попутно переписывать метаданные договора. */
+export async function listDealContractDocumentsReadOnly(
+	dealId: number,
+	basePath = CONTRACT_DOCUMENTS_PATH,
+): Promise<StoredDealContractDocument[]> {
+	return listStoredDealContractDocuments(dealId, basePath, false);
 }
 
 export async function readDealContractDocument(

@@ -4,6 +4,7 @@ export interface AdminDealDocumentSummary {
 	dealId: number;
 	planCount: number;
 	realizationCount: number;
+	relatedCount: number;
 	draftCount: number;
 	lastDocument: string;
 	lastModified: string;
@@ -24,7 +25,7 @@ export interface AdminDealDocumentItem {
 }
 
 export interface AdminDealDocument {
-	type: 'Sales Order' | 'Delivery Note';
+	type: 'Sales Order' | 'Delivery Note' | 'Material Request' | 'Purchase Order' | 'Purchase Receipt' | 'Stock Entry';
 	label: string;
 	name: string;
 	docstatus: number;
@@ -36,7 +37,23 @@ export interface AdminDealDocument {
 	creation: string;
 	modified: string;
 	total: number;
+	supplier: string;
+	supplyRequest: string;
+	purchaseOrder: string;
+	stockEntryType: string;
+	note: string;
 	items: AdminDealDocumentItem[];
+}
+
+export interface AdminDealApplicationDocuments {
+	contracts: Array<{ id: string; contractNumber: string; templateTitle: string; companyName: string; customerName: string; contractDate: string; createdAt: string; filename: string; total: number }>;
+	supplyCards: Array<{ id: number; title: string; stageId: string }>;
+	transfers: Array<{
+		id: number; name: string; status: string; fromStore: string; toStore: string; createdAt: string; createdByName: string;
+		supplyRequest: string; purchaseOrder: string; shipEntry: string; receiveEntry: string; note: string;
+		items: Array<{ productId: number; itemName: string; qty: number }>; historyCount: number;
+	}>;
+	errors: Array<{ source: 'contracts' | 'supply' | 'transfers'; message: string }>;
 }
 
 export interface AdminDealDocumentDiagnostic {
@@ -53,6 +70,7 @@ export interface AdminDealDocumentDiagnostic {
 		error: string | null;
 	};
 	documents: AdminDealDocument[];
+	applicationDocuments: AdminDealApplicationDocuments;
 	calculatedFulfillment: 'ДА' | 'НЕТ';
 	shortages: Array<{ productId: number; itemName: string; required: number; realized: number }>;
 	issues: Array<{ code: string; severity: 'info' | 'warning' | 'error'; title: string; details: string }>;

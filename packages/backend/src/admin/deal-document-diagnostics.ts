@@ -5,8 +5,9 @@ import type { ErpRealization } from '../erp/deal-realizations.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import type { PlanItem } from '../erp/deal-plan-state.js';
 import type { DiagnosticIssue } from './repair-diagnostics-model.js';
+import { readDealApplicationDocuments, type AdminDealApplicationDocuments } from './deal-application-documents.js';
 
-type DealDocumentType = 'Sales Order' | 'Delivery Note';
+type DealDocumentType = 'Sales Order' | 'Delivery Note' | 'Material Request' | 'Purchase Order' | 'Purchase Receipt' | 'Stock Entry';
 
 interface DocumentSpec {
 	type: DealDocumentType;
@@ -16,12 +17,17 @@ interface DocumentSpec {
 const DOCUMENT_SPECS: DocumentSpec[] = [
 	{ type: 'Sales Order', label: 'План сделки' },
 	{ type: 'Delivery Note', label: 'Реализация' },
+	{ type: 'Material Request', label: 'Заявка снабжению' },
+	{ type: 'Purchase Order', label: 'Заказ поставщику' },
+	{ type: 'Purchase Receipt', label: 'Приход от поставщика' },
+	{ type: 'Stock Entry', label: 'Складское перемещение' },
 ];
 
 export interface AdminDealDocumentSummary {
 	dealId: number;
 	planCount: number;
 	realizationCount: number;
+	relatedCount: number;
 	draftCount: number;
 	lastDocument: string;
 	lastModified: string;
@@ -54,6 +60,11 @@ export interface AdminDealDocument {
 	creation: string;
 	modified: string;
 	total: number;
+	supplier: string;
+	supplyRequest: string;
+	purchaseOrder: string;
+	stockEntryType: string;
+	note: string;
 	items: AdminDealDocumentItem[];
 }
 
@@ -71,6 +82,7 @@ export interface AdminDealDocumentDiagnostic {
 		error: string | null;
 	};
 	documents: AdminDealDocument[];
+	applicationDocuments: AdminDealApplicationDocuments;
 	calculatedFulfillment: DealFulfillmentValue;
 	shortages: Array<{ productId: number; itemName: string; required: number; realized: number }>;
 	issues: DiagnosticIssue[];
@@ -132,6 +144,7 @@ export async function searchAdminDealDocuments(erp: ErpClient, query: string, li
 				dealId,
 				planCount: documents.filter((document) => document.type === 'Sales Order').length,
 				realizationCount: documents.filter((document) => document.type === 'Delivery Note').length,
+				relatedCount: documents.filter((document) => document.type !== 'Sales Order' && document.type !== 'Delivery Note').length,
 				draftCount: documents.filter((document) => document.type === 'Delivery Note' && document.docstatus === 0).length,
 				lastDocument: recent?.name ?? '',
 				lastModified: recent?.modified ?? '',
@@ -178,6 +191,11 @@ function normalizeDocument(spec: DocumentSpec, raw: Record<string, unknown>): Ad
 		creation: String(raw['creation'] ?? ''),
 		modified: String(raw['modified'] ?? ''),
 		total: Number(raw['grand_total'] ?? 0),
+		supplier: String(raw['supplier'] ?? ''),
+		supplyRequest: String(raw['b24_supply_request'] ?? ''),
+		purchaseOrder: String(raw['b24_purchase_order'] ?? ''),
+		stockEntryType: String(raw['stock_entry_type'] ?? ''),
+		note: String(raw['b24_note'] ?? raw['remarks'] ?? ''),
 		items: (Array.isArray(raw['items']) ? raw['items'] : []).map((row) => normalizeItem(row as Record<string, unknown>)),
 	};
 }
@@ -245,7 +263,10 @@ function dealError(error: unknown): string {
 }
 
 export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClient, dealId: number): Promise<AdminDealDocumentDiagnostic> {
-	const documents = await readDocuments(erp, dealId);
+	const [documents, applicationDocuments] = await Promise.all([
+		readDocuments(erp, dealId),
+		readDealApplicationDocuments(client, dealId),
+	]);
 	let rawDeal: Record<string, unknown> | null = null;
 	let readError: string | null = null;
 	try {
@@ -268,6 +289,12 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 	if (drafts.length) issues.push({ code: 'realization_drafts', severity: 'warning', title: 'Есть непроведённые реализации', details: drafts.map((document) => document.name).join(', ') });
 	if (shortages.length) issues.push({ code: 'not_fully_realized', severity: 'warning', title: 'Не все позиции проведены', details: shortages.map((item) => `${item.itemName || `#${item.productId}`}: ${item.realized} из ${item.required}`).join('; ') });
 	if (fulfillmentField && fulfillmentField !== calculatedFulfillment) issues.push({ code: 'fulfillment_mismatch', severity: 'error', title: 'Техническое поле сделки не совпадает с ядром', details: `В Битрикс24: «${fulfillmentField}», по документам ядра: «${calculatedFulfillment}».` });
+	for (const error of applicationDocuments.errors) issues.push({
+		code: `application_documents_${error.source}`,
+		severity: 'warning',
+		title: 'Часть документов приложения недоступна',
+		details: `${error.source}: ${error.message}`,
+	});
 	return {
 		deal: {
 			id: dealId,
@@ -282,6 +309,7 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 			error: readError,
 		},
 		documents,
+		applicationDocuments,
 		calculatedFulfillment,
 		shortages,
 		issues,

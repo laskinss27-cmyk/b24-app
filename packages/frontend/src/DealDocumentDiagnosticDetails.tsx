@@ -1,5 +1,6 @@
 import { openDeal } from './b24.js';
 import type { AdminDealDocument, AdminDealDocumentDiagnostic } from './admin-deal-documents-api.js';
+import { DealRelatedDocumentSections } from './DealRelatedDocumentSections.js';
 
 function value(input: unknown): string {
 	return input === null || input === undefined || input === '' ? '—' : String(input);
@@ -22,9 +23,14 @@ function DocumentCard({ document }: { document: AdminDealDocument }): JSX.Elemen
 			</header>
 			<div className="admin-document-meta">
 				<span>Сумма: <b>{rub(document.total)}</b></span>
+				{document.supplier && <span>Поставщик: <b>{document.supplier}</b></span>}
+				{document.supplyRequest && <span>Заявка: <b>{document.supplyRequest}</b></span>}
+				{document.purchaseOrder && <span>Заказ поставщику: <b>{document.purchaseOrder}</b></span>}
+				{document.stockEntryType && <span>Тип движения: <b>{document.stockEntryType}</b></span>}
 				{document.returnAgainst && <span>Возврат к: <b>{document.returnAgainst}</b></span>}
 				{document.amendedFrom && <span>Исправляет: <b>{document.amendedFrom}</b></span>}
 			</div>
+			{document.note && <p className="admin-document-note">{document.note}</p>}
 			{document.items.length === 0 ? <p>В документе нет строк.</p> : (
 				<div className="admin-document-items-wrap"><table className="admin-document-items">
 					<thead><tr><th>Позиция</th><th>Код</th><th>Склад</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead>
@@ -40,6 +46,7 @@ function DocumentCard({ document }: { document: AdminDealDocument }): JSX.Elemen
 
 export function DealDocumentDiagnosticDetails({ diagnostic }: { diagnostic: AdminDealDocumentDiagnostic }): JSX.Element {
 	const { deal } = diagnostic;
+	const applicationCount = diagnostic.applicationDocuments.contracts.length + diagnostic.applicationDocuments.supplyCards.length + diagnostic.applicationDocuments.transfers.length;
 	return (
 		<div className="deal-document-diagnostic-details">
 			<section className="admin-diagnostic-summary">
@@ -53,7 +60,7 @@ export function DealDocumentDiagnosticDetails({ diagnostic }: { diagnostic: Admi
 
 			<section className="admin-panel admin-deal-actions">
 				<button type="button" className="btn-secondary" onClick={() => openDeal(deal.id)}>Открыть сделку</button>
-				<span>Документов в цепочке: {diagnostic.documents.length}</span>
+				<span>Документов в цепочке: {diagnostic.documents.length + applicationCount}</span>
 			</section>
 
 			<section className="admin-panel">
@@ -66,6 +73,8 @@ export function DealDocumentDiagnosticDetails({ diagnostic }: { diagnostic: Admi
 			<section className="admin-deal-documents">
 				{diagnostic.documents.length === 0 ? <div className="admin-panel"><p>Связанных документов ядра не найдено.</p></div> : diagnostic.documents.map((document) => <DocumentCard key={`${document.type}-${document.name}`} document={document} />)}
 			</section>
+
+			<DealRelatedDocumentSections documents={diagnostic.applicationDocuments} />
 
 			<details className="admin-raw-json"><summary>Диагностическая структура (JSON)</summary><pre>{JSON.stringify(diagnostic, null, 2)}</pre></details>
 		</div>

@@ -22,6 +22,7 @@ import {
 	type ContractParty,
 	type StoredDealContractDocument,
 } from './deal-contract.js';
+import { listDealContractDocumentsReadOnly } from './deal-contract-storage.js';
 
 const company: ContractParty = {
 	id: 578,
@@ -463,6 +464,37 @@ test('generated contracts are stored as independent deal documents', async () =>
 		);
 		assert.equal(stored.file.toString('utf8'), 'first contract');
 		await assert.rejects(() => readDealContractDocument(37495, first.id, directory));
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test('admin contract reading does not migrate stored metadata', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'b24-deal-contracts-readonly-'));
+	const document: StoredDealContractDocument = {
+		id: '68da1cb9-ed6f-4190-a366-a251fcb0ef37',
+		dealId: 37868,
+		contractNumber: '12',
+		templateId: 'universal_work',
+		templateTitle: 'Универсальный договор подряда',
+		companyId: 8,
+		companyName: 'ИП Поляков Д.Ю.',
+		customerName: 'Клиент',
+		contractDate: '13 августа 2026г.',
+		contractDateIso: '2026-08-13',
+		createdAt: '2026-08-13T09:00:00.000Z',
+		filename: 'legacy-name.docx',
+		vatRate: 5,
+		total: 1000,
+	};
+	try {
+		await saveDealContractDocument(document, Buffer.from('contract'), directory);
+		const listed = await listDealContractDocumentsReadOnly(document.dealId, directory);
+		assert.equal(listed[0]?.filename, 'legacy-name.docx');
+		assert.equal(
+			JSON.parse(await readFile(join(directory, String(document.dealId), `${document.id}.json`), 'utf8')).filename,
+			'legacy-name.docx',
+		);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
