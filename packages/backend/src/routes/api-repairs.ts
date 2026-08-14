@@ -18,6 +18,7 @@ import { registerRepairPresaleCreateRoute } from './repair-presale-create-route.
 import { registerRepairUpdateRoute } from './repair-update-route.js';
 import { registerRepairStatusUpdateRoute } from './repair-status-update-route.js';
 import { registerRepairClientRefusalRoute } from './repair-client-refusal-route.js';
+import { addRepairLinkToDealTimeline, buildRepairDeepLink } from '../repair-deal-link.js';
 
 export type { RepairKind, RepairStatus } from './repair-status.js';
 
@@ -56,17 +57,13 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
-	const repairLink = (id: number, repairNo: number): string => {
-		const configuredBase = String(process.env['REPAIRS_SECTION_URL'] ?? '').trim();
-		const appCode = String(app.config.appClientId ?? '').trim();
-		const base = configuredBase
-			|| (appCode
-				? `https://${app.config.portalDomain}/marketplace/view/${encodeURIComponent(appCode)}/`
-				: `https://${app.config.portalDomain}/devops/placement/568/`);
-		const url = new URL(base);
-		url.searchParams.set(base.includes('/marketplace/view/') ? 'params[repairId]' : 'repairId', String(id));
-		return `[URL=${url.toString()}]Открыть ремонт #${repairNo || id}[/URL]`;
-	};
+	const repairLink = (id: number, repairNo: number): string => buildRepairDeepLink({
+		portalDomain: app.config.portalDomain,
+		appClientId: app.config.appClientId,
+		configuredBase: process.env['REPAIRS_SECTION_URL'],
+		repairId: id,
+		repairNo,
+	});
 	const attachRepairLinkToCreatedDeal = async (
 		client: B24Client,
 		data: RepairData,
@@ -75,21 +72,16 @@ export function registerApiRepairsRoute(app: FastifyInstance): void {
 	): Promise<void> => {
 		if (!dealSync.created || !dealSync.dealId) return;
 		try {
-			await client.call('crm.deal.update', {
-				id: dealSync.dealId,
-				fields: {
-					COMMENTS: repairLink(repairId, data.repairNo),
-				},
-			});
+			await addRepairLinkToDealTimeline(client, dealSync.dealId, repairLink(repairId, data.repairNo));
 			app.log.info(
 				{ repairId, dealId: dealSync.dealId },
-				'[api/repairs] ссылка на ремонт добавлена в комментарий сделки',
+				'[api/repairs] ссылка на ремонт добавлена в ленту сделки',
 			);
 		} catch (error) {
 			// Ссылка полезна, но её временная ошибка не должна отменять уже созданные ремонт и сделку.
 			app.log.warn(
 				{ repairId, dealId: dealSync.dealId },
-				`[api/repairs] не удалось добавить ссылку в комментарий сделки — ${errInfo(error)}`,
+				`[api/repairs] не удалось добавить ссылку в ленту сделки — ${errInfo(error)}`,
 			);
 		}
 	};
