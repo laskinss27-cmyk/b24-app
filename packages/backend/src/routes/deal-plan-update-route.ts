@@ -7,7 +7,6 @@ import {
 	calculateDealPlanTotal,
 	listDealPlan,
 	syncDealRealizationPrices,
-	syncSupplyRequestQuantitiesFromDeal,
 	updateDealQuoteVariantItems,
 	upsertDealPlan,
 	type DealQuoteVariantItem,
@@ -19,7 +18,6 @@ interface AuthBody {
 }
 
 type DealClientFrom = (body: AuthBody) => B24Client | null;
-type SupplyTransferAllocation = (client: B24Client, dealId: number) => Promise<Map<string, Map<number, number>>>;
 type SyncDealTechnicalFields = (client: B24Client, erp: ErpClient, dealId: number) => Promise<void>;
 
 function errInfo(err: unknown): string {
@@ -29,7 +27,6 @@ function errInfo(err: unknown): string {
 export function registerDealPlanUpdateRoute(
 	app: FastifyInstance,
 	clientFrom: DealClientFrom,
-	supplyTransferAllocation: SupplyTransferAllocation,
 	syncDealTechnicalFields: SyncDealTechnicalFields,
 ): void {
 	// ПЕРЕЗАПИСАТЬ состав плана сделки целиком (из вкладки: правка кол-ва/цены, удаление строк) →
@@ -72,8 +69,6 @@ export function registerDealPlanUpdateRoute(
 			let savedPlan: Awaited<ReturnType<typeof upsertDealPlan>>;
 			try {
 				savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.lineKey ? { lineKey: l.lineKey } : {}) })), today);
-				const transferAllocation = await supplyTransferAllocation(client, dealId);
-				await syncSupplyRequestQuantitiesFromDeal(erp, { dealId, previousPlan, nextPlan: savedPlan.lines, transferAllocation });
 			} catch (error) {
 				await upsertDealPlan(erp, dealId, previousPlan, today).catch(() => undefined);
 				if (changedPrices.length) {

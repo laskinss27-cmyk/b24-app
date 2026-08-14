@@ -36,7 +36,6 @@ export function SupplyRequestLineEditor({
 		setBusy(true); setError('');
 		try {
 			await updateSupplyRequestLine({
-				dealId: Number(order.dealId),
 				requestName: order.name,
 				requestKey: order.requestKey,
 				...(item.rowName ? { rowName: item.rowName } : {}),
@@ -59,11 +58,12 @@ export function SupplyRequestLineEditor({
 			<button className="supply-line-edit" type="button" onClick={() => setOpen(true)}>изменить</button>
 			{open && <div className="supply-proto-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
 				<section className="supply-proto-modal supply-line-edit-modal" role="dialog" aria-modal="true" aria-label="Изменить позицию заявки" onMouseDown={(event) => event.stopPropagation()}>
-					<header><div><h2>Изменить позицию</h2><p>{order.name} · сделка #{order.dealId}</p></div><button type="button" disabled={busy} onClick={() => setOpen(false)}>×</button></header>
+					<header><div><h2>Изменить позицию</h2><p>{order.name} · источник: сделка #{order.dealId}</p></div><button type="button" disabled={busy} onClick={() => setOpen(false)}>×</button></header>
+					<p className="muted small">Изменение сохранится только в заявке снабжению. Состав сделки менеджер меняет отдельно.</p>
 					<label><span>Товар</span><input value={query} disabled={busy} onChange={(event) => { setQuery(event.target.value); setError(''); }} /></label>
 					{results.length > 0 && <div className="supply-line-search-results">{results.map((row) => <button key={row.id} type="button" onClick={() => { setSelected(row); setQuery(row.name); setResults([]); }}>{row.name}<small>#{row.id}</small></button>)}</div>}
 					<label><span>Количество в заявке</span><input type="number" min={minimum || 0.001} step="any" value={qty} disabled={busy} onChange={(event) => { setQty(event.target.value); setError(''); }} /><small>Уже распределено: {minimum}</small></label>
-					{selected.id !== item.productId && minimum > 0 && <p className="supply-order-review-error">Товар уже частично распределён и заменить его нельзя. Для остатка добавьте новую строку в сделке.</p>}
+					{selected.id !== item.productId && minimum > 0 && <p className="supply-order-review-error">Товар уже попал в закупку или перемещение и целиком заменить его нельзя. Необработанный остаток оформите отдельной строкой заявки.</p>}
 					{error && <p className="supply-order-review-error">{error}</p>}
 					<footer><button type="button" disabled={busy} onClick={() => setOpen(false)}>Отмена</button><button className="primary" type="button" disabled={busy || !selected.id || query.trim() !== selected.name || (selected.id !== item.productId && minimum > 0)} onClick={() => void save()}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></footer>
 				</section>

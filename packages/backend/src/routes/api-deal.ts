@@ -1,9 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
-import { parseTransferItem } from '../transfers/model.js';
 import { syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { syncDealServiceSum } from '../deal-service-sum.js';
 import { registerDealCoreRealizationRoute } from './deal-core-realization-route.js';
@@ -59,18 +57,6 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
-	const supplyTransferAllocation = async (client: B24Client, dealId: number): Promise<Map<string, Map<number, number>>> => {
-		await ensureTransfersEntity(client);
-		const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
-		const result = new Map<string, Map<number, number>>();
-		for (const transfer of (items ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId))) {
-			if (!transfer || transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || !transfer.supplyRequestKey) continue;
-			const byProduct = result.get(transfer.supplyRequestKey) ?? new Map<number, number>();
-			for (const line of transfer.lines) byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);
-			result.set(transfer.supplyRequestKey, byProduct);
-		}
-		return result;
-	};
 	const syncDealTechnicalFields = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
 		try {
 			const result = await syncDealFulfillmentStatus(client, erp, dealId);
@@ -100,11 +86,11 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 
 	registerDealQuoteVariantRoutes(app, clientFrom, syncDealTechnicalFields);
 
-	registerDealPlanUpdateRoute(app, clientFrom, supplyTransferAllocation, syncDealTechnicalFields);
+	registerDealPlanUpdateRoute(app, clientFrom, syncDealTechnicalFields);
 
 	registerDealPlanExportRoute(app, clientFrom);
 
-	registerDealPlanProductReplacementRoute(app, clientFrom, supplyTransferAllocation, syncDealTechnicalFields);
+	registerDealPlanProductReplacementRoute(app, clientFrom, syncDealTechnicalFields);
 
 	registerDealCommercialProposalRoute(app, clientFrom);
 	registerDealCommercialProposalFileRoutes(app, clientFrom);

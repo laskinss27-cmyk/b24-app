@@ -14,8 +14,6 @@ import {
 	SUPPLY_PURCHASE_ORDER_FIELD,
 	SUPPLY_PURCHASE_REQUEST_QTY_FIELD,
 	SUPPLY_PURCHASE_STAGE_FIELD,
-	SUPPLY_DEAL_LINE_KEY_FIELD,
-	SUPPLY_DEAL_QTY_FIELD,
 	SUPPLY_REQUEST_FIELD,
 	SUPPLY_REQUEST_KEY_FIELD,
 	appendDealStage,
@@ -74,7 +72,7 @@ import {
 	planTransferCompletion,
 	receiveTransferFromTransit,
 	reduceDealPlanForReturns,
-	replaceDealPlanSupplyProduct,
+	replaceDealPlanProduct,
 	removeDealStageItem,
 	renameDealQuoteVariant,
 	renameDealStage,
@@ -86,7 +84,6 @@ import {
 	submitInventoryAdjustment,
 	submitRealization,
 	syncDealRealizationPrices,
-	syncSupplyRequestQuantitiesFromDeal,
 	upsertDealPlan,
 	updateDealQuoteVariantItems,
 	updateDealStageItem,
@@ -94,7 +91,7 @@ import {
 	updateCoreCatalogPrices,
 	updatePurchaseOrderDraft,
 	updateSupplyPurchaseStage,
-	updateSupplyRequestLineAndDeal,
+	updateSupplyRequestLine,
 	updateSupplyRequestNote,
 	updateSupplyRequestStore,
 } from './operations.js';
@@ -327,15 +324,11 @@ test('supply request lifecycle keeps deal linkage, notes, stocks and destination
 		itemCode: row['item_code'],
 		qty: row['qty'],
 		warehouse: row['warehouse'],
-		lineKey: row[SUPPLY_DEAL_LINE_KEY_FIELD],
-		dealQty: row[SUPPLY_DEAL_QTY_FIELD],
 		description: row['description'],
 	})), [{
 		itemCode: '101',
 		qty: 2,
 		warehouse: 'Main - TEST',
-		lineKey: 'line-101',
-		dealQty: 5,
 		description: 'Белый корпус',
 	}]);
 
@@ -1583,7 +1576,7 @@ test('supply purchase receipt keeps limits, ERP payload and submit rollback', as
 	assert.deepEqual(deleted, ['PR-2']);
 });
 
-test('supply line quantity change applies the same delta to the deal plan', async () => {
+test('supply line quantity change updates only the request', async () => {
 	const erp = new SupplyWorkflowFake();
 	const created = await createSupplyRequest(erp.asClient(), {
 		dealId: 501,
@@ -1591,8 +1584,7 @@ test('supply line quantity change applies the same delta to the deal plan', asyn
 		lines: [{ productId: 101, qty: 2 }],
 	});
 	const request = erp.requestDoc(created.name)!;
-	const result = await updateSupplyRequestLineAndDeal(erp.asClient(), {
-		dealId: 501,
+	const result = await updateSupplyRequestLine(erp.asClient(), {
 		requestName: created.name,
 		requestKey: `${created.name}@${String(request['creation'])}`,
 		rowName: String((request['items'] as Array<Record<string, unknown>>)[0]?.['name']),
@@ -1600,52 +1592,77 @@ test('supply line quantity change applies the same delta to the deal plan', asyn
 		nextProductId: 101,
 		nextItemName: 'Product 101',
 		nextQty: 3,
-		deliveryDate: '2026-08-25',
 	});
-	assert.deepEqual(result, { dealQty: 6 });
-	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 6);
+	assert.deepEqual(result, { requestQty: 3 });
+	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 5);
 	const updatedRow = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
 	assert.equal(updatedRow['qty'], 3);
-	assert.equal(updatedRow[SUPPLY_DEAL_QTY_FIELD], 6);
 });
 
-test('deal quantity synchronization preserves the request delta and line identity', async () => {
-	const erp = new SupplyWorkflowFake();
-	const created = await createSupplyRequest(erp.asClient(), {
-		dealId: 501,
-		scheduleDate: '2026-08-25',
-		lines: [{ productId: 101, qty: 4 }],
-	});
-	const changed = await syncSupplyRequestQuantitiesFromDeal(erp.asClient(), {
-		dealId: 501,
-		previousPlan: [{
-			productId: 101,
-			itemName: 'Product 101',
-			qty: 5,
-			rate: 100,
-			priceListRate: 100,
-			discountPercent: 0,
-			delivered: 0,
-			isService: false,
-			lineKey: 'line-101',
-		}],
-		nextPlan: [{ productId: 101, itemName: 'Product 101', qty: 3, priceListRate: 100, discountPercent: 0, lineKey: 'line-101' }],
-	});
-	assert.equal(changed, 1);
-	const row = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
-	assert.equal(row['qty'], 3);
-	assert.equal(row[SUPPLY_DEAL_LINE_KEY_FIELD], 'line-101');
-	assert.equal(row[SUPPLY_DEAL_QTY_FIELD], 3);
-});
-
-test('manager product replacement updates both the plan and every open supply request', async () => {
+test('supply product replacement updates only the request', async () => {
 	const erp = new SupplyWorkflowFake();
 	const created = await createSupplyRequest(erp.asClient(), {
 		dealId: 501,
 		scheduleDate: '2026-08-25',
 		lines: [{ productId: 101, qty: 2 }],
 	});
-	const plan = await replaceDealPlanSupplyProduct(erp.asClient(), {
+	const request = erp.requestDoc(created.name)!;
+	await updateSupplyRequestLine(erp.asClient(), {
+		requestName: created.name,
+		requestKey: `${created.name}@${String(request['creation'])}`,
+		rowName: String((request['items'] as Array<Record<string, unknown>>)[0]?.['name']),
+		productId: 101,
+		nextProductId: 202,
+		nextItemName: 'Product 202',
+		nextQty: 2,
+	});
+	const requestRow = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
+	assert.equal(requestRow['item_code'], '202');
+	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['item_code'], '101');
+});
+
+test('downstream allocation still protects the request line itself', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 2 }],
+	});
+	const request = erp.requestDoc(created.name)!;
+	const requestKey = `${created.name}@${String(request['creation'])}`;
+	await assert.rejects(updateSupplyRequestLine(erp.asClient(), {
+		requestName: created.name,
+		requestKey,
+		productId: 101,
+		nextProductId: 202,
+		nextItemName: 'Product 202',
+		nextQty: 2,
+		transferAllocation: new Map([[requestKey, new Map([[101, 1]])]]),
+	}), /уже распределён/);
+});
+
+test('deal quantity change leaves the existing supply request unchanged', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 4 }],
+	});
+	await upsertDealPlan(erp.asClient(), 501, [
+		{ productId: 101, itemName: 'Product 101', qty: 3, priceListRate: 100, discountPercent: 0, lineKey: 'line-101' },
+	], '2026-08-25');
+	const row = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
+	assert.equal(row['qty'], 4);
+});
+
+test('manager product replacement updates only the deal plan', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 2 }],
+	});
+	const plan = await replaceDealPlanProduct(erp.asClient(), {
 		dealId: 501,
 		oldProductId: 101,
 		newProductId: 202,
@@ -1656,9 +1673,8 @@ test('manager product replacement updates both the plan and every open supply re
 		{ productId: 202, qty: 5, lineKey: 'line-101' },
 	]);
 	const row = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
-	assert.equal(row['item_code'], '202');
-	assert.equal(row[SUPPLY_DEAL_LINE_KEY_FIELD], 'line-101');
-	assert.equal(row[SUPPLY_DEAL_QTY_FIELD], 5);
+	assert.equal(row['item_code'], '101');
+	assert.equal(row['qty'], 2);
 });
 
 test('marketplace old ID is editable, clearable and unique across active products', async () => {

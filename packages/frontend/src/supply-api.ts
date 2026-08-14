@@ -95,7 +95,6 @@ export async function updateSupplyOrderStore(requestName: string, requestKey: st
 }
 
 export async function updateSupplyRequestLine(input: {
-	dealId: number;
 	requestName: string;
 	requestKey: string;
 	rowName?: string;
@@ -103,15 +102,14 @@ export async function updateSupplyRequestLine(input: {
 	nextProductId: number;
 	nextItemName: string;
 	nextQty: number;
-}): Promise<number> {
+}): Promise<void> {
 	const res = await fetch('/api/supply/request-line', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), ...input }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; dealQty?: number };
+	const json = (await res.json()) as { ok: boolean; error?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось изменить строку заявки');
-	return Number(json.dealQty ?? 0);
 }
 
 export async function createSupplyDocuments(args: { requestName: string; requestKey: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {

@@ -82,7 +82,7 @@ test('supply request edits and partial document errors preserve current values a
 	const requests = captureResponses([
 		{ ok: true },
 		{ ok: true },
-		{ ok: true, dealQty: '3.5' },
+		{ ok: true, requestQty: '3.5' },
 		{
 			ok: false,
 			error: 'частичное выполнение',
@@ -95,7 +95,6 @@ test('supply request edits and partial document errors preserve current values a
 	assert.equal(await updateSupplyOrderNote('MR-1', 'Комментарий'), '');
 	assert.equal(await updateSupplyOrderStore('MR-1', 'request-key', 'Точка 2'), 'Точка 2');
 	assert.equal(await updateSupplyRequestLine({
-		dealId: 91,
 		requestName: 'MR-1',
 		requestKey: 'request-key',
 		rowName: 'ROW-1',
@@ -103,7 +102,7 @@ test('supply request edits and partial document errors preserve current values a
 		nextProductId: 18,
 		nextItemName: 'Новый товар',
 		nextQty: 3,
-	}), 3.5);
+	}), undefined);
 	await assert.rejects(
 		createSupplyDocuments({
 			requestName: 'MR-1', requestKey: 'request-key', dealId: 91, toStore: 'Точка 2',
@@ -117,6 +116,17 @@ test('supply request edits and partial document errors preserve current values a
 		'/api/supply/request-line',
 		'/api/supply/create-documents',
 	]);
+	assert.deepEqual(requests[2]?.body, {
+		domain: 'mobile.example',
+		accessToken: 'supply-token',
+		requestName: 'MR-1',
+		requestKey: 'request-key',
+		rowName: 'ROW-1',
+		productId: 17,
+		nextProductId: 18,
+		nextItemName: 'Новый товар',
+		nextQty: 3,
+	});
 });
 
 test('successful supply document creation preserves empty collection fallbacks', async () => {

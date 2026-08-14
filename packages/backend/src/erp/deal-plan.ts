@@ -135,6 +135,48 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 	});
 }
 
+/** Заменить товар только в рабочем составе сделки.
+ *  Уже созданные заявки снабжению являются самостоятельными документами и здесь не меняются. */
+export async function replaceDealPlanProduct(
+	erp: ErpClient,
+	args: {
+		dealId: number;
+		oldProductId: number;
+		newProductId: number;
+		newItemName: string;
+		deliveryDate: string;
+	},
+): Promise<PlanItem[]> {
+	if (args.oldProductId === args.newProductId) return listDealPlan(erp, args.dealId);
+	const previousPlan = await listDealPlan(erp, args.dealId);
+	const source = previousPlan.find((line) => line.productId === args.oldProductId);
+	if (!source) throw new Error('заменяемая позиция больше не найдена в сделке');
+	if (previousPlan.some((line) => line.productId === args.newProductId)) {
+		throw new Error('новый товар уже есть в сделке отдельной строкой');
+	}
+	const nextPlan = previousPlan.map((line): PlanLine => line === source
+		? {
+			productId: args.newProductId,
+			itemName: args.newItemName || `#${args.newProductId}`,
+			qty: line.qty,
+			priceListRate: line.priceListRate,
+			discountPercent: line.discountPercent,
+			isService: line.isService,
+			lineKey: line.lineKey,
+		}
+		: {
+			productId: line.productId,
+			itemName: line.itemName,
+			qty: line.qty,
+			priceListRate: line.priceListRate,
+			discountPercent: line.discountPercent,
+			isService: line.isService,
+			lineKey: line.lineKey,
+		});
+	await upsertDealPlan(erp, args.dealId, nextPlan, args.deliveryDate);
+	return listDealPlan(erp, args.dealId);
+}
+
 const emptyDealQuoteVariants = (): DealQuoteVariants => ({ enabled: false, selectedId: null, variants: [] });
 
 function parseDealQuoteVariants(raw: unknown): DealQuoteVariants {

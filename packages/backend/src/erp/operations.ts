@@ -34,6 +34,7 @@ export {
 	listDealPlan,
 	listDealQuoteVariants,
 	listDealStages,
+	replaceDealPlanProduct,
 	reduceDealPlanForReturns,
 	removeDealStageItem,
 	renameDealQuoteVariant,
@@ -58,15 +59,11 @@ export type {
 	RealizationPriceSyncResult,
 } from './deal-realizations.js';
 export {
-	SUPPLY_DEAL_LINE_KEY_FIELD,
-	SUPPLY_DEAL_QTY_FIELD,
 	createSupplyRequest,
 	listSupplyOrders,
 	listSupplyRequests,
 	listSupplyRequestsForDeal,
-	replaceDealPlanSupplyProduct,
-	syncSupplyRequestQuantitiesFromDeal,
-	updateSupplyRequestLineAndDeal,
+	updateSupplyRequestLine,
 	updateSupplyRequestNote,
 	updateSupplyRequestStore,
 } from './supply-requests.js';

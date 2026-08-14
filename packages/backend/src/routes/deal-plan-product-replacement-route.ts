@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
 import { setDealB24Service } from '../deal-product-catalog.js';
 import { ErpClient } from '../erp/client.js';
-import { assertDealQuoteVariantSelected, calculateDealPlanTotal, replaceDealPlanSupplyProduct } from '../erp/operations.js';
+import { assertDealQuoteVariantSelected, calculateDealPlanTotal, replaceDealPlanProduct } from '../erp/operations.js';
 
 interface AuthBody {
 	domain?: string;
@@ -10,7 +10,6 @@ interface AuthBody {
 }
 
 type DealClientFrom = (body: AuthBody) => B24Client | null;
-type SupplyTransferAllocation = (client: B24Client, dealId: number) => Promise<Map<string, Map<number, number>>>;
 type SyncDealTechnicalFields = (client: B24Client, erp: ErpClient, dealId: number) => Promise<void>;
 
 function errInfo(err: unknown): string {
@@ -20,7 +19,6 @@ function errInfo(err: unknown): string {
 export function registerDealPlanProductReplacementRoute(
 	app: FastifyInstance,
 	clientFrom: DealClientFrom,
-	supplyTransferAllocation: SupplyTransferAllocation,
 	syncDealTechnicalFields: SyncDealTechnicalFields,
 ): void {
 	app.post('/api/deal/replace-plan-product', async (req, reply) => {
@@ -37,14 +35,12 @@ export function registerDealPlanProductReplacementRoute(
 		}
 		try {
 			await assertDealQuoteVariantSelected(erp, dealId);
-			const transferAllocation = await supplyTransferAllocation(client, dealId);
-			const plan = await replaceDealPlanSupplyProduct(erp, {
+			const plan = await replaceDealPlanProduct(erp, {
 				dealId,
 				oldProductId,
 				newProductId,
 				newItemName: String(b.newItemName ?? '').trim(),
 				deliveryDate: new Date().toISOString().slice(0, 10),
-				transferAllocation,
 			});
 			const total = await calculateDealPlanTotal(erp, dealId);
 			await setDealB24Service(client, dealId, total);

@@ -1,6 +1,5 @@
 import { ErpClient } from './client.js';
-import { ensurePlanField, type PlanItem, type PlanLine } from './deal-plan-state.js';
-import { listDealPlan, upsertDealPlan } from './deal-plan.js';
+import { ensurePlanField } from './deal-plan-state.js';
 import { DEAL_FIELD, ensureErpSetup } from './erp-setup.js';
 import { ensureCoreItem, fetchErpStocks } from './stock-catalog.js';
 import { NOTE_FIELD, ensureNoteField } from './stock-movements.js';
@@ -11,29 +10,6 @@ import {
 	ensurePurchaseFields,
 } from './supply-purchases.js';
 import { erpContext, erpWarehouse } from './warehouse-context.js';
-import {
-	assertProductReplaceAllowed,
-	quantityFromDealChange,
-	quantityFromSupplyChange,
-	resolveDealQtyAtSync,
-} from '../supply/line-sync.js';
-
-export const SUPPLY_DEAL_LINE_KEY_FIELD = 'b24_deal_line_key';
-export const SUPPLY_DEAL_QTY_FIELD = 'b24_deal_qty';
-
-
-
-function planDraft(line: PlanItem): PlanLine {
-	return {
-		productId: line.productId,
-		itemName: line.itemName,
-		qty: line.qty,
-		priceListRate: line.priceListRate,
-		discountPercent: line.discountPercent,
-		isService: line.isService,
-		lineKey: line.lineKey,
-	};
-}
 
 async function requestLineAllocation(
 	erp: ErpClient,
@@ -46,73 +22,11 @@ async function requestLineAllocation(
 	return (purchases.get(productId) ?? 0) + (transferAllocation?.get(requestKey)?.get(productId) ?? 0);
 }
 
-/** Менеджер заменяет товар: та же необработанная строка меняется в плане и открытых заявках. */
-export async function replaceDealPlanSupplyProduct(
+/** Изменить строку только в заявке снабжению.
+ *  Состав сделки не читается и не меняется; уже распределённое вниз количество остаётся защитной границей. */
+export async function updateSupplyRequestLine(
 	erp: ErpClient,
 	args: {
-		dealId: number;
-		oldProductId: number;
-		newProductId: number;
-		newItemName: string;
-		deliveryDate: string;
-		transferAllocation?: SupplyAllocationMap;
-	},
-): Promise<PlanItem[]> {
-	if (args.oldProductId === args.newProductId) return listDealPlan(erp, args.dealId);
-	const previousPlan = await listDealPlan(erp, args.dealId);
-	const source = previousPlan.find((line) => line.productId === args.oldProductId);
-	if (!source) throw new Error('заменяемая позиция больше не найдена в сделке');
-	if (previousPlan.some((line) => line.productId === args.newProductId)) throw new Error('новый товар уже есть в сделке отдельной строкой');
-	const headers = await erp.list<Record<string, unknown>>(
-		'Material Request',
-		['name', 'status'],
-		[['docstatus', '!=', 2], [DEAL_FIELD, '=', String(args.dealId)]],
-		0,
-		'creation desc',
-	);
-	const requestUpdates: Array<{ name: string; before: Record<string, unknown>[]; after: Record<string, unknown>[] }> = [];
-	for (const header of headers) {
-		if (/stopped|transferred|issued|received|completed/i.test(String(header['status'] ?? ''))) continue;
-		const name = String(header['name'] ?? '');
-		const request = await erp.get<Record<string, unknown>>('Material Request', name);
-		if (!request) continue;
-		const requestKey = materialRequestKey(name, request['creation']);
-		const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
-		const target = rawItems.find((item) =>
-			String(item[SUPPLY_DEAL_LINE_KEY_FIELD] ?? '') === source.lineKey || Number(item['item_code']) === source.productId);
-		if (!target) continue;
-		const allocatedQty = await requestLineAllocation(erp, name, requestKey, source.productId, args.transferAllocation);
-		assertProductReplaceAllowed(allocatedQty);
-		requestUpdates.push({
-			name,
-			before: rawItems.map((item) => requestItemPayload(item, {})),
-			after: rawItems.map((item) => requestItemPayload(item, item === target ? {
-				item_code: String(args.newProductId),
-				[SUPPLY_DEAL_LINE_KEY_FIELD]: source.lineKey,
-				[SUPPLY_DEAL_QTY_FIELD]: source.qty,
-			} : {})),
-		});
-	}
-	await ensureCoreItem(erp, { productId: args.newProductId, name: args.newItemName || `#${args.newProductId}` });
-	const nextPlan = previousPlan.map((line): PlanLine => line === source
-		? { ...planDraft(line), productId: args.newProductId, itemName: args.newItemName || `#${args.newProductId}` }
-		: planDraft(line));
-	await upsertDealPlan(erp, args.dealId, nextPlan, args.deliveryDate);
-	try {
-		for (const update of requestUpdates) await erp.update('Material Request', update.name, { items: update.after });
-	} catch (error) {
-		await upsertDealPlan(erp, args.dealId, previousPlan.map(planDraft), args.deliveryDate).catch(() => undefined);
-		for (const update of requestUpdates) await erp.update('Material Request', update.name, { items: update.before }).catch(() => undefined);
-		throw error;
-	}
-	return listDealPlan(erp, args.dealId);
-}
-
-/** Снабжение меняет необработанную строку заявки; дельта количества переносится в сделку. */
-export async function updateSupplyRequestLineAndDeal(
-	erp: ErpClient,
-	args: {
-		dealId: number;
 		requestName: string;
 		requestKey: string;
 		rowName?: string;
@@ -120,65 +34,33 @@ export async function updateSupplyRequestLineAndDeal(
 		nextProductId: number;
 		nextItemName: string;
 		nextQty: number;
-		deliveryDate: string;
 		transferAllocation?: SupplyAllocationMap;
 	},
-): Promise<{ dealQty: number }> {
+): Promise<{ requestQty: number }> {
 	const request = await erp.get<Record<string, unknown>>('Material Request', args.requestName);
 	if (!request || materialRequestKey(args.requestName, request['creation']) !== args.requestKey) throw new Error('заявка была изменена; обновите список');
 	const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
 	const target = rawItems.find((item) =>
 		(args.rowName && String(item['name'] ?? '') === args.rowName) || Number(item['item_code']) === args.productId);
 	if (!target) throw new Error('позиция больше не найдена в заявке');
-	const plan = await listDealPlan(erp, args.dealId);
-	const storedKey = String(target[SUPPLY_DEAL_LINE_KEY_FIELD] ?? '').trim();
-	const planLine = (storedKey ? plan.find((line) => line.lineKey === storedKey) : undefined)
-		?? plan.find((line) => line.productId === args.productId);
 	const requestQty = Number(target['qty'] ?? 0);
 	const allocatedQty = Math.min(requestQty, await requestLineAllocation(erp, args.requestName, args.requestKey, args.productId, args.transferAllocation));
-	if (!planLine) {
-		const existingReplacement = !storedKey && args.nextProductId !== args.productId
-			? plan.find((line) => line.productId === args.nextProductId)
-			: undefined;
-		if (!existingReplacement) throw new Error('связанная позиция больше не найдена в сделке');
-		assertProductReplaceAllowed(allocatedQty);
-		if (args.nextQty - existingReplacement.qty > 0.000001) {
-			throw new Error(`в сделке новой позиции только ${existingReplacement.qty}; заявка не может быть больше`);
-		}
-		await ensureCoreItem(erp, { productId: args.nextProductId, name: args.nextItemName || `#${args.nextProductId}` });
-		const after = rawItems.map((item) => requestItemPayload(item, item === target ? {
-			item_code: String(args.nextProductId),
-			qty: args.nextQty,
-			[SUPPLY_DEAL_LINE_KEY_FIELD]: existingReplacement.lineKey,
-			[SUPPLY_DEAL_QTY_FIELD]: existingReplacement.qty,
-		} : {}));
-		await erp.update('Material Request', args.requestName, { items: after });
-		return { dealQty: existingReplacement.qty };
+	if (args.nextQty + 0.000001 < allocatedQty) {
+		throw new Error(`нельзя уменьшить ниже уже распределённого количества ${allocatedQty}`);
 	}
-	if (args.nextProductId !== args.productId) assertProductReplaceAllowed(allocatedQty);
-	const dealQty = quantityFromSupplyChange({ dealQty: planLine.qty, requestQty, nextRequestQty: args.nextQty, allocatedQty });
-	if (dealQty <= 0.000001) throw new Error('позицию нельзя обнулить из снабжения; удалите или замените её в сделке');
-	if (plan.some((line) => line !== planLine && line.productId === args.nextProductId)) throw new Error('новый товар уже есть в сделке отдельной строкой');
+	if (args.nextProductId !== args.productId && allocatedQty > 0.000001) {
+		throw new Error(`товар уже распределён в количестве ${allocatedQty}; менять можно только ещё не обработанную строку`);
+	}
+	if (rawItems.some((item) => item !== target && Number(item['item_code']) === args.nextProductId)) {
+		throw new Error('новый товар уже есть в заявке отдельной строкой');
+	}
 	await ensureCoreItem(erp, { productId: args.nextProductId, name: args.nextItemName || `#${args.nextProductId}` });
-	const nextPlan = plan.map((line): PlanLine => line === planLine
-		? { ...planDraft(line), productId: args.nextProductId, itemName: args.nextItemName || `#${args.nextProductId}`, qty: dealQty }
-		: planDraft(line));
-	await upsertDealPlan(erp, args.dealId, nextPlan, args.deliveryDate);
-	const before = rawItems.map((item) => requestItemPayload(item, {}));
 	const after = rawItems.map((item) => requestItemPayload(item, item === target ? {
 		item_code: String(args.nextProductId),
 		qty: args.nextQty,
-		[SUPPLY_DEAL_LINE_KEY_FIELD]: planLine.lineKey,
-		[SUPPLY_DEAL_QTY_FIELD]: dealQty,
 	} : {}));
-	try {
-		await erp.update('Material Request', args.requestName, { items: after });
-	} catch (error) {
-		await upsertDealPlan(erp, args.dealId, plan.map(planDraft), args.deliveryDate).catch(() => undefined);
-		await erp.update('Material Request', args.requestName, { items: before }).catch(() => undefined);
-		throw error;
-	}
-	return { dealQty };
+	await erp.update('Material Request', args.requestName, { items: after });
+	return { requestQty: args.nextQty };
 }
 
 
@@ -239,21 +121,10 @@ async function ensureMrField(erp: ErpClient): Promise<void> {
 			insert_after: DEAL_FIELD, in_list_view: 1,
 		});
 	}
-	for (const [fieldname, label, fieldtype, insertAfter] of [
-		[SUPPLY_DEAL_LINE_KEY_FIELD, 'B24 Deal Line Key', 'Data', 'item_code'],
-		[SUPPLY_DEAL_QTY_FIELD, 'B24 Deal Qty', 'Float', SUPPLY_DEAL_LINE_KEY_FIELD],
-	] as const) {
-		const name = `Material Request Item-${fieldname}`;
-		if (!(await erp.get('Custom Field', name))) {
-			await erp.create('Custom Field', {
-				dt: 'Material Request Item', fieldname, label, fieldtype, insert_after: insertAfter, read_only: 1,
-			});
-		}
-	}
 	mrFieldDone = true;
 }
 
-export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string; dealLineKey?: string; dealQty?: number }
+export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string }
 
 /** Создать заявку в снабжение (Material Request, тип Purchase) по выбранным товарам сделки. */
 export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string }): Promise<{ name: string }> {
@@ -263,8 +134,6 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 	if (args.note) await ensureNoteField(erp, 'Material Request');
 	if (!args.lines.length) throw new Error('пустая заявка');
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
-	const plan = await listDealPlan(erp, args.dealId);
-	const planByProduct = new Map(plan.map((line) => [line.productId, line]));
 	const doc = await erp.create('Material Request', {
 		company: ctx.company,
 		material_request_type: 'Purchase',
@@ -277,15 +146,13 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 			qty: l.qty,
 			schedule_date: args.scheduleDate,
 			...(args.toStore ? { warehouse: erpWarehouse(ctx, args.toStore) } : {}),
-			[SUPPLY_DEAL_LINE_KEY_FIELD]: l.dealLineKey?.trim() || planByProduct.get(l.productId)?.lineKey || '',
-			[SUPPLY_DEAL_QTY_FIELD]: Number.isFinite(l.dealQty) ? l.dealQty : (planByProduct.get(l.productId)?.qty ?? l.qty),
 			...(l.note ? { description: l.note } : {}),
 		})),
 	});
 	return { name: String(doc['name']) };
 }
 
-export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number>; rowName: string; dealLineKey: string; dealQty: number }
+export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number>; rowName: string }
 export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; items: SupplyReqItem[] }
 export interface SupplyRequestSummary {
 	name: string;
@@ -357,8 +224,6 @@ export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[
 				note: String(it['description'] ?? ''),
 				stocks: stocks.get(productId) ?? {},
 				rowName: String(it['name'] ?? ''),
-				dealLineKey: String(it[SUPPLY_DEAL_LINE_KEY_FIELD] ?? ''),
-				dealQty: Number(it[SUPPLY_DEAL_QTY_FIELD] ?? it['qty'] ?? 0),
 			};
 		});
 		out.push({
@@ -463,94 +328,5 @@ function requestItemPayload(item: Record<string, unknown>, patch: Record<string,
 		schedule_date: String(item['schedule_date'] ?? ''),
 		description: String(item['description'] ?? ''),
 		warehouse: String(patch['warehouse'] ?? item['warehouse'] ?? ''),
-		[SUPPLY_DEAL_LINE_KEY_FIELD]: String(patch[SUPPLY_DEAL_LINE_KEY_FIELD] ?? item[SUPPLY_DEAL_LINE_KEY_FIELD] ?? ''),
-		[SUPPLY_DEAL_QTY_FIELD]: Number(patch[SUPPLY_DEAL_QTY_FIELD] ?? item[SUPPLY_DEAL_QTY_FIELD] ?? item['qty'] ?? 0),
 	};
-}
-
-/**
- * Переносит изменение количества рабочего состава сделки в ещё открытую потребность снабжения.
- * Уже созданные закупки и перемещения не переписываются: они образуют нижнюю границу.
- */
-export async function syncSupplyRequestQuantitiesFromDeal(
-	erp: ErpClient,
-	args: {
-		dealId: number;
-		previousPlan: readonly PlanItem[];
-		nextPlan: readonly PlanLine[];
-		transferAllocation?: SupplyAllocationMap;
-	},
-): Promise<number> {
-	await ensureMrField(erp);
-	const previousByKey = new Map(args.previousPlan.map((line) => [line.lineKey, line]));
-	const previousByProduct = new Map(args.previousPlan.map((line) => [line.productId, line]));
-	const nextByKey = new Map(args.nextPlan.flatMap((line) => line.lineKey ? [[line.lineKey, line] as const] : []));
-	const nextByProduct = new Map(args.nextPlan.map((line) => [line.productId, line]));
-	const headers = await erp.list<Record<string, unknown>>(
-		'Material Request',
-		['name', 'status'],
-		[['docstatus', '!=', 2], [DEAL_FIELD, '=', String(args.dealId)]],
-		0,
-		'creation desc',
-	);
-	const pending: Array<{ name: string; before: Record<string, unknown>[]; after: Record<string, unknown>[] }> = [];
-	for (const header of headers) {
-		if (/stopped|transferred|issued|received|completed/i.test(String(header['status'] ?? ''))) continue;
-		const name = String(header['name'] ?? '');
-		const request = await erp.get<Record<string, unknown>>('Material Request', name);
-		if (!request) continue;
-		const requestKey = materialRequestKey(name, request['creation']);
-		const purchaseAllocation = await purchaseAllocationForRequest(erp, name, requestKey);
-		const transferAllocation = args.transferAllocation?.get(requestKey) ?? new Map<number, number>();
-		const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
-		let dirty = false;
-		const items: Record<string, unknown>[] = [];
-		for (const item of rawItems) {
-			const productId = Number(item['item_code']);
-			const storedKey = String(item[SUPPLY_DEAL_LINE_KEY_FIELD] ?? '').trim();
-			const previous = (storedKey ? previousByKey.get(storedKey) : undefined) ?? previousByProduct.get(productId);
-			const lineKey = storedKey || previous?.lineKey || '';
-			const next = (lineKey ? nextByKey.get(lineKey) : undefined) ?? nextByProduct.get(productId);
-			if (!previous) {
-				items.push(requestItemPayload(item, {}));
-				continue;
-			}
-			const requestQty = Number(item['qty'] ?? 0);
-			if (!next) {
-				const allocatedQty = Math.min(requestQty, (purchaseAllocation.get(productId) ?? 0) + (transferAllocation.get(productId) ?? 0));
-				assertProductReplaceAllowed(allocatedQty);
-				dirty = true;
-				continue;
-			}
-			const storedDealQty = Number(item[SUPPLY_DEAL_QTY_FIELD]);
-			const hasStoredDealQty = Number.isFinite(storedDealQty) && storedDealQty > 0.000001;
-			const dealQtyAtSync = resolveDealQtyAtSync(item[SUPPLY_DEAL_QTY_FIELD], previous.qty);
-			const allocatedQty = Math.min(requestQty, (purchaseAllocation.get(productId) ?? 0) + (transferAllocation.get(productId) ?? 0));
-			const nextQty = quantityFromDealChange({ requestQty, dealQtyAtSync, nextDealQty: next.qty, allocatedQty });
-			if (nextQty <= 0.000001) {
-				dirty = true;
-				continue;
-			}
-			if (Math.abs(nextQty - requestQty) > 0.000001 || Math.abs(next.qty - dealQtyAtSync) > 0.000001 || !storedKey || !hasStoredDealQty) dirty = true;
-			items.push(requestItemPayload(item, {
-				qty: nextQty,
-				[SUPPLY_DEAL_LINE_KEY_FIELD]: lineKey,
-				[SUPPLY_DEAL_QTY_FIELD]: next.qty,
-			}));
-		}
-		if (!dirty) continue;
-		if (!items.length) throw new Error(`заявка ${name} останется пустой; сначала замените её последнюю позицию`);
-		pending.push({ name, before: rawItems.map((item) => requestItemPayload(item, {})), after: items });
-	}
-	const applied: typeof pending = [];
-	try {
-		for (const update of pending) {
-			await erp.update('Material Request', update.name, { items: update.after });
-			applied.push(update);
-		}
-	} catch (error) {
-		for (const update of applied.reverse()) await erp.update('Material Request', update.name, { items: update.before }).catch(() => undefined);
-		throw error;
-	}
-  return pending.length;
 }

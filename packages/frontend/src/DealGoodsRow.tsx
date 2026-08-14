@@ -76,7 +76,7 @@ export function DealGoodsRow({
 						className="row-del-x"
 						disabled={controlsDisabled}
 						onClick={onReplace}
-						title="Заменить товар одновременно в сделке и необработанной заявке снабжению"
+						title="Заменить товар только в сделке. Заявка снабжению не изменится"
 					>↔</button>}
 					{workingMode && <input
 						type="checkbox"

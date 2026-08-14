@@ -3,16 +3,14 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	assertDealQuoteVariantSelected,
-	calculateDealPlanTotal,
 	createSupplyRequest,
 	listSupplyRequests,
-	updateSupplyRequestLineAndDeal,
+	updateSupplyRequestLine,
 	updateSupplyRequestNote,
 	updateSupplyRequestStore,
 } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
-import { setDealB24CollapsedService } from '../deal-service.js';
 import { canManageStock } from './api-stock.js';
 import type { AuthBody, TransferProgress } from './api-supply-types.js';
 import {
@@ -125,7 +123,6 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 
 	app.post('/api/supply/request-line', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & {
-			dealId?: unknown;
 			requestName?: unknown;
 			requestKey?: unknown;
 			rowName?: unknown;
@@ -141,13 +138,12 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
-		const dealId = Number(b.dealId);
 		const productId = Number(b.productId);
 		const nextProductId = Number(b.nextProductId);
 		const nextQty = Number(b.nextQty);
 		const requestName = String(b.requestName ?? '').trim();
 		const requestKey = String(b.requestKey ?? '').trim();
-		if (![dealId, productId, nextProductId].every((value) => Number.isInteger(value) && value > 0)
+		if (![productId, nextProductId].every((value) => Number.isInteger(value) && value > 0)
 			|| !requestName || !requestKey || !Number.isFinite(nextQty) || nextQty <= 0) {
 			return reply.code(400).send({ ok: false, error: 'некорректные данные строки заявки' });
 		}
@@ -156,13 +152,12 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
 			const transferAllocation = new Map<string, Map<number, number>>();
 			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
-				if (transfer.dealId !== String(dealId) || transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || !transfer.supplyRequestKey) continue;
+				if (transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || transfer.supplyRequestKey !== requestKey) continue;
 				const byProduct = transferAllocation.get(transfer.supplyRequestKey) ?? new Map<number, number>();
 				for (const line of transfer.lines) byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);
 				transferAllocation.set(transfer.supplyRequestKey, byProduct);
 			}
-			const result = await updateSupplyRequestLineAndDeal(erp, {
-				dealId,
+			const result = await updateSupplyRequestLine(erp, {
 				requestName,
 				requestKey,
 				rowName: String(b.rowName ?? '').trim(),
@@ -170,15 +165,12 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 				nextProductId,
 				nextItemName: String(b.nextItemName ?? '').trim(),
 				nextQty,
-				deliveryDate: new Date().toISOString().slice(0, 10),
 				transferAllocation,
 			});
-			const total = await calculateDealPlanTotal(erp, dealId);
-			await setDealB24CollapsedService(client, dealId, total);
-			app.log.info({ dealId, requestName, productId, nextProductId, nextQty }, '[api/supply/request-line] updated');
-			return { ok: true, dealQty: result.dealQty, total };
+			app.log.info({ requestName, productId, nextProductId, nextQty }, '[api/supply/request-line] updated independently');
+			return { ok: true, requestQty: result.requestQty };
 		} catch (err) {
-			app.log.error({ dealId, requestName, productId, nextProductId }, `[api/supply/request-line] failed — ${errInfo(err)}`);
+			app.log.error({ requestName, productId, nextProductId }, `[api/supply/request-line] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
 		}
 	});
