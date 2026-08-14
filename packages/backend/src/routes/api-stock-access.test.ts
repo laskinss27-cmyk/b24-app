@@ -7,9 +7,10 @@ function clientFor(user: { ID: string; ADMIN?: boolean; UF_DEPARTMENT?: number[]
 	return { call: async () => user } as unknown as B24Client;
 }
 
-test('order matrix API allows Vladimir Dranishnikov and Sergey Laskin only', async () => {
+test('order matrix API allows supply employees and stock administrators', async () => {
 	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '1' })), true);
 	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '1858' })), true);
-	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '986', ADMIN: true })), false);
-	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '2000', UF_DEPARTMENT: [10] })), false);
+	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '986', ADMIN: true })), true);
+	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '2000', UF_DEPARTMENT: [10] })), true);
+	assert.equal(await canUseAssortmentMatrix(clientFor({ ID: '2001', UF_DEPARTMENT: [20] })), false);
 });

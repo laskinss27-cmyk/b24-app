@@ -272,7 +272,6 @@ export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ s
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/repairs', REPAIRS_MENU_TITLE, 'Repairs');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/stock', STOCK_MENU_TITLE, 'Stock');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/supply', SUPPLY_MENU_TITLE, 'Supply');
-	await bind(INVENTORY_MENU_PLACEMENT, '/placement/report-builder', REPORT_BUILDER_MENU_TITLE, 'Report builder');
 	await bind(DEAL_LIST_REPORT_PLACEMENT, '/placement/sales-report', DEAL_LIST_REPORT_TITLE, 'Sales report');
 	// Флаг «сделано» — только если НЕ упёрлись в ACCESS_DENIED (т.е. это был админ и сверка прошла).
 	if (!denied) placementsReconciled = true;
@@ -552,23 +551,21 @@ export async function bindSupplyMenuPlacement(opts: BindDealTabOptions): Promise
 	}
 }
 
-/** Личный конструктор отчётов. Сам LEFT_MENU привязывается ко всему порталу,
- *  но placement и каждый API-запрос отдельно проверяют администратора или B24 ID 1. */
-export const REPORT_BUILDER_MENU_TITLE = 'Конструктор отчётов';
-
-export async function bindReportBuilderMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+/** Снять прежний отдельный пункт: конструктор теперь находится внутри «Снаб → Отчёты». */
+let reportBuilderMenuUnbound = false;
+export async function unbindReportBuilderMenuPlacement(opts: BindDealTabOptions): Promise<{ status: string }> {
+	if (reportBuilderMenuUnbound) return { status: 'skipped (already removed this container)' };
 	const handlerUrl = `${opts.publicBaseUrl.replace(/\/$/, '')}/placement/report-builder`;
 	try {
-		await opts.client.call('placement.bind', {
-			PLACEMENT: INVENTORY_MENU_PLACEMENT,
-			HANDLER: handlerUrl,
-			TITLE: REPORT_BUILDER_MENU_TITLE,
-			LANG_ALL: { ru: { TITLE: REPORT_BUILDER_MENU_TITLE }, en: { TITLE: 'Report builder' } },
-		});
-		return { status: 'bound' };
+		await opts.client.call('placement.unbind', { PLACEMENT: INVENTORY_MENU_PLACEMENT, HANDLER: handlerUrl });
+		reportBuilderMenuUnbound = true;
+		return { status: 'unbound' };
 	} catch (err) {
 		if (err instanceof B24ApiError) {
-			if (/already\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) return { status: 'already-bound' };
+			if (/not\s*found|not\s*bind/i.test(err.code + ' ' + (err.description ?? ''))) {
+				reportBuilderMenuUnbound = true;
+				return { status: 'not-bound' };
+			}
 			return { status: `${err.code}: ${err.description ?? ''}` };
 		}
 		return { status: String(err) };

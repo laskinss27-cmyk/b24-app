@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import JSZip from 'jszip';
 import { buildDealKpDocx, normalizeDealKpDocument } from './deal-kp-docx.js';
@@ -9,7 +10,7 @@ const sample = {
 	title: 'Заказ',
 	client: { name: 'Иванов & Партнёры', phone: '+7 900 000-00-00' },
 	manager: { name: 'Менеджер', phone: '' },
-	goods: [{ name: 'IP-камера <уличная>', article: 'DS-2CD', qty: 2, price: 12_500, sum: 25_000, isWork: false }],
+	goods: [{ productId: 101, name: 'IP-камера <уличная>', article: 'DS-2CD', qty: 2, price: 12_500, sum: 25_000, isWork: false, photoPath: '/photo/101.png' }],
 	works: [{ name: 'Монтаж', article: '', qty: 1, price: 5_000, sum: 5_000, isWork: true, stage: 'Этап 1' }],
 	sumGoods: 1,
 	sumWorks: 1,
@@ -38,7 +39,8 @@ test('removes stages from print data and merges equal-priced duplicate rows', ()
 });
 
 test('builds a readable Word package with escaped deal data', async () => {
-	const file = await buildDealKpDocx(sample);
+	const photo = await readFile(new URL('../assets/brand-logo.png', import.meta.url));
+	const file = await buildDealKpDocx(sample, new Map([['/photo/101.png', { buffer: photo, extension: 'png' as const, contentType: 'image/png' as const }]]));
 	const zip = await JSZip.loadAsync(file);
 	const document = await zip.file('word/document.xml')?.async('string');
 	assert.ok(document?.includes('Коммерческое предложение № 37124'));
@@ -47,5 +49,10 @@ test('builds a readable Word package with escaped deal data', async () => {
 	assert.ok(document?.includes('30 000'));
 	assert.equal(document?.includes('Этап 1'), false);
 	assert.ok(await zip.file('word/styles.xml')?.async('string'));
+	assert.ok(await zip.file('word/footer1.xml')?.async('string'));
+	assert.ok(await zip.file('word/media/brand-logo.png')?.async('nodebuffer'));
+	assert.ok(await zip.file('word/media/product-1.png')?.async('nodebuffer'));
+	const relationships = await zip.file('word/_rels/document.xml.rels')?.async('string');
+	assert.ok(relationships?.includes('media/product-1.png'));
 	assert.ok(await zip.file('docProps/core.xml')?.async('string'));
 });

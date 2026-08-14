@@ -82,16 +82,47 @@ export function matrixRecommendation(input: {
 	return Math.max(0, Math.ceil(target - input.freeQty - input.orderedQty - 1e-9));
 }
 
-interface MatrixItemRecord {
+export interface AssortmentMatrixItemInput {
 	productId: number;
-	name: string;
-	article: string;
-	model: string;
-	brand: string;
 	category: string;
 	segment: string;
 	toOrderQty: number;
 	comment: string;
+}
+
+interface MatrixItemRecord extends AssortmentMatrixItemInput {
+	name: string;
+	article: string;
+	model: string;
+	brand: string;
+}
+
+async function listSelectedMatrixItems(erp: ErpClient, selected: AssortmentMatrixItemInput[]): Promise<MatrixItemRecord[]> {
+	if (!selected.length) return [];
+	const byId = new Map(selected.map((item) => [item.productId, item]));
+	const rows: Record<string, unknown>[] = [];
+	const ids = [...byId.keys()].map(String);
+	for (let index = 0; index < ids.length; index += 100) {
+		rows.push(...await erp.list('Item', [
+			'name', 'item_name', 'is_stock_item', 'disabled', 'b24_article', 'b24_model', 'b24_brand',
+		], [['name', 'in', ids.slice(index, index + 100)]]));
+	}
+	const items = rows.flatMap((item) => {
+		const productId = Number(item['name']);
+		const settings = byId.get(productId);
+		if (!settings || Number(item['disabled'] ?? 0) === 1 || Number(item['is_stock_item'] ?? 0) !== 1) return [];
+		return [{
+			...settings,
+			name: String(item['item_name'] ?? '').trim() || `#${productId}`,
+			article: String(item['b24_article'] ?? '').trim(),
+			model: String(item['b24_model'] ?? '').trim(),
+			brand: String(item['b24_brand'] ?? '').trim(),
+		}];
+	});
+	const found = new Set(items.map((item) => item.productId));
+	const missing = selected.find((item) => !found.has(item.productId));
+	if (missing) throw new Error(`товар #${missing.productId} из шаблона не найден в складском каталоге`);
+	return items;
 }
 
 async function listMatrixItems(erp: ErpClient): Promise<MatrixItemRecord[]> {
@@ -149,9 +180,13 @@ export async function buildAssortmentMatrixReport(erp: ErpClient, input: {
 	to: string;
 	selectedStores?: string[];
 	salesScope: MatrixSalesScope;
+	items?: AssortmentMatrixItemInput[];
 }): Promise<AssortmentMatrixReport> {
-	await ensureAssortmentMatrixFields(erp);
-	const [stores, items] = await Promise.all([listActiveStoreTitles(erp), listMatrixItems(erp)]);
+	if (input.items === undefined) await ensureAssortmentMatrixFields(erp);
+	const [stores, items] = await Promise.all([
+		listActiveStoreTitles(erp),
+		input.items === undefined ? listMatrixItems(erp) : listSelectedMatrixItems(erp, input.items),
+	]);
 	const requested = [...new Set((input.selectedStores ?? []).map((store) => store.trim()).filter(Boolean))];
 	const unknown = requested.filter((store) => !stores.includes(store));
 	if (unknown.length) throw new Error(`склад не найден: ${unknown[0]}`);

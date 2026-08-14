@@ -59,12 +59,36 @@ export interface AssortmentMatrixReport {
 	generatedAt: string;
 }
 
+export interface AssortmentMatrixTemplateRow {
+	productId: number;
+	category: string;
+	segment: string;
+	toOrderQty: number;
+	comment: string;
+}
+
+export interface AssortmentMatrixTemplateActor { id: string; name: string }
+export interface AssortmentMatrixTemplate {
+	id: string;
+	name: string;
+	from: string;
+	to: string;
+	selectedStores: string[];
+	salesScope: AssortmentMatrixSalesScope;
+	rows: AssortmentMatrixTemplateRow[];
+	createdAt: string;
+	createdBy: AssortmentMatrixTemplateActor;
+	updatedAt: string;
+	updatedBy: AssortmentMatrixTemplateActor;
+}
+
 /** Канареечная матрица ассортимента и заказа. */
 export async function fetchAssortmentMatrix(input: {
 	from: string;
 	to: string;
 	selectedStores: string[];
 	salesScope: AssortmentMatrixSalesScope;
+	items?: AssortmentMatrixTemplateRow[];
 }): Promise<AssortmentMatrixReport> {
 	const res = await fetch('/api/stock/assortment-matrix', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -82,6 +106,41 @@ export async function fetchAssortmentMatrix(input: {
 		targetDays: Number(json.targetDays ?? 60),
 		generatedAt: json.generatedAt ?? '',
 	};
+}
+
+export async function fetchAssortmentMatrixTemplates(): Promise<AssortmentMatrixTemplate[]> {
+	const res = await fetch('/api/stock/assortment-matrix/templates', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bx24Auth()),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; templates?: AssortmentMatrixTemplate[] };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить шаблоны матрицы');
+	return json.templates ?? [];
+}
+
+export async function saveAssortmentMatrixTemplate(input: {
+	id?: string;
+	name: string;
+	from: string;
+	to: string;
+	selectedStores: string[];
+	salesScope: AssortmentMatrixSalesScope;
+	rows: AssortmentMatrixTemplateRow[];
+	expectedUpdatedAt?: string;
+}): Promise<AssortmentMatrixTemplate> {
+	const res = await fetch('/api/stock/assortment-matrix/templates/save', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; template?: AssortmentMatrixTemplate };
+	if (!json.ok || !json.template) throw new Error(json.error ?? 'не удалось сохранить шаблон матрицы');
+	return json.template;
+}
+
+export async function deleteAssortmentMatrixTemplate(id: string, name: string): Promise<void> {
+	const res = await fetch('/api/stock/assortment-matrix/templates/delete', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), id, name }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить шаблон матрицы');
 }
 
 export async function saveAssortmentMatrixItem(input: {

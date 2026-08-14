@@ -71,7 +71,6 @@ export function DealWorkRow({
 				</div>
 			</td>
 			<td>{row.name}</td>
-			<td><span className="type-badge work">работа</span></td>
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={edit.price} disabled={saving || !editable} onChange={(event) => onEdit({ price: event.target.value })} onBlur={onBlur} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnit)}/ед{saving ? ' …' : ''}</div>

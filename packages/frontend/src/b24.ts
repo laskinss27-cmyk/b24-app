@@ -90,11 +90,21 @@ export {
 } from './stock-transfers.js';
 export { fetchDocDetail, fetchItemHistory, fetchMovements } from './stock-history.js';
 export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement } from './stock-history.js';
-export { downloadTurnoverReportXlsx, fetchAssortmentMatrix, fetchTurnoverReport, saveAssortmentMatrixItem } from './stock-analytics.js';
+export {
+	deleteAssortmentMatrixTemplate,
+	downloadTurnoverReportXlsx,
+	fetchAssortmentMatrix,
+	fetchAssortmentMatrixTemplates,
+	fetchTurnoverReport,
+	saveAssortmentMatrixItem,
+	saveAssortmentMatrixTemplate,
+} from './stock-analytics.js';
 export type {
 	AssortmentMatrixReport,
 	AssortmentMatrixRow,
 	AssortmentMatrixSalesScope,
+	AssortmentMatrixTemplate,
+	AssortmentMatrixTemplateRow,
 	TurnoverReportRow,
 	TurnoverStatus,
 } from './stock-analytics.js';

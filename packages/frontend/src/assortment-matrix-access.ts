@@ -1,6 +1,4 @@
-const ASSORTMENT_MATRIX_USER_IDS = new Set(['1', '1858']);
-
-/** Матрица заказов доступна Владимиру Дранишникову и Сергею Ласкину. */
+/** Навигация снабжения уже закрыта правами; здесь отсекаем только неавторизованный контекст. */
 export function canOpenAssortmentMatrix(userId: string | number | undefined): boolean {
-	return ASSORTMENT_MATRIX_USER_IDS.has(String(userId ?? ''));
+	return Boolean(String(userId ?? '').trim());
 }

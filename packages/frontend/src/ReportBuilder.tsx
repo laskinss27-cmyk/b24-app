@@ -12,6 +12,12 @@ import {
 	type ReportRunResult,
 	type SavedReport,
 } from './report-builder-api.js';
+import {
+	activeReportResultFilterCount,
+	filterReportResultRows,
+	type ReportResultColumnFilter,
+	type ReportResultFilters,
+} from './report-result-filters.js';
 import './ReportBuilder.css';
 
 type Phase = 'loading' | 'ready' | 'denied';
@@ -108,7 +114,7 @@ function formatCell(value: string | number | null, field: ReportField): string {
 	return field.id === 'status' ? (statuses[String(value)] ?? String(value)) : String(value);
 }
 
-export function ReportBuilder(): JSX.Element {
+export function ReportBuilder({ embedded = false }: { embedded?: boolean }): JSX.Element {
 	const ctx = getContext();
 	const [phase, setPhase] = useState<Phase>('loading');
 	const [bootstrap, setBootstrap] = useState<ReportBuilderBootstrap | null>(null);
@@ -119,6 +125,7 @@ export function ReportBuilder(): JSX.Element {
 	const [error, setError] = useState('');
 	const [saveMode, setSaveMode] = useState<SaveMode>(null);
 	const [saveName, setSaveName] = useState('');
+	const [resultFilters, setResultFilters] = useState<ReportResultFilters>({});
 
 	useEffect(() => {
 		const load = async (): Promise<void> => {
@@ -141,6 +148,10 @@ export function ReportBuilder(): JSX.Element {
 
 	const dataset = useMemo(() => bootstrap?.datasets.find((item) => item.id === definition?.datasetId) ?? null, [bootstrap, definition?.datasetId]);
 	const dirty = Boolean(active && definition && !sameDefinition(active.definition, definition));
+	const visibleResultRows = useMemo(() => result
+		? filterReportResultRows(result.rows, result.columns, resultFilters, formatCell)
+		: [], [result, resultFilters]);
+	const activeResultFilters = activeReportResultFilterCount(resultFilters);
 
 	function updateDefinition(update: (current: ReportDefinition) => ReportDefinition): void {
 		setDefinition((current) => current ? update(current) : current);
@@ -195,8 +206,13 @@ export function ReportBuilder(): JSX.Element {
 		setBusy(true); setError('');
 		try {
 			setResult(ctx.__mock ? mockResult(dataset, definition) : await runCustomReport(definition));
+			setResultFilters({});
 		} catch (runError) { setError(runError instanceof Error ? runError.message : String(runError)); }
 		finally { setBusy(false); }
+	}
+
+	function patchResultFilter(fieldId: string, patch: Partial<ReportResultColumnFilter>): void {
+		setResultFilters((current) => ({ ...current, [fieldId]: { ...current[fieldId], ...patch } }));
 	}
 
 	function replaceSaved(report: SavedReport): void {
@@ -248,7 +264,7 @@ export function ReportBuilder(): JSX.Element {
 	function exportCsv(): void {
 		if (!result) return;
 		const quote = (value: string): string => `"${value.replace(/"/g, '""')}"`;
-		const lines = [result.columns.map((column) => quote(column.label)).join(';'), ...result.rows.map((row) => result.columns.map((column) => quote(formatCell(row[column.id] ?? null, column))).join(';'))];
+		const lines = [result.columns.map((column) => quote(column.label)).join(';'), ...visibleResultRows.map((row) => result.columns.map((column) => quote(formatCell(row[column.id] ?? null, column))).join(';'))];
 		const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement('a'); link.href = url; link.download = `${active?.name ?? 'report'}.csv`; link.click(); URL.revokeObjectURL(url);
@@ -260,7 +276,7 @@ export function ReportBuilder(): JSX.Element {
 
 	const grouped = definition.groupBy.length > 0;
 	const selectedOutput = [...new Set([...definition.groupBy, ...definition.columns])];
-	return <div className="rb-app">
+	return <div className={`rb-app${embedded ? ' rb-embedded' : ''}`}>
 		<header className="rb-topbar">
 			<div><span className="rb-kicker">Умный дом · аналитика</span><h1>Конструктор отчётов</h1><p>Соберите форму один раз, затем меняйте период и выборку.</p></div>
 			<div className="rb-user"><span>{bootstrap.user.name}</span><small>{bootstrap.user.isAdmin ? 'Администратор' : 'Персональный доступ'}</small></div>
@@ -325,10 +341,24 @@ export function ReportBuilder(): JSX.Element {
 				<div className="rb-runbar"><div><strong>{definition.columns.length}</strong> колонок{grouped ? ` · группировка «${dataset.fields.find((field) => field.id === definition.groupBy[0])?.label}»` : ' · подробный отчёт'}</div><button className="rb-button rb-primary rb-run" disabled={busy || !definition.columns.length} onClick={() => void run()}>{busy ? 'Строим…' : 'Построить отчёт'}</button></div>
 
 				{result && <section className="rb-card rb-result">
-					<div className="rb-result-head"><div><h3>Результат</h3><p>{result.totalRows} строк · сформирован {new Date(result.generatedAt).toLocaleString('ru-RU')}</p></div><button className="rb-button" onClick={exportCsv}>Скачать CSV</button></div>
+					<div className="rb-result-head"><div><h3>Результат</h3><p>{activeResultFilters ? `${visibleResultRows.length} из ${result.rows.length} загруженных строк` : `${result.totalRows} строк`} · сформирован {new Date(result.generatedAt).toLocaleString('ru-RU')}</p></div><button className="rb-button" onClick={exportCsv}>Скачать CSV{activeResultFilters ? ` (${visibleResultRows.length})` : ''}</button></div>
 					{result.truncated && <div className="rb-warning">Показаны первые 1000 строк. Уточните выборку или скачайте специализированный отчёт.</div>}
-					<div className="rb-table-wrap"><table><thead><tr>{result.columns.map((column) => <th key={column.id}>{column.label}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index}>{result.columns.map((column) => <td key={column.id} className={column.type === 'number' ? 'number' : ''}>{formatCell(row[column.id] ?? null, column)}</td>)}</tr>)}</tbody></table></div>
-					{result.rows.length === 0 && <div className="rb-empty-result">По выбранным условиям данных нет.</div>}
+					<details className="rb-result-filters" open>
+						<summary>Фильтры готового отчёта{activeResultFilters ? <b>{activeResultFilters}</b> : <small>без повторного построения</small>}</summary>
+						<div className="rb-result-filter-body">
+							<div className="rb-result-filter-actions"><span>Фильтры применяются одновременно и не меняют сохранённую форму отчёта.</span>{activeResultFilters > 0 && <button className="rb-button" type="button" onClick={() => setResultFilters({})}>Очистить все</button>}</div>
+							<div className="rb-result-filter-grid">{result.columns.map((column) => {
+								const filter = resultFilters[column.id] ?? {};
+								return <label key={column.id}><span>{column.label}</span>{column.type === 'number'
+									? <div><input type="number" step="any" placeholder="От" value={filter.min ?? ''} onChange={(event) => patchResultFilter(column.id, { min: event.target.value })} /><input type="number" step="any" placeholder="До" value={filter.max ?? ''} onChange={(event) => patchResultFilter(column.id, { max: event.target.value })} /></div>
+									: column.type === 'date'
+										? <div><input type="date" title="Дата от" value={filter.from ?? ''} onChange={(event) => patchResultFilter(column.id, { from: event.target.value })} /><input type="date" title="Дата до" value={filter.to ?? ''} onChange={(event) => patchResultFilter(column.id, { to: event.target.value })} /></div>
+										: <input type="search" placeholder="Содержит…" value={filter.text ?? ''} onChange={(event) => patchResultFilter(column.id, { text: event.target.value })} />}</label>;
+							})}</div>
+						</div>
+					</details>
+					<div className="rb-table-wrap"><table><thead><tr>{result.columns.map((column) => <th key={column.id}>{column.label}</th>)}</tr></thead><tbody>{visibleResultRows.map((row, index) => <tr key={index}>{result.columns.map((column) => <td key={column.id} className={column.type === 'number' ? 'number' : ''}>{formatCell(row[column.id] ?? null, column)}</td>)}</tr>)}</tbody></table></div>
+					{visibleResultRows.length === 0 && <div className="rb-empty-result">{activeResultFilters ? 'По заданным фильтрам строк не найдено.' : 'По выбранным условиям данных нет.'}</div>}
 				</section>}
 			</main>
 		</div>

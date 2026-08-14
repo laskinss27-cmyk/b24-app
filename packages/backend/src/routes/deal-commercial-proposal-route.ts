@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
 import { dealExportRows } from '../deal-export-rows.js';
+import { contactCaption, receiptContactId, type DealContactBinding } from '../deal-receipt-client.js';
 import { ErpClient } from '../erp/client.js';
 import { listDealPlan, listDealQuoteVariants, listDealStages, type DealStage, type PlanItem } from '../erp/operations.js';
 
@@ -29,13 +30,19 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 			const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
 			const contactId = Number(deal?.['CONTACT_ID'] ?? 0);
 			const assignedId = Number(deal?.['ASSIGNED_BY_ID'] ?? 0);
-			const [contact, mgrRaw] = await Promise.all([
-				contactId ? client.call<Record<string, unknown>>('crm.contact.get', { id: contactId }).catch(() => null) : Promise.resolve(null),
+			const [contactBindings, mgrRaw] = await Promise.all([
+				client.call<DealContactBinding[]>('crm.deal.contact.items.get', { id: dealId }).catch(() => []),
 				assignedId ? client.call<unknown>('user.get', { ID: assignedId }).then((r) => (Array.isArray(r) ? r[0] : r) as Record<string, unknown> | null).catch(() => null) : Promise.resolve(null),
 			]);
-			const clientName = contact ? [contact['NAME'], contact['LAST_NAME']].filter(Boolean).join(' ').trim() : '';
-			const phones = contact?.['PHONE'] as Array<{ VALUE?: string }> | undefined;
-			const clientPhone = String(phones?.[0]?.VALUE ?? '');
+			const receiptId = receiptContactId(contactBindings, contactId);
+			const [contact, receiptContact] = await Promise.all([
+				contactId ? client.call<Record<string, unknown>>('crm.contact.get', { id: contactId }).catch(() => null) : Promise.resolve(null),
+				receiptId && receiptId !== contactId
+					? client.call<Record<string, unknown>>('crm.contact.get', { id: receiptId }).catch(() => null)
+					: Promise.resolve(null),
+			]);
+			const primaryClient = contactCaption(contact);
+			const receiptClient = receiptContact ? contactCaption(receiptContact) : primaryClient;
 			const mgrName = mgrRaw ? [mgrRaw['NAME'], mgrRaw['LAST_NAME']].filter(Boolean).join(' ').trim() : '';
 			// Только РАБОЧИЙ телефон менеджера (личный мобильный в КП не светим). Пусто — строка без телефона.
 			const mgrPhone = mgrRaw ? String(mgrRaw['WORK_PHONE'] ?? '') : '';
@@ -131,7 +138,8 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 				ok: true,
 				kp: {
 					number: dealId, date: String(deal?.['DATE_CREATE'] ?? ''), title: String(deal?.['TITLE'] ?? ''),
-					client: { name: clientName, phone: clientPhone },
+					client: primaryClient,
+					receiptClient,
 					manager: { name: mgrName, phone: mgrPhone },
 					goods, works, sumGoods, sumWorks, total: sumGoods + sumWorks,
 				},

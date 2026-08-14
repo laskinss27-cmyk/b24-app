@@ -5,10 +5,12 @@ import { ProductBase } from './ProductBase.js';
 import { Marketplaces } from './Marketplaces.js';
 import { InventoryHome } from './InventoryHome.js';
 import { AssortmentMatrix } from './AssortmentMatrix.js';
+import { ReportBuilder } from './ReportBuilder.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
 import { createSupplyOrderActions } from './supply-order-actions.js';
 import { SupplyNavigation, type SupplyViewKey } from './SupplyNavigation.js';
 import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
+import { isPortalAdmin } from './current-user.js';
 import { SupplyPageHeader } from './SupplyPageHeader.js';
 import { SupplySearch } from './SupplyOverviewControls.js';
 import { SupplyDocumentDetail, type OpenSupplyDocument } from './SupplyDocumentDetail.js';
@@ -45,7 +47,7 @@ export function Supply(): JSX.Element {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', inventory: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', 'report-builder': '', inventory: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
 	const {
 		sort,
@@ -164,12 +166,13 @@ export function Supply(): JSX.Element {
 	if (phase === 'denied' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
 	if (phase === 'denied' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
 	if (phase === 'denied') return <div className="supply-proto-state">Нет доступа к разделам снабжения и маркетплейсов.</div>;
+	const canOpenReportBuilder = Boolean(ctx.__mock) || currentUserId === '1' || isPortalAdmin();
 
 	return (
 		<div className="supply-proto-shell">
-			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={setView} onToggleReports={() => setReportsOpen((current) => !current)} />
-			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
-				<SupplyPageHeader view={view} onCreate={setCreateKind} />
+			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} canOpenReportBuilder={canOpenReportBuilder} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={setView} onToggleReports={() => setReportsOpen((current) => !current)} />
+			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'report-builder' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
+				{view !== 'report-builder' && <SupplyPageHeader view={view} onCreate={setCreateKind} />}
 				{(view === 'orders' || view === 'purchase' || view === 'logistics') && <SupplyMetrics orders={orders} view={view} />}
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
@@ -186,6 +189,7 @@ export function Supply(): JSX.Element {
 				{view === 'ledger' && <div className="supply-proto-card supply-stock-card"><LedgerTab /></div>}
 				{view === 'turnover' && <div className="supply-proto-card supply-stock-card"><TurnoverReportTab stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
 				{view === 'matrix' && canOpenAssortmentMatrix(currentUserId) && <div className="supply-proto-card supply-stock-card supply-matrix-card"><AssortmentMatrix stores={stockForm?.stores ?? []} mock={Boolean(ctx.__mock)} /></div>}
+				{view === 'report-builder' && canOpenReportBuilder && <ReportBuilder embedded />}
 				{view === 'inventory' && <InventoryHome />}
 			</main>
 			{createKind && <SupplyStandaloneDocumentModal kind={createKind} suppliers={suppliers} mock={Boolean(ctx.__mock)} onCreateSupplier={addSupplier} onClose={() => setCreateKind(null)} onDone={(message, nextView) => { setCreateKind(null); setNotice(message); setView(nextView); setStockRefresh((value) => value + 1); void reload(); }} />}

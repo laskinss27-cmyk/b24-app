@@ -40,7 +40,6 @@ export function DealProductsTable({
 					<tr>
 						<th className="check-col" title={workingMode ? 'Выбор строк для действий' : undefined}></th>
 						<th>Товар / работа</th>
-						<th>Тип</th>
 						<th className="num">Цена</th>
 						<th className="num">Скидка</th>
 						<th className="num">Кол-во</th>

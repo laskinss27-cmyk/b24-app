@@ -50,8 +50,8 @@
 .products-table tbody tr:hover {
 	background: #fafafa;
 }
-/* Заголовок над полем: колонки с инпутами/бейджем (Тип·Цена·Скидка·Кол-во·К отгрузке) — по центру,
-   чтобы короткая надпись села над полем, а не у правого края. Товар(2)/Сумма(8)/Остатки(9)/Склад(10) — как были. */
+/* Заголовок над полем: колонки с инпутами (Цена·Скидка·Кол-во·К отгрузке) — по центру,
+   чтобы короткая надпись села над полем, а не у правого края. */
 .products-table thead th:nth-child(3), .products-table tbody td:nth-child(3),
 .products-table thead th:nth-child(4), .products-table tbody td:nth-child(4),
 .products-table thead th:nth-child(5), .products-table tbody td:nth-child(5),
@@ -60,22 +60,6 @@
 	text-align: center;
 }
 
-.type-badge {
-	display: inline-block;
-	padding: 1px 8px;
-	border-radius: 10px;
-	font-size: 11px;
-	font-weight: 600;
-	white-space: nowrap;
-}
-.type-badge.goods {
-	background: #e8f0fe;
-	color: #1a56db;
-}
-.type-badge.work {
-	background: #f3e8ff;
-	color: #7e22ce;
-}
 
 .shipped {
 	color: #9ca3af;
@@ -143,10 +127,13 @@
 .realize-actions { display: flex; gap: 8px; align-items: center; }
 .btn-realize-all.submit { background: #2563eb; }
 .btn-realize-all.submit:hover:not([disabled]) { background: #1d4ed8; }
-.btn-cancel-draft {
-	background: #eef0f3 !important;
-	color: #4b5563 !important;
-	font-weight: 500 !important;
+.realize-bar .btn-order-supply {
+	background: #c2410c;
+	color: #fff;
+	font-weight: 700;
+}
+.realize-bar .btn-order-supply:hover:not([disabled]) {
+	background: #9a3412;
 }
 .realize-cell {
 	white-space: normal;
@@ -219,14 +206,6 @@
 .of-total {
 	color: #9ca3af;
 	font-size: 11px;
-}
-.type-badge.part {
-	background: #f0fdf4;
-	color: #15803d;
-}
-.type-badge.part.part-return {
-	background: #fff7ed;
-	color: #c2410c;
 }
 .part-store {
 	font-size: 12px;

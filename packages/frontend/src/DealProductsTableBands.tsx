@@ -5,7 +5,7 @@ import type { EnrichedRow } from './deal-products-table-types.js';
 export function DealProductGroupBand({ label, count, sum }: { label: string; count: number; sum: number }): JSX.Element {
 	return (
 		<tr className="group-band">
-			<td colSpan={8}>{label} <span className="group-band-count">· {count}</span></td>
+			<td colSpan={7}>{label} <span className="group-band-count">· {count}</span></td>
 			<td className="num group-band-sum" colSpan={3}>{rub(sum)}</td>
 		</tr>
 	);
@@ -26,7 +26,7 @@ export function DealStageSectionBand({
 }): JSX.Element {
 	return (
 		<tr className="deal-stage-band">
-			<td colSpan={8}>
+			<td colSpan={7}>
 				<div className="deal-stage-band-title">
 					<span className="deal-stage-band-heading"><b>{title}</b>{onRename && <button type="button" className="deal-stage-rename" title="Переименовать этап" aria-label={`Переименовать этап «${title}»`} onClick={onRename}>✎</button>}{subtitle && <small>{subtitle}</small>}</span>
 					{onAddItems && <button type="button" className="deal-stage-inline-add" onClick={onAddItems}>Добавить оборудование или работу</button>}

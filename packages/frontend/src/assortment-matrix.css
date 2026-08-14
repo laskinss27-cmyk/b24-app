@@ -2,6 +2,13 @@
 .assortment-matrix { min-width: 0; }
 .assortment-matrix-banner { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin-bottom: 12px; border: 1px solid #9fc5ff; border-radius: 8px; background: #eef6ff; color: #194f90; font-size: 13px; }
 .assortment-matrix-banner b { padding: 3px 7px; border-radius: 10px; background: #185fa5; color: #fff; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.assortment-matrix-templates { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border: 1px solid #d8dee8; border-radius: 8px; background: #fff; }
+.assortment-matrix-templates label { display: grid; gap: 4px; color: #667085; font-size: 12px; }
+.assortment-matrix-templates label:first-child select { min-width: 230px; }
+.assortment-matrix-templates label:nth-child(2) { flex: 1 1 300px; }
+.assortment-matrix-templates label:nth-child(2) input { width: 100%; }
+.assortment-matrix-templates small { width: 100%; color: #667085; }
+.assortment-matrix-templates button.danger { color: #b42318; }
 .assortment-matrix-filters, .assortment-matrix-add, .assortment-matrix-toolbar { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
 .assortment-matrix-filters label { display: grid; gap: 4px; color: #667085; font-size: 12px; }
 .assortment-matrix input, .assortment-matrix select, .assortment-matrix textarea, .assortment-matrix button, .assortment-matrix summary { box-sizing: border-box; padding: 7px 9px; border: 1px solid #cdd5e0; border-radius: 6px; background: #fff; color: #1a2231; font: inherit; }

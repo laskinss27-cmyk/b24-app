@@ -66,8 +66,9 @@ test('offers only actions that actually belong to the current supply page', () =
 	assert.deepEqual(supplyActionIdsForView('receipt'), ['create-receipt']);
 });
 
-test('order matrix is visible to Vladimir Dranishnikov and Sergey Laskin', () => {
+test('order matrix navigation is visible to authenticated supply-page users', () => {
 	assert.equal(canOpenAssortmentMatrix('1'), true);
 	assert.equal(canOpenAssortmentMatrix('1858'), true);
-	assert.equal(canOpenAssortmentMatrix('986'), false);
+	assert.equal(canOpenAssortmentMatrix('986'), true);
+	assert.equal(canOpenAssortmentMatrix(''), false);
 });

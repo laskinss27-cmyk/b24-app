@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+	deleteAssortmentMatrixTemplate,
 	fetchAssortmentMatrix,
+	fetchAssortmentMatrixTemplates,
+	saveAssortmentMatrixTemplate,
 	saveAssortmentMatrixItem,
 	searchStockItems,
 	type AssortmentMatrixReport,
 	type AssortmentMatrixRow,
 	type AssortmentMatrixSalesScope,
+	type AssortmentMatrixTemplate,
+	type AssortmentMatrixTemplateRow,
 	type StockItem,
 } from './b24.js';
 
@@ -72,6 +77,10 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 	const [addCategory, setAddCategory] = useState('');
 	const [addSegment, setAddSegment] = useState('');
 	const [filter, setFilter] = useState('');
+	const [templates, setTemplates] = useState<AssortmentMatrixTemplate[]>([]);
+	const [activeTemplateId, setActiveTemplateId] = useState('');
+	const [templateName, setTemplateName] = useState('');
+	const [templateBusy, setTemplateBusy] = useState(false);
 
 	const syncDrafts = (rows: AssortmentMatrixRow[]): void => setDrafts(Object.fromEntries(rows.map((row) => [row.productId, {
 		category: row.category,
@@ -79,21 +88,41 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 		toOrder: String(row.toOrderQty),
 		comment: row.comment,
 	}])));
+	const templateRows = (): AssortmentMatrixTemplateRow[] => (report?.rows ?? []).map((row) => {
+		const draft = drafts[row.productId] ?? { category: row.category, segment: row.segment, toOrder: String(row.toOrderQty), comment: row.comment };
+		return {
+			productId: row.productId,
+			category: draft.category.trim(),
+			segment: draft.segment.trim(),
+			toOrderQty: Number(draft.toOrder.replace(',', '.')),
+			comment: draft.comment.trim(),
+		};
+	});
 
-	const load = async (): Promise<void> => {
-		if (!from || !to || from > to) { setError('Проверь период отчёта.'); return; }
-		if (!selectedStores.length) { setError('Выбери хотя бы один склад.'); return; }
+	const load = async (override?: { from?: string; to?: string; selectedStores?: string[]; salesScope?: AssortmentMatrixSalesScope; items?: AssortmentMatrixTemplateRow[]; global?: boolean }): Promise<void> => {
+		const nextFrom = override?.from ?? from;
+		const nextTo = override?.to ?? to;
+		const nextStores = override?.selectedStores ?? selectedStores;
+		const nextScope = override?.salesScope ?? salesScope;
+		const items = override?.global ? undefined : override?.items ?? (activeTemplateId ? templateRows() : undefined);
+		if (!nextFrom || !nextTo || nextFrom > nextTo) { setError('Проверь период отчёта.'); return; }
+		if (!nextStores.length) { setError('Выбери хотя бы один склад.'); return; }
 		setLoading(true); setError('');
 		try {
-			const next = mock ? mockReport(selectedStores) : await fetchAssortmentMatrix({ from, to, selectedStores, salesScope });
+			const next = mock ? mockReport(nextStores) : await fetchAssortmentMatrix({ from: nextFrom, to: nextTo, selectedStores: nextStores, salesScope: nextScope, ...(items !== undefined ? { items } : {}) });
 			setReport(next);
 			setSelectedStores(next.selectedStores);
 			syncDrafts(next.rows);
 			window.localStorage.setItem(STORE_KEY, JSON.stringify(next.selectedStores));
-			window.localStorage.setItem(SALES_SCOPE_KEY, salesScope);
+			window.localStorage.setItem(SALES_SCOPE_KEY, nextScope);
 		} catch (reason) { setError(errorText(reason)); }
 		finally { setLoading(false); }
 	};
+
+	useEffect(() => {
+		if (mock) return;
+		void fetchAssortmentMatrixTemplates().then(setTemplates).catch((reason) => setError(errorText(reason)));
+	}, [mock]);
 
 	useEffect(() => {
 		if (!selectedStores.length && initialStores.length) setSelectedStores(initialStores);
@@ -140,8 +169,9 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 		if (!window.confirm(`Убрать «${row.name}» из матрицы? Сам товар останется в каталоге.`)) return;
 		setSaving(row.productId); setError('');
 		try {
-			if (!mock) await saveAssortmentMatrixItem({ productId: row.productId, enabled: false, category: row.category, segment: row.segment, toOrderQty: row.toOrderQty, comment: row.comment });
+			if (!mock && !activeTemplateId) await saveAssortmentMatrixItem({ productId: row.productId, enabled: false, category: row.category, segment: row.segment, toOrderQty: row.toOrderQty, comment: row.comment });
 			setReport((current) => current ? { ...current, rows: current.rows.filter((item) => item.productId !== row.productId) } : current);
+			setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => Number(id) !== row.productId)));
 		} catch (reason) { setError(errorText(reason)); }
 		finally { setSaving(null); }
 	};
@@ -163,15 +193,80 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 		if (!picked || !addCategory || !addSegment.trim()) { setError('Выбери категорию, сегмент и товар.'); return; }
 		setSaving(picked.productId); setError('');
 		try {
-			if (!mock) await saveAssortmentMatrixItem({ productId: picked.productId, enabled: true, category: addCategory, segment: addSegment, toOrderQty: 0, comment: '' });
+			if (!mock && !activeTemplateId) await saveAssortmentMatrixItem({ productId: picked.productId, enabled: true, category: addCategory, segment: addSegment, toOrderQty: 0, comment: '' });
+			const added = { productId: picked.productId, category: addCategory, segment: addSegment, toOrderQty: 0, comment: '' };
 			setPicked(null); setSearch(''); setResults([]);
-			await load();
+			await load(activeTemplateId ? { items: [...templateRows(), added] } : undefined);
 		} catch (reason) { setError(errorText(reason)); }
 		finally { setSaving(null); }
 	};
 
+	const activeTemplate = templates.find((template) => template.id === activeTemplateId) ?? null;
+
+	const openTemplate = async (id: string): Promise<void> => {
+		if (!id) {
+			setActiveTemplateId('');
+			setTemplateName('');
+			await load({ global: true });
+			return;
+		}
+		const template = templates.find((item) => item.id === id);
+		if (!template) return;
+		setActiveTemplateId(template.id);
+		setTemplateName(template.name);
+		setFrom(template.from);
+		setTo(template.to);
+		setSelectedStores(template.selectedStores);
+		setSalesScope(template.salesScope);
+		await load({
+			from: template.from, to: template.to, selectedStores: template.selectedStores,
+			salesScope: template.salesScope, items: template.rows,
+		});
+	};
+
+	const saveTemplate = async (): Promise<void> => {
+		const name = templateName.trim();
+		if (!name) { setError('Укажи название шаблона.'); return; }
+		const rows = templateRows();
+		if (rows.some((row) => !Number.isFinite(row.toOrderQty) || row.toOrderQty < 0)) { setError('Проверь количество «К заказу».'); return; }
+		setTemplateBusy(true); setError('');
+		try {
+			const saved = mock ? {
+				id: activeTemplateId || 'mock-template', name, from, to, selectedStores, salesScope, rows,
+				createdAt: activeTemplate?.createdAt ?? new Date().toISOString(), createdBy: activeTemplate?.createdBy ?? { id: '1', name: 'Тест' },
+				updatedAt: new Date().toISOString(), updatedBy: { id: '1', name: 'Тест' },
+			} : await saveAssortmentMatrixTemplate({
+				...(activeTemplate ? { id: activeTemplate.id, expectedUpdatedAt: activeTemplate.updatedAt } : {}),
+				name, from, to, selectedStores, salesScope, rows,
+			});
+			setTemplates((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+			setActiveTemplateId(saved.id);
+			setTemplateName(saved.name);
+		} catch (reason) { setError(errorText(reason)); }
+		finally { setTemplateBusy(false); }
+	};
+
+	const deleteTemplate = async (): Promise<void> => {
+		if (!activeTemplate || !window.confirm(`Удалить общий шаблон «${activeTemplate.name}»?`)) return;
+		setTemplateBusy(true); setError('');
+		try {
+			if (!mock) await deleteAssortmentMatrixTemplate(activeTemplate.id, activeTemplate.name);
+			setTemplates((current) => current.filter((item) => item.id !== activeTemplate.id));
+			setActiveTemplateId(''); setTemplateName('');
+			await load({ global: true });
+		} catch (reason) { setError(errorText(reason)); }
+		finally { setTemplateBusy(false); }
+	};
+
 	return <section className="assortment-matrix">
 		<div className="assortment-matrix-banner"><b>Матрица заказов</b><span>Рекомендация рассчитывается на явный запас <strong>60 дней</strong>.</span></div>
+		<div className="assortment-matrix-templates">
+			<label>Общий шаблон<select value={activeTemplateId} disabled={templateBusy || loading} onChange={(event) => void openTemplate(event.target.value)}><option value="">Текущая матрица</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+			<label>Название<input value={templateName} maxLength={80} placeholder="Например, Домофоны — основной заказ" onChange={(event) => setTemplateName(event.target.value)} /></label>
+			<button className="btn-primary" type="button" disabled={templateBusy || loading || !report} onClick={() => void saveTemplate()}>{templateBusy ? 'Сохраняю…' : activeTemplate ? 'Сохранить изменения' : 'Сохранить как шаблон'}</button>
+			{activeTemplate && <button className="danger" type="button" disabled={templateBusy || loading} onClick={() => void deleteTemplate()}>Удалить шаблон</button>}
+			{activeTemplate && <small>Обновил: {activeTemplate.updatedBy.name} · {new Date(activeTemplate.updatedAt).toLocaleString('ru-RU')}</small>}
+		</div>
 		<div className="assortment-matrix-filters">
 			<label>Продажи с<input type="date" max={today} value={from} onChange={(event) => setFrom(event.target.value)} /></label>
 			<label>по<input type="date" max={today} value={to} onChange={(event) => setTo(event.target.value)} /></label>
@@ -205,7 +300,7 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 					<td className="number recommended" title={`Продажи ${qty(row.soldQty)} / ${report?.periodDays ?? 0} дней × 60 − свободно ${qty(row.freeQty)} − заказано ${qty(row.orderedQty)}`}>{qty(row.recommendedQty)}<small>своб. {qty(row.freeQty)} · заказано {qty(row.orderedQty)}</small></td>
 					<td><input className="number-input" type="number" min="0" step="any" value={draft.toOrder} onChange={(event) => patchDraft(row.productId, { toOrder: event.target.value })} /></td>
 					<td><textarea rows={2} value={draft.comment} onChange={(event) => patchDraft(row.productId, { comment: event.target.value })} /></td>
-					<td className="assortment-matrix-actions"><button type="button" disabled={saving !== null} onClick={() => void saveRow(row)}>{saving === row.productId ? '…' : 'Сохранить'}</button><button type="button" className="danger" disabled={saving !== null} onClick={() => void removeRow(row)}>Убрать</button></td>
+					<td className="assortment-matrix-actions">{!activeTemplateId && <button type="button" disabled={saving !== null} onClick={() => void saveRow(row)}>{saving === row.productId ? '…' : 'Сохранить'}</button>}<button type="button" className="danger" disabled={saving !== null} onClick={() => void removeRow(row)}>Убрать</button></td>
 				</tr>;
 			})}
 			{!loading && visibleRows.length === 0 && <tr><td colSpan={10 + selectedStores.length} className="assortment-matrix-empty">Добавь первые товары в матрицу.</td></tr>}

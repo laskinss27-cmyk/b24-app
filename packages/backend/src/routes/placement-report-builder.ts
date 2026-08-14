@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client } from '../b24/client.js';
+import { unbindReportBuilderMenuPlacement } from '../b24/placement.js';
 import { PlacementBodySchema, PlacementQuerySchema, buildReportBuilderContext, extractInstallAuth } from '../handlers/placement-context.js';
 import { reportBuilderUser } from '../report-builder/access.js';
 import { verifyBitrixRequest } from '../security.js';
@@ -18,6 +19,8 @@ export function registerPlacementReportBuilderRoute(app: FastifyInstance): void 
 		if (!(await reportBuilderUser(client))) {
 			return reply.code(403).type('text/html; charset=utf-8').send('<!doctype html><html lang="ru"><body style="font-family:Arial,sans-serif;padding:32px"><h1>Нет доступа</h1><p>Конструктор отчётов доступен только администраторам и Владимиру Дранишникову.</p></body></html>');
 		}
+		const cleanup = await unbindReportBuilderMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+		app.log.info({ status: cleanup.status }, '[placement/report-builder] obsolete menu cleanup');
 		const indexHtml = await app.readFrontendIndex();
 		if (!indexHtml) return reply.code(503).send('frontend is not built');
 		const ctxJson = JSON.stringify(buildReportBuilderContext(parsed.data))

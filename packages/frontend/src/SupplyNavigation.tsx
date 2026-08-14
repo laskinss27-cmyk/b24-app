@@ -1,13 +1,14 @@
 import { type StockMovementKind } from './StockLedger.js';
 import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 
-export type SupplyViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'inventory';
+export type SupplyViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'report-builder' | 'inventory';
 
-export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMarketplaces, currentUserId, mock, onViewChange, onToggleReports }: {
+export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMarketplaces, canOpenReportBuilder, currentUserId, mock, onViewChange, onToggleReports }: {
 	view: SupplyViewKey;
 	reportsOpen: boolean;
 	marketplaceOnly: boolean;
 	canOpenMarketplaces: boolean;
+	canOpenReportBuilder: boolean;
 	currentUserId: string;
 	mock: boolean;
 	onViewChange: (view: SupplyViewKey) => void;
@@ -34,7 +35,7 @@ export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMa
 				<div className="supply-proto-nav-group">
 					<button className={view === 'stocks' ? 'active' : ''} type="button" onClick={() => onViewChange('stocks')}>Остатки</button>
 					<button
-						className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' || view === 'matrix' ? ' active' : ''}`}
+						className={`supply-proto-nav-parent${view === 'ledger' || view === 'turnover' || view === 'matrix' || view === 'report-builder' ? ' active' : ''}`}
 						type="button"
 						aria-expanded={reportsOpen}
 						aria-controls="supply-reports-menu"
@@ -47,6 +48,7 @@ export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMa
 							<button className={view === 'ledger' ? 'active' : ''} type="button" onClick={() => onViewChange('ledger')}>Движение товаров</button>
 							<button className={view === 'turnover' ? 'active' : ''} type="button" onClick={() => onViewChange('turnover')}>Оборачиваемость</button>
 							{canOpenAssortmentMatrix(currentUserId) && <button className={view === 'matrix' ? 'active' : ''} type="button" onClick={() => onViewChange('matrix')}>Матрица заказа <small>β</small></button>}
+							{canOpenReportBuilder && <button className={view === 'report-builder' ? 'active' : ''} type="button" onClick={() => onViewChange('report-builder')}>Конструктор отчётов</button>}
 						</div>
 					)}
 				</div>

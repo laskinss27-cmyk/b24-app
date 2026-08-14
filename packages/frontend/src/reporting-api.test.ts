@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BX24Sdk } from './b24-context.js';
+import { activeReportResultFilterCount, filterReportResultRows } from './report-result-filters.js';
+
+test('ready report filters combine text, number and date conditions without rerunning it', () => {
+	const columns = [
+		{ id: 'manager', label: 'Менеджер', type: 'text' as const, role: 'dimension' as const },
+		{ id: 'total', label: 'Сумма', type: 'number' as const, role: 'measure' as const },
+		{ id: 'closed', label: 'Закрыта', type: 'date' as const, role: 'dimension' as const },
+	];
+	const rows = [
+		{ manager: 'Иванов Алексей', total: 120000, closed: '2026-08-03' },
+		{ manager: 'Петрова Анна', total: 75000, closed: '2026-08-07' },
+		{ manager: 'Иванов Сергей', total: 45000, closed: '2026-07-29' },
+	];
+	const filters = {
+		manager: { text: 'иванов' },
+		total: { min: '50000', max: '150000' },
+		closed: { from: '2026-08-01', to: '2026-08-31' },
+	};
+	assert.equal(activeReportResultFilterCount(filters), 3);
+	assert.deepEqual(filterReportResultRows(rows, columns, filters), [rows[0]]);
+});
 
 interface CapturedRequest { url: string; body: Record<string, unknown> }
 

@@ -7,7 +7,6 @@ export function DealProductRealizationRow({ row, part }: { row: EnrichedRow; par
 		<tr className="part-row">
 			<td className="check-col"></td>
 			<td className="part-name">↳ {row.name}</td>
-			<td><span className={`type-badge part${part.isReturn ? ' part-return' : ''}`}>{part.isReturn ? 'возврат' : part.submitted ? 'реализовано' : 'черновик'}</span></td>
 			<td className="num">{rub(row.price)}</td>
 			<td className="num"><span className="none">—</span></td>
 			<td className="num"><span className="none">—</span></td>

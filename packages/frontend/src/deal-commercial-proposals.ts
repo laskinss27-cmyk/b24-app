@@ -18,6 +18,8 @@ export interface KpData {
 	date: string;
 	title: string;
 	client: { name: string; phone: string };
+	/** Дополнительный участник сделки, которому адресуется товарный чек. */
+	receiptClient?: { name: string; phone: string };
 	manager: { name: string; phone: string };
 	goods: KpRow[];
 	works: KpRow[];

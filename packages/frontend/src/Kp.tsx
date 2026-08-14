@@ -37,6 +37,7 @@ export type DealPrintKind = 'kp' | 'receipt';
 
 function ReceiptDocument({ kp }: { kp: KpData }): JSX.Element {
 	const rows = [...kp.goods, ...kp.works];
+	const buyer = kp.receiptClient ?? kp.client;
 	return (
 		<div className="deal-receipt">
 			<div className="deal-receipt-head">
@@ -45,7 +46,7 @@ function ReceiptDocument({ kp }: { kp: KpData }): JSX.Element {
 			</div>
 			<div className="deal-receipt-meta">
 				<span>Продавец: <b>Умный дом</b></span>
-				<span>Покупатель: <b>{kp.client.name || '—'}</b>{kp.client.phone ? ` · ${kp.client.phone}` : ''}</span>
+				<span>Покупатель: <b>{buyer.name || '—'}</b>{buyer.phone ? ` · ${buyer.phone}` : ''}</span>
 			</div>
 			<table>
 				<thead><tr><th>№</th><th>Наименование</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead>
@@ -98,7 +99,8 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 	// Единая сетка колонок для таблиц товаров и работ — чтобы цифры (кол-во/цена/сумма) стояли в один столбец.
 	const renderCols = (): JSX.Element => (
 		<colgroup>
-			<col style={{ width: '42px' }} />
+			<col style={{ width: '34px' }} />
+			<col style={{ width: '50px' }} />
 			<col />
 			<col style={{ width: '58px' }} />
 			<col style={{ width: '96px' }} />
@@ -109,6 +111,7 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 		const photo = r.photoPath ? photoFullUrl(r.photoPath) : null;
 		return (
 			<tr key={`g${i}`} className={i % 2 ? 'kp-zebra' : ''}>
+				<td className="kp-index">{i + 1}</td>
 				<td className="kp-photo-cell">{photo ? <img src={photo} alt="" className="kp-photo" /> : <div className="kp-photo kp-photo-empty" />}</td>
 				<td>{r.name}{r.article && <div className="kp-article">{r.article}</div>}</td>
 				<td className="kp-num">{r.qty}</td>
@@ -119,7 +122,9 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 	};
 	const workRow = (r: KpRow, i: number): JSX.Element => (
 		<tr key={`w${i}`} className={i % 2 ? 'kp-zebra' : ''}>
-			<td colSpan={2}>{r.name}</td>
+			<td className="kp-index">{(kp?.goods.length ?? 0) + i + 1}</td>
+			<td className="kp-photo-cell" />
+			<td>{r.name}</td>
 			<td className="kp-num">{r.qty}</td>
 			<td className="kp-num">{money(r.price)}</td>
 			<td className="kp-num">{money(r.sum)}</td>
@@ -127,6 +132,7 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 	);
 	return (
 		<div className="kp-wrap">
+			<style media="print">{'@page { size: A4 portrait; margin: 10mm; }'}</style>
 			<div className="blank-toolbar no-print">
 				<button className="btn-secondary" onClick={onBack}>← Назад</button>
 				{kp && <button className="btn-primary" onClick={() => void printKp()}>🖨 Печать / сохранить PDF</button>}
@@ -139,18 +145,19 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 				<div className="kp-doc">
 					<div className="kp-head">
 						<img className="kp-logo" src={REPAIR_LOGO} alt="Умный дом" />
+						<span>СИСТЕМЫ БЕЗОПАСНОСТИ И АВТОМАТИЗАЦИИ</span>
 					</div>
 
 					<div className="kp-title">Коммерческое предложение № {kp.number}</div>
 					<div className="kp-meta">от {ruDate(kp.date)}{kp.manager.name ? ` · менеджер: ${kp.manager.name}` : ''}{kp.manager.phone ? ` · ${kp.manager.phone}` : ''}</div>
-					<div className="kp-client">Клиент: <b>{kp.client.name || '—'}</b>{kp.client.phone && <> · {kp.client.phone}</>}</div>
+					<div className="kp-client"><span>Клиент</span><b>{kp.client.name || '—'}{kp.client.phone && <> · {kp.client.phone}</>}</b></div>
 
 					{kp.goods.length > 0 && (
 						<>
 							<div className="kp-section">Оборудование</div>
 							<table className="kp-table">
 								{renderCols()}
-								<thead><tr><th colSpan={2}>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
+								<thead><tr><th>№</th><th>Фото</th><th>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
 								<tbody>{kp.goods.map(goodsRow)}</tbody>
 							</table>
 						</>
@@ -160,6 +167,7 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 							<div className="kp-section">Работы</div>
 							<table className="kp-table">
 								{renderCols()}
+								<thead><tr><th>№</th><th>Фото</th><th>Наименование</th><th className="kp-num">Кол-во</th><th className="kp-num">Цена</th><th className="kp-num">Сумма</th></tr></thead>
 								<tbody>{kp.works.map(workRow)}</tbody>
 							</table>
 						</>
@@ -171,7 +179,8 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 						<div className="kp-trow kp-grand"><span>Итого</span><span className="kp-grand-sum">{money(kp.total)}</span></div>
 					</div>
 
-					<div className="kp-foot">Предложение действительно 14 дней. Гарантия на оборудование — по гарантии производителя, на работы — 12 мес.</div>
+					<div className="kp-terms"><b>УСЛОВИЯ ПРЕДЛОЖЕНИЯ</b><span>Предложение действительно 14 дней. Гарантия на оборудование — по гарантии производителя, на выполненные работы — 12 месяцев.</span></div>
+					<div className="kp-foot"><b>Умный дом</b><span>Коммерческое предложение</span></div>
 				</div>
 			)}
 			{kp && kind === 'receipt' && <ReceiptDocument kp={kp} />}

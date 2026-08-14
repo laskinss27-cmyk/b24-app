@@ -10,7 +10,15 @@ Object.defineProperty(globalThis, 'window', {
 	} as Window,
 });
 
-const { downloadTurnoverReportXlsx, fetchAssortmentMatrix, fetchTurnoverReport, saveAssortmentMatrixItem } = await import('./b24.js');
+const {
+	deleteAssortmentMatrixTemplate,
+	downloadTurnoverReportXlsx,
+	fetchAssortmentMatrix,
+	fetchAssortmentMatrixTemplates,
+	fetchTurnoverReport,
+	saveAssortmentMatrixItem,
+	saveAssortmentMatrixTemplate,
+} = await import('./b24.js');
 
 function captureResponses(responses: Array<unknown | Response>): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
@@ -60,6 +68,31 @@ test('matrix saving and turnover reads preserve payloads and numeric fallbacks',
 			},
 		},
 	]);
+});
+
+test('shared matrix template API preserves the editable definition', async () => {
+	const template = {
+		id: '0f0a5026-e702-43da-85c7-d561ccbf9f99', name: 'Домофоны', from: '2026-08-01', to: '2026-08-14',
+		selectedStores: ['Основной'], salesScope: 'selected' as const,
+		rows: [{ productId: 17, category: 'Домофоны', segment: 'IP', toOrderQty: 5, comment: 'Заказать' }],
+		createdAt: '2026-08-14T10:00:00.000Z', createdBy: { id: '1', name: 'Автор' },
+		updatedAt: '2026-08-14T10:00:00.000Z', updatedBy: { id: '1', name: 'Автор' },
+	};
+	const requests = captureResponses([{ ok: true, templates: [template] }, { ok: true, template }, { ok: true }]);
+
+	assert.deepEqual(await fetchAssortmentMatrixTemplates(), [template]);
+	assert.deepEqual(await saveAssortmentMatrixTemplate({
+		name: template.name, from: template.from, to: template.to, selectedStores: template.selectedStores,
+		salesScope: template.salesScope, rows: template.rows,
+	}), template);
+	await deleteAssortmentMatrixTemplate(template.id, template.name);
+	assert.deepEqual(requests.map((request) => request.url), [
+		'/api/stock/assortment-matrix/templates',
+		'/api/stock/assortment-matrix/templates/save',
+		'/api/stock/assortment-matrix/templates/delete',
+	]);
+	assert.deepEqual(requests[1]?.body['rows'], template.rows);
+	assert.equal(requests[2]?.body['id'], template.id);
 });
 
 test('turnover Excel download preserves filename and object URL cleanup', async () => {

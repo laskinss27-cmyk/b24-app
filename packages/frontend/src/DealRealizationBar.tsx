@@ -75,7 +75,7 @@ export function DealRealizationBar({
 					{busy ? '…' : hasPendingDrafts ? '✓ Провести' : `Реализация${realizationDocumentCount ? ` (${realizationDocumentCount})` : ''}`}
 				</button>
 				{!hasPendingDrafts && supplyGoodsCount > 0 && (
-					<button className="btn-cancel-draft" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={onOrderSupply}>{supplyBusy ? '…' : `Заказать (${supplyGoodsCount})`}</button>
+					<button className="btn-order-supply" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={onOrderSupply}>{supplyBusy ? '…' : `Заказать (${supplyGoodsCount})`}</button>
 				)}
 			</div>
 			{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}

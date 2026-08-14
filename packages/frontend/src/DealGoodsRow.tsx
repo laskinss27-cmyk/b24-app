@@ -91,7 +91,6 @@ export function DealGoodsRow({
 			<td>
 				<span className="goods-name-line">{hasParts ? <span className="part-name">↳ {row.name}</span> : row.name}{orderedTitle && <span className="goods-ordered-mark" title={orderedTitle}>заказано</span>}</span>
 			</td>
-			<td><span className="type-badge goods">товар</span></td>
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={edit.price} disabled={saving || !editable} onChange={(event) => onEdit({ price: event.target.value })} onBlur={onBlur} title="Цена без скидки, ₽" />
 				<div className="cell-final" title="Наценка от закупочной цены, рассчитанная по итоговой цене продажи после скидки">наценка {dealProductMarkupText(row, edit)}{saving ? ' …' : ''}</div>

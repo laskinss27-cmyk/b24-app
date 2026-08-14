@@ -11,7 +11,9 @@
 	.turnover-print tr { break-inside: avoid; page-break-inside: avoid; }
 	.supply-print-table .supplier-row, .supply-print-table .subtotal-row { break-inside: avoid; page-break-inside: avoid; }
 	.repair-blank { position: absolute; left: 0; top: 0; width: 100%; }
-	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; }
+	.kp-doc { position: absolute; left: 0; top: 0; width: 100%; max-width: none; border: 0; box-shadow: none; border-radius: 0; }
+	.kp-table thead { display: table-header-group; }
+	.kp-table tr, .kp-totals, .kp-terms { break-inside: avoid; page-break-inside: avoid; }
 	.deal-receipt { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; box-sizing: border-box; }
 	.no-print { display: none !important; }
 	/* 1 акт = 1 печатная страница: разрыв страницы после каждого экземпляра (кроме последнего), акт не рвём. */

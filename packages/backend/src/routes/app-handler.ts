@@ -6,7 +6,7 @@ import {
 	parsePlacementOptions,
 } from '../handlers/placement-context.js';
 import { B24Client, B24ApiError } from '../b24/client.js';
-import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, bindRepairsUriPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, bindReportBuilderMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
+import { bindDealTabPlacement, bindInventoryMenuPlacement, bindDealListReportPlacement, unbindDealListReportMenu, unbindCatalogExternalPlacement, ensureInventoryEntity, bindRepairsMenuPlacement, bindRepairsUriPlacement, ensureRepairsEntity, bindStockMenuPlacement, bindSupplyMenuPlacement, unbindReportBuilderMenuPlacement, DEAL_TAB_PLACEMENT, DEAL_LIST_REPORT_PLACEMENT, CATALOG_EXTERNAL_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
 import { handleOAuthCallback } from './mobile.js';
 
@@ -196,8 +196,8 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			try {
 				const stk = await bindStockMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				const sup = await bindSupplyMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
-				const reports = await bindReportBuilderMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
-				app.log.info({ stock: stk.status, supply: sup.status, reportBuilder: reports.status }, '[app/handler] work menus');
+				const reports = await unbindReportBuilderMenuPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
+				app.log.info({ stock: stk.status, supply: sup.status, obsoleteReportBuilder: reports.status }, '[app/handler] work menus');
 			} catch (err) {
 				app.log.error({}, `[app/handler] work menu bind failed — ${err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err)}`);
 			}

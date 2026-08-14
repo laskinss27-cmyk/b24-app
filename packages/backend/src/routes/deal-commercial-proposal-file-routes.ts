@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { buildDealKpDocx } from '../deal-kp-docx.js';
+import { buildDealKpDocx, normalizeDealKpDocument } from '../deal-kp-docx.js';
+import { loadDealKpImages } from '../deal-kp-photos.js';
 import { buildDealKpXlsx } from '../deal-kp-xlsx.js';
 
 interface AuthBody {
@@ -24,8 +25,10 @@ export function registerDealCommercialProposalFileRoutes(app: FastifyInstance, c
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const file = await buildDealKpDocx(b.kp);
-			app.log.info({ dealId }, '[api/deal/kp-docx] ok');
+			const kp = normalizeDealKpDocument(b.kp);
+			const images = await loadDealKpImages(kp, b);
+			const file = await buildDealKpDocx(kp, images);
+			app.log.info({ dealId, images: images.size }, '[api/deal/kp-docx] ok');
 			return reply
 				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 				.header('Content-Disposition', `attachment; filename="kp-${dealId}.docx"`)
@@ -46,8 +49,10 @@ export function registerDealCommercialProposalFileRoutes(app: FastifyInstance, c
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
-			const file = await buildDealKpXlsx(b.kp);
-			app.log.info({ dealId }, '[api/deal/kp-xlsx] ok');
+			const kp = normalizeDealKpDocument(b.kp);
+			const images = await loadDealKpImages(kp, b);
+			const file = await buildDealKpXlsx(kp, images);
+			app.log.info({ dealId, images: images.size }, '[api/deal/kp-xlsx] ok');
 			return reply
 				.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 				.header('Content-Disposition', `attachment; filename="kp-${dealId}.xlsx"`)
