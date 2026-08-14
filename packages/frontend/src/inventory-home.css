@@ -47,6 +47,10 @@ h2.inv-h2 {
 	background: #e8f5e9;
 	color: #15803d;
 }
+.badge.closed {
+	background: #eef2f7;
+	color: #475569;
+}
 .status-dot {
 	color: #9ca3af;
 	font-size: 12px;

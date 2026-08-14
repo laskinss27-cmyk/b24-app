@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
+import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 
@@ -111,6 +112,7 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 				}
 
 				data['points'] = points;
+				synchronizeInventoryStatus(data, points);
 				await client.call('entity.item.update', {
 					ENTITY: INVENTORY_ENTITY,
 					ID: b.inventoryId,

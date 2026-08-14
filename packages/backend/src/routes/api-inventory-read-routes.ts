@@ -8,6 +8,7 @@ import {
 	searchErpItems,
 } from '../erp/operations.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
+import { inventoryStatusForPoints } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 
 export function registerInventoryReadRoutes(app: FastifyInstance): void {
@@ -25,12 +26,13 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 				} catch {
 					/* битый JSON — пропускаем */
 				}
+				const points = Array.isArray(parsed['points']) ? parsed['points'] as Array<Record<string, unknown>> : [];
 				return {
 					id: String(it['ID'] ?? ''),
 					title: String(it['NAME'] ?? ''),
-					status: String(parsed['status'] ?? 'active'),
+					status: inventoryStatusForPoints(points),
 					deadline: String(parsed['deadline'] ?? ''),
-					points: Array.isArray(parsed['points']) ? parsed['points'] : [],
+					points,
 					createdById: String(parsed['createdById'] ?? it['CREATED_BY'] ?? ''),
 					createdAt: String(parsed['createdAt'] ?? it['DATE_CREATE'] ?? ''),
 					sectionIds: Array.isArray(parsed['sectionIds']) ? parsed['sectionIds'] : [],

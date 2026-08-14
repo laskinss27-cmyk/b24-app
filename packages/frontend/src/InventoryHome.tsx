@@ -455,7 +455,7 @@ export function InventoryHome(): JSX.Element {
 			<div className="inv-card" key={inv.id}>
 				<div className="inv-card-head">
 					<strong>{inv.title}</strong>
-					<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status}</span>
+					<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status === 'closed' ? 'закрыта' : inv.status}</span>
 					{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
 					{isInitiator && (
 						<button className="btn-del" title="Удалить инвентаризацию" onClick={() => void removeInventory(inv)}>
