@@ -43,13 +43,14 @@ test('stock product creation succeeds and search rejects backend errors', async 
 });
 
 test('receipt, issue, and submit operations preserve shared endpoints and kind fields', async () => {
-	const requests = captureResponses([{ ok: true, name: 'PR-1' }, { ok: true, name: 'SE-1' }, { ok: true }]);
+	const requests = captureResponses([{ ok: true, name: 'PR-1' }, { ok: true, name: 'SE-1' }, { ok: true }, { ok: true }]);
 	const receipt = { toStore: 'Основной', supplier: 'Vendor', lines: [{ productId: 17, qty: 2, purchase: 800, retail: 1200 }] };
 	const issue = { fromStore: 'Основной', reason: 'Порча', lines: [{ productId: 17, qty: 1 }] };
 
 	assert.equal(await createReceiptDoc(receipt), 'PR-1');
 	assert.equal(await createIssueDoc(issue), 'SE-1');
 	await submitStockDoc('receipt', 'PR-1');
+	await submitStockDoc('receipt', 'STE-RECEIPT', 'Stock Entry');
 	assert.deepEqual(requests, [
 		{
 			url: '/api/stock/create',
@@ -62,6 +63,10 @@ test('receipt, issue, and submit operations preserve shared endpoints and kind f
 		{
 			url: '/api/stock/submit',
 			body: { domain: 'mobile.example', accessToken: 'documents-token', kind: 'receipt', name: 'PR-1' },
+		},
+		{
+			url: '/api/stock/submit',
+			body: { domain: 'mobile.example', accessToken: 'documents-token', kind: 'receipt', name: 'STE-RECEIPT', doctype: 'Stock Entry' },
 		},
 	]);
 });

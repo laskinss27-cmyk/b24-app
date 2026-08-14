@@ -62,10 +62,10 @@ export async function createIssueDoc(input: IssueDraftInput): Promise<string> {
 }
 
 /** Провести черновик прихода/списания (двигает остатки ядра). */
-export async function submitStockDoc(kind: 'receipt' | 'issue', name: string): Promise<void> {
+export async function submitStockDoc(kind: 'receipt' | 'issue', name: string, doctype?: 'Stock Entry' | 'Purchase Receipt'): Promise<void> {
 	const res = await fetch('/api/stock/submit', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), kind, name }),
+		body: JSON.stringify({ ...bx24Auth(), kind, name, ...(doctype ? { doctype } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось провести документ');

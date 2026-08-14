@@ -35,7 +35,7 @@ export async function ensureNoteField(erp: ErpClient, doctype: string): Promise<
 
 // ── Складской учёт: журнал движений (read-only вкладки) ───────────────────────
 
-export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string; dealId: string }
+export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string }
 
 /**
  * Документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация).
@@ -62,19 +62,32 @@ export async function listCoreMovements(
 		return rows.map((r) => {
 			const base = `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`;
 			const note = String(r[NOTE_FIELD] ?? '');
-			return { name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: kind === 'return' && note ? `${base} · ${note}` : base, dealId: String(r[DEAL_FIELD] ?? '') };
+			return { name: String(r['name']), doctype: 'Delivery Note' as const, date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: kind === 'return' && note ? `${base} · ${note}` : base, dealId: String(r[DEAL_FIELD] ?? '') };
 		});
 	}
 	const withNote = (base: string, note: string): string => note ? (base ? `${base} · ${note}` : note) : base;
 	if (kind === 'receipt') {
 		await ensureNoteField(erp, 'Purchase Receipt'); // поле может ещё не существовать — select упал бы
-		const rows = await erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER);
-		return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r['supplier'] ?? ''), String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
+		await ensureNoteField(erp, 'Stock Entry');
+		const [purchaseReceipts, materialReceipts] = await Promise.all([
+			erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER),
+			erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Receipt'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail')], limit, ORDER),
+		]);
+		return [
+			...purchaseReceipts.map((row) => ({
+				name: String(row['name']), doctype: 'Purchase Receipt' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
+				summary: withNote(String(row['supplier'] ?? ''), String(row[NOTE_FIELD] ?? '')), dealId: String(row[DEAL_FIELD] ?? ''),
+			})),
+			...materialReceipts.map((row) => ({
+				name: String(row['name']), doctype: 'Stock Entry' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
+				summary: String(row[NOTE_FIELD] ?? '') || 'оприходование', dealId: String(row[DEAL_FIELD] ?? ''),
+			})),
+		].sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name)).slice(0, limit);
 	}
 	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
 	await ensureNoteField(erp, 'Stock Entry');
 	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail')], limit, ORDER);
-	return rows.map((r) => ({ name: String(r['name']), date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
+	return rows.map((r) => ({ name: String(r['name']), doctype: 'Stock Entry' as const, date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
 }
 
 // ── Детали документа + история движений по товару (для окна «Складской учёт») ──

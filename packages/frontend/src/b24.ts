@@ -227,6 +227,8 @@ export {
 } from './inventory-api.js';
 export type {
 	ErpInvDoc,
+	ErpInvDocuments,
+	ErpInvDocumentState,
 	ErpRecoLine,
 	Inventory,
 	InvPoint,

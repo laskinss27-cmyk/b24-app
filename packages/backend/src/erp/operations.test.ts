@@ -32,6 +32,7 @@ import {
 	createPurchaseOrderDraft,
 	createSupplyPurchaseReceipt,
 	createInventoryRecoDraft,
+	createInventoryAdjustmentDraft,
 	createReceiptDraft,
 	createSupplyRequest,
 	createTransferDraft,
@@ -40,6 +41,7 @@ import {
 	createClientReturns,
 	createRealizationDraft,
 	deleteInventoryRecoDraft,
+	deleteInventoryAdjustmentDraft,
 	deliverRepairUnit,
 	ensureCoreItem,
 	ensureMarketplaceOldIdField,
@@ -81,6 +83,7 @@ import {
 	selectDealQuoteVariant,
 	submitDoc,
 	submitInventoryReco,
+	submitInventoryAdjustment,
 	submitRealization,
 	syncDealRealizationPrices,
 	syncSupplyRequestQuantitiesFromDeal,
@@ -1790,6 +1793,56 @@ test('inventory reconciliation keeps its current draft lifecycle and payload', a
 	assert.deepEqual(requests, [{ method: 'DELETE', path: '/api/resource/Stock%20Reconciliation/RECO-1' }]);
 });
 
+test('inventory adjustments create separate shortage and surplus Stock Entries', async () => {
+	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
+	const submitted: Array<{ doctype: string; name: string }> = [];
+	const deleted: Array<{ doctype: string; name: string }> = [];
+	let stockEntrySequence = 0;
+	const client = {
+		list: async (doctype: string) => doctype === 'Company' ? [{ name: 'Test Company', abbr: 'TEST' }] : [],
+		get: async (doctype: string, name: string) => {
+			if (doctype === 'Custom Field') return { name };
+			if (doctype === 'Stock Entry') return { name, docstatus: 0 };
+			return null;
+		},
+		create: async (doctype: string, fields: Record<string, unknown>) => {
+			created.push({ doctype, fields: structuredClone(fields) });
+			return { name: doctype === 'Stock Entry' ? `STE-${++stockEntrySequence}` : `created-${doctype}` };
+		},
+		submit: async (doctype: string, name: string) => { submitted.push({ doctype, name }); },
+		delete: async (doctype: string, name: string) => { deleted.push({ doctype, name }); },
+	} as unknown as ErpClient;
+
+	const issue = await createInventoryAdjustmentDraft(client, {
+		invRef: 'inv42:store7:issue', kind: 'issue', storeTitle: 'Main',
+		lines: [{ productId: 101, qty: 2, valuation: 125 }],
+	});
+	const receipt = await createInventoryAdjustmentDraft(client, {
+		invRef: 'inv42:store7:receipt', kind: 'receipt', storeTitle: 'Main',
+		lines: [{ productId: 202, qty: 3, valuation: 40 }],
+	});
+
+	assert.deepEqual(issue, { name: 'STE-1' });
+	assert.deepEqual(receipt, { name: 'STE-2' });
+	const entries = created.filter((entry) => entry.doctype === 'Stock Entry');
+	assert.equal(entries[0]?.fields['stock_entry_type'], 'Material Issue');
+	assert.equal(entries[0]?.fields['b24_inv_ref'], 'inv42:store7:issue');
+	assert.equal(entries[0]?.fields['b24_reason'], 'Инвентаризация');
+	assert.equal(entries[0]?.fields['b24_note'], 'Списание по инвентаризации');
+	assert.deepEqual(entries[0]?.fields['items'], [{ item_code: '101', qty: 2, s_warehouse: 'Main - TEST' }]);
+	assert.equal(entries[1]?.fields['stock_entry_type'], 'Material Receipt');
+	assert.equal(entries[1]?.fields['b24_inv_ref'], 'inv42:store7:receipt');
+	assert.equal(entries[1]?.fields['b24_note'], 'Оприходование по инвентаризации');
+	assert.deepEqual(entries[1]?.fields['items'], [{
+		item_code: '202', qty: 3, t_warehouse: 'Main - TEST', basic_rate: 40, valuation_rate: 40,
+	}]);
+
+	await submitInventoryAdjustment(client, issue.name);
+	await deleteInventoryAdjustmentDraft(client, receipt.name);
+	assert.deepEqual(submitted, [{ doctype: 'Stock Entry', name: 'STE-1' }]);
+	assert.deepEqual(deleted, [{ doctype: 'Stock Entry', name: 'STE-2' }]);
+});
+
 test('stock movement list keeps document filters, summaries and submission state', async () => {
 	const calls: Array<{ doctype: string; fields: string[]; filters: unknown[][]; limit: number | undefined; order: string | undefined }> = [];
 	const client = {
@@ -1807,6 +1860,9 @@ test('stock movement list keeps document filters, summaries and submission state
 				return [{ name: 'PR-1', posting_date: '2026-08-04', supplier: 'Поставщик', docstatus: 1, b24_deal_id: '', b24_note: 'срочно' }];
 			}
 			if (doctype === 'Stock Entry') {
+				if (filters.some((filter) => filter[0] === 'stock_entry_type' && filter[2] === 'Material Receipt')) {
+					return [{ name: 'STE-RECEIPT', posting_date: '2026-08-02', docstatus: 1, b24_deal_id: '', b24_note: 'Оприходование по инвентаризации' }];
+				}
 				return [{ name: 'STE-1', posting_date: '2026-08-03', docstatus: 0, b24_deal_id: '7', b24_reason: '', b24_note: 'бой' }];
 			}
 			return [];
@@ -1814,16 +1870,17 @@ test('stock movement list keeps document filters, summaries and submission state
 	} as unknown as ErpClient;
 
 	assert.deepEqual(await listCoreMovements(client, 'delivery', { from: '2026-08-01', to: '2026-08-06', productId: 101 }), [{
-		name: 'DN-1', date: '2026-08-05', submitted: true, summary: '125 ₽', dealId: '42',
+		name: 'DN-1', doctype: 'Delivery Note', date: '2026-08-05', submitted: true, summary: '125 ₽', dealId: '42',
 	}]);
 	assert.deepEqual(await listCoreMovements(client, 'return'), [{
-		name: 'RET-1', date: '2026-08-05', submitted: false, summary: '125 ₽ · повреждение', dealId: '42',
+		name: 'RET-1', doctype: 'Delivery Note', date: '2026-08-05', submitted: false, summary: '125 ₽ · повреждение', dealId: '42',
 	}]);
-	assert.deepEqual(await listCoreMovements(client, 'receipt'), [{
-		name: 'PR-1', date: '2026-08-04', submitted: true, summary: 'Поставщик · срочно', dealId: '',
-	}]);
+	assert.deepEqual(await listCoreMovements(client, 'receipt'), [
+		{ name: 'PR-1', doctype: 'Purchase Receipt', date: '2026-08-04', submitted: true, summary: 'Поставщик · срочно', dealId: '' },
+		{ name: 'STE-RECEIPT', doctype: 'Stock Entry', date: '2026-08-02', submitted: true, summary: 'Оприходование по инвентаризации', dealId: '' },
+	]);
 	assert.deepEqual(await listCoreMovements(client, 'issue'), [{
-		name: 'STE-1', date: '2026-08-03', submitted: false, summary: 'списание · бой', dealId: '7',
+		name: 'STE-1', doctype: 'Stock Entry', date: '2026-08-03', submitted: false, summary: 'списание · бой', dealId: '7',
 	}]);
 
 	const deliveryCall = calls.find((call) => call.doctype === 'Delivery Note' && call.limit === 1000);

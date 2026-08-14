@@ -1,6 +1,6 @@
 import { bx24Auth } from './bitrix-auth.js';
 
-export interface CoreMovement { name: string; date: string; submitted: boolean; summary: string; dealId: string; ownerName: string }
+export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string; ownerName: string }
 export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery' | 'return', period?: { from?: string; to?: string; productId?: number }): Promise<CoreMovement[]> {
 	const res = await fetch('/api/stock/movements', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },

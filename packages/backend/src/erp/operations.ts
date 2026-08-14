@@ -88,6 +88,15 @@ export {
 } from './inventory-reconciliation.js';
 export type { ErpStoreLine, InventoryRecoLine } from './inventory-reconciliation.js';
 export {
+	createInventoryAdjustmentDraft,
+	deleteInventoryAdjustmentDraft,
+	submitInventoryAdjustment,
+} from './inventory-adjustment-documents.js';
+export type {
+	InventoryAdjustmentKind,
+	InventoryAdjustmentLine,
+} from './inventory-adjustment-documents.js';
+export {
 	MARKETPLACE_BUNDLE_SOURCE_FIELD,
 	MARKETPLACE_BUNDLE_UNITS_FIELD,
 	MARKETPLACE_NAME_FIELD,

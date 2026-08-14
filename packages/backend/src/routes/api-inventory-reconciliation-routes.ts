@@ -2,112 +2,208 @@ import type { FastifyInstance } from 'fastify';
 import { INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import {
+	createInventoryAdjustmentDraft,
 	createInventoryRecoDraft,
+	deleteInventoryAdjustmentDraft,
 	deleteInventoryRecoDraft,
 	submitInventoryReco,
+	type InventoryAdjustmentLine,
 	type InventoryRecoLine,
 } from '../erp/operations.js';
 import {
-	computeInventoryReconciliationLines,
-	loadInventoryPoint,
-} from './api-inventory-reconciliation-helpers.js';
+	inventoryDocumentCount,
+	inventoryDocumentSet,
+	legacyInventoryDocument,
+	type InventoryDocumentRecord,
+	type InventoryDocumentSet,
+} from './api-inventory-document-state.js';
+import { submitInventoryDocumentSet } from './api-inventory-document-submission.js';
+import { computeInventoryReconciliationLines, loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 
+function draftRecord(name: string, lines: number, savedAt: string): InventoryDocumentRecord {
+	return { name, status: 'draft', lines, savedAt };
+}
+
+async function updateInventoryItem(
+	client: ReturnType<typeof inventoryClientFrom> & {},
+	loaded: Awaited<ReturnType<typeof loadInventoryPoint>>,
+): Promise<void> {
+	loaded.data['points'] = loaded.points;
+	await client.call('entity.item.update', {
+		ENTITY: INVENTORY_ENTITY,
+		ID: loaded.item['ID'],
+		NAME: loaded.item['NAME'],
+		DETAIL_TEXT: JSON.stringify(loaded.data),
+	});
+}
+
+async function deleteDraftDocuments(erp: ErpClient, documents: InventoryDocumentSet): Promise<void> {
+	for (const document of Object.values(documents)) {
+		if (document?.status === 'draft') await deleteInventoryAdjustmentDraft(erp, document.name);
+	}
+}
+
 export function registerInventoryReconciliationRoutes(app: FastifyInstance): void {
 	app.post('/api/inventory/erp-doc-preview', async (req, reply) => {
-		const b = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number };
-		const client = inventoryClientFrom(app, b);
+		const body = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number };
+		const client = inventoryClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
+		if (!body.inventoryId || body.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
-			const { pt } = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
-			if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
+			const { pt } = await loadInventoryPoint(client, body.inventoryId, Number(body.storeId));
+			if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документы ядра — только по сверенной точке' });
 			const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
-			app.log.info({ storeId: b.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
-			return { ok: true, lines, storeName, doc: pt['erpDoc'] ?? null };
-		} catch (err) {
-			app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-preview] failed — ${inventoryErrorInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(err) });
+			app.log.info({ storeId: body.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
+			return {
+				ok: true,
+				lines,
+				storeName,
+				docs: inventoryDocumentSet(pt),
+				legacyDoc: legacyInventoryDocument(pt) ?? null,
+				// Старый клиент ожидает поле doc; сохраняем его на время совместимости.
+				doc: legacyInventoryDocument(pt) ?? null,
+			};
+		} catch (error) {
+			app.log.error({ storeId: body.storeId }, `[api/inventory/erp-doc-preview] failed — ${inventoryErrorInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(error) });
 		}
 	});
 
 	app.post('/api/inventory/erp-doc-save', async (req, reply) => {
-		const b = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number; recreate?: boolean };
-		const client = inventoryClientFrom(app, b);
+		const body = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number; recreate?: boolean };
+		const client = inventoryClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
+		if (!body.inventoryId || body.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
-			const { item, data, points, pt } = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
-			if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документ ядра — только по сверённой точке' });
-			const prev = pt['erpDoc'] as { name?: string; status?: string } | undefined;
-			if (prev?.name && prev.status === 'submitted') return reply.code(200).send({ ok: false, error: `документ ${prev.name} уже проведён`, doc: prev });
-			if (prev?.name && prev.status === 'draft') {
-				if (!b.recreate) return reply.code(200).send({ ok: false, error: `черновик ${prev.name} уже записан (recreate — пересоздать)`, doc: prev });
-				await deleteInventoryRecoDraft(erp, prev.name);
-			}
-			const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
-			const recoLines: InventoryRecoLine[] = lines.map((l) => ({ productId: l.productId, qty: l.fact, valuation: l.valuation }));
-			const { name } = await createInventoryRecoDraft(erp, {
-				invRef: `inv${b.inventoryId}:store${b.storeId}`,
-				storeTitle: storeName,
-				lines: recoLines,
+			const saved = await withInventoryUpdateLock(body.inventoryId, async () => {
+				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
+				if (String(loaded.pt['status']) !== 'reconciled') throw new Error('документы ядра — только по сверенной точке');
+
+				const legacy = legacyInventoryDocument(loaded.pt);
+				if (legacy) {
+					if (legacy.status === 'submitted') throw new Error(`документ ${legacy.name} уже проведён`);
+					if (!body.recreate) throw new Error(`черновик ${legacy.name} уже записан (recreate — пересоздать)`);
+					await deleteInventoryRecoDraft(erp, legacy.name);
+					const { lines, storeName } = await computeInventoryReconciliationLines(erp, loaded.pt);
+					const recoLines: InventoryRecoLine[] = lines.map((line) => ({
+						productId: line.productId, qty: line.fact, valuation: line.valuation,
+					}));
+					const created = await createInventoryRecoDraft(erp, {
+						invRef: `inv${body.inventoryId}:store${body.storeId}`,
+						storeTitle: storeName,
+						lines: recoLines,
+					});
+					const legacyDoc = draftRecord(created.name, lines.length, new Date().toISOString());
+					loaded.pt['erpDoc'] = legacyDoc;
+					await updateInventoryItem(client, loaded);
+					return { docs: {}, legacyDoc, lines: lines.length };
+				}
+
+				const previous = inventoryDocumentSet(loaded.pt);
+				if (inventoryDocumentCount(previous)) {
+					if (Object.values(previous).some((document) => document?.status === 'submitted')) {
+						throw new Error('один из документов уже проведён — пересоздание запрещено');
+					}
+					if (!body.recreate) {
+						const names = Object.values(previous).map((document) => document?.name).filter(Boolean).join(', ');
+						throw new Error(`черновики уже записаны: ${names} (recreate — пересоздать)`);
+					}
+					await deleteDraftDocuments(erp, previous);
+				}
+
+				const { lines, storeName } = await computeInventoryReconciliationLines(erp, loaded.pt);
+				const issueLines: InventoryAdjustmentLine[] = lines
+					.filter((line) => line.diff < 0)
+					.map((line) => ({ productId: line.productId, qty: Math.abs(line.diff), valuation: line.valuation }));
+				const receiptLines: InventoryAdjustmentLine[] = lines
+					.filter((line) => line.diff > 0)
+					.map((line) => ({ productId: line.productId, qty: line.diff, valuation: line.valuation }));
+				if (!issueLines.length && !receiptLines.length) throw new Error('нет расхождений — документы не нужны');
+
+				const createdNames: string[] = [];
+				const documents: InventoryDocumentSet = {};
+				const savedAt = new Date().toISOString();
+				try {
+					if (issueLines.length) {
+						const created = await createInventoryAdjustmentDraft(erp, {
+							invRef: `inv${body.inventoryId}:store${body.storeId}:issue`,
+							kind: 'issue', storeTitle: storeName, lines: issueLines,
+						});
+						createdNames.push(created.name);
+						documents.issue = draftRecord(created.name, issueLines.length, savedAt);
+					}
+					if (receiptLines.length) {
+						const created = await createInventoryAdjustmentDraft(erp, {
+							invRef: `inv${body.inventoryId}:store${body.storeId}:receipt`,
+							kind: 'receipt', storeTitle: storeName, lines: receiptLines,
+						});
+						createdNames.push(created.name);
+						documents.receipt = draftRecord(created.name, receiptLines.length, savedAt);
+					}
+					loaded.pt['erpDocs'] = documents;
+					await updateInventoryItem(client, loaded);
+				} catch (error) {
+					for (const name of createdNames) await deleteInventoryAdjustmentDraft(erp, name).catch(() => undefined);
+					throw error;
+				}
+				return { docs: documents, legacyDoc: null, lines: lines.length };
 			});
-			const doc = { name, status: 'draft', lines: lines.length, savedAt: new Date().toISOString() };
-			pt['erpDoc'] = doc;
-			data['points'] = points;
-			await client.call('entity.item.update', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId, NAME: item['NAME'], DETAIL_TEXT: JSON.stringify(data) });
-			app.log.info({ storeId: b.storeId, name }, '[api/inventory/erp-doc-save] ok');
-			return { ok: true, doc };
-		} catch (err) {
-			app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-save] failed — ${inventoryErrorInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(err) });
+			app.log.info({ storeId: body.storeId, documents: inventoryDocumentCount(saved.docs), lines: saved.lines }, '[api/inventory/erp-doc-save] ok');
+			return { ok: true, ...saved, doc: saved.legacyDoc };
+		} catch (error) {
+			app.log.error({ storeId: body.storeId }, `[api/inventory/erp-doc-save] failed — ${inventoryErrorInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(error) });
 		}
 	});
 
 	app.post('/api/inventory/erp-doc-submit', async (req, reply) => {
-		const b = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number };
-		const client = inventoryClientFrom(app, b);
+		const body = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number };
+		const client = inventoryClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		if (!b.inventoryId || b.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
+		if (!body.inventoryId || body.storeId == null) return reply.code(400).send({ ok: false, error: 'inventoryId/storeId required' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
-			const { pt } = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
-			const doc = pt['erpDoc'] as { name?: string; status?: string; lines?: number } | undefined;
-			if (!doc?.name) return reply.code(200).send({ ok: false, error: 'сначала «Записать» (черновика ядра нет)' });
-			const live = await erp.get('Stock Reconciliation', doc.name);
-			if (!live) return reply.code(200).send({ ok: false, error: `${doc.name} не найден в ядре — пересоздай через «Записать»` });
-			if (Number(live['docstatus'] ?? 0) !== 1) await submitInventoryReco(erp, doc.name);
-			else app.log.info({ name: doc.name }, '[api/inventory/erp-doc-submit] reco уже проведён — дозавершаю');
-			const completed = await withInventoryUpdateLock(b.inventoryId, async () => {
-				const latest = await loadInventoryPoint(client, b.inventoryId!, Number(b.storeId));
-				const latestDocument = latest.pt['erpDoc'] as { name?: string; status?: string; lines?: number } | undefined;
-				if (latestDocument?.name && latestDocument.name !== doc.name) {
-					throw new Error(`документ точки изменился: ожидался ${doc.name}, найден ${latestDocument.name}`);
+			const completed = await withInventoryUpdateLock(body.inventoryId, async () => {
+				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
+				const legacy = legacyInventoryDocument(loaded.pt);
+				if (legacy) {
+					const live = await erp.get('Stock Reconciliation', legacy.name);
+					if (!live) throw new Error(`${legacy.name} не найден в ядре — пересоздай через «Записать»`);
+					if (Number(live['docstatus'] ?? 0) !== 1) await submitInventoryReco(erp, legacy.name);
+					legacy.status = 'submitted';
+					legacy.submittedAt = new Date().toISOString();
+					loaded.pt['erpDoc'] = legacy;
+					const inventoryStatus = synchronizeInventoryStatus(loaded.data, loaded.points);
+					await updateInventoryItem(client, loaded);
+					return { docs: {}, legacyDoc: legacy, inventoryStatus };
 				}
-				latest.pt['erpDoc'] = { ...doc, ...latestDocument, name: doc.name, status: 'submitted', submittedAt: new Date().toISOString() };
-				latest.data['points'] = latest.points;
-				const inventoryStatus = synchronizeInventoryStatus(latest.data, latest.points);
-				await client.call('entity.item.update', {
-					ENTITY: INVENTORY_ENTITY,
-					ID: b.inventoryId,
-					NAME: latest.item['NAME'],
-					DETAIL_TEXT: JSON.stringify(latest.data),
+
+				const documents = inventoryDocumentSet(loaded.pt);
+				if (!inventoryDocumentCount(documents)) throw new Error('сначала «Записать» (черновиков ядра нет)');
+				await submitInventoryDocumentSet(erp, documents, async (currentDocuments) => {
+					loaded.pt['erpDocs'] = currentDocuments;
+					// Сохраняем каждый успешный шаг: при ошибке второго документа повтор продолжит с него.
+					synchronizeInventoryStatus(loaded.data, loaded.points);
+					await updateInventoryItem(client, loaded);
 				});
-				return { doc: latest.pt['erpDoc'], inventoryStatus };
+				const inventoryStatus = synchronizeInventoryStatus(loaded.data, loaded.points);
+				await updateInventoryItem(client, loaded);
+				return { docs: documents, legacyDoc: null, inventoryStatus };
 			});
-			app.log.info({ storeId: b.storeId, name: doc.name, inventoryStatus: completed.inventoryStatus }, '[api/inventory/erp-doc-submit] ok');
-			return { ok: true, ...completed };
-		} catch (err) {
-			app.log.error({ storeId: b.storeId }, `[api/inventory/erp-doc-submit] failed — ${inventoryErrorInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(err) });
+			app.log.info({ storeId: body.storeId, documents: inventoryDocumentCount(completed.docs), inventoryStatus: completed.inventoryStatus }, '[api/inventory/erp-doc-submit] ok');
+			return { ok: true, ...completed, doc: completed.legacyDoc };
+		} catch (error) {
+			app.log.error({ storeId: body.storeId }, `[api/inventory/erp-doc-submit] failed — ${inventoryErrorInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(error) });
 		}
 	});
 }

@@ -31,7 +31,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const [showForm, setShowForm] = useState(false);
 	const [busyDoc, setBusyDoc] = useState<string | null>(null);
 	const [prod, setProd] = useState<StockItem | null>(null);
-	const [openDoc, setOpenDoc] = useState<string | null>(null);
+	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string } | null>(null);
 	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
 
 	useEffect(() => {
@@ -50,7 +50,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const submit = async (m: CoreMovement): Promise<void> => {
 		if (kind === 'delivery' || kind === 'return') return;
 		setBusyDoc(m.name); setErr(null);
-		try { await submitStockDoc(kind, m.name); setBump((b) => b + 1); }
+		try { await submitStockDoc(kind, m.name, m.doctype === 'Stock Entry' ? 'Stock Entry' : 'Purchase Receipt'); setBump((b) => b + 1); }
 		catch (e) { setErr(errText(e)); }
 		finally { setBusyDoc(null); }
 	};
@@ -86,14 +86,14 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 					<tbody>
 						{shown.map((m) => (
 							<tr key={m.name}>
-								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc(m.name); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind] }); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
 								{canPost && <td style={TD}>{!m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}</td>}
 							</tr>
 						))}
 					</tbody>
 				</table>
 			)}
-			{openDoc && <StockDocumentDetailModal doctype={KIND_DOCTYPE[kind]} name={openDoc} onClose={() => setOpenDoc(null)} />}
+			{openDoc && <StockDocumentDetailModal doctype={openDoc.doctype} name={openDoc.name} {...(kind === 'issue' || kind === 'receipt' ? { printKind: kind } : {})} onClose={() => setOpenDoc(null)} />}
 			{showForm && form && kind === 'receipt' && <ReceiptForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 			{showForm && form && kind === 'issue' && <IssueForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 		</>

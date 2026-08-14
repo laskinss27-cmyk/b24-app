@@ -39,8 +39,10 @@ export interface InvPoint {
 	draftUpdatedAt?: string;
 	draftUpdatedById?: string;
 	draftUpdatedByName?: string;
-	/** Документ ЯДРА (Stock Reconciliation в ERPNext) по 1С-модели «Записать → Провести». */
+	/** Legacy Stock Reconciliation у ревизий, созданных до разделения документов. */
 	erpDoc?: ErpInvDoc;
+	/** New documents: inventory shortage issue and inventory surplus receipt. */
+	erpDocs?: ErpInvDocuments;
 }
 
 export interface ErpInvDoc {
@@ -49,6 +51,15 @@ export interface ErpInvDoc {
 	lines: number;
 	savedAt?: string;
 	submittedAt?: string;
+}
+export interface ErpInvDocuments {
+	issue?: ErpInvDoc;
+	receipt?: ErpInvDoc;
+}
+export interface ErpInvDocumentState {
+	docs: ErpInvDocuments;
+	/** Legacy Stock Reconciliation, retained for inventories that already created it. */
+	legacyDoc: ErpInvDoc | null;
 }
 export interface Inventory {
 	id: string;
@@ -168,7 +179,7 @@ export async function deleteInventory(inventoryId: string): Promise<void> {
 	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить');
 }
 
-// ── Документ ядра (Stock Reconciliation, 1С-модель «на основании») ───────────
+// ── Складские документы инвентаризации ───────────────────────────────────────
 
 export interface ErpRecoLine {
 	productId: number;
@@ -190,21 +201,30 @@ async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Pr
 }
 
 /** Болванка: строки документа ядра, ничего не записано (1С: «не сохранил — пропала»). */
-export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[]; doc: ErpInvDoc | null }> {
-	const j = await postErpDoc<{ lines?: ErpRecoLine[]; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
-	return { lines: j.lines ?? [], doc: j.doc ?? null };
+function inventoryDocumentState(response: { docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }): ErpInvDocumentState {
+	return {
+		docs: response.docs ?? {},
+		legacyDoc: response.legacyDoc ?? response.doc ?? null,
+	};
 }
 
-/** «Записать»: черновик Stock Reconciliation в ядре (остатки не двигаются). */
-export async function saveErpDoc(inventoryId: string, storeId: number, recreate = false): Promise<ErpInvDoc> {
-	const j = await postErpDoc<{ doc?: ErpInvDoc }>('/api/inventory/erp-doc-save', { inventoryId, storeId, recreate });
-	if (!j.doc) throw new Error('бэкенд не вернул документ');
-	return j.doc;
+export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[] } & ErpInvDocumentState> {
+	const j = await postErpDoc<{ lines?: ErpRecoLine[]; docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
+	return { lines: j.lines ?? [], ...inventoryDocumentState(j) };
 }
 
-/** «Провести»: submit Stock Reconciliation в ядре. */
-export async function submitErpDoc(inventoryId: string, storeId: number): Promise<ErpInvDoc> {
-	const j = await postErpDoc<{ doc?: ErpInvDoc }>('/api/inventory/erp-doc-submit', { inventoryId, storeId });
-	if (!j.doc) throw new Error('бэкенд не вернул документ');
-	return j.doc;
+/** Создать черновики списания недостачи и/или оприходования излишков. */
+export async function saveErpDoc(inventoryId: string, storeId: number, recreate = false): Promise<ErpInvDocumentState> {
+	const j = await postErpDoc<{ docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-save', { inventoryId, storeId, recreate });
+	const state = inventoryDocumentState(j);
+	if (!Object.keys(state.docs).length && !state.legacyDoc) throw new Error('бэкенд не вернул складские документы');
+	return state;
+}
+
+/** Провести все необходимые документы; уже проведённые при повторе пропускаются. */
+export async function submitErpDoc(inventoryId: string, storeId: number): Promise<ErpInvDocumentState> {
+	const j = await postErpDoc<{ docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-submit', { inventoryId, storeId });
+	const state = inventoryDocumentState(j);
+	if (!Object.keys(state.docs).length && !state.legacyDoc) throw new Error('бэкенд не вернул складские документы');
+	return state;
 }

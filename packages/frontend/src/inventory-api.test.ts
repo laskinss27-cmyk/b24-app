@@ -100,20 +100,32 @@ test('inventory deletion preserves authenticated endpoint payload', async () => 
 });
 
 test('ERP inventory documents preserve preview fallbacks and save-submit endpoints', async () => {
-	const draft = { name: 'REC-1', status: 'draft', lines: 2 };
-	const submitted = { name: 'REC-1', status: 'submitted', lines: 2 };
+	const draft = {
+		issue: { name: 'STE-I', status: 'draft', lines: 1 },
+		receipt: { name: 'STE-R', status: 'draft', lines: 1 },
+	};
+	const submitted = {
+		issue: { name: 'STE-I', status: 'submitted', lines: 1 },
+		receipt: { name: 'STE-R', status: 'submitted', lines: 1 },
+	};
 	const requests = captureResponses([
 		{ ok: true },
-		{ ok: true, doc: draft },
-		{ ok: true, doc: submitted },
+		{ ok: true, docs: draft, legacyDoc: null },
+		{ ok: true, docs: submitted, legacyDoc: null },
 	]);
 
-	assert.deepEqual(await previewErpDoc('inv-1', 7), { lines: [], doc: null });
-	assert.deepEqual(await saveErpDoc('inv-1', 7, true), draft);
-	assert.deepEqual(await submitErpDoc('inv-1', 7), submitted);
+	assert.deepEqual(await previewErpDoc('inv-1', 7), { lines: [], docs: {}, legacyDoc: null });
+	assert.deepEqual(await saveErpDoc('inv-1', 7, true), { docs: draft, legacyDoc: null });
+	assert.deepEqual(await submitErpDoc('inv-1', 7), { docs: submitted, legacyDoc: null });
 	assert.deepEqual(requests, [
 		{ url: '/api/inventory/erp-doc-preview', body: { domain: 'inventory.example', accessToken: 'inventory-token', inventoryId: 'inv-1', storeId: 7 } },
 		{ url: '/api/inventory/erp-doc-save', body: { domain: 'inventory.example', accessToken: 'inventory-token', inventoryId: 'inv-1', storeId: 7, recreate: true } },
 		{ url: '/api/inventory/erp-doc-submit', body: { domain: 'inventory.example', accessToken: 'inventory-token', inventoryId: 'inv-1', storeId: 7 } },
 	]);
+});
+
+test('ERP inventory API keeps legacy reconciliation documents readable', async () => {
+	const legacy = { name: 'RECO-1', status: 'submitted', lines: 2 };
+	captureResponses([{ ok: true, lines: [], doc: legacy }]);
+	assert.deepEqual(await previewErpDoc('inv-old', 7), { lines: [], docs: {}, legacyDoc: legacy });
 });

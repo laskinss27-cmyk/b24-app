@@ -12,7 +12,7 @@ const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(
 const modalCard: CSSProperties = { background: '#fff', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
 
 /** Раскрытие складского документа ядра (строки + шапка). */
-export function StockDocumentDetailModal({ doctype, name, onClose }: { doctype: string; name: string; onClose: () => void }): JSX.Element {
+export function StockDocumentDetailModal({ doctype, name, printKind: requestedPrintKind, onClose }: { doctype: string; name: string; printKind?: 'issue' | 'receipt'; onClose: () => void }): JSX.Element {
 	const [d, setD] = useState<CoreDocDetail | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	useEffect(() => {
@@ -20,7 +20,7 @@ export function StockDocumentDetailModal({ doctype, name, onClose }: { doctype: 
 		fetchDocDetail(doctype, name).then((x) => { if (alive) setD(x); }).catch((e) => { if (alive) setErr(errText(e)); });
 		return () => { alive = false; };
 	}, [doctype, name]);
-	const printKind: 'issue' | 'receipt' | null = doctype === 'Purchase Receipt' ? 'receipt' : doctype === 'Stock Entry' ? 'issue' : null;
+	const printKind: 'issue' | 'receipt' | null = requestedPrintKind ?? (doctype === 'Purchase Receipt' ? 'receipt' : doctype === 'Stock Entry' ? 'issue' : null);
 	return (
 		<div style={{ ...overlay, zIndex: 1100 }}>
 			<div style={modalCard}>

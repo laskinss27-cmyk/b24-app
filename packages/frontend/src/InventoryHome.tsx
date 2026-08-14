@@ -20,6 +20,8 @@ import {
 	saveErpDoc,
 	submitErpDoc,
 	type ErpInvDoc,
+	type ErpInvDocuments,
+	type ErpInvDocumentState,
 	type ErpRecoLine,
 	type Inventory,
 	type InvPoint,
@@ -129,7 +131,7 @@ export function InventoryHome(): JSX.Element {
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/** Открытая модалка QR точки (мобильный подсчёт): какую точку показываем. */
 	const [qrFor, setQrFor] = useState<{ invId: string; storeId: number; storeName: string } | null>(null);
-	/** Открытая модалка документа ЯДРА (Stock Reconciliation, 1С-цепочка Записать→Провести). */
+	/** Документы инвентаризации в ядре: списание недостачи и оприходование излишков. */
 	const [erpFor, setErpFor] = useState<{ invId: string; storeId: number; storeName: string } | null>(null);
 
 	useEffect(() => {
@@ -433,12 +435,17 @@ export function InventoryHome(): JSX.Element {
 			);
 		}
 		if (st === 'reconciled') {
-			const erpBadge = p.erpDoc ? (p.erpDoc.status === 'submitted' ? ' ✓' : ' ✎') : '';
+			const pointDocuments = Object.values(p.erpDocs ?? {});
+			const hasDocuments = pointDocuments.length > 0 || Boolean(p.erpDoc);
+			const documentsSubmitted = pointDocuments.length > 0
+				? pointDocuments.every((document) => document.status === 'submitted')
+				: p.erpDoc?.status === 'submitted';
+			const erpBadge = hasDocuments ? (documentsSubmitted ? ' ✓' : ' ✎') : '';
 			return (
 				<>
 					{isInitiator && (
 						<button className="btn-mini" onClick={() => setErpFor({ invId: inv.id, storeId: p.storeId, storeName: p.storeName })}>
-							Документ ядра{erpBadge}
+							Документы ядра{erpBadge}
 						</button>
 					)}
 					{openBtn}
@@ -588,10 +595,9 @@ export function InventoryHome(): JSX.Element {
 }
 
 /**
- * Документ ЯДРА «на основании» точки (1С-модель): болванка (ничего не записано;
- * закрыл — пропала) → «Записать» (черновик Stock Reconciliation в ERPNext) →
- * «Провести» (остатки ядра изменяются по фактам точки).
- * Книга здесь — остатки ЯДРА (ERPNext), не Б24: документ выравнивает ядро по фактам.
+ * По сверенной точке создаются независимые черновики ядра: Material Issue для
+ * недостачи и Material Receipt для излишков. Проведение можно безопасно повторить:
+ * уже проведённый документ будет пропущен, а незавершённый продолжен.
  */
 function ErpDocModal(props: {
 	invId: string;
@@ -602,15 +608,27 @@ function ErpDocModal(props: {
 	onChanged: () => void;
 }): JSX.Element {
 	const [lines, setLines] = useState<ErpRecoLine[] | null>(null);
-	const [doc, setDoc] = useState<ErpInvDoc | null>(null);
+	const [docs, setDocs] = useState<ErpInvDocuments>({});
+	const [legacyDoc, setLegacyDoc] = useState<ErpInvDoc | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
+
+	function applyDocumentState(state: ErpInvDocumentState): void {
+		setDocs(state.docs);
+		setLegacyDoc(state.legacyDoc);
+	}
+
+	async function refreshDocumentState(): Promise<void> {
+		const result = await withTimeout(previewErpDoc(props.invId, props.storeId), 20000, 'erp-doc-preview');
+		setLines(result.lines);
+		applyDocumentState(result);
+	}
 
 	useEffect(() => {
 		if (props.mock) { setLines([]); setErr('dev-мок: документ ядра доступен только с подключённым ERPNext.'); return; }
 		let alive = true;
 		withTimeout(previewErpDoc(props.invId, props.storeId), 20000, 'erp-doc-preview')
-			.then((r) => { if (alive) { setLines(r.lines); setDoc(r.doc); } })
+			.then((result) => { if (alive) { setLines(result.lines); setDocs(result.docs); setLegacyDoc(result.legacyDoc); } })
 			.catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)); });
 		return () => { alive = false; };
 	}, [props.invId, props.storeId, props.mock]);
@@ -618,43 +636,62 @@ function ErpDocModal(props: {
 	async function doSave(recreate = false): Promise<void> {
 		setBusy(true); setErr(null);
 		try {
-			const d = await withTimeout(saveErpDoc(props.invId, props.storeId, recreate), 25000, 'erp-doc-save');
-			setDoc(d);
+			const state = await withTimeout(saveErpDoc(props.invId, props.storeId, recreate), 25000, 'erp-doc-save');
+			applyDocumentState(state);
 			props.onChanged();
 		} catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); }
 		finally { setBusy(false); }
 	}
 
 	async function doSubmit(): Promise<void> {
-		if (!doc) return;
-		if (doc.status !== 'submitted' && !window.confirm(`Провести ${doc.name} в ядре? Остатки ERPNext изменятся по фактам точки.`)) return;
+		const pending = Object.values(docs).filter((document) => document.status !== 'submitted');
+		if (!legacyDoc && !pending.length) return;
+		const pendingNames = legacyDoc && legacyDoc.status !== 'submitted'
+			? legacyDoc.name
+			: pending.map((document) => document.name).join(', ');
+		if (pendingNames && !window.confirm(`Провести складские документы ${pendingNames}? Остатки ERPNext изменятся: недостача спишется, излишек оприходуется.`)) return;
 		setBusy(true); setErr(null);
 		try {
 			// Проведение и связанные записи могут быть небыстрыми, поэтому оставляем явный прогресс.
-			const submittedDoc = await withTimeout(submitErpDoc(props.invId, props.storeId), 55000, 'erp-doc-submit');
-			setDoc(submittedDoc);
+			const state = await withTimeout(submitErpDoc(props.invId, props.storeId), 55000, 'erp-doc-submit');
+			applyDocumentState(state);
 			props.onChanged();
 		} catch (e: unknown) {
 			const msg = String(e instanceof Error ? e.message : e);
 			setErr(msg.includes('таймаут') ? `${msg} — нажми «Провести» ещё раз: продолжу с места обрыва, дублей не будет` : msg);
+			await refreshDocumentState().catch(() => undefined);
 		}
 		finally { setBusy(false); }
 	}
 
-	const submitted = doc?.status === 'submitted';
+	const documentList = Object.entries(docs) as Array<['issue' | 'receipt', ErpInvDoc]>;
+	const hasDocuments = documentList.length > 0 || Boolean(legacyDoc);
+	const submitted = documentList.length > 0
+		? documentList.every(([, document]) => document.status === 'submitted')
+		: legacyDoc?.status === 'submitted';
+	const canRecreate = legacyDoc?.status === 'draft'
+		|| (documentList.length > 0 && documentList.every(([, document]) => document.status === 'draft'));
 	return (
 		<div className="qr-overlay" onClick={props.onClose}>
 			<div className="qr-modal erp-doc-modal" onClick={(e) => e.stopPropagation()}>
 				<div className="qr-head">
-					<strong>🧠 Документ ядра — {props.storeName}</strong>
+					<strong>🧠 Документы инвентаризации — {props.storeName}</strong>
 					<button className="btn-del" title="Закрыть" onClick={props.onClose}>✕</button>
 				</div>
-				{doc ? (
+				{legacyDoc ? (
 					<p className="muted">
-						{submitted ? `✓ ${doc.name} ПРОВЕДЁН в ядре` : `✎ черновик ${doc.name} записан (остатки не тронуты)`} · строк {doc.lines}
+						Старый документ сверки: {legacyDoc.status === 'submitted' ? `✓ ${legacyDoc.name} проведён` : `✎ черновик ${legacyDoc.name}`} · строк {legacyDoc.lines}
 					</p>
+				) : documentList.length ? (
+					<div className="inventory-document-list">
+						{documentList.map(([kind, document]) => (
+							<p className="muted" key={kind}>
+								{document.status === 'submitted' ? '✓' : '✎'} {kind === 'issue' ? 'Списание недостачи' : 'Оприходование излишков'}: <b>{document.name}</b> · строк {document.lines} · {document.status === 'submitted' ? 'проведён' : 'черновик, остатки не тронуты'}
+							</p>
+						))}
+					</div>
 				) : (
-					<p className="muted">Болванка «на основании» точки: ничего не записано — закроешь, и она пропала. Учёт здесь — остатки ЯДРА.</p>
+					<p className="muted">Документы ещё не записаны. Будут созданы отдельно: списание недостачи и оприходование излишков.</p>
 				)}
 				{err && <p className="error">⛔ {err}</p>}
 				{lines === null && !err ? <p>Считаю болванку…</p> : null}
@@ -678,13 +715,13 @@ function ErpDocModal(props: {
 					) : !err ? <p className="muted">Факты сошлись с ядром — документ не нужен.</p> : null
 				)}
 				<div className="inv-actions">
-					{!doc && lines !== null && lines.length > 0 && (
-						<button className="btn-primary" disabled={busy} onClick={() => void doSave()}>{busy ? 'Записываю…' : 'Записать'}</button>
+					{!hasDocuments && lines !== null && lines.length > 0 && (
+						<button className="btn-primary" disabled={busy} onClick={() => void doSave()}>{busy ? 'Записываю…' : 'Создать документы'}</button>
 					)}
-					{doc && !submitted && (
+					{hasDocuments && !submitted && (
 						<>
-							<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести'}</button>
-							<button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать от свежей болванки</button>
+							<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести документы'}</button>
+							{canRecreate && <button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать по текущим остаткам</button>}
 						</>
 					)}
 					<button className="btn-secondary" onClick={props.onClose}>Закрыть</button>

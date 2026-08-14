@@ -9,14 +9,16 @@ import type { StockAuthBody } from './api-stock-types.js';
 
 export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 	app.post('/api/stock/submit', async (req, reply) => {
-		const b = (req.body ?? {}) as StockAuthBody & { kind?: unknown; name?: unknown };
+		const b = (req.body ?? {}) as StockAuthBody & { kind?: unknown; name?: unknown; doctype?: unknown };
 		const client = stockClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		const name = String(b.name ?? '').trim();
 		if (!name) return reply.code(400).send({ ok: false, error: 'нет имени документа' });
-		const doctype = b.kind === 'receipt' ? 'Purchase Receipt' : b.kind === 'issue' ? 'Stock Entry' : null;
+		const doctype = b.kind === 'receipt'
+			? (b.doctype === 'Stock Entry' ? 'Stock Entry' : 'Purchase Receipt')
+			: b.kind === 'issue' ? 'Stock Entry' : null;
 		if (!doctype) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
 		try {
 			if (!appPermission(req, 'stock.post_documents', await canManageStock(client))) {
@@ -35,6 +37,12 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 					.filter((line) => Number.isInteger(line.productId) && line.productId > 0 && line.qty > 0 && line.fromStore);
 				if (lines.length !== rawLines.length) throw new Error('не удалось проверить склад строк списания');
 				await validateFreeStock(client, erp, lines);
+			}
+			if (b.kind === 'receipt' && doctype === 'Stock Entry') {
+				const document = await erp.get<Record<string, unknown>>('Stock Entry', name);
+				if (String(document?.['stock_entry_type'] ?? '') !== 'Material Receipt') {
+					throw new Error('как оприходование можно провести только Stock Entry типа Material Receipt');
+				}
 			}
 			await submitDoc(erp, doctype, name);
 			app.log.info({ name, doctype }, '[api/stock/submit] ok');
