@@ -6,6 +6,7 @@ import { receivingChatStore } from '../transfers/chats.js';
 import { sameTransferQuantities, type TransferData } from '../transfers/model.js';
 import type { TransferNotificationService } from './transfer-notification-service.js';
 import { loadTransfer, saveTransferData } from './transfer-storage.js';
+import { validateTransferReservation } from './transfer-reservation-service.js';
 import { formatTransferLines } from './transfer-task-service.js';
 import { currentUser } from './transfer-user-access.js';
 
@@ -17,7 +18,9 @@ interface AuthBody {
 type TransferClientFrom = (body: AuthBody) => B24Client | null;
 
 function errInfo(err: unknown): string {
-	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+	return err instanceof B24ApiError
+		? `${err.code}: ${err.description ?? ''}`
+		: err instanceof Error ? err.message : String(err);
 }
 
 export function registerTransferShipRoute(
@@ -46,6 +49,9 @@ export function registerTransferShipRoute(
 			if (!sameTransferQuantities(doc.lines, doc.collectedLines)) {
 				return reply.code(409).send({ ok: false, error: 'собранное количество не совпадает с планом — снабжению нужно скорректировать перемещение' });
 			}
+			// Даём понятную ошибку до создания Stock Entry и одновременно защищаем
+			// старые документы, созданные до проверки живого остатка.
+			await validateTransferReservation(erp, client, id, doc.fromStore, doc.collectedLines);
 			const did = Number(doc.dealId) || 0;
 			const { name: entryName } = await shipTransferToTransit(erp, {
 				transferId: id,

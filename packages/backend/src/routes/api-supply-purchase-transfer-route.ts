@@ -13,6 +13,7 @@ import { newTransferData } from '../transfers/model.js';
 import type { AuthBody, TransferProgress } from './api-supply-types.js';
 import { currentRequest, parseTransferProgress, transferBelongsToRequest } from './api-supply-request-progress.js';
 import { currentUser, errInfo, notifyTransferCreated, supplyClientFrom } from './api-supply-route-helpers.js';
+import { validateTransferReservation } from './transfer-reservation-service.js';
 
 export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supplyCreationLocks: Set<string>): void {
 	app.post('/api/supply/purchase-transfer', async (req, reply) => {
@@ -107,6 +108,10 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 			const me = await currentUser(client);
 			const now = new Date().toISOString();
 			const transferLines = [...incoming.entries()].map(([productId, qty]) => ({ productId, name: itemNames.get(productId) || `#${productId}`, qty }));
+			// Приход по заказу показывает, сколько когда-то поступило, но не гарантирует,
+			// что товар до сих пор лежит на складе прихода. Перед созданием документа
+			// перепроверяем живой остаток и активные резервы всех перемещений.
+			await validateTransferReservation(erp, client, 0, fromStore, transferLines);
 			let baseData = newTransferData({
 				supplyRequest: requestName,
 				supplyRequestKey: request.requestKey,

@@ -21,7 +21,10 @@ export async function validateTransferReservation(
 		const actual = Number(stocks.get(line.productId)?.[fromStore] ?? 0);
 		const available = Math.max(actual - (reserved.get(line.productId) ?? 0), 0);
 		if (line.qty > available + 0.000001) {
-			throw new Error(`на складе «${fromStore}» для «${line.name || `#${line.productId}`}» свободно ${available}, указано ${line.qty}`);
+			throw new Error(
+				`На складе «${fromStore}» для «${line.name || `#${line.productId}`}» доступно ${available}, требуется ${line.qty}. `
+				+ 'Проверь склад-источник и фактический остаток. Если товар уже перемещён, отмени повторный документ.',
+			);
 		}
 	}
 }

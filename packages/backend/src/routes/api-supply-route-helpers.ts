@@ -8,7 +8,9 @@ import type { TransferData } from '../transfers/model.js';
 import type { AuthBody, CurrentUser } from './api-supply-types.js';
 
 export function errInfo(err: unknown): string {
-	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
+	return err instanceof B24ApiError
+		? `${err.code}: ${err.description ?? ''}`
+		: err instanceof Error ? err.message : String(err);
 }
 
 export async function currentUser(client: B24Client): Promise<CurrentUser> {
