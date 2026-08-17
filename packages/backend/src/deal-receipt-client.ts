@@ -23,7 +23,13 @@ export function receiptContactId(bindings: DealContactBinding[], primaryContactI
 
 export function contactCaption(contact: Record<string, unknown> | null): { name: string; phone: string } {
 	if (!contact) return { name: '', phone: '' };
-	const name = [contact['NAME'], contact['LAST_NAME']].filter(Boolean).join(' ').trim();
+	// В русской карточке контакта Битрикс показывает ФИО в порядке
+	// «Фамилия / введённая первая часть → Имя → Отчество». Повторяем этот
+	// порядок, чтобы печатная форма не переставляла части имени местами.
+	const name = [contact['LAST_NAME'], contact['NAME'], contact['SECOND_NAME']]
+		.map((part) => String(part ?? '').trim())
+		.filter(Boolean)
+		.join(' ');
 	const phones = contact['PHONE'] as Array<{ VALUE?: string }> | undefined;
 	return { name, phone: String(phones?.[0]?.VALUE ?? '') };
 }

@@ -14,10 +14,25 @@ test('receipt falls back to the primary contact when no additional participant e
 	assert.equal(receiptContactId([], 12926), 12926);
 });
 
-test('contact caption preserves the displayed Bitrix name and first phone', () => {
+test('contact caption follows the displayed Bitrix name order and keeps the first phone', () => {
 	assert.deepEqual(contactCaption({
-		NAME: 'Дмитрий',
-		LAST_NAME: 'Сакирин',
+		LAST_NAME: 'Дмитрий',
+		NAME: 'Сакирин',
 		PHONE: [{ VALUE: '+7 921 941-01-34' }],
 	}), { name: 'Дмитрий Сакирин', phone: '+7 921 941-01-34' });
+});
+
+test('contact caption does not reverse a two-part name entered in Bitrix', () => {
+	assert.deepEqual(contactCaption({
+		LAST_NAME: 'Наталья',
+		NAME: 'Николаевна',
+	}), { name: 'Наталья Николаевна', phone: '' });
+});
+
+test('contact caption includes the patronymic when Bitrix stores all three parts', () => {
+	assert.deepEqual(contactCaption({
+		LAST_NAME: 'Иванов',
+		NAME: 'Иван',
+		SECOND_NAME: 'Иванович',
+	}), { name: 'Иванов Иван Иванович', phone: '' });
 });
