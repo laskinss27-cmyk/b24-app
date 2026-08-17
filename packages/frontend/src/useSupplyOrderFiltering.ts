@@ -1,7 +1,8 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type { SupplyOrderRow } from './b24.js';
 import { orderSearchValues, searchMatches } from './supply-search-values.js';
-import { orderStatus, type OrderStatusFilter, type SortKey } from './SupplyOrdersView.js';
+import { orderMatchesStatusFilter, type OrderStatusFilter } from './supply-order-status-filter.js';
+import type { SortKey } from './SupplyOrdersView.js';
 
 type SupplyOrderFiltering = {
 	sort: SortKey;
@@ -13,7 +14,7 @@ type SupplyOrderFiltering = {
 
 export function useSupplyOrderFiltering(orders: SupplyOrderRow[], search: string): SupplyOrderFiltering {
 	const [sort, setSort] = useState<SortKey>('dateDesc');
-	const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
+	const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>([]);
 	const requestOrders = useMemo(() => orders.filter((order) => !order.standalone), [orders]);
 	const sortedOrders = useMemo(() => [...requestOrders].sort((a, b) => {
 		if (sort === 'dateAsc') return String(a.date).localeCompare(String(b.date));
@@ -23,7 +24,7 @@ export function useSupplyOrderFiltering(orders: SupplyOrderRow[], search: string
 	}), [requestOrders, sort]);
 	const filteredOrders = useMemo(
 		() => sortedOrders.filter((order) =>
-			(orderStatusFilter === 'all' || orderStatus(order) === orderStatusFilter)
+			orderMatchesStatusFilter(order, orderStatusFilter)
 			&& searchMatches(search, orderSearchValues(order))),
 		[orderStatusFilter, search, sortedOrders],
 	);

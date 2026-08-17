@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
 	DEFAULT_SUPPLY_UI_LAYOUT,
@@ -10,6 +11,7 @@ import {
 	supplyActionIdsForView,
 } from './supply-ui-layout.js';
 import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
+import { toggleOrderStatusFilter } from './supply-order-status-filter.js';
 
 function memoryStorage(initial?: string): Pick<Storage, 'getItem' | 'setItem'> & { value: string | undefined } {
 	return {
@@ -71,4 +73,19 @@ test('order matrix navigation is visible to authenticated supply-page users', ()
 	assert.equal(canOpenAssortmentMatrix('1858'), true);
 	assert.equal(canOpenAssortmentMatrix('986'), true);
 	assert.equal(canOpenAssortmentMatrix(''), false);
+});
+
+test('supply order comment keeps its save button inside the card', () => {
+	const css = readFileSync(new URL('./deal-product-picker.css', import.meta.url), 'utf8');
+
+	assert.match(css, /\.supply-order-note-editor\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/s);
+	assert.match(css, /\.supply-order-note-editor textarea\s*\{[^}]*box-sizing:\s*border-box;[^}]*width:\s*100%;/s);
+});
+
+test('supply order status filter allows several statuses at once', () => {
+	let filter = toggleOrderStatusFilter([], 'needs_action');
+	filter = toggleOrderStatusFilter(filter, 'in_progress');
+
+	assert.deepEqual(filter, ['needs_action', 'in_progress']);
+	assert.deepEqual(toggleOrderStatusFilter(filter, 'needs_action'), ['in_progress']);
 });

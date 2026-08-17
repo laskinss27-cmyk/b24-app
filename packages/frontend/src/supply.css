@@ -1683,6 +1683,82 @@
 	flex-wrap: wrap;
 }
 
+.supply-status-filter {
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	font-size: 12px;
+	color: #7a8699;
+}
+
+.supply-status-filter legend {
+	margin-bottom: 4px;
+	padding: 0;
+}
+
+.supply-status-filter > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+
+.supply-status-filter button,
+.supply-status-filter label {
+	display: inline-flex;
+	align-items: center;
+	min-height: 31px;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 5px 9px;
+	border: 1px solid #cdd5e0;
+	border-radius: 7px;
+	background: #fff;
+	color: #526174;
+	font: inherit;
+	cursor: pointer;
+}
+
+.supply-status-filter button.active,
+.supply-status-filter label.active {
+	border-color: #76a9e0;
+	background: #eaf3ff;
+	color: #185fa5;
+}
+
+.supply-status-filter input {
+	margin: 0 6px 0 0;
+}
+
+.supply-order-deal-link {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 0 10px;
+	padding: 9px 12px;
+	border: 1px solid #bed5ed;
+	border-radius: 8px;
+	background: #f5f9fe;
+	color: #185fa5;
+	text-align: left;
+	cursor: pointer;
+}
+
+.supply-order-deal-link span,
+.supply-order-deal-link small {
+	font-size: 12px;
+	color: #66788e;
+}
+
+.supply-order-deal-link b {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .supply-order-list {
 	display: grid;
 	gap: 10px;

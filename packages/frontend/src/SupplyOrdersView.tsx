@@ -1,4 +1,4 @@
-import { type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyTransferChild } from './b24.js';
+import { openDeal, type SupplyOrderItem, type SupplyOrderRow, type SupplyPurchaseChild, type SupplyTransferChild } from './b24.js';
 import { decisionGroups, decisionLinesForOrder, decisionReady, decisionsForRow, requestItemsForOrder, rowKey, type DecisionMap, type DecisionState } from './supply-decision-planning.js';
 import { documentAmount, lineTitle, money, transferDocumentLabel, transferHasDiscrepancy, transferStatus } from './supply-document-values.js';
 import { purchaseAmount, purchaseIsCancelled, purchaseIsShortage, purchaseIsWaiting, purchaseStatus } from './supply-purchase-status.js';
@@ -6,12 +6,9 @@ import { SupplyDecisionRows } from './SupplyDecisionRows.js';
 import { SupplyOrderNoteEditor, SupplyOrderStoreEditor } from './SupplyOrderEditors.js';
 import { SupplyStatusPill } from './SupplyOverviewControls.js';
 import { transferNumberLabel } from './transfer-number.js';
+import { SUPPLY_ORDER_STATUS_OPTIONS, toggleOrderStatusFilter, type OrderStatusFilter } from './supply-order-status-filter.js';
 
 export type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
-export type OrderStatusFilter = 'all' | 'needs_action' | 'in_progress' | 'closed';
-
-export const orderStatus = (order: SupplyOrderRow): Exclude<OrderStatusFilter, 'all'> =>
-	order.closed ? 'closed' : requestItemsForOrder(order).length > 0 ? 'needs_action' : 'in_progress';
 
 export function SupplyMetrics({ orders, view }: { orders: SupplyOrderRow[]; view: 'orders' | 'purchase' | 'logistics' }): JSX.Element {
 	const requests = orders.filter((order) => !order.standalone);
@@ -111,15 +108,13 @@ export function SupplyOrdersView({
 					<p>Открой заявку, выбери по каждой строке закупку или перемещение, затем создай документы одним явным действием.</p>
 				</div>
 				<div className="supply-order-filters">
-					<label className="supply-sort">
-						<span>Статус</span>
-						<select value={statusFilter} onChange={(e) => onStatusFilter(e.target.value as OrderStatusFilter)}>
-							<option value="all">Все статусы</option>
-							<option value="needs_action">Требуют обработки</option>
-							<option value="in_progress">В исполнении</option>
-							<option value="closed">Закрытые</option>
-						</select>
-					</label>
+					<fieldset className="supply-status-filter">
+						<legend>Статус</legend>
+						<div>
+							<button className={statusFilter.length === 0 ? 'active' : ''} type="button" onClick={() => onStatusFilter([])}>Все</button>
+							{SUPPLY_ORDER_STATUS_OPTIONS.map((option) => <label key={option.value} className={statusFilter.includes(option.value) ? 'active' : ''}><input type="checkbox" checked={statusFilter.includes(option.value)} onChange={() => onStatusFilter(toggleOrderStatusFilter(statusFilter, option.value))} />{option.label}</label>)}
+						</div>
+					</fieldset>
 					<label className="supply-sort">
 						<span>Сортировка</span>
 						<select value={sort} onChange={(e) => onSort(e.target.value as SortKey)}>
@@ -184,6 +179,11 @@ export function SupplyOrdersView({
 							</button>
 							{isOpen && (
 								<div className="supply-order-body">
+									<button className="supply-order-deal-link" type="button" onClick={() => openDeal(Number(order.dealId))}>
+										<span>Привязка к сделке</span>
+										<b>{order.dealTitle || `Сделка #${order.dealId}`}</b>
+										<small>Сделка #{order.dealId} ↗</small>
+									</button>
 									<div className="supply-order-settings">
 										<SupplyOrderStoreEditor order={order} stores={stores} onSave={onSaveStore} />
 										<SupplyOrderNoteEditor order={order} onSave={onSaveNote} />
