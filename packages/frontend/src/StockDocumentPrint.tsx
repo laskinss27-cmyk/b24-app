@@ -1,4 +1,5 @@
 import type { CoreDocDetail, TransferDoc } from './b24.js';
+import { createPortal } from 'react-dom';
 
 // ── Печатные формы (перемещение/списание/приход) — @media print, как КП/ремонты ──
 
@@ -14,7 +15,7 @@ export function StockBlank({ doc }: { doc: PrintDoc }): JSX.Element {
 	const totalQty = doc.rows.reduce((a, r) => a + r.qty, 0);
 	const totalSum = doc.withMoney ? doc.rows.reduce((a, r) => a + r.qty * (r.price ?? 0), 0) : 0;
 	const money = (n: number): string => n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-	return (
+	const blank = (
 		<div className="stock-blank">
 			<div className="sb-title">{doc.title} {doc.number} от {doc.dateRu}</div>
 			<div className="sb-meta">
@@ -60,6 +61,9 @@ export function StockBlank({ doc }: { doc: PrintDoc }): JSX.Element {
 			</div>
 		</div>
 	);
+	// Печатный бланк должен быть прямым ребёнком body. Если оставить его внутри
+	// position:fixed-модалки, Chrome повторяет накладную на каждой печатной странице.
+	return typeof document === 'undefined' ? blank : createPortal(blank, document.body);
 }
 
 export const transferToPrint = (t: TransferDoc): PrintDoc => ({

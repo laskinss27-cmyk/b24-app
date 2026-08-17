@@ -1,9 +1,9 @@
 /* На экране — визуально разделяем экземпляры (в печати они на разных страницах). */
 .blank-page + .blank-page { border-top: 2px dashed #d1d5db; margin-top: 28px; padding-top: 20px; }
 
-/* Печатные формы складских документов (перемещение/списание/приход). На экране — за кадром (left:-10000),
+/* Печатные формы складских документов порталом вынесены прямо в body. На экране не показываем,
    печатается через @media print ниже. */
-.stock-blank { position: fixed; left: -10000px; top: 0; width: 760px; background: #fff; color: #000; font-size: 13px; padding: 8px 0; }
+.stock-blank { display: none; width: 760px; background: #fff; color: #000; font-size: 13px; padding: 8px 0; }
 .sb-title { font-size: 17px; font-weight: 600; margin: 0 0 10px; }
 .sb-meta { font-size: 13px; color: #111; line-height: 1.8; margin-bottom: 12px; }
 .sb-meta b { font-weight: 600; }

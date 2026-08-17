@@ -3,7 +3,10 @@
 	/* .inv добавлен: этот глобальный `body * {hidden}` (для Ремонтов/КП) иначе прячет
 	   и печать инвентаризации → пустые листы. Хром .inv скрыт display:none в 1-м @media print. */
 	.repair-blank, .repair-blank *, .kp-doc, .kp-doc *, .deal-receipt, .deal-receipt *, .inv, .inv *, .stock-blank, .stock-blank *, .supply-print, .supply-print *, .turnover-print, .turnover-print * { visibility: visible; }
-	.stock-blank { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
+	/* StockBlank живёт прямым ребёнком body через React portal. Полностью убираем из печатного
+	   layout приложение и фиксированные модалки: иначе Chrome повторяет бланк на каждом листе. */
+	body:has(> .stock-blank) > *:not(.stock-blank) { display: none !important; }
+	body > .stock-blank { display: block; position: static; width: 100%; padding: 0; }
 	.supply-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
 	.turnover-print { display: block; position: absolute; left: 0; top: 0; width: 100%; }
 	.supply-print-table thead { display: table-header-group; }
