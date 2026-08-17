@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { fetchServiceProductIds, setDealB24Service } from '../deal-product-catalog.js';
 import { ErpClient } from '../erp/client.js';
@@ -101,7 +102,7 @@ export function registerDealCoreRealizationRoute(
 					}
 				}
 				await ensureTransfersEntity(client);
-				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 				const reserved = new Map<string, number>();
 				for (const transfer of (transferItems ?? []).map(parseTransferItem).filter((item) => item && (item.status === 'draft' || item.status === 'collected' || item.status === 'requested'))) {
 					for (const line of transfer!.lines) {

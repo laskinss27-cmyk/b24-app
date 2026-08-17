@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { setDealB24Service } from '../deal-product-catalog.js';
 import { ErpClient } from '../erp/client.js';
@@ -35,7 +36,7 @@ async function hasDealQuoteVariantActivity(client: B24Client, erp: ErpClient, de
 		listDealStages(erp, dealId),
 		listDealRealizations(erp, dealId),
 		listSupplyRequestsForDeal(erp, dealId),
-		client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
+		listAllEntityItems(client, TRANSFERS_ENTITY),
 	]);
 	const transfers = (transferItems ?? []).map(parseTransferItem).filter((item) => item?.dealId === String(dealId));
 	return stages.length > 0 || realizations.length > 0 || supply.length > 0 || transfers.length > 0;

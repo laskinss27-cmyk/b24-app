@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
@@ -47,7 +48,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			const reservations = new Map<string, number>();
 			try {
 				await ensureTransfersEntity(client);
-				const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
 					if (t.status === 'draft' || t.status === 'collected' || t.status === 'requested') {
 						for (const line of t.lines) {

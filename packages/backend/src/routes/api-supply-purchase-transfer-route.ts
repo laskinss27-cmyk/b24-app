@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeDomain } from '../security.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	listSupplyRequests,
@@ -87,7 +88,7 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 			for (const line of request.items) requested.set(line.productId, (requested.get(line.productId) ?? 0) + line.qty);
 			const covered = new Map<number, number>();
 			const forwarded = new Map<number, number>();
-			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
 				if (transfer.correctionOf || !transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
 				for (const line of transfer.lines) {

@@ -1,4 +1,5 @@
 import type { B24Client } from '../b24/client.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import type { ErpClient } from '../erp/client.js';
 import { fetchErpStocksFor } from '../erp/operations.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
@@ -12,7 +13,7 @@ export async function validateFreeStock(
 	if (!lines.length) return;
 	await ensureTransfersEntity(client);
 	const [rawTransfers, stocks] = await Promise.all([
-		client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
+		listAllEntityItems(client, TRANSFERS_ENTITY),
 		fetchErpStocksFor(erp, lines.map((line) => line.productId)),
 	]);
 	const transfers = (rawTransfers ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);

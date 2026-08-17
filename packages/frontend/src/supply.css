@@ -1650,6 +1650,17 @@
 	font-size: 13px;
 }
 
+.supply-proto-notice-over-modal {
+	position: fixed;
+	top: 16px;
+	left: 50%;
+	z-index: 1100;
+	width: min(760px, calc(100vw - 32px));
+	box-sizing: border-box;
+	transform: translateX(-50%);
+	box-shadow: 0 8px 28px rgba(20, 30, 50, 0.24);
+}
+
 .supply-proto-state,
 .empty {
 	padding: 20px;

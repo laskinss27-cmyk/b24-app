@@ -1,4 +1,5 @@
 import type { B24Client } from '../b24/client.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { SUPPLY_TYPE_ID } from '../deal-supply-cards.js';
 import { listDealContractDocumentsReadOnly } from '../deal-contract-storage.js';
 import { TRANSFERS_ENTITY } from '../b24/placement.js';
@@ -60,7 +61,7 @@ export async function readDealApplicationDocuments(client: B24Client, dealId: nu
 			select: ['id', 'title', 'stageId'],
 			order: { id: 'desc' },
 		}),
-		client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } }),
+		listAllEntityItems(client, TRANSFERS_ENTITY),
 	]);
 	const errors: AdminDealApplicationDocuments['errors'] = [];
 	if (contractsResult.status === 'rejected') errors.push({ source: 'contracts', message: message(contractsResult.reason) });

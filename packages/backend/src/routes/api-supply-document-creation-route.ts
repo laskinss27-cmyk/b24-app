@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeDomain } from '../security.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { ErpClient } from '../erp/client.js';
 import { createPurchaseOrderDraft, listSupplyRequests, updatePurchaseOrderDraft } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
@@ -68,7 +69,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 			const requested = new Map<number, number>();
 			for (const item of request.items) requested.set(item.productId, (requested.get(item.productId) ?? 0) + item.qty);
 			const planned = new Map<number, number>();
-			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 			const existingTransfers = (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null);
 			const reservedByProductStore = new Map<string, number>();
 			for (const transfer of existingTransfers) {

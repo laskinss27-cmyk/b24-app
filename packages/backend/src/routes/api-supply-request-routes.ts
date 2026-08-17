@@ -10,6 +10,7 @@ import {
 	updateSupplyRequestStore,
 } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { canManageStock } from './api-stock.js';
 import type { AuthBody, TransferProgress } from './api-supply-types.js';
@@ -100,7 +101,7 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (MR_DONE.has(request.status)) throw new Error('у выполненной заявки нельзя менять склад');
 			await ensureTransfersEntity(client);
-			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 			const linkedTransfer = (transferItems ?? [])
 				.map(parseTransferProgress)
 				.find((transfer) => transfer && transfer.status !== 'canceled' && transferBelongsToRequest(transfer, request));
@@ -149,7 +150,7 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 		}
 		try {
 			await ensureTransfersEntity(client);
-			const transferItems = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, SORT: { ID: 'DESC' } });
+			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 			const transferAllocation = new Map<string, Map<number, number>>();
 			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
 				if (transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || transfer.supplyRequestKey !== requestKey) continue;
