@@ -53,7 +53,7 @@ export function Repairs(): JSX.Element {
 	const [screen, setScreen] = useState<Screen>({ k: 'list' });
 	const [repairs, setRepairs] = useState<Repair[]>([]);
 	const [canEditPrice, setCanEditPrice] = useState(false);
-	const [dispatchContact, setDispatchContact] = useState<DispatchContact>({ name: '', phone: '' });
+	const [dispatchContact, setDispatchContact] = useState<DispatchContact>({ name: '', phone: '', email: '' });
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [deepLinkHandled, setDeepLinkHandled] = useState(false);
@@ -66,14 +66,14 @@ export function Repairs(): JSX.Element {
 			if (ctx.__mock) {
 				setRepairs(MOCK_REPAIRS);
 				setCanEditPrice(true);
-				setDispatchContact({ name: 'Андропов Даниил', phone: '+7 921 000-00-00' });
+				setDispatchContact({ name: 'Андропов Даниил', phone: '+7 921 000-00-00', email: 'daniel@example.test' });
 				return;
 			}
 			const res = await withTimeout(fetchRepairs(), 30000, 'repairs/list');
 			setRepairs(res.repairs);
 			setCanEditPrice(res.canEditPrice);
 			void withTimeout(fetchCurrentUser(), 15000, 'user.current')
-				.then((user) => setDispatchContact({ name: user.name, phone: user.phone }))
+				.then((user) => setDispatchContact({ name: user.name, phone: user.phone, email: user.email }))
 				.catch(() => undefined);
 		} catch (e: unknown) {
 			setErr(String(e instanceof Error ? e.message : e));
@@ -87,7 +87,7 @@ export function Repairs(): JSX.Element {
 		if (!ctx.__mock && !contact.name) {
 			try {
 				const user = await withTimeout(fetchCurrentUser(), 15000, 'user.current');
-				contact = { name: user.name, phone: user.phone };
+				contact = { name: user.name, phone: user.phone, email: user.email };
 				setDispatchContact(contact);
 			} catch { /* Печать остаётся доступной, даже если профиль Б24 временно не ответил. */ }
 		}

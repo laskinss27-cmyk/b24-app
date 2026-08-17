@@ -5,6 +5,7 @@ import { REPAIR_LOGO } from './repair-logo.js';
 export interface RepairDispatchContact {
 	name: string;
 	phone: string;
+	email: string;
 }
 
 /** Сводное сопроводительное письмо для передачи выбранного оборудования в сервис. */
@@ -27,6 +28,7 @@ export function RepairDispatchBlank({ repairs, contact, onBack }: {
 						<span>Дата: {repairDate(new Date().toISOString())}</span>
 						{contact.name && <span>Контактное лицо: {contact.name}</span>}
 						{contact.phone && <span>Телефон: {contact.phone}</span>}
+						{contact.email && <span>E-mail: {contact.email}</span>}
 					</div>
 				</div>
 				<div className="blank-title">Сопроводительное письмо</div>

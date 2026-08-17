@@ -25,8 +25,8 @@ export async function fetchCurrentUserId(): Promise<string> {
 	return _uidInflight;
 }
 
-/** Текущий пользователь: id, читаемое имя и контактный телефон. */
-export async function fetchCurrentUser(): Promise<{ id: string; name: string; phone: string }> {
+/** Текущий пользователь: id, читаемое имя и рабочие контакты. */
+export async function fetchCurrentUser(): Promise<{ id: string; name: string; phone: string; email: string }> {
 	const u = await call<{
 		ID?: string | number;
 		NAME?: string;
@@ -34,13 +34,19 @@ export async function fetchCurrentUser(): Promise<{ id: string; name: string; ph
 		WORK_PHONE?: string;
 		PERSONAL_MOBILE?: string;
 		PERSONAL_PHONE?: string;
+		WORK_EMAIL?: string;
+		EMAIL?: string;
+		PERSONAL_MAIL?: string;
 	}>('user.current');
 	const id = String(u?.ID ?? '');
 	const name = [u?.LAST_NAME, u?.NAME].filter(Boolean).join(' ').trim() || id;
 	const phone = [u?.WORK_PHONE, u?.PERSONAL_MOBILE, u?.PERSONAL_PHONE]
 		.map((value) => String(value ?? '').trim())
 		.find(Boolean) ?? '';
-	return { id, name, phone };
+	const email = [u?.WORK_EMAIL, u?.EMAIL, u?.PERSONAL_MAIL]
+		.map((value) => String(value ?? '').trim())
+		.find(Boolean) ?? '';
+	return { id, name, phone, email };
 }
 
 /** Админ ли смотрящий — синхронно через BX24.isAdmin() (без REST, не виснет).

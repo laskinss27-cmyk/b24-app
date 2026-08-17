@@ -33,15 +33,30 @@ test('current user id preserves in-flight deduplication and session caching', as
 	assert.equal(calls, 1);
 });
 
-test('current user details preserve name and phone priority', async () => {
+test('current user details preserve name, phone and email priorities', async () => {
 	browserWindow.BX24 = makeSdk((_method, _params, callback) => {
 		callback({
-			data: () => ({ ID: 7, NAME: 'Ivan', LAST_NAME: 'Ivanov', WORK_PHONE: '', PERSONAL_MOBILE: '+70000000000', PERSONAL_PHONE: '+71111111111' }),
+			data: () => ({
+				ID: 7,
+				NAME: 'Ivan',
+				LAST_NAME: 'Ivanov',
+				WORK_PHONE: '',
+				PERSONAL_MOBILE: '+70000000000',
+				PERSONAL_PHONE: '+71111111111',
+				WORK_EMAIL: '',
+				EMAIL: 'ivanov@example.test',
+				PERSONAL_MAIL: 'personal@example.test',
+			}),
 			error: () => null,
 		});
 	});
 
-	assert.deepEqual(await fetchCurrentUser(), { id: '7', name: 'Ivanov Ivan', phone: '+70000000000' });
+	assert.deepEqual(await fetchCurrentUser(), {
+		id: '7',
+		name: 'Ivanov Ivan',
+		phone: '+70000000000',
+		email: 'ivanov@example.test',
+	});
 });
 
 test('portal administration and management ids preserve synchronous SDK behavior', () => {
