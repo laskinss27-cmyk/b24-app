@@ -5,6 +5,7 @@ import { purchaseAmount, purchaseIsCancelled, purchaseIsShortage, purchaseIsWait
 import { SupplyDecisionRows } from './SupplyDecisionRows.js';
 import { SupplyOrderNoteEditor, SupplyOrderStoreEditor } from './SupplyOrderEditors.js';
 import { SupplyStatusPill } from './SupplyOverviewControls.js';
+import { transferNumberLabel } from './transfer-number.js';
 
 export type SortKey = 'dateDesc' | 'dateAsc' | 'store' | 'deal';
 export type OrderStatusFilter = 'all' | 'needs_action' | 'in_progress' | 'closed';
@@ -214,13 +215,13 @@ export function SupplyOrdersView({
 												return (
 													<div key={`t-${transfer.id}`} className="supply-document-branch">
 														<button className="supply-document-row" type="button" onClick={() => onOpenTransfer(order, transfer)}>
-													<div><span className="kind">Перемещение</span><b>{transfer.displayTitle || transferDocumentLabel(transfer)}</b><small>{transferDocumentLabel(transfer)} · {transfer.fromStore} → {transfer.toStore}{transfer.purchaseOrder ? ` · ${transfer.purchaseOrder}` : ''}</small></div>
+													<div><span className="kind">Перемещение {transferNumberLabel(transfer)}</span><b>{transfer.displayTitle || transferDocumentLabel(transfer)}</b><small>{transferDocumentLabel(transfer)} · {transfer.fromStore} → {transfer.toStore}{transfer.purchaseOrder ? ` · ${transfer.purchaseOrder}` : ''}</small></div>
 													<div className="supply-document-meta"><span>{documentAmount(transfer.lines)}</span>{transferHasDiscrepancy(transfer) && <span className="supply-discrepancy">Расхождение</span>}<span className="status">{status.label}</span></div>
 														</button>
 														{corrections.length > 0 && <div className="supply-correction-list">{corrections.map((correction) => {
 															const correctionStatus = transferStatus(correction);
 															return <button key={correction.id} className="supply-document-row supply-correction-row" type="button" onClick={() => onOpenTransfer(order, correction)}>
-																<div><span className="kind">{correction.correctionKind === 'shortage_return' ? 'Возврат недовоза' : 'Перенос излишка'}</span><b>{transferDocumentLabel(correction)}</b><small>{correction.fromStore} → {correction.toStore}</small></div>
+																<div><span className="kind">{correction.correctionKind === 'shortage_return' ? 'Возврат недовоза' : 'Перенос излишка'} {transferNumberLabel(correction)}</span><b>{transferDocumentLabel(correction)}</b><small>{correction.fromStore} → {correction.toStore}</small></div>
 																<div className="supply-document-meta"><span>{documentAmount(correction.lines)}</span><span className="status">{correctionStatus.label}</span></div>
 															</button>;
 														})}</div>}

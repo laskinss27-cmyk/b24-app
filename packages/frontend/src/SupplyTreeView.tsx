@@ -3,6 +3,7 @@ import { requestItemsForOrder } from './supply-decision-planning.js';
 import { lineTitle, transferDocumentLabel, transferHasDiscrepancy, transferStatus } from './supply-document-values.js';
 import { purchaseStatus } from './supply-purchase-status.js';
 import { SupplyStatusPill } from './SupplyOverviewControls.js';
+import { transferNumberLabel } from './transfer-number.js';
 
 export function SupplyTreeView({ orders, onOpenPurchase, onOpenTransfer }: { orders: SupplyOrderRow[]; onOpenPurchase: (order: SupplyOrderRow, purchase: SupplyPurchaseChild) => void; onOpenTransfer: (order: SupplyOrderRow, transfer: SupplyTransferChild) => void }): JSX.Element {
 	return (
@@ -40,7 +41,7 @@ export function SupplyTreeView({ orders, onOpenPurchase, onOpenTransfer }: { ord
 								return (
 									<div key={`${order.name}-${transfer.id}`} className={`supply-proto-node${transfer.correctionOf ? ' correction' : ''}`}>
 									<div className="node-top">
-										<div><span className="kind">{transfer.correctionOf ? 'корректировка' : 'перемещение'}</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transfer.displayTitle || transferDocumentLabel(transfer)}</button> · {transferDocumentLabel(transfer)}</div>
+										<div><span className="kind">{transfer.correctionOf ? 'корректировка' : 'перемещение'} {transferNumberLabel(transfer)}</span> <button className="supply-inline-document-link" type="button" onClick={() => onOpenTransfer(order, transfer)}>{transfer.displayTitle || transferDocumentLabel(transfer)}</button> · {transferDocumentLabel(transfer)}</div>
 											<div className="supply-status-pair">{transferHasDiscrepancy(transfer) && <SupplyStatusPill tone="warn">Расхождение</SupplyStatusPill>}<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></div>
 										</div>
 										<p>{transfer.lines.map(lineTitle).join(' · ')}</p>

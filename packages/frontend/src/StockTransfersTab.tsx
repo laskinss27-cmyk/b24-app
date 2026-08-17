@@ -12,6 +12,7 @@ import { StockProductFilter } from './StockProductFilter.js';
 import { StockTransferDetailModal } from './StockTransferDetailModal.js';
 import { StockTransferQuantityModal } from './StockTransferQuantityModal.js';
 import { transferStatusText } from './StockTransferStatus.js';
+import { transferNumberLabel, transferNumberSearchValues } from './transfer-number.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
@@ -34,7 +35,7 @@ function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc
 	} else {
 		basis = <span>Самостоятельное перемещение</span>;
 	}
-	return <div>{basis}<div style={{ color: '#7a8699', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
+	return <div><b>Перемещение {transferNumberLabel(transfer)}</b><div>{basis}</div><div style={{ color: '#7a8699', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
 }
 
 const transferHasFinalDiscrepancy = (transfer: TransferDoc): boolean => {
@@ -163,7 +164,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 		if (prod && !t.lines.some((l) => l.productId === prod.productId)) return false;
 		const q = search.trim().toLowerCase();
 		if (!q) return true;
-		const hay = `${t.dealId} ${t.ownerName ?? ''} ${t.supplyRequest ?? ''} ${t.supplyRequestKey ?? ''} ${t.purchaseOrder ?? ''} ${t.correctionOf ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
+		const hay = `${transferNumberSearchValues(t).join(' ')} ${t.dealId} ${t.ownerName ?? ''} ${t.supplyRequest ?? ''} ${t.supplyRequestKey ?? ''} ${t.purchaseOrder ?? ''} ${t.correctionOf ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
 		return q.split(/\s+/).every((w) => hay.includes(w));
 	});
 

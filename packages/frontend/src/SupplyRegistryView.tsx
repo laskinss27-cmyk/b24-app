@@ -3,6 +3,7 @@ import { lineTitle, transferDocumentLabel, transferHasDiscrepancy, transferStatu
 import { purchaseStatus } from './supply-purchase-status.js';
 import { purchaseSearchValues, searchMatches, transferSearchValues } from './supply-search-values.js';
 import { SupplyStatusPill } from './SupplyOverviewControls.js';
+import { transferNumberLabel } from './transfer-number.js';
 
 type RegistryRow =
 	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
@@ -33,7 +34,7 @@ export function SupplyRegistryView({ orders, kind, search, onOpenPurchase, onOpe
 									return <tr key={`${row.order.name}-${row.purchase.name}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenPurchase(row.order, row.purchase)}>{row.purchase.name}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.purchase.supplier || 'поставщик не выбран'}</td><td>{row.purchase.lines.map(lineTitle).join(' · ')}</td><td><SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></td></tr>;
 								}
 								const status = transferStatus(row.transfer);
-								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>{transferDocumentLabel(row.transfer)}</button></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><div className="supply-status-pair">{transferHasDiscrepancy(row.transfer) && <SupplyStatusPill tone="warn">Расхождение</SupplyStatusPill>}<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></div></td></tr>;
+								return <tr key={`${row.order.name}-${row.transfer.id}`}><td><button className="supply-table-document-link" type="button" onClick={() => onOpenTransfer(row.order, row.transfer)}>Перемещение {transferNumberLabel(row.transfer)}</button><small>{transferDocumentLabel(row.transfer)}</small></td><td>{row.order.standalone ? 'Без сделки' : `#${row.order.dealId}`}</td><td>{row.transfer.fromStore} → {row.transfer.toStore}</td><td>{row.transfer.lines.map(lineTitle).join(' · ')}</td><td><div className="supply-status-pair">{transferHasDiscrepancy(row.transfer) && <SupplyStatusPill tone="warn">Расхождение</SupplyStatusPill>}<SupplyStatusPill tone={status.tone}>{status.label}</SupplyStatusPill></div></td></tr>;
 							})}
 						</tbody>
 					</table>

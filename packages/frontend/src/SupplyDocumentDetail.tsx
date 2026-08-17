@@ -20,6 +20,7 @@ import {
 import { purchaseStatus } from './supply-purchase-status.js';
 import { SupplyPurchasePrint } from './SupplyPrintViews.js';
 import { SupplySupplierField } from './SupplySupplierField.js';
+import { transferNumberLabel } from './transfer-number.js';
 
 export type OpenSupplyDocument =
 	| { kind: 'purchase'; order: SupplyOrderRow; purchase: SupplyPurchaseChild }
@@ -208,9 +209,9 @@ export function SupplyDocumentDetail({ document, suppliers, busy, canDelete, onC
 	const selectableStores = destinationStores.includes(transfer.toStore) ? destinationStores : [transfer.toStore, ...destinationStores];
 	return (
 		<div className="supply-proto-overlay">
-			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferDocumentLabel(transfer)}`}>
+			<section className="supply-proto-modal supply-document-modal" role="dialog" aria-modal="true" aria-label={`Перемещение ${transferNumberLabel(transfer)}`}>
 				<header>
-					<div><span className="supply-document-eyebrow">Перемещение</span><h2>{transfer.displayTitle || transferDocumentLabel(transfer)}</h2><p>{transferDocumentLabel(transfer)} · {transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
+					<div><span className="supply-document-eyebrow">Перемещение {transferNumberLabel(transfer)}</span><h2>{transfer.displayTitle || transferDocumentLabel(transfer)}</h2><p>{transferDocumentLabel(transfer)} · {transfer.fromStore} → {transfer.toStore}{order.standalone ? ' · без сделки' : ` · сделка #${order.dealId}`}</p></div>
 					<div className="supply-document-modal-head"><span>{status.label}</span>{transferHasDiscrepancy(transfer) && <span className="supply-discrepancy">Расхождение</span>}<button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 				</header>
 				<div className="transfer-destination">
