@@ -29,6 +29,7 @@ const {
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
 	receiveSupplyPurchase,
+	removeSupplyRequestLineRemainder,
 	updateSupplyOrderNote,
 	updateSupplyOrderStore,
 	updateSupplyPurchaseOrder,
@@ -134,6 +135,30 @@ test('successful supply document creation preserves empty collection fallbacks',
 	assert.deepEqual(await createSupplyDocuments({
 		requestName: 'MR-1', requestKey: 'request-key', dealId: 91, toStore: 'Точка 2', lines: [],
 	}), { transfers: [], purchases: [], updatedPurchases: [] });
+});
+
+test('removing a supply request line sends a remainder-only removal request', async () => {
+	const requests = captureResponses([{ ok: true, requestQty: 0, removed: true }]);
+
+	await removeSupplyRequestLineRemainder({
+		requestName: 'MR-1',
+		requestKey: 'request-key',
+		rowName: 'ROW-1',
+		productId: 17,
+	});
+
+	assert.deepEqual(requests, [{
+		url: '/api/supply/request-line',
+		body: {
+			domain: 'mobile.example',
+			accessToken: 'supply-token',
+			requestName: 'MR-1',
+			requestKey: 'request-key',
+			rowName: 'ROW-1',
+			productId: 17,
+			removeRemainder: true,
+		},
+	}]);
 });
 
 test('supply purchase lifecycle rejects supplier errors and preserves endpoint order and transfer result', async () => {

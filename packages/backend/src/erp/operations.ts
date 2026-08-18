@@ -63,6 +63,7 @@ export {
 	listSupplyOrders,
 	listSupplyRequests,
 	listSupplyRequestsForDeal,
+	removeSupplyRequestLineRemainder,
 	updateSupplyRequestLine,
 	updateSupplyRequestNote,
 	updateSupplyRequestStore,

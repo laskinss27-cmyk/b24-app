@@ -121,6 +121,7 @@ export {
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
 	receiveSupplyPurchase,
+	removeSupplyRequestLineRemainder,
 	updateSupplyOrderNote,
 	updateSupplyOrderStore,
 	updateSupplyPurchaseOrder,

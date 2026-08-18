@@ -5,6 +5,7 @@ import {
 	assertDealQuoteVariantSelected,
 	createSupplyRequest,
 	listSupplyRequests,
+	removeSupplyRequestLineRemainder,
 	updateSupplyRequestLine,
 	updateSupplyRequestNote,
 	updateSupplyRequestStore,
@@ -131,6 +132,7 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			nextProductId?: unknown;
 			nextItemName?: unknown;
 			nextQty?: unknown;
+			removeRemainder?: unknown;
 		};
 		const client = supplyClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
@@ -144,8 +146,9 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 		const nextQty = Number(b.nextQty);
 		const requestName = String(b.requestName ?? '').trim();
 		const requestKey = String(b.requestKey ?? '').trim();
-		if (![productId, nextProductId].every((value) => Number.isInteger(value) && value > 0)
-			|| !requestName || !requestKey || !Number.isFinite(nextQty) || nextQty <= 0) {
+		const removeRemainder = b.removeRemainder === true;
+		if (!Number.isInteger(productId) || productId <= 0 || !requestName || !requestKey
+			|| (!removeRemainder && (!Number.isInteger(nextProductId) || nextProductId <= 0 || !Number.isFinite(nextQty) || nextQty <= 0))) {
 			return reply.code(400).send({ ok: false, error: 'некорректные данные строки заявки' });
 		}
 		try {
@@ -158,18 +161,23 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 				for (const line of transfer.lines) byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);
 				transferAllocation.set(transfer.supplyRequestKey, byProduct);
 			}
-			const result = await updateSupplyRequestLine(erp, {
+			const common = {
 				requestName,
 				requestKey,
 				rowName: String(b.rowName ?? '').trim(),
 				productId,
-				nextProductId,
-				nextItemName: String(b.nextItemName ?? '').trim(),
-				nextQty,
 				transferAllocation,
-			});
-			app.log.info({ requestName, productId, nextProductId, nextQty }, '[api/supply/request-line] updated independently');
-			return { ok: true, requestQty: result.requestQty };
+			};
+			const result = removeRemainder
+				? await removeSupplyRequestLineRemainder(erp, common)
+				: await updateSupplyRequestLine(erp, {
+					...common,
+					nextProductId,
+					nextItemName: String(b.nextItemName ?? '').trim(),
+					nextQty,
+				});
+			app.log.info({ requestName, productId, nextProductId, nextQty, removeRemainder, requestQty: result.requestQty }, '[api/supply/request-line] updated independently');
+			return { ok: true, requestQty: result.requestQty, ...('removed' in result ? { removed: result.removed } : {}) };
 		} catch (err) {
 			app.log.error({ requestName, productId, nextProductId }, `[api/supply/request-line] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });

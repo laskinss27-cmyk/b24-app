@@ -63,6 +63,36 @@ export async function updateSupplyRequestLine(
 	return { requestQty: args.nextQty };
 }
 
+/** Убрать только ещё не распределённый остаток строки заявки.
+ *  Уже созданные закупки и перемещения остаются в истории и задают минимальное количество строки. */
+export async function removeSupplyRequestLineRemainder(
+	erp: ErpClient,
+	args: {
+		requestName: string;
+		requestKey: string;
+		rowName?: string;
+		productId: number;
+		transferAllocation?: SupplyAllocationMap;
+	},
+): Promise<{ requestQty: number; removed: boolean }> {
+	const request = await erp.get<Record<string, unknown>>('Material Request', args.requestName);
+	if (!request || materialRequestKey(args.requestName, request['creation']) !== args.requestKey) throw new Error('заявка была изменена; обновите список');
+	const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
+	const target = rawItems.find((item) =>
+		(args.rowName && String(item['name'] ?? '') === args.rowName) || Number(item['item_code']) === args.productId);
+	if (!target) throw new Error('позиция больше не найдена в заявке');
+	const requestQty = Number(target['qty'] ?? 0);
+	const allocatedQty = Math.min(requestQty, await requestLineAllocation(erp, args.requestName, args.requestKey, args.productId, args.transferAllocation));
+	if (requestQty <= allocatedQty + 0.000001) throw new Error('у позиции уже нет необработанного остатка');
+	const after = rawItems.flatMap((item) => {
+		if (item !== target) return [requestItemPayload(item, {})];
+		return allocatedQty > 0.000001 ? [requestItemPayload(item, { qty: allocatedQty })] : [];
+	});
+	if (!after.length) throw new Error('нельзя удалить последнюю позицию заявки; закройте заявку целиком');
+	await erp.update('Material Request', args.requestName, { items: after });
+	return { requestQty: allocatedQty, removed: allocatedQty <= 0.000001 };
+}
+
 
 /** Заказ для дисплея снабжения: один Sales Order = спрос одной сделки. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; rate: number; stocks: Record<string, number> }

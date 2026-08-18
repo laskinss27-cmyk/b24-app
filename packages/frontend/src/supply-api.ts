@@ -112,6 +112,21 @@ export async function updateSupplyRequestLine(input: {
 	if (!json.ok) throw new Error(json.error ?? 'не удалось изменить строку заявки');
 }
 
+export async function removeSupplyRequestLineRemainder(input: {
+	requestName: string;
+	requestKey: string;
+	rowName?: string;
+	productId: number;
+}): Promise<void> {
+	const res = await fetch('/api/supply/request-line', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input, removeRemainder: true }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось убрать позицию из заявки');
+}
+
 export async function createSupplyDocuments(args: { requestName: string; requestKey: string; dealId: number; toStore: string; lines: SupplyDecisionLine[] }): Promise<SupplyCreatedDocuments> {
 	const res = await fetch('/api/supply/create-documents', {
 		method: 'POST',

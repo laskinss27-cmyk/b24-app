@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { searchProducts, updateSupplyRequestLine, type SupplyOrderItem, type SupplyOrderRow } from './b24.js';
+import { removeSupplyRequestLineRemainder, searchProducts, updateSupplyRequestLine, type SupplyOrderItem, type SupplyOrderRow } from './b24.js';
 
 export function SupplyRequestLineEditor({
 	order,
@@ -53,6 +53,28 @@ export function SupplyRequestLineEditor({
 		}
 	};
 
+	const removeRemainder = async (): Promise<void> => {
+		const message = minimum > 0
+			? `Убрать необработанный остаток позиции? Уже распределённое количество ${minimum} останется в заявке и документах.`
+			: 'Удалить позицию из заявки снабжению? Состав сделки не изменится.';
+		if (!window.confirm(message)) return;
+		setBusy(true); setError('');
+		try {
+			await removeSupplyRequestLineRemainder({
+				requestName: order.name,
+				requestKey: order.requestKey,
+				...(item.rowName ? { rowName: item.rowName } : {}),
+				productId: item.productId,
+			});
+			await onSaved();
+			setOpen(false);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : 'Не удалось убрать позицию.');
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	return (
 		<>
 			<button className="supply-line-edit" type="button" onClick={() => setOpen(true)}>изменить</button>
@@ -65,7 +87,7 @@ export function SupplyRequestLineEditor({
 					<label><span>Количество в заявке</span><input type="number" min={minimum || 0.001} step="any" value={qty} disabled={busy} onChange={(event) => { setQty(event.target.value); setError(''); }} /><small>Уже распределено: {minimum}</small></label>
 					{selected.id !== item.productId && minimum > 0 && <p className="supply-order-review-error">Товар уже попал в закупку или перемещение и целиком заменить его нельзя. Необработанный остаток оформите отдельной строкой заявки.</p>}
 					{error && <p className="supply-order-review-error">{error}</p>}
-					<footer><button type="button" disabled={busy} onClick={() => setOpen(false)}>Отмена</button><button className="primary" type="button" disabled={busy || !selected.id || query.trim() !== selected.name || (selected.id !== item.productId && minimum > 0)} onClick={() => void save()}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></footer>
+					<footer><button className="danger" type="button" disabled={busy} onClick={() => void removeRemainder()}>Убрать из заявки</button><button type="button" disabled={busy} onClick={() => setOpen(false)}>Отмена</button><button className="primary" type="button" disabled={busy || !selected.id || query.trim() !== selected.name || (selected.id !== item.productId && minimum > 0)} onClick={() => void save()}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></footer>
 				</section>
 			</div>}
 		</>

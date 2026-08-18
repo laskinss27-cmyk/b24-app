@@ -73,6 +73,7 @@ import {
 	receiveTransferFromTransit,
 	reduceDealPlanForReturns,
 	replaceDealPlanProduct,
+	removeSupplyRequestLineRemainder,
 	removeDealStageItem,
 	renameDealQuoteVariant,
 	renameDealStage,
@@ -1597,6 +1598,58 @@ test('supply line quantity change updates only the request', async () => {
 	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 5);
 	const updatedRow = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
 	assert.equal(updatedRow['qty'], 3);
+});
+
+test('removing an unallocated supply line leaves the deal plan unchanged', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [
+			{ productId: 101, qty: 2 },
+			{ productId: 202, qty: 1 },
+		],
+	});
+	const request = erp.requestDoc(created.name)!;
+	const rows = request['items'] as Array<Record<string, unknown>>;
+	const result = await removeSupplyRequestLineRemainder(erp.asClient(), {
+		requestName: created.name,
+		requestKey: `${created.name}@${String(request['creation'])}`,
+		rowName: String(rows[0]?.['name']),
+		productId: 101,
+	});
+
+	assert.deepEqual(result, { requestQty: 0, removed: true });
+	assert.deepEqual(
+		(erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>).map((row) => row['item_code']),
+		['202'],
+	);
+	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 5);
+});
+
+test('removing a partly allocated supply line keeps only its allocated quantity', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [
+			{ productId: 101, qty: 3 },
+			{ productId: 202, qty: 1 },
+		],
+	});
+	const request = erp.requestDoc(created.name)!;
+	const requestKey = `${created.name}@${String(request['creation'])}`;
+	const result = await removeSupplyRequestLineRemainder(erp.asClient(), {
+		requestName: created.name,
+		requestKey,
+		productId: 101,
+		transferAllocation: new Map([[requestKey, new Map([[101, 1]])]]),
+	});
+
+	assert.deepEqual(result, { requestQty: 1, removed: false });
+	const row = (erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]!;
+	assert.equal(row['item_code'], '101');
+	assert.equal(row['qty'], 1);
 });
 
 test('supply product replacement updates only the request', async () => {
