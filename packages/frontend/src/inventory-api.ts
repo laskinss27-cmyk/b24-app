@@ -1,5 +1,33 @@
 import { bx24Auth } from './bitrix-auth.js';
 
+type InventoryApiResponse<T> = { ok: boolean; error?: string } & T;
+
+async function postInventoryApi<T>(
+	path: string,
+	payload: Record<string, unknown>,
+	keepalive = false,
+): Promise<InventoryApiResponse<T>> {
+	const auth = bx24Auth();
+	const send = async (forceRefresh = false): Promise<InventoryApiResponse<T>> => {
+		const res = await fetch(path, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				...auth,
+				...payload,
+				...(forceRefresh && 'mobileSession' in auth ? { mobileRefresh: true } : {}),
+			}),
+			...(keepalive ? { keepalive: true } : {}),
+		});
+		return (await res.json()) as InventoryApiResponse<T>;
+	};
+	let json = await send();
+	if (!json.ok && 'mobileSession' in auth && /expired_token/i.test(String(json.error ?? ''))) {
+		json = await send(true);
+	}
+	return json;
+}
+
 export type InvPointStatus = 'idle' | 'in_progress' | 'submitted' | 'act' | 'reconciled';
 
 /** Строка результата подсчёта (храним только расхождения — для сводки инициатора). */
@@ -75,12 +103,7 @@ export interface Inventory {
 }
 
 export async function listInventories(): Promise<Inventory[]> {
-	const res = await fetch('/api/inventory/list', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(bx24Auth()),
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string; inventories?: Inventory[] };
+	const json = await postInventoryApi<{ inventories?: Inventory[] }>('/api/inventory/list', {});
 	if (!json.ok) throw new Error(json.error ?? 'ошибка хранилища');
 	return json.inventories ?? [];
 }
@@ -93,12 +116,7 @@ export async function createInventory(
 	notifyUserIds: string[],
 	sectionIds: number[],
 ): Promise<void> {
-	const res = await fetch('/api/inventory/create', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), title, points, deadline, createdById, notifyUserIds, sectionIds }),
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string };
+	const json = await postInventoryApi('/api/inventory/create', { title, points, deadline, createdById, notifyUserIds, sectionIds });
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить');
 }
 
@@ -109,13 +127,7 @@ interface InventoryUpdateResponse {
 }
 
 async function postInventoryUpdate(payload: Record<string, unknown>, keepalive = false): Promise<InventoryUpdateResponse> {
-	const res = await fetch('/api/inventory/update', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...payload }),
-		keepalive,
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string } & InventoryUpdateResponse;
+	const json = await postInventoryApi<InventoryUpdateResponse>('/api/inventory/update', payload, keepalive);
 	if (!json.ok) throw new Error(json.error ?? 'не удалось обновить точку');
 	return json;
 }
@@ -170,12 +182,7 @@ export async function reopenPoint(inventoryId: string, storeId: number, userId: 
 
 /** Удалить инвентаризацию целиком (необратимо) — через бэкенд, entity.item.delete. */
 export async function deleteInventory(inventoryId: string): Promise<void> {
-	const res = await fetch('/api/inventory/delete', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), inventoryId }),
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string };
+	const json = await postInventoryApi('/api/inventory/delete', { inventoryId });
 	if (!json.ok) throw new Error(json.error ?? 'не удалось удалить');
 }
 
@@ -190,12 +197,7 @@ export interface ErpRecoLine {
 }
 
 async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Promise<T> {
-	const res = await fetch(path, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...payload }),
-	});
-	const json = (await res.json()) as { ok: boolean; error?: string } & T;
+	const json = await postInventoryApi<T>(path, payload);
 	if (!json.ok) throw new Error(json.error ?? 'ошибка документа ядра');
 	return json;
 }

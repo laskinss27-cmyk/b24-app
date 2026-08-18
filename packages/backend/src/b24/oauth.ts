@@ -94,6 +94,12 @@ export interface ExchangeParams {
 	code: string;
 }
 
+export interface RefreshParams {
+	clientId: string;
+	clientSecret: string;
+	refreshToken: string;
+}
+
 /**
  * Меняет authorization code на access_token (шаг 3).
  *
@@ -120,6 +126,32 @@ export async function exchangeCodeForToken(params: ExchangeParams): Promise<Toke
 		throw new OAuthError(json.error, json.error_description, response.status);
 	}
 
+	return {
+		accessToken: json.access_token,
+		refreshToken: json.refresh_token ?? null,
+		expiresIn: json.expires_in ?? null,
+		domain: json.domain ?? null,
+		memberId: json.member_id ?? null,
+		scope: json.scope ?? null,
+	};
+}
+
+/** Обновляет истекающий мобильный access_token. Битрикс ротирует refresh_token,
+ * поэтому вызывающий код обязан сохранить значение из ответа. */
+export async function refreshAccessToken(params: RefreshParams): Promise<TokenResult> {
+	const body = new URLSearchParams({
+		grant_type: 'refresh_token',
+		client_id: params.clientId,
+		client_secret: params.clientSecret,
+		refresh_token: params.refreshToken,
+	});
+	const response = await fetch(TOKEN_ENDPOINT, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body: body.toString(),
+	});
+	const json = (await response.json()) as TokenSuccess | TokenErrorBody;
+	if (isTokenError(json)) throw new OAuthError(json.error, json.error_description, response.status);
 	return {
 		accessToken: json.access_token,
 		refreshToken: json.refresh_token ?? null,

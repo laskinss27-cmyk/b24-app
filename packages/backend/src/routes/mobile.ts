@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import { buildAuthorizeUrl, exchangeCodeForToken, OAuthError } from '../b24/oauth.js';
-import { B24Client } from '../b24/client.js';
+import { B24ApiError, B24Client } from '../b24/client.js';
 import { seal, unseal, buildSessionCookie, clearSessionCookie, readCookie, randomNonce, safeEqual } from '../mobile-session.js';
+import { mobileSessionCookie, mobileSessionPayload, resolveMobileSessionAuth } from '../mobile-auth-session.js';
+import { M_SESSION_COOKIE, M_STATE_COOKIE } from './mobile-session-constants.js';
 
 /**
  * ФАЗА A мобильного QR-пульта: автономная авторизация телефона через OAuth.
@@ -16,9 +18,7 @@ import { seal, unseal, buildSessionCookie, clearSessionCookie, readCookie, rando
  * обмена вынесена в общую handleOAuthCallback() и вызывается из ОБОИХ роутов. Cookie — Path=/
  * (чтобы доходили и до /app/handler, и до /m).
  */
-export const M_SESSION_COOKIE = 'm_sess';
-export const M_STATE_COOKIE = 'm_state';
-const SESSION_TTL_SEC = 30 * 60;
+export { M_SESSION_COOKIE, M_STATE_COOKIE } from './mobile-session-constants.js';
 const STATE_TTL_SEC = 10 * 60;
 
 const nowSec = (): number => Math.floor(Date.now() / 1000);
@@ -83,7 +83,7 @@ export async function handleOAuthCallback(
 		// ВАЖНО: tok.domain из обмена = 'oauth.bitrix.info' (центральный OAuth-сервер), это НЕ
 		// REST-хост. Токен валиден для НАШЕГО портала — REST-вызовы шлём на него.
 		const domain = cfg.portalDomain;
-		const sessToken = seal(secret, { accessToken: tok.accessToken, domain, scope: tok.scope ?? '', exp: nowSec() + SESSION_TTL_SEC });
+		const session = mobileSessionPayload(tok, domain, nowSec());
 		const isProd = cfg.nodeEnv === 'production';
 		// inv/store были упакованы в state на старте OAuth (см. GET /m). Б24 теряет query при
 		// возврате на /app/handler, поэтому достаём их из расшифрованного state и кладём обратно
@@ -96,7 +96,7 @@ export async function handleOAuthCallback(
 		return {
 			ok: true,
 			cookies: [
-				buildSessionCookie(M_SESSION_COOKIE, sessToken, { maxAgeSec: SESSION_TTL_SEC, secure: isProd, path: '/' }),
+				mobileSessionCookie(cfg, session),
 				clearSessionCookie(M_STATE_COOKIE, '/'),
 			],
 			redirect,
@@ -128,14 +128,31 @@ export function registerMobileRoute(app: FastifyInstance): void {
 		const invId = typeof q['inv'] === 'string' ? q['inv'] : '';
 		const storeId = q['store'] != null ? Number(q['store']) : NaN;
 
-		const sess = unseal(secret, readCookie(req.headers.cookie, M_SESSION_COOKIE), nowSec());
-		const accessToken = sess?.['accessToken'];
-		const domain = sess?.['domain'];
-		const scope = typeof sess?.['scope'] === 'string' ? sess['scope'] : '';
+		let clearOldSession = false;
+		const resolved = await resolveMobileSessionAuth({ config: cfg, cookieHeader: req.headers.cookie })
+			.catch((error) => {
+				clearOldSession = true;
+				app.log.warn({ error: String(error) }, '[m] mobile session refresh failed');
+				return null;
+			});
+		if (resolved?.setCookie) reply.header('Set-Cookie', resolved.setCookie);
+		const accessToken = resolved?.session.accessToken;
+		const domain = resolved?.session.domain;
+		const scope = resolved?.session.scope ?? '';
 		if (typeof accessToken === 'string' && typeof domain === 'string') {
 			try {
-				const client = new B24Client({ auth: { kind: 'oauth', domain, accessToken } });
-				const u = await client.call<{ NAME?: string; LAST_NAME?: string; ID?: string | number }>('user.current', {});
+				let client = new B24Client({ auth: { kind: 'oauth', domain, accessToken } });
+				let u: { NAME?: string; LAST_NAME?: string; ID?: string | number };
+				try {
+					u = await client.call('user.current', {});
+				} catch (error) {
+					if (!(error instanceof B24ApiError) || error.code !== 'expired_token') throw error;
+					const forced = await resolveMobileSessionAuth({ config: cfg, cookieHeader: req.headers.cookie, forceRefresh: true });
+					if (!forced) throw error;
+					if (forced.setCookie) reply.header('Set-Cookie', forced.setCookie);
+					client = new B24Client({ auth: { kind: 'oauth', domain: forced.session.domain, accessToken: forced.session.accessToken } });
+					u = await client.call('user.current', {});
+				}
 				const name = [u?.LAST_NAME, u?.NAME].filter(Boolean).join(' ').trim() || `id ${u?.ID ?? '?'}`;
 
 				// Есть точка → отдаём фронт-бандл с экраном подсчёта (view='mobileCount').
@@ -149,7 +166,7 @@ export function registerMobileRoute(app: FastifyInstance): void {
 						dealId: null,
 						memberId: null,
 						domain,
-						accessToken,
+						mobileSession: true,
 						inventoryId: invId,
 						storeId,
 						me: { id: String(u?.ID ?? ''), name },
@@ -183,7 +200,8 @@ export function registerMobileRoute(app: FastifyInstance): void {
 		if (Number.isFinite(storeId)) statePayload['store'] = storeId;
 		const stateToken = seal(secret, statePayload);
 		const url = buildAuthorizeUrl({ domain: cfg.portalDomain, clientId: cfg.appClientId, state: stateToken });
-		reply.header('Set-Cookie', buildSessionCookie(M_STATE_COOKIE, stateToken, { maxAgeSec: STATE_TTL_SEC, secure: isProd, path: '/' }));
+		const stateCookie = buildSessionCookie(M_STATE_COOKIE, stateToken, { maxAgeSec: STATE_TTL_SEC, secure: isProd, path: '/' });
+		reply.header('Set-Cookie', clearOldSession ? [clearSessionCookie(M_SESSION_COOKIE, '/'), stateCookie] : stateCookie);
 		app.log.info({}, '[m] redirect → /oauth/authorize/');
 		return reply.redirect(url);
 	});

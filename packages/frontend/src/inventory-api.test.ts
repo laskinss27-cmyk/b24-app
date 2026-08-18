@@ -124,6 +124,37 @@ test('ERP inventory documents preserve preview fallbacks and save-submit endpoin
 	]);
 });
 
+test('mobile inventory retries an expired token through the server session without exposing tokens', async () => {
+	const browserWindow = window;
+	const previous = browserWindow.__B24_CONTEXT__;
+	browserWindow.__B24_CONTEXT__ = {
+		dealId: null,
+		domain: 'inventory.example',
+		memberId: null,
+		mobileSession: true,
+	};
+	try {
+		const requests = captureResponses([
+			{ ok: false, error: 'expired_token: The access token provided has expired.' },
+			{ ok: true, draftUpdatedAt: '2026-08-18T12:00:00Z' },
+		]);
+		assert.deepEqual(await saveDraftPoint('inv-mobile', 7, '9', { 42: 1 }, {}, {
+			userName: 'Counter', sessionId: 'mobile-session', sequence: 4,
+		}), { ok: true, draftUpdatedAt: '2026-08-18T12:00:00Z' });
+		assert.equal(requests.length, 2);
+		assert.deepEqual(requests[0]?.body, {
+			domain: 'inventory.example', mobileSession: true,
+			inventoryId: 'inv-mobile', storeId: 7, action: 'saveDraft', userId: '9', userName: 'Counter',
+			draft: { 42: 1 }, comments: {}, draftSessionId: 'mobile-session', draftSequence: 4,
+		});
+		assert.deepEqual(requests[1]?.body, { ...requests[0]?.body, mobileRefresh: true });
+		assert.equal('accessToken' in (requests[0]?.body ?? {}), false);
+	} finally {
+		if (previous) browserWindow.__B24_CONTEXT__ = previous;
+		else delete browserWindow.__B24_CONTEXT__;
+	}
+});
+
 test('ERP inventory API keeps legacy reconciliation documents readable', async () => {
 	const legacy = { name: 'RECO-1', status: 'submitted', lines: 2 };
 	captureResponses([{ ok: true, lines: [], doc: legacy }]);

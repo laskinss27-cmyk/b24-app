@@ -40,6 +40,7 @@ import { registerApiAdminRepairDiagnosticsRoute } from './routes/api-admin-repai
 import { registerApiAdminDealDocumentsRoute } from './routes/api-admin-deal-documents.js';
 import { registerApiAdminDealFulfillmentRoute } from './routes/api-admin-deal-fulfillment.js';
 import { registerApiAdminControlRoute } from './routes/api-admin-control.js';
+import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -66,8 +67,8 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 			// OAuth-токены не утекут в рабочие логи.
 			redact: {
 				paths: [
-					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'client_secret',
-					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.client_secret',
+					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'client_secret',
+					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.accessToken', '*.refreshToken', '*.client_secret',
 				],
 				censor: '[REDACTED]',
 			},
@@ -108,6 +109,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 
 	// Новые правила доступа включаются по сотрудникам и отделам. Для ещё не
 	// настроенных записей хук оставляет прежние ролевые проверки без изменений.
+	registerMobileSessionAuthHook(app);
 	registerAccessPolicyHook(app);
 	registerOperationLog(app);
 

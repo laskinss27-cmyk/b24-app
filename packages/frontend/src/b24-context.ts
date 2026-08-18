@@ -21,8 +21,10 @@ export interface B24Context {
 	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder' | null;
 	domain: string | null;
 	memberId: string | null;
-	/** Мобильный режим (/m, вне iframe): токен/точка/юзер приходят в контексте, BX24 SDK нет. */
+	/** Legacy-мобильный режим: старые страницы могли получать access_token в контексте. */
 	accessToken?: string;
+	/** Мобильный режим с серверной HttpOnly-сессией: OAuth-токены в JavaScript не передаются. */
+	mobileSession?: boolean;
 	inventoryId?: string;
 	storeId?: number;
 	me?: { id: string; name: string };

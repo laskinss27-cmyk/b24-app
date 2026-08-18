@@ -110,6 +110,13 @@ test('bx24Auth prefers SDK credentials, falls back to mobile context, and reject
 
 	browserWindow.BX24 = makeSdk(() => {});
 	assert.deepEqual(bx24Auth(), { domain: 'mobile.example', accessToken: 'mobile-token' });
+	browserWindow.__B24_CONTEXT__ = {
+		dealId: null,
+		domain: 'mobile.example',
+		memberId: null,
+		mobileSession: true,
+	};
+	assert.deepEqual(bx24Auth(), { domain: 'mobile.example', mobileSession: true });
 
 	delete browserWindow.BX24;
 	delete browserWindow.__B24_CONTEXT__;

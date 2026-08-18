@@ -1,10 +1,139 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import Fastify from 'fastify';
 import type { ErpClient } from '../erp/client.js';
 import { withInventoryUpdateLock } from './api-inventory.js';
 import { submitInventoryDocumentSet } from './api-inventory-document-submission.js';
 import type { InventoryDocumentSet } from './api-inventory-document-state.js';
 import { inventoryStatusForPoints, synchronizeInventoryStatus } from './api-inventory-status.js';
+import { mobileSessionCookie, mobileSessionPayload, resolveMobileSessionAuth } from '../mobile-auth-session.js';
+import type { Config } from '../config.js';
+import { refreshAccessToken } from '../b24/oauth.js';
+import { registerMobileSessionAuthHook } from '../mobile-auth-hook.js';
+
+const mobileConfig: Config = {
+	port: 3000,
+	host: '127.0.0.1',
+	portalDomain: 'portal.example.bitrix24.ru',
+	publicBaseUrl: 'https://app.example.com',
+	appSectionUrl: '',
+	inventoryNotify: 'off',
+	appClientId: 'local.test',
+	appClientSecret: 'secret',
+	nodeEnv: 'test',
+};
+
+test('mobile inventory session keeps OAuth tokens encrypted and refreshes before expiry', async () => {
+	const now = 1_800_000_000;
+	const initial = mobileSessionPayload({
+		accessToken: 'access-old', refreshToken: 'refresh-old', expiresIn: 120,
+		domain: null, memberId: null, scope: 'entity',
+	}, mobileConfig.portalDomain, now);
+	const cookie = mobileSessionCookie(mobileConfig, initial);
+	assert.doesNotMatch(cookie, /access-old|refresh-old/);
+	assert.match(cookie, /HttpOnly/);
+
+	let refreshCalls = 0;
+	const refresh = async () => {
+		refreshCalls += 1;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		return {
+			accessToken: 'access-new', refreshToken: 'refresh-new', expiresIn: 3600,
+			domain: null, memberId: null, scope: 'entity',
+		};
+	};
+	const [first, second] = await Promise.all([
+		resolveMobileSessionAuth({ config: mobileConfig, cookieHeader: cookie, now, refresh }),
+		resolveMobileSessionAuth({ config: mobileConfig, cookieHeader: cookie, now, refresh }),
+	]);
+	assert.equal(refreshCalls, 1);
+	assert.equal(first?.session.accessToken, 'access-new');
+	assert.equal(second?.session.refreshToken, 'refresh-new');
+	assert.match(first?.setCookie ?? '', /HttpOnly/);
+	assert.doesNotMatch(first?.setCookie ?? '', /access-new|refresh-new/);
+});
+
+test('mobile inventory session reuses a healthy access token without refreshing it', async () => {
+	const now = 1_800_000_000;
+	const session = mobileSessionPayload({
+		accessToken: 'access-current', refreshToken: 'refresh-current', expiresIn: 3600,
+		domain: null, memberId: null, scope: 'entity',
+	}, mobileConfig.portalDomain, now);
+	let refreshCalls = 0;
+	const resolved = await resolveMobileSessionAuth({
+		config: mobileConfig,
+		cookieHeader: mobileSessionCookie(mobileConfig, session),
+		now,
+		refresh: async () => {
+			refreshCalls += 1;
+			throw new Error('unexpected refresh');
+		},
+	});
+	assert.equal(refreshCalls, 0);
+	assert.equal(resolved?.session.accessToken, 'access-current');
+	assert.equal(resolved?.setCookie, undefined);
+});
+
+test('Bitrix token refresh uses a form body and preserves the rotated token response', async () => {
+	const originalFetch = globalThis.fetch;
+	let requestUrl = '';
+	let requestBody = '';
+	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		requestUrl = String(input);
+		requestBody = String(init?.body ?? '');
+		return new Response(JSON.stringify({
+			access_token: 'access-new', refresh_token: 'refresh-new', expires_in: 3600,
+			domain: 'oauth.bitrix.info', scope: 'entity',
+		}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+	}) as typeof fetch;
+	try {
+		assert.deepEqual(await refreshAccessToken({
+			clientId: 'local.test', clientSecret: 'secret-value', refreshToken: 'refresh-old',
+		}), {
+			accessToken: 'access-new', refreshToken: 'refresh-new', expiresIn: 3600,
+			domain: 'oauth.bitrix.info', memberId: null, scope: 'entity',
+		});
+		assert.equal(requestUrl, 'https://oauth.bitrix.info/oauth/token/');
+		assert.equal(requestUrl.includes('secret-value'), false);
+		assert.deepEqual(Object.fromEntries(new URLSearchParams(requestBody)), {
+			grant_type: 'refresh_token', client_id: 'local.test', client_secret: 'secret-value', refresh_token: 'refresh-old',
+		});
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test('mobile auth hook resolves the HttpOnly session before an inventory route runs', async () => {
+	const now = Math.floor(Date.now() / 1000);
+	const session = mobileSessionPayload({
+		accessToken: 'server-only-access', refreshToken: 'server-only-refresh', expiresIn: 3600,
+		domain: null, memberId: null, scope: 'entity',
+	}, mobileConfig.portalDomain, now);
+	const cookie = mobileSessionCookie(mobileConfig, session).split(';')[0]!;
+	const app = Fastify({ logger: false });
+	app.decorate('config', mobileConfig);
+	registerMobileSessionAuthHook(app);
+	app.post('/api/inventory/test-mobile-session', async (req) => ({ ok: true, body: req.body }));
+	try {
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/inventory/test-mobile-session',
+			headers: { cookie },
+			payload: { domain: mobileConfig.portalDomain, mobileSession: true },
+		});
+		assert.equal(response.statusCode, 200);
+		assert.deepEqual(response.json(), {
+			ok: true,
+			body: {
+				domain: mobileConfig.portalDomain,
+				mobileSession: true,
+				accessToken: 'server-only-access',
+			},
+		});
+	} finally {
+		await app.close();
+	}
+});
 
 test('inventory updates for one record are serialized without losing another point', async () => {
 	const order: string[] = [];
