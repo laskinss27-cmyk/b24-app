@@ -48,7 +48,7 @@ test('inventory stock loading preserves shared endpoint and optional fields', as
 	const requests = captureResponses([{ ok: true, lines: first }, { ok: true }]);
 
 	assert.deepEqual(await fetchStoreInventory(7, [4]), first);
-	assert.deepEqual(await fetchStoreStock(8, undefined, 'Point'), []);
+	assert.deepEqual(await fetchStoreStock(8, undefined, 'Point', 'inv-8'), []);
 	assert.deepEqual(requests, [
 		{
 			url: '/api/inventory/stock',
@@ -56,7 +56,7 @@ test('inventory stock loading preserves shared endpoint and optional fields', as
 		},
 		{
 			url: '/api/inventory/stock',
-			body: { domain: 'inventory.example', accessToken: 'inventory-token', storeId: 8, storeName: 'Point', sectionIds: [] },
+			body: { domain: 'inventory.example', accessToken: 'inventory-token', inventoryId: 'inv-8', storeId: 8, storeName: 'Point', sectionIds: [] },
 		},
 	]);
 });

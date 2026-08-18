@@ -3,13 +3,25 @@ import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	coreStoreId,
+	fetchErpSnapshotStockFull,
 	fetchErpStoreStockFull,
 	listActiveStoreTitles,
 	searchErpItems,
 } from '../erp/operations.js';
+import { inventorySnapshotQuantities } from '../inventory-stock-snapshot.js';
+import { loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { inventoryStatusForPoints } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
+
+async function resolveCurrentStoreTitle(erp: ErpClient, storeId: number, storeName: unknown): Promise<string> {
+	const storeTitles = await listActiveStoreTitles(erp);
+	const requestedTitle = String(storeName ?? '').trim().toLocaleLowerCase('ru-RU');
+	const storeTitle = storeTitles.find((title) => coreStoreId(title) === storeId)
+		?? storeTitles.find((title) => title.toLocaleLowerCase('ru-RU') === requestedTitle);
+	if (!storeTitle) throw new Error('склад ядра не найден');
+	return storeTitle;
+}
 
 export function registerInventoryReadRoutes(app: FastifyInstance): void {
 	app.post('/api/inventory/list', async (req, reply) => {
@@ -48,19 +60,30 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 	});
 
 	app.post('/api/inventory/stock', async (req, reply) => {
-		const b = (req.body ?? {}) as InventoryAuthBody & { storeId?: number; storeName?: unknown; sectionIds?: unknown };
+		const b = (req.body ?? {}) as InventoryAuthBody & { inventoryId?: string; storeId?: number; storeName?: unknown; sectionIds?: unknown };
 		const client = inventoryClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		if (b.storeId == null) return reply.code(400).send({ ok: false, error: 'storeId required' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
-			const storeTitles = await listActiveStoreTitles(erp);
-			const requestedTitle = String(b.storeName ?? '').trim().toLocaleLowerCase('ru-RU');
-			const storeTitle = storeTitles.find((title) => coreStoreId(title) === Number(b.storeId))
-				?? storeTitles.find((title) => title.toLocaleLowerCase('ru-RU') === requestedTitle);
-			if (!storeTitle) return reply.code(400).send({ ok: false, error: 'склад ядра не найден' });
-			const core = await fetchErpStoreStockFull(erp, storeTitle);
+			let source: 'snapshot' | 'core' = 'core';
+			let core: Awaited<ReturnType<typeof fetchErpStoreStockFull>>;
+			if (b.inventoryId) {
+				const loaded = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
+				const quantities = inventorySnapshotQuantities(loaded.pt);
+				if (loaded.data['stockSnapshotAt'] && !quantities) throw new Error('снимок остатков точки повреждён');
+				if (quantities) {
+					core = await fetchErpSnapshotStockFull(erp, quantities);
+					source = 'snapshot';
+				} else {
+					const storeTitle = await resolveCurrentStoreTitle(erp, Number(b.storeId), b.storeName);
+					core = await fetchErpStoreStockFull(erp, storeTitle);
+				}
+			} else {
+				const storeTitle = await resolveCurrentStoreTitle(erp, Number(b.storeId), b.storeName);
+				core = await fetchErpStoreStockFull(erp, storeTitle);
+			}
 			const lines = core.map((l) => ({
 					productId: l.productId,
 					name: l.name,
@@ -71,7 +94,7 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 					sectionName: l.section || undefined,
 					photoPath: l.image ? `/api/inventory/erp-image?p=${encodeURIComponent(l.image)}` : undefined,
 				}));
-			app.log.info({ storeId: b.storeId, count: lines.length, source: 'core' }, '[api/inventory/stock] ok');
+			app.log.info({ inventoryId: b.inventoryId ?? null, storeId: b.storeId, count: lines.length, source }, '[api/inventory/stock] ok');
 			return { ok: true, lines };
 		} catch (err) {
 			app.log.error({ storeId: b.storeId }, `[api/inventory/stock] failed — ${inventoryErrorInfo(err)}`);

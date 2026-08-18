@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
+import { ErpClient } from '../erp/client.js';
+import { coreStoreId, fetchErpStoreStockFull, listActiveStoreTitles } from '../erp/operations.js';
+import { captureInventoryPointSnapshots, inventorySnapshotQuantities } from '../inventory-stock-snapshot.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
@@ -40,12 +43,30 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 					return reply.code(200).send({ ok: false, error: 'битый JSON хранилища' });
 				}
 				const points = Array.isArray(data['points']) ? (data['points'] as Array<Record<string, unknown>>) : [];
-				const pt = points.find((p) => Number(p['storeId']) === Number(b.storeId));
+				let pt = points.find((p) => Number(p['storeId']) === Number(b.storeId));
 				if (!pt) return reply.code(200).send({ ok: false, error: 'точка не найдена' });
 
 				const status = String(pt['status'] ?? 'idle');
 				const now = new Date().toISOString();
 				const meId = String(b.userId ?? '');
+				// Active inventories created before snapshot support are frozen on their next write.
+				// Submitted history remains untouched and keeps the legacy reconciliation path.
+				if ((b.action === 'claim' || b.action === 'saveDraft') && !inventorySnapshotQuantities(pt)) {
+					const erp = ErpClient.fromEnv();
+					if (!erp) throw new Error('ядро склада не подключено — снимок остатков не создан');
+					const storeTitles = await listActiveStoreTitles(erp);
+					const [frozenPoint] = await captureInventoryPointSnapshots([pt], now, {
+						storeTitles,
+						storeIdForTitle: coreStoreId,
+						loadStock: (storeTitle) => fetchErpStoreStockFull(erp, storeTitle),
+					});
+					if (!frozenPoint) throw new Error('не удалось зафиксировать снимок остатков');
+					frozenPoint['stockSnapshotMigratedAt'] = now;
+					const pointIndex = points.indexOf(pt);
+					points[pointIndex] = frozenPoint;
+					pt = frozenPoint;
+					app.log.info({ inventoryId: b.inventoryId, storeId: b.storeId }, '[api/inventory/update] legacy stock snapshot captured');
+				}
 				const comments = b.comments && typeof b.comments === 'object'
 					? Object.fromEntries(Object.entries(b.comments)
 						.filter(([productId, value]) => /^\d+$/.test(productId) && Number(productId) > 0 && typeof value === 'string')

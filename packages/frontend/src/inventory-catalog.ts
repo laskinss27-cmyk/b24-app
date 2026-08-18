@@ -167,11 +167,11 @@ export async function fetchStoreInventory(storeId: number, sectionIds?: number[]
  * собираем серверно (зеркало fetchStoreInventory на бэке). Авторизация — токен из
  * мобильного контекста (bx24Auth() сам возьмёт его из __B24_CONTEXT__).
  */
-export async function fetchStoreStock(storeId: number, sectionIds?: number[], storeName?: string): Promise<InvLine[]> {
+export async function fetchStoreStock(storeId: number, sectionIds?: number[], storeName?: string, inventoryId?: string): Promise<InvLine[]> {
 	const res = await fetch('/api/inventory/stock', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), storeId, storeName, sectionIds: sectionIds ?? [] }),
+		body: JSON.stringify({ ...bx24Auth(), inventoryId, storeId, storeName, sectionIds: sectionIds ?? [] }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; lines?: InvLine[] };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить остатки склада');

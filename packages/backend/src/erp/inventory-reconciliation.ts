@@ -44,6 +44,36 @@ export interface ErpStoreLine {
 	image: string;
 }
 
+async function fetchErpItemCards(erp: ErpClient, ids: string[]): Promise<Map<string, Record<string, unknown>>> {
+	const itemById = new Map<string, Record<string, unknown>>();
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200);
+		const rows = await erp.list('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand', 'b24_section', 'image'], [['name', 'in', chunk]]);
+		for (const row of rows) itemById.set(String(row['name']), row);
+	}
+	return itemById;
+}
+
+/** Restores display rows from an immutable quantity snapshot, including products now at zero. */
+export async function fetchErpSnapshotStockFull(erp: ErpClient, quantities: Map<number, number>): Promise<ErpStoreLine[]> {
+	const ids = [...quantities.keys()].map(String);
+	if (!ids.length) return [];
+	const itemById = await fetchErpItemCards(erp, ids);
+	return [...quantities.entries()].map(([productId, book]) => {
+		const item = itemById.get(String(productId));
+		return {
+			productId,
+			name: String(item?.['item_name'] ?? `#${productId}`),
+			book,
+			article: String(item?.['b24_article'] ?? ''),
+			model: String(item?.['b24_model'] ?? ''),
+			brand: String(item?.['b24_brand'] ?? ''),
+			section: String(item?.['b24_section'] ?? ''),
+			image: String(item?.['image'] ?? ''),
+		};
+	});
+}
+
 /** Полная строка склада из ЯДРА для подсчёта: остаток (Bin>0) + карточка (Item: имя/модель/артикул/бренд/фото).
  *  Заменяет Б24-источник в инвентаризации (всё из ядра, без кусков от Б24). */
 export async function fetchErpStoreStockFull(erp: ErpClient, storeTitle: string): Promise<ErpStoreLine[]> {
@@ -51,12 +81,7 @@ export async function fetchErpStoreStockFull(erp: ErpClient, storeTitle: string)
 	const bins = await erp.list('Bin', ['item_code', 'actual_qty'], [['warehouse', '=', erpWarehouse(ctx, storeTitle)], ['actual_qty', '>', 0]]);
 	const ids = [...new Set(bins.map((b) => String(b['item_code'])).filter((c) => /^\d+$/.test(c)))];
 	if (!ids.length) return [];
-	const itemById = new Map<string, Record<string, unknown>>();
-	for (let i = 0; i < ids.length; i += 200) {
-		const chunk = ids.slice(i, i + 200);
-		const rows = await erp.list('Item', ['name', 'item_name', 'b24_model', 'b24_article', 'b24_brand', 'b24_section', 'image'], [['name', 'in', chunk]]);
-		for (const r of rows) itemById.set(String(r['name']), r);
-	}
+	const itemById = await fetchErpItemCards(erp, ids);
 	const out: ErpStoreLine[] = [];
 	for (const b of bins) {
 		const productId = Number(b['item_code']);

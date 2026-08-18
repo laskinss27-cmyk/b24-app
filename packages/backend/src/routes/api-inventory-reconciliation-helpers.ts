@@ -2,6 +2,7 @@ import type { B24Client } from '../b24/client.js';
 import { INVENTORY_ENTITY } from '../b24/placement.js';
 import type { ErpClient } from '../erp/client.js';
 import { fetchErpItemNames, fetchErpStoreStock } from '../erp/operations.js';
+import { frozenInventoryDifferences } from '../inventory-stock-snapshot.js';
 
 export async function loadInventoryPoint(client: B24Client, inventoryId: string, storeId: number) {
 	const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
@@ -15,10 +16,31 @@ export async function loadInventoryPoint(client: B24Client, inventoryId: string,
 }
 
 export async function computeInventoryReconciliationLines(erp: ErpClient, point: Record<string, unknown>) {
+	const storeName = String(point['storeName'] ?? '');
+	const frozen = frozenInventoryDifferences(point);
+	if (frozen) {
+		const current = await fetchErpStoreStock(erp, storeName);
+		const lines = frozen.map((line) => ({
+			productId: line.productId,
+			name: line.name,
+			bookErp: line.book,
+			fact: line.fact,
+			diff: line.diff,
+			valuation: current.get(line.productId)?.valuation ?? 0,
+		}));
+		const unnamed = lines.filter((line) => !line.name).map((line) => line.productId);
+		if (unnamed.length) {
+			const names = await fetchErpItemNames(erp, unnamed);
+			for (const line of lines) if (!line.name) line.name = names.get(line.productId) ?? `товар #${line.productId}`;
+		}
+		lines.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+		return { lines, storeName };
+	}
+
+	// Старые инвентаризации без снимка сохраняют прежнюю логику совместимости.
 	const facts = (point['draft'] ?? {}) as Record<string, number>;
 	const factIds = Object.keys(facts).map(Number).filter((id) => Number.isInteger(id) && id > 0);
 	if (!factIds.length) throw new Error('у точки нет фактов подсчёта (draft пуст)');
-	const storeName = String(point['storeName'] ?? '');
 	const book = await fetchErpStoreStock(erp, storeName);
 	const resultLines = ((point['result'] ?? {}) as { lines?: Array<{ productId: number; name?: string }> }).lines ?? [];
 	const nameById = new Map(resultLines.map((line) => [Number(line.productId), String(line.name ?? '')]));

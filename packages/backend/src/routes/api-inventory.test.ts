@@ -10,6 +10,13 @@ import { mobileSessionCookie, mobileSessionPayload, resolveMobileSessionAuth } f
 import type { Config } from '../config.js';
 import { refreshAccessToken } from '../b24/oauth.js';
 import { registerMobileSessionAuthHook } from '../mobile-auth-hook.js';
+import { computeInventoryReconciliationLines } from './api-inventory-reconciliation-helpers.js';
+import {
+	createInventoryStockSnapshot,
+	captureInventoryPointSnapshots,
+	frozenInventoryDifferences,
+	inventorySnapshotQuantities,
+} from '../inventory-stock-snapshot.js';
 
 const mobileConfig: Config = {
 	port: 3000,
@@ -161,6 +168,65 @@ test('a failed inventory update releases the queue', async () => {
 	await assert.rejects(() => withInventoryUpdateLock('inv-2', async () => { throw new Error('failed'); }), /failed/);
 	const result = await withInventoryUpdateLock('inv-2', async () => 'next');
 	assert.equal(result, 'next');
+});
+
+test('inventory snapshot and submitted differences stay frozen after later stock movements', () => {
+	const snapshot = createInventoryStockSnapshot([{
+		productId: 101, name: 'Relay', book: 10, article: '', model: '', brand: '', section: '', image: '',
+	}], '2026-08-18T10:00:00.000Z');
+	const point: Record<string, unknown> = {
+		stockSnapshot: snapshot,
+		result: {
+			lines: [{ productId: 101, name: 'Relay', book: 10, fact: 9, diff: -1 }],
+		},
+	};
+
+	assert.deepEqual([...inventorySnapshotQuantities(point)!], [[101, 10]]);
+	assert.deepEqual(frozenInventoryDifferences(point), [{
+		productId: 101, name: 'Relay', book: 10, fact: 9, diff: -1,
+	}]);
+	// A later sale may move live ERP stock from 10 to 6; neither frozen value changes.
+	assert.equal(inventorySnapshotQuantities(point)?.get(101), 10);
+});
+
+test('inventory creation captures every point before the document is stored', async () => {
+	const requested: string[] = [];
+	const points = await captureInventoryPointSnapshots([
+		{ storeId: 7, storeName: 'Old title', status: 'idle' },
+	], '2026-08-18T10:00:00.000Z', {
+		storeTitles: ['Dunayskiy'],
+		storeIdForTitle: () => 7,
+		loadStock: async (title) => {
+			requested.push(title);
+			return [{ productId: 101, name: 'Relay', book: 4, article: '', model: '', brand: '', section: '', image: '' }];
+		},
+	});
+	assert.deepEqual(requested, ['Dunayskiy']);
+	assert.deepEqual(points, [{
+		storeId: 7,
+		storeName: 'Dunayskiy',
+		status: 'idle',
+		stockSnapshot: { version: 1, capturedAt: '2026-08-18T10:00:00.000Z', lines: [[101, 4]] },
+	}]);
+});
+
+test('inventory documents use the frozen result after live stock changes', async () => {
+	const erp = {
+		list: async (doctype: string) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Bin') return [{ item_code: '101', actual_qty: 6, valuation_rate: 125 }];
+			return [];
+		},
+	} as unknown as ErpClient;
+	const point: Record<string, unknown> = {
+		storeName: 'Dunayskiy',
+		stockSnapshot: { version: 1, capturedAt: '2026-08-18T10:00:00.000Z', lines: [[101, 10]] },
+		result: { lines: [{ productId: 101, name: 'Relay', book: 10, fact: 9, diff: -1 }] },
+	};
+	assert.deepEqual(await computeInventoryReconciliationLines(erp, point), {
+		storeName: 'Dunayskiy',
+		lines: [{ productId: 101, name: 'Relay', bookErp: 10, fact: 9, diff: -1, valuation: 125 }],
+	});
 });
 
 test('inventory closes only after every reconciled point has a submitted core document', () => {

@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
+import { ErpClient } from '../erp/client.js';
+import { coreStoreId, fetchErpStoreStockFull, listActiveStoreTitles } from '../erp/operations.js';
+import { captureInventoryPointSnapshots } from '../inventory-stock-snapshot.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 
@@ -15,10 +18,19 @@ export function registerInventoryCreateRoute(app: FastifyInstance): void {
 		await ensureInventoryEntity(client);
 		try {
 			const sectionIds = Array.isArray(b.sectionIds) ? b.sectionIds.map(Number).filter((n) => Number.isInteger(n) && n >= 0) : [];
+			const erp = ErpClient.fromEnv();
+			if (!erp) throw new Error('ядро склада не подключено — снимок остатков не создан');
+			const storeTitles = await listActiveStoreTitles(erp);
+			const capturedAt = new Date().toISOString();
+			const points = await captureInventoryPointSnapshots(b.points, capturedAt, {
+				storeTitles,
+				storeIdForTitle: coreStoreId,
+				loadStock: (storeTitle) => fetchErpStoreStockFull(erp, storeTitle),
+			});
 			await client.call('entity.item.add', {
 				ENTITY: INVENTORY_ENTITY,
 				NAME: b.title,
-				DETAIL_TEXT: JSON.stringify({ status: 'active', deadline: b.deadline ?? '', points: b.points, createdById: b.createdById ?? '', createdAt: new Date().toISOString(), sectionIds }),
+				DETAIL_TEXT: JSON.stringify({ status: 'active', deadline: b.deadline ?? '', points, createdById: b.createdById ?? '', createdAt: capturedAt, stockSnapshotAt: capturedAt, sectionIds }),
 			});
 
 			if (b.createdById) {
@@ -46,7 +58,7 @@ export function registerInventoryCreateRoute(app: FastifyInstance): void {
 				}
 			}
 
-			app.log.info({}, '[api/inventory/create] ok');
+			app.log.info({ points: points.length, snapshotLines: points.reduce((sum, point) => sum + (((point['stockSnapshot'] as { lines?: unknown[] } | undefined)?.lines?.length) ?? 0), 0) }, '[api/inventory/create] ok');
 			return { ok: true };
 		} catch (err) {
 			app.log.error({}, `[api/inventory/create] failed — ${inventoryErrorInfo(err)}`);

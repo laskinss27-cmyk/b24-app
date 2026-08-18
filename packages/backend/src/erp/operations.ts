@@ -82,6 +82,7 @@ export {
 	fetchErpItemNames,
 	fetchErpStoreStock,
 	fetchErpStoreStockFull,
+	fetchErpSnapshotStockFull,
 	submitInventoryReco,
 } from './inventory-reconciliation.js';
 export type { ErpStoreLine, InventoryRecoLine } from './inventory-reconciliation.js';

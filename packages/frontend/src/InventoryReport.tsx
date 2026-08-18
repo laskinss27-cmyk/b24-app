@@ -248,8 +248,8 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				: mock
 					? Promise.resolve(MOCK_STOCK[storeId] ?? [])
 					: mobile
-						? fetchStoreStock(storeId, sectionIds, storeName)
-						: fetchStoreStock(storeId, sectionIds, storeName); // десктоп тоже → наш backend, остатки только из ядра
+						? fetchStoreStock(storeId, sectionIds, storeName, inventoryId)
+						: fetchStoreStock(storeId, sectionIds, storeName, inventoryId); // десктоп тоже → наш backend, остатки только из снимка инвентаризации
 		load
 			.then((rows) => {
 				if (!alive) return;
@@ -280,7 +280,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		return () => {
 			alive = false;
 		};
-	}, [storeId, mock, mobile, mode, actLines, sectionIds]);
+	}, [inventoryId, storeId, storeName, mock, mobile, mode, actLines, sectionIds]);
 
 	const list = useMemo<InvLine[]>(() => {
 		const base = items ?? [];
