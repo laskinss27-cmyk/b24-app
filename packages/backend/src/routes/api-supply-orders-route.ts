@@ -71,8 +71,10 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 					const lines = t.status === 'shortage' ? t.receivedLines : (t.status === 'received' || t.status === 'posted') ? t.lines : [];
 					addCovered(fulfilled, request.requestKey, lines);
 				}
-			} catch {
-				// Если старое хранилище перемещений недоступно, заявки всё равно покажем как есть.
+			} catch (error) {
+				// Нельзя считать недоступный реестр пустым: иначе обработанные позиции
+				// ложно возвращаются в «нераспределённые».
+				throw new Error(`Не удалось загрузить реестр перемещений: ${errInfo(error)}`);
 			}
 			const purchasesByRequest = await listPurchaseChildren(erp, [...reqs, standaloneRequest]);
 			for (const [requestKey, purchases] of purchasesByRequest.entries()) {

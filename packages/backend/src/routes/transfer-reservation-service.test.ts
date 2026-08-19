@@ -30,7 +30,10 @@ function transferItem(id: number, productId: number, qty: number, status: 'draft
 }
 
 function clientWithTransfers(items: Record<string, unknown>[]): B24Client {
-	return { call: async () => items } as unknown as B24Client;
+	return {
+		call: async () => items,
+		callWithMeta: async () => ({ result: items }),
+	} as unknown as B24Client;
 }
 
 test('transfer reservation rejects a repeated document when source stock is already gone', async () => {

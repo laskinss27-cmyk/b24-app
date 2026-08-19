@@ -89,14 +89,17 @@ test('deal diagnostics reads Bitrix supply cards and application transfers witho
 	const client = {
 		async call(method: string) {
 			if (method === 'crm.item.list') return { items: [{ id: 44, title: 'Поставка № 44', stageId: 'DT1110_114:NEW' }] };
-			if (method === 'entity.item.get') return [{
+			if (method === 'crm.deal.get') return { ID: '37868', TITLE: 'Камера', UF_CRM_ALL_REALIZED: 'НЕТ' };
+			throw new Error(`unexpected ${method}`);
+		},
+		async callWithMeta(method: string) {
+			assert.equal(method, 'entity.item.get');
+			return { result: [{
 				ID: '81', NAME: 'Перемещение #81', DETAIL_TEXT: JSON.stringify({
 					dealId: '37868', status: 'in_transit', fromStore: 'Склад А', toStore: 'Склад Б', createdAt: '2026-08-13T09:00:00Z',
 					createdByName: 'Сергей', lines: [{ productId: 18448, name: 'Камера', qty: 1 }], history: [{ at: '2026-08-13T09:00:00Z', status: 'in_transit', byId: '1' }],
 				}),
-			}];
-			if (method === 'crm.deal.get') return { ID: '37868', TITLE: 'Камера', UF_CRM_ALL_REALIZED: 'НЕТ' };
-			throw new Error(`unexpected ${method}`);
+			}] };
 		},
 	} as unknown as B24Client;
 	const result = await diagnoseAdminDealDocuments(client, erp, 37868);

@@ -44,7 +44,7 @@ export class B24ApiError extends Error {
 	}
 }
 
-interface B24SuccessResponse<T> {
+export interface B24SuccessResponse<T> {
 	result: T;
 	time?: unknown;
 	next?: number;
@@ -78,7 +78,7 @@ function buildHeaders(auth: B24Auth): HeadersInit {
 }
 
 /** Один вызов метода Б24. Throttle применяется снаружи. */
-async function rawCall<T>(auth: B24Auth, method: string, params: Record<string, unknown>): Promise<T> {
+async function rawCall<T>(auth: B24Auth, method: string, params: Record<string, unknown>): Promise<B24SuccessResponse<T>> {
 	const url = buildMethodUrl(auth, method);
 	const body: Record<string, unknown> = { ...params };
 	if (auth.kind === 'oauth') {
@@ -95,7 +95,7 @@ async function rawCall<T>(auth: B24Auth, method: string, params: Record<string, 
 	if (isB24Error(json)) {
 		throw new B24ApiError(method, json.error, json.error_description, response.status);
 	}
-	return json.result;
+	return json;
 }
 
 export interface BatchCall {
@@ -118,7 +118,7 @@ export interface B24ClientOptions {
 
 export class B24Client {
 	private readonly auth: B24Auth;
-	private readonly throttled: <T>(method: string, params: Record<string, unknown>) => Promise<T>;
+	private readonly throttled: <T>(method: string, params: Record<string, unknown>) => Promise<B24SuccessResponse<T>>;
 
 	constructor(options: B24ClientOptions) {
 		this.auth = options.auth;
@@ -130,7 +130,12 @@ export class B24Client {
 	}
 
 	/** Вызов одного метода Б24. */
-	call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+	async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+		return (await this.throttled<T>(method, params)).result;
+	}
+
+	/** Вызов списочного метода вместе с серверными next/total для надёжной пагинации. */
+	callWithMeta<T>(method: string, params: Record<string, unknown> = {}): Promise<B24SuccessResponse<T>> {
 		return this.throttled<T>(method, params);
 	}
 
