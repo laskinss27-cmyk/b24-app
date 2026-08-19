@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { renderAsync as renderDocx } from 'docx-preview';
 import { downloadStoredDealContract, fetchDealContractFile, type StoredDealContractDocument } from './b24.js';
 import { rub } from './deal-display-formatters.js';
+import { dealContractPreviewLayout } from './deal-products-placement-sizing.js';
 
 export function DealContractDocumentModal({
 	preview,
@@ -14,11 +15,7 @@ export function DealContractDocumentModal({
 	const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
 	const [error, setError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
-	const previewHeight = Math.min(900, Math.max(520, window.screen.availHeight - 100));
-	const overlayStyle: CSSProperties = {
-		top: Math.max(12, Math.round(preview.anchorY - previewHeight * 0.2)),
-		height: previewHeight,
-	};
+	const overlayStyle = dealContractPreviewLayout(preview.anchorY, window.scrollY, window.innerHeight);
 
 	useEffect(() => {
 		globalThis.document.body.classList.add('deal-contract-preview-open');

@@ -1,6 +1,24 @@
 export const PRODUCT_PICKER_MIN_HEIGHT = 900;
 export const DEAL_WORKSPACE_MIN_HEIGHT = 821;
 export const DEAL_PLACEMENT_VERTICAL_RESERVE = 219;
+export const DEAL_CONTRACT_PREVIEW_MAX_HEIGHT = 760;
+export const DEAL_DOCUMENT_PREVIEW_MARGIN = 12;
+
+export const dealContractPreviewLayout = (
+	anchorY: number,
+	scrollY: number,
+	viewportHeight: number,
+): { top: number; height: number } => {
+	const viewportTop = Math.max(DEAL_DOCUMENT_PREVIEW_MARGIN, Math.round(scrollY) + DEAL_DOCUMENT_PREVIEW_MARGIN);
+	const viewportBottom = Math.max(viewportTop, Math.round(scrollY + viewportHeight) - DEAL_DOCUMENT_PREVIEW_MARGIN);
+	const height = Math.min(DEAL_CONTRACT_PREVIEW_MAX_HEIGHT, Math.max(0, viewportBottom - viewportTop));
+	const maximumTop = Math.max(viewportTop, viewportBottom - height);
+	const preferredTop = Math.round(anchorY - height * 0.2);
+	return {
+		top: Math.min(maximumTop, Math.max(viewportTop, preferredTop)),
+		height,
+	};
+};
 
 export const dealWorkspaceFrameHeight = (
 	currentFrameHeight: number,
