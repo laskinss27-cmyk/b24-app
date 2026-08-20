@@ -82,3 +82,31 @@ Rollback: вернуть сохранённый container или mode `off`. Б�
 ## Влияние на менеджеров
 
 A-C не требуют остановки менеджеров: они не меняют рабочие источники приложения. Их следует выполнять вне ежедневного backup и наблюдать MariaDB resources. D — обычный backend deployment с коротким окном замены контейнера и полным rollback; его время согласуется отдельно. Переключение workflow reads/writes в этот change set не входит.
+
+## Follow-up: deploy выключенного SQL-каркаса
+
+После отдельного разрешения пользователя 2026-08-20 развёрнут image `b24-app:596bddb` с revision `596bddb06cf853a0a8816281bb2468ccdf9b3cfd`. Предыдущий production-контейнер `b24-app:aabda51` сохранён остановленным под именем `b24-backend-prev-before-596bddb`.
+
+Перед запуском из снимка рабочего окружения удалены все переменные `B24_APP_DB_*`, затем явно добавлена только `B24_APP_DB_MODE=off`. SQL credentials новому контейнеру не передавались. Миграции, backfill, shadow reads/writes и переключение источников не запускались; рабочее поведение продолжает использовать Bitrix24 и официальный ERPNext API.
+
+После переключения и отдельной повторной проверкой подтверждены:
+
+- internal и public `/health` — HTTP 200;
+- `/ready` — HTTP 200, `database.status=disabled`;
+- авторизованный read-only ERPNext `Company` — одна строка;
+- image `b24-app:596bddb`, `restart_count=0`, restart policy `unless-stopped`;
+- сеть `erpnext_frappe_network`, порт `127.0.0.1:3000`, bind mount `/srv/b24-state:/app/state` read-write;
+- ровно одна переменная `B24_APP_DB_*`: `B24_APP_DB_MODE=off`;
+- rollback-контейнер существует, остановлен и сохраняет image `b24-app:aabda51`.
+
+Два первых внутренних HTTP-запроса во время старта получили connection reset и были успешно повторены встроенным retry. После стабилизации независимые health-проверки прошли с первого запроса. Это ожидаемое короткое окно замены контейнера, а не обнаруженная ошибка приложения.
+
+### Посторонние предупреждения, не исправленные в этом этапе
+
+- production image использует Node.js `20.20.2`, а установленный `undici@8.4.1` декларирует engine `>=22.19.0`;
+- `npm ci` сообщил о четырёх известных уязвимостях зависимостей: две moderate и две high;
+- Vite повторил существующее предупреждение о frontend chunk около 970 kB после minification;
+- локальный npm предупреждает, что форма флага `-ws` будет удалена в будущем;
+- локальный Git повторяет существующие environment-предупреждения о недоступном global ignore и преобразовании LF/CRLF.
+
+Эти пункты не проявились как ошибки тестов или production health-check, но требуют отдельных change sets со своими baseline и rollback; обновление Node/dependencies или разбиение frontend bundle с SQL rollout не совмещать.

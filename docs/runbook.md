@@ -230,7 +230,7 @@ find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 
 Bench backup не включает отдельную базу `b24_app`. До её первых авторитетных записей оператор обязан расширить фактический backup script отдельным consistent dump, проверкой архива/checksum, внешней копией и retention, а затем выполнить restore drill в отдельную временную БД. Runtime, migrator и backup используют разных ограниченных пользователей; root не передаётся backend.
 
-На 2026-08-20 пустая schema и три роли provisioned. Проверенные root-only credentials хранятся в `/root/b24-app-secrets`; не выводить их в shell history, логи или Git. Backend ещё не подключён, таблиц нет, migration runner не запускался.
+На 2026-08-20 пустая schema и три роли provisioned. Проверенные root-only credentials хранятся в `/root/b24-app-secrets`; не выводить их в shell history, логи или Git. В production развёрнут disabled-каркас commit `596bddb`: у backend есть только `B24_APP_DB_MODE=off`, SQL credentials отсутствуют, соединение с MariaDB не создаётся, таблиц нет и migration runner не запускался.
 
 Standalone `/root/sync/b24-app-backup.sh` пишет только в root-only `/root/core-backups/b24_app`. Для dump используется отдельный `/root/b24-app-secrets/backup-dump.cnf` без поля `database=`; это исключает конфликт с `mariadb-dump --databases`. Ручные архивы лежат в `manual/`, диагностический — в `diagnostic/`, поэтому ERPNext retention их не видит.
 
@@ -241,6 +241,8 @@ Job `/root/sync/b24-app-backup-job.sh` в 12:30 UTC загружает dump/chec
 Restore drill пустого dump выполнен в `b24_app_restore_20260820_084026`: charset/collation и 0 таблиц совпали, рабочая `b24_app` осталась с 0 таблиц. Guard-скрипт запретил рабочее имя и повторный restore; после отдельного разрешения cleanup-скрипт удалил только временную schema. Backup gate ещё не закрыт для авторитетных данных: нужен повторный drill после появления доменных migrations/данных, измеренные RPO/RTO и фактическая проверка ветки retention после превышения лимита.
 
 Полный gate, порядок восстановления и отката описаны в [sql-migration.md](sql-migration.md). На текущем этапе `B24_APP_DB_MODE=off`; backend и ERPNext backup script не изменены, добавлена только независимая `b24_app` backup job.
+
+Disabled-каркас `b24-app:596bddb` развёрнут 2026-08-20 с сохранением предыдущего контейнера как `b24-backend-prev-before-596bddb`. После замены независимо подтверждены internal/public `/health`, `/ready` со статусом `database: disabled`, авторизованный ERPNext read, bind mount `/srv/b24-state:/app/state`, порт `127.0.0.1:3000`, restart policy `unless-stopped` и членство в `erpnext_frappe_network`. У нового контейнера `restart_count=0`; единственная переменная с префиксом `B24_APP_DB_` — `B24_APP_DB_MODE=off`. Это не переключение чтений или записей на SQL.
 
 ### Текущее состояние `/app/state`
 
