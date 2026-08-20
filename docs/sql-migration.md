@@ -2,11 +2,11 @@
 
 ## Статус и граница текущего этапа
 
-На 2026-08-20 выполнены этап 0 и отключённый фундамент этапа 1. Disabled-каркас commit `596bddb06cf853a0a8816281bb2468ccdf9b3cfd` развёрнут с единственной SQL-переменной `B24_APP_DB_MODE=off`, без credentials и runtime-соединения. Отдельным bootstrap созданы schema `b24_app` и три ограниченные роли. Ручной migration runner создал только `b24_app_schema_migrations`; доменных таблиц нет, metadata-таблица содержит 0 применённых migration rows.
+На 2026-08-20 выполнены этап 0 и connection/readiness-фундамент этапа 1. Commit `596bddb06cf853a0a8816281bb2468ccdf9b3cfd` развёрнут в `B24_APP_DB_MODE=readiness` с отдельным runtime credential и только `USAGE + SELECT`; `/ready` выполняет `SELECT 1`. Отдельным bootstrap созданы schema `b24_app` и три ограниченные роли. В production ручной migration runner создал только `b24_app_schema_migrations`: доменных таблиц нет, metadata-таблица содержит 0 применённых migration rows. Четыре доменных DDL-файла подготовлены только локально и не применялись.
 
-Read-only production preflight, фактические network/backup результаты и следующий change set записаны отдельно: [sql-preflight-2026-08-20.md](sql-preflight-2026-08-20.md).
+Read-only production preflight, фактические network/backup результаты и следующий change set записаны отдельно: [sql-preflight-2026-08-20.md](sql-preflight-2026-08-20.md). Реальные связи и минимальная модель первого модуля зафиксированы в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md).
 
-`b24_app` пока **не является источником данных**. `B24_APP_DB_MODE=off` по умолчанию; приложение не открывает SQL-соединение, не запускает миграции при старте, не зеркалирует данные и не меняет текущие чтения/записи. Исправленная пагинация Bitrix24 из `f3ae38e` остаётся рабочим fallback.
+`b24_app` пока **не является источником данных**. Без production env безопасным default остаётся `B24_APP_DB_MODE=off`; текущий явно разрешённый production mode — `readiness`. Приложение открывает ограниченный pool только для dependency probe, не запускает миграции при старте, не зеркалирует данные и не меняет текущие workflow чтения/записи. Исправленная пагинация Bitrix24 из `f3ae38e` остаётся рабочим fallback.
 
 ## Текущая source-of-truth matrix
 
@@ -47,17 +47,18 @@ Bitrix deal
   -> ERP Delivery Note (реализация)
 ```
 
-Одна заявка и одна закупка могут иметь несколько строк и downstream-документов. Поэтому будущая связь не должна кодироваться одним nullable foreign key в `documents`: нужны отдельные `document_links` и `document_lines` с типом связи, внешней системой, внешним ID и стабильным ключом строки.
+Production baseline подтвердил граф: 54 заявки связаны с 89 перемещениями, 78 заказами поставщикам и 54 приёмками; на одну заявку приходится до 7 перемещений, 9 закупок и 13 transfer/purchase документов суммарно. Одна заявка и одна закупка могут иметь несколько строк и downstream-документов. Поэтому будущая связь не должна кодироваться одним nullable foreign key в `documents`: нужны отдельные `document_links`, `document_lines` и количественные line allocations с внешней системой, внешним ID и стабильным ключом строки.
 
 ## Минимальная будущая схема домена
 
-На этапе 1 доменные таблицы намеренно не создаются. После read-only выборки реальных JSON и проверки кардинальностей минимальный кандидат:
+Read-only аудит снаба сузил и локально зафиксировал первый DDL change set из четырёх one-statement migrations:
 
-- `documents`: тип, статус, версия snapshot, внешний Bitrix/ERP ID, timestamps;
-- `document_lines`: стабильный line key, SKU, план/факт и замороженный payload;
-- `document_links`: направленная типизированная связь между документами и внешними ссылками;
-- `events`: append-only аудит переходов и actor/idempotency key;
-- `sync_jobs`: курсор, попытки, ошибка и состояние backfill/shadow comparison.
+- `workflow_documents`: тип, внешний статус/docstatus, внешняя система и ID, deal ID, source timestamps, observed time/hash;
+- `workflow_document_lines`: внешний child-row key, SKU, план/request/fact quantity и nullable склад строки;
+- `workflow_document_links`: направленная типизированная связь между документами;
+- `workflow_line_allocations`: количественная связь строк для split между несколькими закупками, приёмками и перемещениями.
+
+`workflow_events`/idempotency относятся к этапу 4, а `sync_jobs`/checkpoints добавляются вместе с управляемым backfill. Они не входят в первый DDL «на всякий случай». Точные поля, ограничения и relation types перечислены в [аудите домена](sql-supply-domain-audit-2026-08-20.md).
 
 Отдельно от workflow-каркаса будущей интеграции Tilda нужна специализированная таблица `tilda_product_mappings`, а не новый файл в `/app/state`. Минимальные поля-кандидаты: уникальные `tilda_uid` и `tilda_external_id`, `tilda_sku`, nullable внешние ссылки `erp_item_code`/`erp_product_id`, `mapping_status` (`confirmed`, `unresolved`, `ignored`), явный тип строки parent/variant, nullable `parent_tilda_uid` и variant metadata, `audit_source`, `created_at`, `updated_at`, `last_seen_at` и nullable `confirmed_at`. Точный состав variant metadata и типы колонок определяются по исходному экспорту до миграции; универсальный payload «на всякий случай» не добавляется. Уникальность ERP-ссылки и SKU заранее не предполагается, пока аудит не подтвердит кардинальности.
 
@@ -95,7 +96,7 @@ Runtime DML-права не выдаются заранее: `INSERT/UPDATE/DELE
 - `GET /health` не изменён и проверяет процесс backend.
 - `GET /ready` при `B24_APP_DB_MODE=off` возвращает database `disabled`; при `readiness` выполняет `SELECT 1` и отдаёт 503 при недоступности.
 - `npm -w @b24-app/backend run db:migrate` — только ручная команда. Она требует отдельные `B24_APP_MIGRATION_DB_USER/PASSWORD`, advisory lock и проверяет checksum уже применённых файлов.
-- каталог `packages/backend/migrations` пока не содержит доменных SQL. Первый ручной запуск 2026-08-20 создал только `b24_app_schema_migrations`; до запуска было 0 таблиц, после — одна metadata-таблица с 0 строк.
+- каталог `packages/backend/migrations` содержит локальные `0001`-`0004` для supply identity/graph mirror. В production они не запускались: первый ручной запуск 2026-08-20 создал только `b24_app_schema_migrations`; production schema по-прежнему содержит одну metadata-таблицу с 0 строк.
 - после применения файл миграции неизменяем; исправление оформляется новой миграцией.
 
 ## Обязательный gate перед авторитетными записями
@@ -140,18 +141,23 @@ sha256sum "$B24_APP_FINAL" > "${B24_APP_FINAL}.sha256"
 
 Проверенным dump выполнен restore drill через [`scripts/b24-app-restore-drill.sh`](../scripts/b24-app-restore-drill.sh). Создана отдельная schema `b24_app_restore_20260820_084026` с `utf8mb4/utf8mb4_unicode_ci`, восстановлено 0 таблиц согласно пустому dump; число таблиц рабочей `b24_app` до и после осталось 0. Negative tests подтвердили отказ для имени `b24_app` и для уже существующей restore schema. После фиксации результата временная schema удалена guarded-скриптом с точным confirmation; повторная проверка показала 0 таблиц в рабочей `b24_app`. Backup gate для будущих авторитетных данных ещё не закрыт: после появления доменных таблиц restore drill повторяется с migrations, row counts и выборочными link chains; отдельно проверяется реальное срабатывание retention и измеряются RPO/RTO.
 
+После первой metadata migration полный job создал `20260820_112406-b24_app-database.sql.gz` размером 924 bytes с одной table definition и 0 data rows. Локальные gzip/checksum и внешний Bitrix Disk read-back прошли; upload IDs: dump `103522`, checksum `103520`. Временная schema `b24_app_restore_20260820_112406` восстановила одну `b24_app_schema_migrations` с 0 строк. Независимое сравнение подтвердило одинаковые charset/collation, сигнатуры колонок и индексов; рабочая schema оставалась 1/0. Guarded cleanup удалил только временную schema, после чего restore schema count равен 0. Этот результат достаточен для отдельного read-only readiness rollout, но не заменяет повторный drill после появления доменных таблиц и данных.
+
+Перед первым доменным apply создан более свежий metadata-only safety dump `20260820_122411-b24_app-database.sql.gz`; gzip/checksum и внешний read-back прошли, Disk IDs `103574/103572`. Точные локальные migrations `0001`-`0004` успешно прошли server-level rehearsal в отдельной MariaDB 11.8: первый runner применил 4 файла, второй был идемпотентен, структура дала 5 tables / 54 columns / 5 FK / 20 CHECK / 21 indexes, а positive/negative constraint tests прошли. Rehearsal отдельно зафиксировала требование создавать database с явным `utf8mb4/utf8mb4_unicode_ci`: новый default MariaDB 11.8 — `utf8mb4_uca1400_ai_ci`. Рабочая `b24_app` уже имеет правильную явную collation и в rehearsal не использовалась.
+
 Restore drill выполняется не поверх production: административный оператор создаёт временную БД, импортирует выбранный dump, проверяет `b24_app_schema_migrations`, counts и выборочные link chains, после чего удаляет только явно названную временную БД.
 
 Production restore требует остановить записи приложения, сделать свежий safety dump и восстановить выбранную копию в новую БД. После проверки контейнер пересоздаётся с новым `B24_APP_DB_NAME`; старая БД и rollback-контейнер сохраняются до подтверждения. Для текущего этапа rollback проще: вернуть `B24_APP_DB_MODE=off` или прежний контейнер — действующие Bitrix/ERPNext пути не менялись.
 
 ## Порядок следующих малых этапов
 
-1. Provision database/users, disabled deploy, отдельный backup и metadata migration выполнены; runtime остаётся `off`.
-2. Сделать свежий dump и restore drill одной metadata-таблицы, не затрагивая рабочую schema.
-3. Отдельным deploy включить только `B24_APP_DB_MODE=readiness` с read-only runtime credential и проверить `/ready`; workflow остаётся на Bitrix/ERPNext.
-4. Добавить минимальные таблицы только после выборки реальных кардинальностей.
-5. Read-only backfill с checkpoint и отчётом, без переключения.
-6. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
-7. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
+1. Provision database/users, disabled deploy, отдельный backup, metadata migration и restore drill одной metadata-таблицы выполнены.
+2. `B24_APP_DB_MODE=readiness` включён с read-only runtime credential; internal/public `/ready` показывает `database: up`, workflow остаётся на Bitrix/ERPNext.
+3. Read-only кардинальности проверены; четыре локальных one-statement DDL migrations и их статические contract tests подготовлены без применения.
+4. Отсутствие target tables, свежий safety dump и isolated MariaDB rehearsal закрыты. Только после отдельного разрешения и commit/build точных hashes: применить DDL к `b24_app` одним manual runner и независимо сверить columns/indexes/FK/CHECK при 0 domain rows.
+5. Повторить backup/external read-back/isolated restore gate новой схемы до любого backfill.
+6. Read-only backfill с checkpoint и отчётом, без переключения.
+7. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
+8. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 
 Каждый пункт имеет собственные тесты «до/после», сравнение результатов и отдельный список посторонних ошибок. Коммит, push и deploy требуют явной команды.

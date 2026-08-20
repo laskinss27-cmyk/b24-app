@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS workflow_document_links (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    from_document_id BIGINT UNSIGNED NOT NULL,
+    to_document_id BIGINT UNSIGNED NOT NULL,
+    relation_type VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    evidence_kind VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    evidence_source VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    observed_at DATETIME(6) NOT NULL,
+    source_hash BINARY(32) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_workflow_document_links_relation (from_document_id, to_document_id, relation_type),
+    KEY ix_workflow_document_links_target (to_document_id, relation_type),
+    KEY ix_workflow_document_links_observed_at (observed_at),
+    CONSTRAINT fk_workflow_document_links_from FOREIGN KEY (from_document_id) REFERENCES workflow_documents (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_workflow_document_links_to FOREIGN KEY (to_document_id) REFERENCES workflow_documents (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_workflow_document_links_relation CHECK (relation_type IN ('ordered_for_request', 'received_against_order', 'received_for_request', 'transfers_for_request', 'transfers_for_purchase', 'posts_transfer_ship', 'posts_transfer_receive', 'posts_transfer_correction', 'corrects_transfer')),
+    CONSTRAINT chk_workflow_document_links_evidence CHECK (evidence_kind IN ('explicit_external_field', 'native_erp_link', 'derived_match')),
+    CONSTRAINT chk_workflow_document_links_distinct CHECK (from_document_id <> to_document_id),
+    CONSTRAINT chk_workflow_document_links_source CHECK (CHAR_LENGTH(evidence_source) > 0)
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
