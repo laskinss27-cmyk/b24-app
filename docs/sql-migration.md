@@ -2,7 +2,7 @@
 
 ## Статус и граница текущего этапа
 
-На 2026-08-20 выполнены этап 0 и connection/readiness-фундамент этапа 1. Commit `596bddb06cf853a0a8816281bb2468ccdf9b3cfd` развёрнут в `B24_APP_DB_MODE=readiness` с отдельным runtime credential и только `USAGE + SELECT`; `/ready` выполняет `SELECT 1`. Отдельным bootstrap созданы schema `b24_app` и три ограниченные роли. В production ручной migration runner создал только `b24_app_schema_migrations`: доменных таблиц нет, metadata-таблица содержит 0 применённых migration rows. Четыре доменных DDL-файла подготовлены только локально и не применялись.
+На 2026-08-20 выполнены этап 0 и schema/readiness-фундамент этапа 1. Runtime commit `596bddb06cf853a0a8816281bb2468ccdf9b3cfd` развёрнут в `B24_APP_DB_MODE=readiness` с отдельным credential и только `USAGE + SELECT`; `/ready` выполняет `SELECT 1`. Commit `5b9a6d845900f284a2da23ffbfa17b0d9ce600cb` опубликован и собран отдельно, но не развёрнут как backend. Его ручной one-shot runner применил `0001`-`0004`: production содержит metadata и четыре пустые supply identity/graph tables, 4 migration rows и 0 domain rows.
 
 Read-only production preflight, фактические network/backup результаты и следующий change set записаны отдельно: [sql-preflight-2026-08-20.md](sql-preflight-2026-08-20.md). Реальные связи и минимальная модель первого модуля зафиксированы в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md).
 
@@ -96,7 +96,7 @@ Runtime DML-права не выдаются заранее: `INSERT/UPDATE/DELE
 - `GET /health` не изменён и проверяет процесс backend.
 - `GET /ready` при `B24_APP_DB_MODE=off` возвращает database `disabled`; при `readiness` выполняет `SELECT 1` и отдаёт 503 при недоступности.
 - `npm -w @b24-app/backend run db:migrate` — только ручная команда. Она требует отдельные `B24_APP_MIGRATION_DB_USER/PASSWORD`, advisory lock и проверяет checksum уже применённых файлов.
-- каталог `packages/backend/migrations` содержит локальные `0001`-`0004` для supply identity/graph mirror. В production они не запускались: первый ручной запуск 2026-08-20 создал только `b24_app_schema_migrations`; production schema по-прежнему содержит одну metadata-таблицу с 0 строк.
+- каталог `packages/backend/migrations` содержит применённые `0001`-`0004` для supply identity/graph mirror. Production runner 2026-08-20 записал их точные filenames/checksums в `b24_app_schema_migrations`; четыре domain tables остаются пустыми и runtime их не читает/не пишет.
 - после применения файл миграции неизменяем; исправление оформляется новой миграцией.
 
 ## Обязательный gate перед авторитетными записями
@@ -154,8 +154,8 @@ Production restore требует остановить записи прилож
 1. Provision database/users, disabled deploy, отдельный backup, metadata migration и restore drill одной metadata-таблицы выполнены.
 2. `B24_APP_DB_MODE=readiness` включён с read-only runtime credential; internal/public `/ready` показывает `database: up`, workflow остаётся на Bitrix/ERPNext.
 3. Read-only кардинальности проверены; четыре локальных one-statement DDL migrations и их статические contract tests подготовлены без применения.
-4. Отсутствие target tables, свежий safety dump и isolated MariaDB rehearsal закрыты. Только после отдельного разрешения и commit/build точных hashes: применить DDL к `b24_app` одним manual runner и независимо сверить columns/indexes/FK/CHECK при 0 domain rows.
-5. Повторить backup/external read-back/isolated restore gate новой схемы до любого backfill.
+4. Отсутствие target tables, свежий safety dump, isolated MariaDB rehearsal и production DDL apply закрыты. Независимая сверка подтвердила 5 tables / 4 migration rows / 54 columns / 5 FK / 20 CHECK / 21 indexes при 0 domain rows.
+5. Только после отдельного разрешения повторить backup/external read-back/isolated restore gate новой схемы до любого backfill.
 6. Read-only backfill с checkpoint и отчётом, без переключения.
 7. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 8. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.

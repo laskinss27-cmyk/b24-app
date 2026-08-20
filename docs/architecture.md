@@ -46,7 +46,7 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 | служебная память отдельных процессов | entity-хранилища Битрикс24 |
 | публичный остаток Tilda (будущая односторонняя проекция) | ERPNext; Tilda не становится источником правды |
 
-Точная карта entity stores, `/app/state`, связей ERPNext и поэтапного перехода на отдельную базу приведена в [sql-migration.md](sql-migration.md). На текущем этапе `b24_app` работает только как readiness dependency: ограниченное соединение выполняет `SELECT 1`; доменных таблиц, workflow-чтений и записей нет.
+Точная карта entity stores, `/app/state`, связей ERPNext и поэтапного перехода на отдельную базу приведена в [sql-migration.md](sql-migration.md). На текущем этапе runtime использует `b24_app` только как readiness dependency: ограниченное соединение выполняет `SELECT 1`. Четыре пустые supply identity/graph tables уже созданы ручными migrations, но workflow-чтений, backfill и записей в них нет.
 
 Регулярного зеркалирования остатков из Битрикс24 в ERPNext нет. Старые миграционные скрипты не являются частью рабочего контура.
 
@@ -115,7 +115,7 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 
 Отдельная MariaDB-база `b24_app` вводится маленькими обратимыми этапами. ERPNext остаётся единственным источником правды физических остатков и проведённых складских документов, а Битрикс24 — CRM, идентификацией и правами. Прямой SQL к ERPNext запрещён. Отключённая конфигурация, ручной migration runner, metadata backup/restore drill и read-only readiness уже проверены; backfill, shadow reads и переключение модулей выполняются отдельными этапами после повторного backup/restore gate доменной схемы.
 
-Первым проверен домен снаба: production-кардинальности требуют нормализованных документов, строк, типизированных document links и количественных line allocations. Точные наблюдения и граница change set приведены в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md). Четыре one-statement DDL migrations подготовлены локально, но не применены; production-таблиц и изменений текущего workflow нет.
+Первым проверен домен снаба: production-кардинальности требуют нормализованных документов, строк, типизированных document links и количественных line allocations. Точные наблюдения и граница change set приведены в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md). Четыре one-statement DDL migrations применены отдельным ручным runner и независимо сверены при 0 domain rows; текущий workflow не изменён.
 
 ## Будущая проекция остатков в Tilda
 

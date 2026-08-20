@@ -112,4 +112,4 @@ See [runbook.md](runbook.md) for the current deployment and rollback procedure.
 
 ## Planned workflow database
 
-The separate MariaDB database `b24_app` is introduced in small reversible stages. ERPNext remains the only source of truth for physical stock and submitted inventory/accounting documents, while Bitrix24 remains the CRM and identity/permission system. Direct SQL access to ERPNext is prohibited. The current foundation is disabled by default and adds only configuration, readiness and a manual migration runner; see the [staged migration plan](../sql-migration.md).
+The separate MariaDB database `b24_app` is introduced in small reversible stages. ERPNext remains the only source of truth for physical stock and submitted inventory/accounting documents, while Bitrix24 remains the CRM and identity/permission system. Direct SQL access to ERPNext is prohibited. The runtime still uses SQL only for readiness; four empty supply identity/graph tables exist after an explicitly run manual migration, with no backfill or workflow reads/writes. See the [staged migration plan](../sql-migration.md).
