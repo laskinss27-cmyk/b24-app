@@ -43,8 +43,18 @@ Draft, submitted, свежий, смешанный, неразбираемый k
 
 Baseline до кода: focused planner/snapshot `22/22`, общий typecheck успешен. После изменения focused suite `26/26`, полный backend `212/212`, общий typecheck и `git diff --check` успешны. Добавлены отдельные guards для canceled receipt, canceled purchase order, трехфазного canceled Stock Entry lifecycle и случая с пересечением SKU, который обязан остаться blocker.
 
-Это пока локальная проверяемая модель. Commit, push, deploy, новый production dry-run, SQL writer, backfill apply и source switch не выполнялись.
+На момент завершения аудита это была только локальная проверяемая модель. Её последующее развёртывание и production dry-run записаны ниже; SQL writer, backfill apply и source switch не выполнялись.
 
 ## Уточнение предыдущего аудита
 
-Предыдущий line-mismatch аудит считал link `MAT-PRE-2026-00014` → `PUR-ORD-2026-00012` доказанным только по custom field. Новый временной и revision-аудит опроверг это для текущего source: нынешний PO создан спустя четыре дня после canceled receipt и содержит другой SKU. Production read-only planner всё ещё включает две ложные document links этой приёмки; локальный change их исключает. SQL пуст, поэтому неверная связь не была записана.
+Предыдущий line-mismatch аудит считал link `MAT-PRE-2026-00014` → `PUR-ORD-2026-00012` доказанным только по custom field. Новый временной и revision-аудит опроверг это для текущего source: нынешний PO создан спустя четыре дня после canceled receipt и содержит другой SKU. Пятый production dry-run ещё включал две ложные document links этой приёмки; шестой dry-run после узкого change исключил их. SQL пуст, поэтому неверная связь не была записана.
+
+## Развёртывание и production-подтверждение
+
+Commit `9b6b80c` опубликован в `origin/main` и развёрнут как read-only image `b24-app:9b6b80c`. Первый deploy-проход безопасно вернул прежний `b24-app:b799329`: временный операторский скрипт проверял readiness по неверному JSON-path, хотя endpoint уже отвечал `database: up`. После исправления только проверяющего скрипта canary и повторный deploy прошли. Текущий container `b24-backend` работает с restart count 0 в `erpnext_frappe_network`; `b24-backend-prev-before-9b6b80c` сохраняет exited rollback image `b24-app:b799329`.
+
+Один полный owner OAuth dry-run завершён в `2026-08-20T18:09:17.389Z`. Все источники полны: ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5`. План `4352ad2267a21df6884df8a25b1387a1088f9b37c16d2c98ef23b73cbd36359d` точно совпал с ожидаемой дельтой: 510 documents / 991 lines / 518 links / 705 allocations, 2 `missing_line_match` errors и 20 warnings — 4 `historical_request_revision_unavailable`, 4 `historical_source_line_unavailable`, 12 `historical_transfer_line_unavailable`. `readyToApply=false` сохраняется из-за двух live blockers.
+
+До полного прохода четыре HTTP-попытки завершились на `user.current` с `invalid_token`: reload/new placement повторяли устаревший initial `AUTH_ID`. Они не дошли до чтения ERP/Bitrix registries. Успешный запрос использовал актуальный `BX24.getAuth()` из живого SDK-контекста iframe; краткоживущий token не сохранялся в файлах или логах и очищен после вызова.
+
+Независимый post-check подтвердил internal/public health, readiness `database: up`, официальный ERPNext GET, image/network/restart/rollback и 4 migration rows при SQL domain rows `0|0|0|0`. Рабочие чтения и записи по-прежнему идут через Bitrix/ERPNext fallback.

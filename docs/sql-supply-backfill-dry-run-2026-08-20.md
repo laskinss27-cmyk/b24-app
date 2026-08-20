@@ -109,3 +109,18 @@ Commits `28232e1` и `b799329` fast-forward опубликованы в `origin/
 Последующий официальный ERP read разобрал все четыре `stale_request_key`: это одна удалённая версия `MAT-MR-2026-00002` от 17 июля, четыре canceled downstream-документа и новая draft-заявка с тем же именем от 21 июля без пересечения SKU. Отдельно обнаружено, что текущий `PUR-ORD-2026-00012` создан позже canceled `MAT-PRE-2026-00014` и содержит другой SKU, поэтому две document links приёмки в текущем dry-run ложные. Локальный historical revision change исключает их и ожидаемо меняет plan на 518 links / 2 errors / 20 warnings; focused `26/26`, полный backend `212/212` и typecheck успешны. Подробности: [аудит stale revision](sql-supply-stale-request-audit-2026-08-20.md). SQL остался пустым; commit и production deploy не выполнялись.
 
 Посторонние наблюдения, не исправленные этим этапом: Docker build повторил существующие предупреждения Node 20 / `undici` engine, четыре npm audit findings и frontend chunk size; первоначальные независимые public/ERP команды не выполнились из-за локального PowerShell escaping и были безопасно повторены отдельным read-only скриптом; встроенный браузер блокировал адрес до загрузки, а новый Chrome placement не инициализировал BX24 SDK, поэтому OAuth был считан только из уже разрешённого placement POST через временное CDP-наблюдение. Ни одно из этих наблюдений не вызвало повторный dry-run и не менялось в коде.
+
+## Шестой production dry-run
+
+Commit `9b6b80c` опубликован и развёрнут как `b24-app:9b6b80c`; rollback `b24-app:b799329` сохранён в `b24-backend-prev-before-9b6b80c`. Первый switch автоматически откатился из-за ошибки временного deploy-check: readiness JSON был прочитан как `payload.database.status` вместо `payload.checks.database.status`. Сам новый container был healthy; после исправления только диагностического скрипта canary и повторный switch прошли. Production untracked cleanup-файлы не входили в build context и не изменялись.
+
+Полный owner OAuth dry-run выполнен в `2026-08-20T18:09:17.389Z`, HTTP 200; production log содержит один `complete`. План `4352ad2267a21df6884df8a25b1387a1088f9b37c16d2c98ef23b73cbd36359d` подтвердил ожидаемый результат:
+
+- полные источники: ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5`;
+- 510 documents / 991 lines / 518 links / 705 allocations;
+- 2 errors: `missing_line_match` в live draft-связках;
+- 20 warnings: 4 `historical_request_revision_unavailable`, 4 `historical_source_line_unavailable`, 12 `historical_transfer_line_unavailable`.
+
+Четыре предшествующие production POST завершились fail-closed на `user.current invalid_token` до чтения источников: initial placement `AUTH_ID` оказался устаревшим даже после reload/new tab. Успешный запрос использовал только актуальный token из `BX24.getAuth()` живого iframe. Отдельная локальная попытка была остановлена сетевым sandbox до достижения endpoint и в production log отсутствует. Это операторская OAuth-диагностика, не ошибка planner и не изменение данных.
+
+После полного прохода `readyToApply=false`: historical stale revisions объяснены, но две live line-связки всё ещё не имеют доказанного соответствия. Независимый post-check подтвердил internal/public health, readiness `up`, официальный ERPNext read, `b24-app:9b6b80c`, restart count 0, `erpnext_frappe_network`, rollback `b24-app:b799329`, 4 migration rows и SQL domain rows `0|0|0|0`. SQL writer, backfill apply и source switch не выполнялись.
