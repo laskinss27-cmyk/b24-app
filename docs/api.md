@@ -45,6 +45,7 @@
 | `/api/reports/*` | отчёты |
 | `/api/quicksale/*` | быстрая продажа |
 | `/api/access-control/*` | чтение сотрудников и отделов, загрузка и сохранение правил доступа |
+| `/api/admin/sql-migration/supply/dry-run` | owner-only read-only отчёт будущего mirror снаба; без SQL-записей и переключения источника |
 
 Актуальный перечень конкретных endpoint всегда определяется регистрацией `app.get` и `app.post` в `packages/backend/src/routes/`. При добавлении или удалении группы этот документ обновляется.
 
@@ -71,6 +72,8 @@ Backend:
 7. возвращает JSON-ошибку с понятным сообщением.
 
 Писать прямые вызовы Битрикс24 из React не следует: это усложняет права, таймауты и аудит.
+
+Диагностический `POST /api/admin/sql-migration/supply/dry-run` сохраняет именно OAuth-контекст владельца после `user.current`: production webhook не имеет доступа к `entity.item.get`. Маршрут читает ERPNext и `ctv_transfers`, возвращает source status, counts, типы связей, blockers и hash плана. Он не вызывает migrations, не открывает database runtime и не пишет ни в одну систему.
 
 ## Правила изменений
 

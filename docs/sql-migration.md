@@ -8,6 +8,8 @@ Read-only production preflight, фактические network/backup резул
 
 `b24_app` пока **не является источником данных**. Без production env безопасным default остаётся `B24_APP_DB_MODE=off`; текущий явно разрешённый production mode — `readiness`. Приложение открывает ограниченный pool только для dependency probe, не запускает миграции при старте, не зеркалирует данные и не меняет текущие workflow чтения/записи. Исправленная пагинация Bitrix24 из `f3ae38e` остаётся рабочим fallback.
 
+Локально подготовлен следующий изолированный gate: owner-only `POST /api/admin/sql-migration/supply/dry-run`. Он строит только отчёт и детерминированный hash плана, не подключается к `b24_app` и не содержит SQL writer. ERPNext читается исключительно `GET /api/resource` без `ensure/setup` helpers; `ctv_transfers` читается OAuth-токеном владельца с защищённой пагинацией. Ошибка/403 Bitrix, неполный JSON, stale request key, неоднозначная строка, отсутствующая ссылка или quantity evidence делают `readyToApply=false`, а не превращаются в пустой реестр. Production backend этот route пока не содержит: deploy и сам dry-run являются отдельными разрешаемыми действиями.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |
@@ -158,8 +160,9 @@ Production restore требует остановить записи прилож
 3. Read-only кардинальности проверены; четыре локальных one-statement DDL migrations и их статические contract tests подготовлены без применения.
 4. Отсутствие target tables, свежий safety dump, isolated MariaDB rehearsal и production DDL apply закрыты. Независимая сверка подтвердила 5 tables / 4 migration rows / 54 columns / 5 FK / 20 CHECK / 21 indexes при 0 domain rows.
 5. Post-DDL backup, external read-back и isolated restore gate пустой новой схемы выполнены; source/restore signatures и 0 domain rows совпали, временные объекты удалены guarded cleanup.
-6. Read-only backfill с checkpoint и отчётом, без переключения.
-7. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
-8. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
+6. Локальный read-only dry-run planner и owner-only route подготовлены без SQL writer. Далее: отдельно разрешённый deploy диагностического route, production dry-run и разбор всех blockers; workflow остаётся на Bitrix/ERPNext.
+7. Только для плана с подтверждённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
+8. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
+9. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 
 Каждый пункт имеет собственные тесты «до/после», сравнение результатов и отдельный список посторонних ошибок. Коммит, push и deploy требуют явной команды.
