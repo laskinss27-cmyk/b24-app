@@ -12,7 +12,7 @@ Owner-only `POST /api/admin/sql-migration/supply/dry-run` развёрнут в 
 
 Второй production dry-run прочитал все три источника полностью, получил 505 documents / 991 lines / 508 links / 705 allocations и 35 errors вместо 64. Все ожидаемые 29 ложных blockers standalone/manual исчезли без новых issue; остались 24 проявления пяти исторических transfer gaps, семь line mismatches и четыре stale revisions. Точный отчёт записан в [журнале dry-run](sql-supply-backfill-dry-run-2026-08-20.md); workflow SQL tables остались пустыми.
 
-Третий production dry-run на `dbd7b3c` сохранил те же кардинальности и получил 40 errors / 0 warnings. Дополнительный официальный ERP read объяснил результат: все 12 references пяти исчезнувших transfer принадлежат отменённым Stock Entry `docstatus=2`, поэтому submitted-only tombstone gate правильно отказал. Локальный follow-up моделирует однородное canceled evidence отдельно, не выдавая его за проведённое и не реконструируя строки; production SQL остаётся 4 migration rows и 0 domain rows.
+Третий production dry-run на `dbd7b3c` сохранил те же кардинальности и получил 40 errors / 0 warnings. Дополнительный официальный ERP read объяснил результат: все 12 references пяти исчезнувших transfer принадлежат отменённым Stock Entry `docstatus=2`, поэтому submitted-only tombstone gate правильно отказал. Follow-up `c9a3c0b` развернул отдельную canceled-evidence ветку. Четвёртый dry-run получил ожидаемые 510 documents / 991 lines / 520 links / 705 allocations, 11 errors и 12 warnings: все 29 historical errors устранены без придуманных строк, production SQL остаётся 4 migration rows и 0 domain rows.
 
 ## Текущая source-of-truth matrix
 
@@ -166,7 +166,7 @@ Production restore требует остановить записи прилож
 5. Post-DDL backup, external read-back и isolated restore gate пустой новой схемы выполнены; source/restore signatures и 0 domain rows совпали, временные объекты удалены guarded cleanup.
 6. Read-only route развёрнут, первый production dry-run выполнен и fail-closed остановлен на 64 коррелированных legacy issues; workflow остаётся на Bitrix/ERPNext, SQL domain tables пусты.
 7. Standalone roots и ручные transfer requests смоделированы и развёрнуты без SQL/runtime-записи; второй dry-run подтвердил устранение ожидаемых 29 ложных blockers без новых issue, SQL domain rows остались нулевыми.
-8. Submitted-only tombstone-модель развёрнута и fail-closed доказала, что реальные 12 ERP references отменены. Локально добавлена отдельная canceled-evidence ветка: только однородные `docstatus=2` старше 24 часов, ноль выдуманных строк и warnings вместо line allocations. После отдельного commit/deploy повторить dry-run; затем разобрать семь line mismatches и четыре stale revision links.
+8. Submitted-only gate доказал, что реальные 12 ERP references отменены; отдельная canceled-evidence ветка развёрнута. Четвёртый dry-run подтвердил пять tombstone, 12 восстановленных links, 12 warnings и отсутствие придуманных line allocations. Далее отдельными change sets разобрать семь line mismatches и четыре stale revision links.
 9. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
 10. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 11. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
