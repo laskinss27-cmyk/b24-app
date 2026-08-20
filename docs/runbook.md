@@ -229,6 +229,8 @@ find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 
 Bench backup не включает отдельную базу `b24_app`. До её первых авторитетных записей оператор обязан расширить фактический backup script отдельным consistent dump, проверкой архива/checksum, внешней копией и retention, а затем выполнить restore drill в отдельную временную БД. Runtime, migrator и backup используют разных ограниченных пользователей; root не передаётся backend.
 
+На 2026-08-20 пустая schema и три роли provisioned. Проверенные root-only credentials хранятся в `/root/b24-app-secrets`; не выводить их в shell history, логи или Git. Backend ещё не подключён, таблиц нет, migration runner не запускался. Следующий gate — отдельный dump и restore drill, а не deploy.
+
 Полный gate, порядок восстановления и отката описаны в [sql-migration.md](sql-migration.md). На текущем этапе `B24_APP_DB_MODE=off`, поэтому существующий production backup не изменяется этой локальной работой.
 
 ### Текущее состояние `/app/state`

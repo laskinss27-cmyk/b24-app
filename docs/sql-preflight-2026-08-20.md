@@ -4,6 +4,19 @@
 
 Проверка выполнена без SQL-аутентификации, без изменения контейнеров, cron, env, файлов, БД или пользователей. Production-записи не выполнялись. Локальный baseline перед проверкой: 184/184 backend-теста и полный typecheck.
 
+## Provision result
+
+После отдельного разрешения пользователя 2026-08-20 в 08:08 UTC выполнен одноразовый bootstrap через существующий MariaDB root внутри `erpnext-db-1`. Root credential не выводился, не копировался из контейнера и не сохранялся в новых файлах.
+
+Созданы:
+
+- пустая schema `b24_app`, `utf8mb4` / `utf8mb4_unicode_ci`;
+- `b24_app_runtime@%`: только `SELECT` на `b24_app.*`;
+- `b24_app_migrator@%`: DML и ограниченные schema DDL только на `b24_app.*`;
+- `b24_app_backup@%`: `SELECT`, `SHOW VIEW`, `TRIGGER` только на `b24_app.*`.
+
+Все три роли прошли отдельный login через alias `db`; после provision в schema ноль таблиц. Случайные credentials находятся только в `/root/b24-app-secrets`: каталог `root:root` mode `700`, файлы mode `600`. Backend остался на image `b24-app:aabda51`, не получил `B24_APP_DB_*`, не перезапускался и не подключался к schema. Internal/public health и ERPNext GET после provision успешны.
+
 ## Подтверждённые production-факты
 
 | Проверка | Результат |
@@ -39,14 +52,14 @@
 
 Ни один пункт ниже ещё не выполнялся. Каждый approval gate отдельный.
 
-### A. Provision пустой базы и ролей
+### A. Provision пустой базы и ролей — выполнено
 
 1. DBA интерактивно проверяет отсутствие конфликтующих schema/users.
 2. Создаёт пустую `b24_app` и отдельные `runtime`, `migrator`, `backup` credentials по [sql-migration.md](sql-migration.md).
 3. Runtime получает только `SELECT`; DML не выдаётся до отдельного writer-этапа.
 4. Секреты сохраняются в root-only files; migration secret не попадает в постоянный env backend.
 
-Это production SQL metadata write и требует явного разрешения. Rollback на этом шаге — перестать использовать созданные объекты и сохранить их для расследования; `DROP DATABASE/USER` не входит в автоматический rollback и требует отдельного destructive approval.
+Production SQL metadata write выполнен по явному разрешению. Rollback на этом шаге — не использовать созданные объекты и сохранить их для расследования; `DROP DATABASE/USER` не входит в автоматический rollback и требует отдельного destructive approval.
 
 ### B. Metadata migration без deploy
 

@@ -231,6 +231,8 @@ find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 
 Bench backup does not include the separate `b24_app` database. Before its first authoritative write, extend the effective backup job with a consistent dump, archive/checksum validation, external copy and retention, then complete a restore drill into a separately named temporary database. Runtime, migrator and backup must use separate least-privilege accounts; the backend never receives root credentials. The authoritative staged gate is documented in [the SQL migration plan](../sql-migration.md).
 
+As of 2026-08-20, the empty schema and three least-privilege roles have been provisioned. Verified root-only credentials are stored under `/root/b24-app-secrets`; never print them to shell history, logs, or Git. The backend is still disconnected, there are no tables, and the migration runner has not been executed. The next gate is a separate dump and restore drill, not a deployment.
+
 ### Current `/app/state` status
 
 The 2026-08-20 read-only audit confirmed `/srv/b24-state:/app/state`, but found no copy of that directory in `core-backup.sh`, a separate cron entry, or a backup timer. Contracts, contract sequences, templates and the operation log must not be described as recoverable from the ERPNext backup. Treat state backup and its restore drill as a separate change rather than combining it with SQL provisioning.
