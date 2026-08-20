@@ -177,7 +177,7 @@ Production restore требует остановить записи прилож
 8. Submitted-only gate доказал, что реальные 12 ERP references отменены; отдельная canceled-evidence ветка развёрнута. Четвёртый dry-run подтвердил пять tombstone, 12 восстановленных links, 12 warnings и отсутствие придуманных line allocations.
 9. Read-only аудит семи line mismatch завершён: две live draft-связки не имеют доказанного соответствия, пять historical downstream-связок имеют явные document links, но не доказанные line allocations. Узкая warning-модель прошла focused `22/22`, полный backend `208/208`, typecheck и production dry-run `6 errors / 17 warnings`; SQL domain rows остались нулевыми.
 10. Четыре stale revisions разобраны как одна старая canceled версия переиспользованного request name. Fail-closed модель прошла focused `26/26`, полный backend `212/212`, typecheck, commit/deploy и шестой production dry-run; ожидаемая дельта подтверждена, SQL domain rows остались нулевыми.
-11. Отдельно разобрать только две live `missing_line_match`; до объяснённого результата сохранять их errors и не проектировать apply.
+11. Две последние `missing_line_match` официально разобраны как старые app-canceled draft PO с точными request keys. Узкая локальная evidence-only модель прошла focused `29/29`, backend `215/215` и typecheck; ожидает отдельные commit/deploy/dry-run gates. До production-подтверждения apply не проектировать.
 12. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
 13. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 14. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.

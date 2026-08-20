@@ -51,9 +51,17 @@ function erpTimestampMs(value: unknown): number | null {
 }
 function isHistoricalErpEvidence(entry: Record<string, unknown>, observedAt: string, expectedDocstatus: 1 | 2): boolean {
 	if (Number(entry['docstatus']) !== expectedDocstatus) return false;
+	return isHistoricalErpTimestamp(entry, observedAt);
+}
+function isHistoricalErpTimestamp(entry: Record<string, unknown>, observedAt: string): boolean {
 	const observedMs = Date.parse(observedAt);
 	const entryMs = erpTimestampMs(text(entry['modified']) || entry['creation']);
 	return Number.isFinite(observedMs) && entryMs !== null && observedMs - entryMs >= HISTORICAL_TOMBSTONE_GRACE_MS;
+}
+function isHistoricalAppCanceledPurchaseOrder(entry: Record<string, unknown>, observedAt: string): boolean {
+	return Number(entry['docstatus']) === 0
+		&& text(entry[SUPPLY_PURCHASE_STAGE_FIELD]) === 'cancelled'
+		&& isHistoricalErpTimestamp(entry, observedAt);
 }
 function isHistoricalTerminalErpDocument(document: Record<string, unknown>, observedAt: string): boolean {
 	const docstatus = Number(document['docstatus']);
@@ -408,6 +416,14 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		// without an upstream manager request. It is not a missing document.
 		if (!requestName || requestName === '__standalone__' || historicalCanceledRequestRevisions.has(order)) continue;
 		const requestRef = docRef('supply_request', requestName);
+		const request = requestsByName.get(requestName);
+		const currentRequestKey = request ? `${requestName}@${text(request['creation'])}` : '';
+		const historicalMissingLine = Boolean(
+			request
+			&& text(order[SUPPLY_REQUEST_KEY_FIELD]) === currentRequestKey
+			&& observedDocumentIdentities.has(documentIdentity(requestRef))
+			&& isHistoricalAppCanceledPurchaseOrder(order, observedAt),
+		);
 		addLink(orderRef, requestRef, 'ordered_for_request', SUPPLY_REQUEST_FIELD, { order: order['name'], requestName, requestKey: order[SUPPLY_REQUEST_KEY_FIELD] });
 		rawLines(order).forEach((line, lineIndex) => {
 			const quantity = numberOrNull(line[SUPPLY_PURCHASE_REQUEST_QTY_FIELD]);
@@ -416,7 +432,7 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 				issues.push(issue('missing_order_allocation_quantity', identity, `${SUPPLY_PURCHASE_REQUEST_QTY_FIELD} must be positive`));
 				return;
 			}
-			const source = indexedLineRef(index, requestRef, text(line['item_code']), issues, identity);
+			const source = indexedLineRef(index, requestRef, text(line['item_code']), issues, identity, { historicalMissingLine });
 			if (!source) return;
 			allocations.push({ source, target: lineRef(orderRef, line, lineIndex), allocationType: 'ordered', quantity, evidenceKind: 'derived_match', evidenceSource: `${SUPPLY_PURCHASE_REQUEST_QTY_FIELD}+item_code`, observedAt, sourcePayload: line });
 		});

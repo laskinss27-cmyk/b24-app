@@ -106,6 +106,59 @@ test('historical canceled purchase order does not allocate against the reused re
 	assert.equal(plan.allocations.length, 0);
 });
 
+test('historical app-canceled draft purchase order keeps its request link without inventing a replaced line allocation', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts = [];
+	raw.stockEntries = [];
+	raw.transferItems = [];
+	raw.purchaseOrders[0] = {
+		...raw.purchaseOrders[0]!,
+		modified: '2026-08-02 11:00:00', docstatus: 0, status: 'Draft', b24_supply_stage: 'cancelled',
+		items: [{ name: 'POI-CANCELED', item_code: '999', qty: 1, b24_request_qty: 1 }],
+	};
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.ok(plan.links.some((item) => item.identity === 'erpnext:purchase_order:PO-1->erpnext:supply_request:MR-1:ordered_for_request'));
+	assert.ok(plan.issues.some((item) => item.severity === 'warning' && item.code === 'historical_source_line_unavailable' && item.identity === 'PO-1:1'));
+	assert.ok(!plan.issues.some((item) => item.code === 'missing_line_match' && item.identity === 'PO-1:1'));
+	assert.equal(plan.allocations.length, 0);
+});
+
+test('recent app-canceled draft purchase order with a missing request line stays a blocker', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts = [];
+	raw.stockEntries = [];
+	raw.transferItems = [];
+	raw.purchaseOrders[0] = {
+		...raw.purchaseOrders[0]!,
+		modified: observedAt, docstatus: 0, status: 'Draft', b24_supply_stage: 'cancelled',
+		items: [{ name: 'POI-RECENT', item_code: '999', qty: 1, b24_request_qty: 1 }],
+	};
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.severity === 'error' && item.code === 'missing_line_match' && item.identity === 'PO-1:1'));
+	assert.ok(!plan.issues.some((item) => item.code === 'historical_source_line_unavailable' && item.identity === 'PO-1:1'));
+});
+
+test('old ordered draft purchase order with a missing request line stays a blocker', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts = [];
+	raw.stockEntries = [];
+	raw.transferItems = [];
+	raw.purchaseOrders[0] = {
+		...raw.purchaseOrders[0]!,
+		modified: '2026-08-02 11:00:00', docstatus: 0, status: 'Draft', b24_supply_stage: 'ordered',
+		items: [{ name: 'POI-ORDERED', item_code: '999', qty: 1, b24_request_qty: 1 }],
+	};
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.severity === 'error' && item.code === 'missing_line_match' && item.identity === 'PO-1:1'));
+	assert.ok(!plan.issues.some((item) => item.code === 'historical_source_line_unavailable' && item.identity === 'PO-1:1'));
+});
+
 test('canceled stale revision with a current item overlap remains a blocker', () => {
 	const raw = rawSources();
 	raw.purchaseReceipts[0] = {
