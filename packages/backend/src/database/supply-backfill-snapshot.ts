@@ -23,6 +23,9 @@ import type {
 	SupplyMirrorSourceLink,
 } from './supply-backfill-types.js';
 
+const BITRIX_ENTITY_ITEM_ID = /^[1-9]\d*$/;
+const HISTORICAL_TOMBSTONE_GRACE_MS = 24 * 60 * 60 * 1_000;
+
 function text(value: unknown): string { return String(value ?? '').trim(); }
 function numberOrNull(value: unknown): number | null {
 	if (value === null || value === undefined || value === '') return null;
@@ -36,6 +39,21 @@ function dealId(value: unknown): number | null {
 function rawLines(value: Record<string, unknown>): Record<string, unknown>[] {
 	return Array.isArray(value['items']) ? value['items'] as Record<string, unknown>[] : [];
 }
+function erpTimestampMs(value: unknown): number | null {
+	const raw = text(value);
+	if (!raw) return null;
+	const withoutMicroseconds = raw.replace(/(\.\d{3})\d+/, '$1');
+	const isoLike = withoutMicroseconds.includes('T') ? withoutMicroseconds : withoutMicroseconds.replace(' ', 'T');
+	const withZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(isoLike) ? isoLike : `${isoLike}Z`;
+	const parsed = Date.parse(withZone);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+function isHistoricalTransferEvidence(entry: Record<string, unknown>, observedAt: string): boolean {
+	if (Number(entry['docstatus']) !== 1) return false;
+	const observedMs = Date.parse(observedAt);
+	const entryMs = erpTimestampMs(text(entry['modified']) || entry['creation']);
+	return Number.isFinite(observedMs) && entryMs !== null && observedMs - entryMs >= HISTORICAL_TOMBSTONE_GRACE_MS;
+}
 function docRef(documentType: MirrorDocumentRef['documentType'], externalId: unknown, externalSystem: MirrorDocumentRef['externalSystem'] = 'erpnext'): MirrorDocumentRef {
 	return { externalSystem, documentType, externalId: text(externalId) };
 }
@@ -45,6 +63,9 @@ function lineRef(document: MirrorDocumentRef, line: Record<string, unknown>, ind
 }
 function issue(code: string, identity: string, message: string): SupplyMirrorPlanIssue {
 	return { severity: 'error', code, identity, message };
+}
+function warning(code: string, identity: string, message: string): SupplyMirrorPlanIssue {
+	return { severity: 'warning', code, identity, message };
 }
 
 function erpDocument(
@@ -128,6 +149,27 @@ function transferRequestDocument(raw: Record<string, unknown>, request: StoredTr
 			targetWarehouse: request.toStore || null,
 			sourcePayload: line,
 		})),
+	};
+}
+
+function missingTransferDocument(transferId: string, references: Record<string, unknown>[], observedAt: string): SupplyMirrorSourceDocument {
+	return {
+		...docRef('transfer', transferId, 'bitrix'),
+		externalRevisionKey: null,
+		externalStatus: 'source_missing',
+		externalDocstatus: null,
+		sourceCreatedAt: null,
+		sourceModifiedAt: null,
+		observedAt,
+		sourcePayload: {
+			kind: 'missing_external_document',
+			externalSystem: 'bitrix',
+			entity: 'ctv_transfers',
+			externalId: transferId,
+			evidenceKind: 'erpnext_external_reference',
+			references,
+		},
+		lines: [],
 	};
 }
 
@@ -236,6 +278,41 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		transfers.set(parsed.id, parsed);
 		documents.push(transferDocument(item, parsed, observedAt));
 	}
+	const observedTransferIds = new Set(raw.transferItems
+		.map((item) => text(item['ID'] ?? item['id']))
+		.filter((id) => BITRIX_ENTITY_ITEM_ID.test(id)));
+	const missingTransferCandidates = new Map<string, Array<{ entry: Record<string, unknown>; reference: Record<string, unknown> }>>();
+	for (const entry of raw.stockEntries) {
+		const transferId = text(entry[TRANSFER_DOCUMENT_FIELD]);
+		if (!BITRIX_ENTITY_ITEM_ID.test(transferId) || observedTransferIds.has(transferId)) continue;
+		const candidates = missingTransferCandidates.get(transferId) ?? [];
+		candidates.push({
+			entry,
+			reference: {
+				documentType: 'stock_entry',
+				externalId: text(entry['name']),
+				referenceField: TRANSFER_DOCUMENT_FIELD,
+				phaseField: TRANSFER_PHASE_FIELD,
+				phase: text(entry[TRANSFER_PHASE_FIELD]),
+			},
+		});
+		missingTransferCandidates.set(transferId, candidates);
+	}
+	const historicalMissingTransferIds = new Set<string>();
+	const missingTransferReferences = new Map<string, Record<string, unknown>[]>();
+	for (const [transferId, candidates] of missingTransferCandidates) {
+		if (!candidates.every(({ entry }) => isHistoricalTransferEvidence(entry, observedAt))) {
+			issues.push(issue('unconfirmed_missing_transfer', transferId, 'missing transfer is not backed only by submitted ERP Stock Entries older than 24 hours'));
+			continue;
+		}
+		historicalMissingTransferIds.add(transferId);
+		missingTransferReferences.set(transferId, candidates.map(({ reference }) => reference));
+	}
+	for (const transferId of [...historicalMissingTransferIds].sort((left, right) => left.localeCompare(right, 'en'))) {
+		const references = (missingTransferReferences.get(transferId) ?? [])
+			.sort((left, right) => text(left['externalId']).localeCompare(text(right['externalId']), 'en'));
+		documents.push(missingTransferDocument(transferId, references, observedAt));
+	}
 
 	const links: SupplyMirrorSourceLink[] = [];
 	const allocations: SupplyMirrorSourceAllocation[] = [];
@@ -320,6 +397,16 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 			continue;
 		}
 		addLink(entryRef, transferRef, relation, `${TRANSFER_DOCUMENT_FIELD}+${TRANSFER_PHASE_FIELD}`, entry);
+		if (historicalMissingTransferIds.has(transferId)) {
+			rawLines(entry).forEach((_line, lineIndex) => {
+				issues.push(warning(
+					'historical_transfer_line_unavailable',
+					`${text(entry['name'])}:${lineIndex + 1}`,
+					`transfer ${transferId} is absent from the complete Bitrix snapshot; line allocation was not invented`,
+				));
+			});
+			continue;
+		}
 		rawLines(entry).forEach((line, lineIndex) => {
 			const source = indexedLineRef(index, transferRef, text(line['item_code']), issues, `${text(entry['name'])}:${lineIndex + 1}`);
 			const quantity = Number(line['qty']);

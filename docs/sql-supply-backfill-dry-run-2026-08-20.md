@@ -68,3 +68,11 @@ Image `b24-app:38ce403` развёрнут с сохранением `b24-backen
 - 4 stale request keys для пересозданного `MAT-MR-2026-00002`.
 
 `readyToApply=false`. Независимый post-check подтвердил `B24_APP_DB_MODE=readiness`, 4 migration rows и `0|0|0|0` во всех workflow tables. Для пяти исчезнувших исторических transfer ID tombstone пока не создаётся: нельзя выдумывать отсутствующий payload или строки. SQL writer не проектируется до нового dry-run с объяснённым паритетом.
+
+## Локальная tombstone-модель
+
+Следующий локальный change set создаёт evidence-only tombstone только если положительный числовой transfer ID отсутствует в полном текущем `ctv_transfers`, но явно записан в проведённых ERP `Stock Entry.b24_transfer_document`, причём все такие Stock Entry старше 24 часов. Свежая, непроведённая или без читаемого timestamp ссылка остаётся error, чтобы concurrent scan не создавал ложную историю. Документ получает identity `bitrix:transfer:<id>`, статус `source_missing`, ноль строк и детерминированный список ERP-свидетельств: Stock Entry, поле ссылки и phase. Исходный Bitrix payload, deal, timestamps, quantities и строки не восстанавливаются по догадке.
+
+Stock Entry получает проверяемую document link к tombstone. Line allocation не создаётся; для каждой строки возвращается `historical_transfer_line_unavailable` с severity `warning`. Существующая, но повреждённая запись `ctv_transfers` не превращается в tombstone: её source остаётся incomplete blocker. Отчёт теперь отдельно считает `errors` и `warnings`; только errors блокируют `readyToApply`.
+
+Baseline перед изменением: focused 12/12 и общий typecheck. После 24-hour race gate: focused 14/14, полный backend 200/200 и общий typecheck успешны. На неизменном snapshot ожидаемая дельта — пять tombstone documents и 12 восстановленных document links, а прежние 24 historical errors заменяются 12 явными warnings без придуманных allocations. Фактическая production-дельта должна быть подтверждена отдельным deploy/dry-run; локальный код ещё не развёрнут.

@@ -59,6 +59,7 @@ test('invalid Bitrix transfer JSON makes the mirror plan non-applicable', () => 
 	assert.equal(plan.sourceStatus.bitrixTransfers.complete, false);
 	assert.ok(plan.issues.some((item) => item.code === 'invalid_transfer_record'));
 	assert.ok(plan.issues.some((item) => item.code === 'incomplete_source'));
+	assert.ok(!plan.documents.some((item) => item.externalStatus === 'source_missing'));
 });
 
 test('stale request revision is reported instead of guessed', () => {
@@ -124,6 +125,50 @@ test('invalid Bitrix transfer request JSON makes its source incomplete', () => {
 	assert.equal(plan.sourceStatus.bitrixTransferRequests.complete, false);
 	assert.ok(plan.issues.some((item) => item.code === 'invalid_transfer_request_record'));
 	assert.ok(plan.issues.some((item) => item.code === 'incomplete_source' && item.identity === 'bitrixTransferRequests'));
+});
+
+test('missing historical transfer becomes an evidence-only tombstone without invented lines', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseOrders = [];
+	raw.purchaseReceipts = [];
+	raw.transferItems = [];
+	raw.transferRequestItems = [];
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	const report = summarizeSupplyMirrorPlan(plan);
+	assert.equal(plan.readyToApply, true);
+	assert.equal(plan.documents.length, 2);
+	assert.equal(plan.lines.length, 1);
+	assert.equal(plan.links.length, 1);
+	assert.equal(plan.allocations.length, 0);
+	assert.deepEqual(plan.issues, [{
+		severity: 'warning',
+		code: 'historical_transfer_line_unavailable',
+		identity: 'MAT-STE-1:1',
+		message: 'transfer 10 is absent from the complete Bitrix snapshot; line allocation was not invented',
+	}]);
+	const tombstone = plan.documents.find((item) => item.identity === 'bitrix:transfer:10');
+	assert.equal(tombstone?.externalStatus, 'source_missing');
+	assert.ok(!plan.lines.some((item) => item.documentIdentity === 'bitrix:transfer:10'));
+	assert.equal(report.counts.errors, 0);
+	assert.equal(report.counts.warnings, 1);
+});
+
+test('recent missing transfer stays an error instead of becoming a tombstone', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseOrders = [];
+	raw.purchaseReceipts = [];
+	raw.transferItems = [];
+	raw.transferRequestItems = [];
+	raw.stockEntries[0]!['creation'] = observedAt;
+	raw.stockEntries[0]!['modified'] = observedAt;
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.code === 'unconfirmed_missing_transfer' && item.identity === '10'));
+	assert.ok(!plan.documents.some((item) => item.externalStatus === 'source_missing'));
 });
 
 test('ERP source collector uses list and get only', async () => {

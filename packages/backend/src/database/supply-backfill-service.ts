@@ -21,6 +21,7 @@ export interface SupplyBackfillDryRunReport {
 		links: number;
 		allocations: number;
 		errors: number;
+		warnings: number;
 	};
 	documentsByType: Record<string, number>;
 	linksByType: Record<string, number>;
@@ -56,6 +57,7 @@ export function summarizeSupplyMirrorPlan(plan: SupplyMirrorPlan): SupplyBackfil
 			links: plan.links.length,
 			allocations: plan.allocations.length,
 			errors: plan.issues.filter((item) => item.severity === 'error').length,
+			warnings: plan.issues.filter((item) => item.severity === 'warning').length,
 		},
 		documentsByType: countBy(plan.documents.map((row) => row.documentType)),
 		linksByType: countBy(plan.links.map((row) => row.relationType)),

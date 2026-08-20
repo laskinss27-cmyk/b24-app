@@ -164,7 +164,7 @@ Production restore требует остановить записи прилож
 5. Post-DDL backup, external read-back и isolated restore gate пустой новой схемы выполнены; source/restore signatures и 0 domain rows совпали, временные объекты удалены guarded cleanup.
 6. Read-only route развёрнут, первый production dry-run выполнен и fail-closed остановлен на 64 коррелированных legacy issues; workflow остаётся на Bitrix/ERPNext, SQL domain tables пусты.
 7. Standalone roots и ручные transfer requests смоделированы и развёрнуты без SQL/runtime-записи; второй dry-run подтвердил устранение ожидаемых 29 ложных blockers без новых issue, SQL domain rows остались нулевыми.
-8. Отдельно выбрать проверяемую политику для пяти исторических transfer ID, затем разобрать семь line mismatches и четыре stale revision links. Не создавать tombstone payload/строки по догадке.
+8. Для пяти исторических transfer ID локально подготовлена evidence-only tombstone-модель: только ERP reference evidence, ноль выдуманных строк и warnings вместо неподтверждённых line allocations. После отдельного commit/deploy повторить dry-run; затем разобрать семь line mismatches и четыре stale revision links.
 9. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
 10. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 11. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
