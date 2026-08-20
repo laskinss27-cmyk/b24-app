@@ -145,6 +145,8 @@ sha256sum "$B24_APP_FINAL" > "${B24_APP_FINAL}.sha256"
 
 Перед первым доменным apply создан более свежий metadata-only safety dump `20260820_122411-b24_app-database.sql.gz`; gzip/checksum и внешний read-back прошли, Disk IDs `103574/103572`. Точные локальные migrations `0001`-`0004` успешно прошли server-level rehearsal в отдельной MariaDB 11.8: первый runner применил 4 файла, второй был идемпотентен, структура дала 5 tables / 54 columns / 5 FK / 20 CHECK / 21 indexes, а positive/negative constraint tests прошли. Rehearsal отдельно зафиксировала требование создавать database с явным `utf8mb4/utf8mb4_unicode_ci`: новый default MariaDB 11.8 — `utf8mb4_uca1400_ai_ci`. Рабочая `b24_app` уже имеет правильную явную collation и в rehearsal не использовалась.
 
+После production DDL полный job создал `20260820_131030-b24_app-database.sql.gz` размером 2511 bytes с 5 table definitions, 4 metadata rows и 0 domain rows. Checksum/gzip и внешний Bitrix Disk read-back прошли; upload IDs: dump `103618`, checksum `103616`. Dump восстановлен только во временную `b24_app_restore_20260820_131030`. Независимые SHA-256 signatures совпали для table settings, 54 columns, 21 indexes, 5 FK и 20 CHECK; migration filenames/checksums и `0|0|0|0` domain rows также совпали. После отдельного разрешения guarded cleanup удалил restore schema, exited runner и два root-only parity staging-файла. Финальный post-check подтвердил отсутствие временных целей и неизменную production schema 5/4/0.
+
 Restore drill выполняется не поверх production: административный оператор создаёт временную БД, импортирует выбранный dump, проверяет `b24_app_schema_migrations`, counts и выборочные link chains, после чего удаляет только явно названную временную БД.
 
 Production restore требует остановить записи приложения, сделать свежий safety dump и восстановить выбранную копию в новую БД. После проверки контейнер пересоздаётся с новым `B24_APP_DB_NAME`; старая БД и rollback-контейнер сохраняются до подтверждения. Для текущего этапа rollback проще: вернуть `B24_APP_DB_MODE=off` или прежний контейнер — действующие Bitrix/ERPNext пути не менялись.
@@ -155,7 +157,7 @@ Production restore требует остановить записи прилож
 2. `B24_APP_DB_MODE=readiness` включён с read-only runtime credential; internal/public `/ready` показывает `database: up`, workflow остаётся на Bitrix/ERPNext.
 3. Read-only кардинальности проверены; четыре локальных one-statement DDL migrations и их статические contract tests подготовлены без применения.
 4. Отсутствие target tables, свежий safety dump, isolated MariaDB rehearsal и production DDL apply закрыты. Независимая сверка подтвердила 5 tables / 4 migration rows / 54 columns / 5 FK / 20 CHECK / 21 indexes при 0 domain rows.
-5. Только после отдельного разрешения повторить backup/external read-back/isolated restore gate новой схемы до любого backfill.
+5. Post-DDL backup, external read-back и isolated restore gate пустой новой схемы выполнены; source/restore signatures и 0 domain rows совпали, временные объекты удалены guarded cleanup.
 6. Read-only backfill с checkpoint и отчётом, без переключения.
 7. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 8. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.

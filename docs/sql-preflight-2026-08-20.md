@@ -194,3 +194,15 @@ Commit `5b9a6d845900f284a2da23ffbfa17b0d9ce600cb` опубликован fast-fo
 После отдельного разрешения container `b24-app-migrate-5b9a6d8` стартовал в 12:57:52 UTC только с root-only `migrator.env`, применил ровно `0001`-`0004` и завершился в 12:57:53 UTC с exit code 0. Независимый MariaDB audit подтвердил 5 tables / 4 migration rows / 54 columns / 5 FK / 20 CHECK / 21 indexes, все 5 tables InnoDB `utf8mb4_unicode_ci`, точные filenames/checksums и `0|0|0|0` domain rows. Backend не перезапускался: `b24-app:596bddb`, `B24_APP_DB_MODE=readiness`, `restart_count=0`; internal/public health/readiness, ERPNext API read и `erpnext_frappe_network` успешны. Backfill, shadow reads/writes, workflow SQL DML, deploy и source switch не выполнялись. Exited runner container пока сохранён до отдельного cleanup; новый post-DDL backup/restore drill остаётся следующим отдельным gate.
 
 После DDL и документационных изменений повторён тот же локальный baseline: backend 186/186, frontend 117/117 и полный typecheck успешны. Существующее npm warning о single-hyphen `-ws` не исправлялось.
+
+## Follow-up: post-DDL backup и restore gate
+
+При production 5 tables / 4 migration rows / 0 domain rows и отсутствии backup-процессов полный job создал `20260820_131030-b24_app-database.sql.gz` размером 2511 bytes с пятью table definitions. Checksum/gzip и Bitrix Disk read-back прошли; upload IDs: dump `103618`, checksum `103616`. Независимая проверка dump подтвердила 5 `CREATE TABLE`, ровно один metadata `INSERT`, 4 migration rows source и 0 domain rows.
+
+Guarded restore script создал только `b24_app_restore_20260820_131030`, импортировал 5 таблиц и подтвердил неизменность source table count. Дополнительная независимая parity-сверка показала одинаковые `utf8mb4/utf8mb4_unicode_ci`, table signatures 5/5, column signatures 54/54, index signatures 21/21, FK signatures 5/5, CHECK signatures 20/20, все четыре filenames/checksums и `0|0|0|0` domain rows.
+
+Перед успешной parity-сверкой два диагностических запуска не изменили MariaDB: первый остановился на shell quoting backtick до SSH, второй был вручную прерван после 30 секунд без вывода из-за локального PowerShell interpolation; проверка processlist показала 0 активных запросов к source/restore. Для прозрачного успешного запуска использованы два root-only staging-файла без credentials.
+
+После отдельного разрешения в 13:16:11 UTC guarded cleanup удалил только temporary restore schema, exited `b24-app-migrate-5b9a6d8` и два проверенных staging-файла. Backup и image сохранены. Финальный post-check подтвердил отсутствие restore schema/runner/staging, валидный checksum backup, production 5 tables / 4 migration rows / 0 domain rows, backend `b24-app:596bddb` running с `restart_count=0`, internal/public health/readiness, ERPNext API read и `erpnext_frappe_network`. Workflow SQL reads/writes, backfill, deploy и source switch по-прежнему не выполнялись.
+
+После полного backup/restore/cleanup этапа повторён тот же локальный baseline: backend 186/186, frontend 117/117 и полный typecheck успешны. Существующее npm warning о single-hyphen `-ws` не исправлялось.
