@@ -237,20 +237,63 @@ function indexedLineRef(
 	};
 }
 
-function validateRequestKey(raw: Record<string, unknown>, requests: Map<string, Record<string, unknown>>, issues: SupplyMirrorPlanIssue[]): void {
+function hasNoItemOverlap(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+	const leftItems = new Set(rawLines(left).map((line) => text(line['item_code'])).filter(Boolean));
+	const rightItems = new Set(rawLines(right).map((line) => text(line['item_code'])).filter(Boolean));
+	return leftItems.size > 0 && rightItems.size > 0 && [...leftItems].every((itemCode) => !rightItems.has(itemCode));
+}
+
+function isHistoricalCanceledRequestRevision(
+	raw: Record<string, unknown>,
+	request: Record<string, unknown>,
+	requestName: string,
+	stored: string,
+	observedAt: string,
+): boolean {
+	if (!stored.startsWith(`${requestName}@`) || !isHistoricalErpEvidence(raw, observedAt, 2)) return false;
+	const storedCreationMs = erpTimestampMs(stored.slice(requestName.length + 1));
+	const documentCreationMs = erpTimestampMs(raw['creation']);
+	const currentCreationMs = erpTimestampMs(request['creation']);
+	return storedCreationMs !== null
+		&& documentCreationMs !== null
+		&& currentCreationMs !== null
+		&& storedCreationMs <= documentCreationMs
+		&& documentCreationMs < currentCreationMs
+		&& hasNoItemOverlap(raw, request);
+}
+
+function validateRequestKey(
+	raw: Record<string, unknown>,
+	requests: Map<string, Record<string, unknown>>,
+	issues: SupplyMirrorPlanIssue[],
+	observedAt: string,
+): boolean {
 	const requestName = text(raw[SUPPLY_REQUEST_FIELD]);
-	if (!requestName) return;
+	if (!requestName) return false;
 	const request = requests.get(requestName);
-	if (!request) return;
+	if (!request) return false;
 	const stored = text(raw[SUPPLY_REQUEST_KEY_FIELD]);
 	const current = `${requestName}@${text(request['creation'])}`;
-	if (stored && stored !== current) issues.push(issue('stale_request_key', text(raw['name']), `${stored} does not match ${current}`));
+	if (!stored || stored === current) return false;
+	if (isHistoricalCanceledRequestRevision(raw, request, requestName, stored, observedAt)) {
+		issues.push(warning(
+			'historical_request_revision_unavailable',
+			text(raw['name']),
+			`${stored} predates the current ${current}; links and allocations to the reused request identity were not invented`,
+		));
+		return true;
+	}
+	issues.push(issue('stale_request_key', text(raw['name']), `${stored} does not match ${current}`));
+	return false;
 }
 
 export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observedAt: string): SupplyMirrorSnapshot {
 	const issues: SupplyMirrorPlanIssue[] = [];
 	const requestsByName = new Map(raw.materialRequests.map((row) => [text(row['name']), row]));
-	for (const row of [...raw.purchaseOrders, ...raw.purchaseReceipts, ...raw.stockEntries]) validateRequestKey(row, requestsByName, issues);
+	const historicalCanceledRequestRevisions = new Set<Record<string, unknown>>();
+	for (const row of [...raw.purchaseOrders, ...raw.purchaseReceipts, ...raw.stockEntries]) {
+		if (validateRequestKey(row, requestsByName, issues, observedAt)) historicalCanceledRequestRevisions.add(row);
+	}
 
 	const documents: SupplyMirrorSourceDocument[] = [
 		...raw.materialRequests.map((row) => erpDocument(row, 'supply_request', observedAt, { request: 'qty' })),
@@ -363,7 +406,7 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		const requestName = text(order[SUPPLY_REQUEST_FIELD]);
 		// This sentinel is intentionally written for purchase orders created
 		// without an upstream manager request. It is not a missing document.
-		if (!requestName || requestName === '__standalone__') continue;
+		if (!requestName || requestName === '__standalone__' || historicalCanceledRequestRevisions.has(order)) continue;
 		const requestRef = docRef('supply_request', requestName);
 		addLink(orderRef, requestRef, 'ordered_for_request', SUPPLY_REQUEST_FIELD, { order: order['name'], requestName, requestKey: order[SUPPLY_REQUEST_KEY_FIELD] });
 		rawLines(order).forEach((line, lineIndex) => {
@@ -383,6 +426,7 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		const receiptRef = docRef('purchase_receipt', receipt['name']);
 		const orderName = text(receipt[SUPPLY_PURCHASE_ORDER_FIELD]);
 		const requestName = text(receipt[SUPPLY_REQUEST_FIELD]);
+		if (historicalCanceledRequestRevisions.has(receipt)) continue;
 		if (orderName) addLink(receiptRef, docRef('purchase_order', orderName), 'received_against_order', SUPPLY_PURCHASE_ORDER_FIELD, receipt);
 		if (requestName) addLink(receiptRef, docRef('supply_request', requestName), 'received_for_request', SUPPLY_REQUEST_FIELD, receipt);
 		if (!orderName) {

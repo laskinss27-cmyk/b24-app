@@ -70,6 +70,76 @@ test('stale request revision is reported instead of guessed', () => {
 	assert.ok(plan.issues.some((item) => item.code === 'stale_request_key' && item.identity === 'PO-1'));
 });
 
+test('historical canceled receipt from a reused request identity stays isolated evidence', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts[0] = {
+		...raw.purchaseReceipts[0]!,
+		creation: '2026-07-02 10:00:00', modified: '2026-07-02 11:00:00', docstatus: 2, status: 'Cancelled',
+		b24_supply_request_key: 'MR-1@2026-07-01 10:00:00',
+		items: [{ name: 'PRI-OLD', item_code: '999', qty: 1, warehouse: 'Incoming' }],
+	};
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.ok(plan.issues.some((item) => item.severity === 'warning' && item.code === 'historical_request_revision_unavailable' && item.identity === 'PR-1'));
+	assert.ok(!plan.issues.some((item) => item.code === 'stale_request_key' && item.identity === 'PR-1'));
+	assert.ok(!plan.links.some((item) => item.fromDocumentIdentity === 'erpnext:purchase_receipt:PR-1'));
+	assert.ok(!plan.allocations.some((item) => item.targetLineIdentity.startsWith('erpnext:purchase_receipt:PR-1:')));
+});
+
+test('historical canceled purchase order does not allocate against the reused request', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts = [];
+	raw.stockEntries = [];
+	raw.transferItems = [];
+	raw.purchaseOrders[0] = {
+		...raw.purchaseOrders[0]!,
+		creation: '2026-07-02 10:00:00', modified: '2026-07-02 11:00:00', docstatus: 2, status: 'Cancelled',
+		b24_supply_request_key: 'MR-1@2026-07-01 10:00:00',
+		items: [{ name: 'POI-OLD', item_code: '999', qty: 1, b24_request_qty: 1 }],
+	};
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.ok(plan.issues.some((item) => item.severity === 'warning' && item.code === 'historical_request_revision_unavailable' && item.identity === 'PO-1'));
+	assert.equal(plan.links.length, 0);
+	assert.equal(plan.allocations.length, 0);
+});
+
+test('canceled stale revision with a current item overlap remains a blocker', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts[0] = {
+		...raw.purchaseReceipts[0]!,
+		creation: '2026-07-02 10:00:00', modified: '2026-07-02 11:00:00', docstatus: 2, status: 'Cancelled',
+		b24_supply_request_key: 'MR-1@2026-07-01 10:00:00',
+	};
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.severity === 'error' && item.code === 'stale_request_key' && item.identity === 'PR-1'));
+	assert.ok(!plan.issues.some((item) => item.code === 'historical_request_revision_unavailable' && item.identity === 'PR-1'));
+});
+
+test('historical canceled stock entries keep only their missing-transfer evidence links', () => {
+	const raw = rawSources();
+	raw.transferItems = [];
+	raw.stockEntries = ['ship', 'receive', 'correction_extra'].map((phase, index) => ({
+		...raw.stockEntries[0]!,
+		name: `MAT-STE-OLD-${index + 1}`,
+		creation: '2026-07-02 10:00:00', modified: '2026-07-02 11:00:00', docstatus: 2, status: 'Cancelled',
+		b24_supply_request_key: 'MR-1@2026-07-01 10:00:00', b24_transfer_phase: phase,
+		items: [{ name: `SEI-OLD-${index + 1}`, item_code: '999', qty: 1, s_warehouse: 'Transit', t_warehouse: 'Target' }],
+	}));
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.equal(plan.issues.filter((item) => item.code === 'historical_request_revision_unavailable').length, 3);
+	assert.equal(plan.issues.filter((item) => item.code === 'historical_transfer_line_unavailable').length, 3);
+	assert.ok(plan.documents.some((item) => item.identity === 'bitrix:transfer:10' && item.externalStatus === 'source_missing_canceled'));
+	assert.equal(plan.links.filter((item) => item.toDocumentIdentity === 'bitrix:transfer:10').length, 3);
+	assert.ok(!plan.links.some((item) => item.toDocumentIdentity === 'erpnext:supply_request:MR-1' && item.fromDocumentIdentity.startsWith('erpnext:stock_entry:')));
+});
+
 test('historical submitted receipt preserves its order link without inventing a missing line allocation', () => {
 	const raw = rawSources();
 	raw.purchaseReceipts[0]!['items'] = [{ name: 'PRI-OLD', item_code: '999', qty: 1, warehouse: 'Incoming' }];

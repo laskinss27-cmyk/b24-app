@@ -14,7 +14,7 @@
 | --- | --- | --- | --- | --- |
 | live draft | `PUR-ORD-2026-00032` | item `11280`, qty `4`, request qty `4` | draft `MAT-MR-2026-00009` содержит только `16836` qty `1` и `18510` qty `4` | исходная строка отсутствует; безопасного соответствия нет |
 | live draft | `PUR-ORD-2026-00038` | item `16784`, qty `35`, request qty `35` | draft `MAT-MR-2026-00014` содержит `18010`, `18008`, `17938`, `12252`, `18462`; отдельный `PUR-ORD-2026-00040` уже использует `18462` qty `35` | замена или дубликат не доказаны; автоматически выбирать `18462` нельзя |
-| historical canceled | `MAT-PRE-2026-00014` | item `18096`, qty `1` | явная ссылка на `PUR-ORD-2026-00012`; текущий draft заказа содержит только `16656` qty `1` | document link доказан, исходная строка больше недоступна |
+| historical canceled | `MAT-PRE-2026-00014` | item `18096`, qty `1` | поле содержит `PUR-ORD-2026-00012`; текущий draft заказа содержит только `16656` qty `1` | уточнено последующим revision-аудитом: текущее имя PO переиспользовано, link не доказан |
 | historical submitted | `MAT-PRE-2026-00088` | item `20328`, qty `1` | явная ссылка на `PUR-ORD-2026-00017`; текущий draft заказа содержит только `20332` и `19964` | document link доказан, исходная строка больше недоступна |
 | historical submitted | `MAT-PRE-2026-00088` | item `13590`, qty `1` | та же явная ссылка на `PUR-ORD-2026-00017` | document link доказан, исходная строка больше недоступна |
 | historical submitted | transfer `20724` / `MAT-STE-2026-00198` | item `20328`, qty `1` | submitted Stock Entry явно ссылается на `MAT-MR-2026-00002` и `PUR-ORD-2026-00017`; строки заказа нет | связь документов доказана, line allocation не доказан |
@@ -22,9 +22,9 @@
 
 `MAT-STE-2026-00198` и `MAT-STE-2026-00199` вместе содержат `20328`, `20332`, `13590`, `19964` qty `1`; это объясняет две transfer-to-order ошибки для строк, исчезнувших из текущего `PUR-ORD-2026-00017`. Это не восстанавливает прежние child-row keys и не даёт права создавать предполагаемые allocations.
 
-## Реализованная локальная модель
+## Реализованная модель
 
-Локальный planner change переводит `missing_line_match` в warning `historical_source_line_unavailable` только при одновременном выполнении всех условий:
+Planner переводит `missing_line_match` в warning `historical_source_line_unavailable` только при одновременном выполнении всех условий:
 
 1. между source и downstream есть явная устойчивая document link;
 2. downstream ERP-документ проведён или отменён (`docstatus=1/2`), либо transfer имеет подтверждённые проведённые ERP ship/receive references;
@@ -36,7 +36,7 @@
 
 Draft/current, свежие, смешанные, неоднозначные и неразбираемые случаи остаются errors. В частности, `PUR-ORD-2026-00032` и `PUR-ORD-2026-00038` продолжат блокировать apply. `ambiguous_line_match` никогда не понижается до warning.
 
-На неизменном снимке ожидаемая дельта локального change set: 510 documents / 991 lines / 520 links / 705 allocations остаются без изменений; errors уменьшаются с 11 до 6 (2 live line mismatch + 4 stale request key), warnings увеличиваются с 12 до 17. Это только проверяемое ожидание, не разрешение на writer, backfill, deploy или source switch.
+Предсказанная дельта подтверждена production dry-run: 510 documents / 991 lines / 520 links / 705 allocations остались без изменений; errors уменьшились с 11 до 6 (2 live line mismatch + 4 stale request key), warnings увеличились с 12 до 17.
 
 Baseline до кода: focused planner/snapshot `17/17`, backend typecheck успешен. После изменения focused suite `22/22`, полный backend `208/208`, backend typecheck и `git diff --check` успешны. Посторонних ошибок не обнаружено.
 
@@ -44,4 +44,6 @@ Baseline до кода: focused planner/snapshot `17/17`, backend typecheck ус
 
 Текущие draft-источники изменились относительно исторических downstream-документов. Аудит не определяет, было ли это ручной заменой SKU, пересозданием строки или legacy-поведением ERP/интеграции. Исправлять сами ERP-документы в рамках SQL-миграции нельзя.
 
-Локальный planner change готов, но не развёрнут. Следующий gate — отдельные commit/push/deploy и один owner-only production dry-run только после явного разрешения. До этого production продолжает возвращать прежние 11 errors / 12 warnings, SQL domain tables остаются пустыми.
+Planner change развёрнут в `b24-app:b799329`. Owner-only production dry-run `2026-08-20T17:01:10.827Z` подтвердил 2 оставшихся live blockers и 5 historical warnings без allocations; SQL domain tables остались пустыми. Следующий отдельный change set — read-only аудит четырёх `stale_request_key`; writer, backfill apply и source switch этим результатом не разрешены.
+
+Последующий [аудит stale revision](sql-supply-stale-request-audit-2026-08-20.md) установил, что `MAT-PRE-2026-00014` создан раньше текущего `PUR-ORD-2026-00012`, а их SKU различаются. Поэтому deployed read-only planner пока сохраняет две ложные links этой canceled receipt; SQL пуст, и ошибка не записана. Исправление ограничено следующим отдельным planner change.

@@ -30,7 +30,7 @@
 
 ## Следующий gate
 
-Пять исчезнувших исторических transfer ID уже получили проверяемую canceled/submitted tombstone-модель без выдуманного payload и строк. Семь оставшихся SKU mismatch разобраны отдельным [read-only аудитом](sql-supply-line-mismatch-audit-2026-08-20.md): две live draft-связки остаются blockers, пять historical downstream-связок допускают только warning без line allocation. Узкая модель реализована и протестирована локально, но ещё не развёрнута; четыре stale revision links остаются отдельной задачей. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после нового dry-run с объяснённым паритетом; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
+Пять исчезнувших исторических transfer ID уже получили проверяемую canceled/submitted tombstone-модель без выдуманного payload и строк. Семь оставшихся SKU mismatch разобраны отдельным [read-only аудитом](sql-supply-line-mismatch-audit-2026-08-20.md): две live draft-связки остаются blockers, пять historical downstream-связок допускают только warning без line allocation. Узкая модель развёрнута и подтверждена пятым production dry-run; четыре stale revision links остаются отдельной задачей. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после плана с объяснённым паритетом; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
 
 ## Production deploy и первый dry-run
 
@@ -92,3 +92,20 @@ Commit `c9a3c0b` развёрнут как `b24-app:c9a3c0b`; предыдущи
 Фактический план `6e5072a3c5b702cc6e80a84560ba140cb2e91660c22f3429b97909f6d716ba8b` полностью совпал с предсказанной дельтой: источники ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5`; 510 documents / 991 lines / 520 links / 705 allocations, 11 errors и 12 warnings. Пять canceled evidence tombstone добавили пять transfer documents и 12 typed links. Прежние 12 missing links, 12 historical line errors и 5 unconfirmed-transfer errors исчезли; вместо недоступных исходных строк остались 12 явных `historical_transfer_line_unavailable` warnings без line allocations.
 
 `readyToApply=false` сохраняется только из-за семи `missing_line_match` в существующих связанных документах и четырёх `stale_request_key`. Независимый post-check ограниченным runtime credential подтвердил `B24_APP_DB_MODE=readiness`, 4 migration rows и `0|0|0|0` domain rows. SSH tunnel закрыт, browser runtime с краткоживущим OAuth token сброшен, временные diagnostic/deploy файлы удалены. Следующий change set должен разбирать только одну из двух оставшихся групп; SQL writer и source switch по-прежнему запрещены.
+
+## Пятый production dry-run
+
+Commits `28232e1` и `b799329` fast-forward опубликованы в `origin/main`. Image `b24-app:b799329` собран из чистого `origin/main` archive, поэтому существующие production untracked `scripts/day-x-cleanup.mjs/.ts` не попали в build context и остались без изменений. Предыдущий `b24-app:c9a3c0b` сохранён как `b24-backend-prev-before-b799329`. Internal/public health, readiness, официальный ERP read, `/srv/b24-state:/app/state`, `127.0.0.1:3000`, `unless-stopped` и `erpnext_frappe_network` подтверждены; restart count после deploy и dry-run равен 0.
+
+После отдельного action-time подтверждения один owner OAuth dry-run выполнен в `2026-08-20T17:01:10.827Z`. Production log содержит ровно один `POST /api/admin/sql-migration/supply/dry-run`, один `complete` и HTTP 200 за 4.35 s. План `e71076bbdfef8e9b9b07258755ad72ce4970e98e1261a59cca2acc33f35df4f2` полностью совпал с ожидаемой дельтой:
+
+- полные источники: ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5`;
+- 510 documents / 991 lines / 520 links / 705 allocations;
+- 6 errors: 2 `missing_line_match` в live draft-связках и 4 `stale_request_key`;
+- 17 warnings: 5 `historical_source_line_unavailable` и прежние 12 `historical_transfer_line_unavailable`.
+
+Пять historical line errors стали warnings без изменения кардинальностей и без придуманных allocations. `readyToApply=false` сохраняется. Независимый runtime SELECT подтвердил `B24_APP_DB_MODE=readiness`, 4 migration rows и 0 строк в `workflow_documents`, `workflow_document_lines`, `workflow_document_links`, `workflow_line_allocations`. OAuth token затёрт, временная Chrome-вкладка закрыта, browser runtime сброшен, SSH tunnel и все временные deploy/post-check файлы удалены. SQL writer, backfill apply и source switch не выполнялись.
+
+Последующий официальный ERP read разобрал все четыре `stale_request_key`: это одна удалённая версия `MAT-MR-2026-00002` от 17 июля, четыре canceled downstream-документа и новая draft-заявка с тем же именем от 21 июля без пересечения SKU. Отдельно обнаружено, что текущий `PUR-ORD-2026-00012` создан позже canceled `MAT-PRE-2026-00014` и содержит другой SKU, поэтому две document links приёмки в текущем dry-run ложные. Локальный historical revision change исключает их и ожидаемо меняет plan на 518 links / 2 errors / 20 warnings; focused `26/26`, полный backend `212/212` и typecheck успешны. Подробности: [аудит stale revision](sql-supply-stale-request-audit-2026-08-20.md). SQL остался пустым; commit и production deploy не выполнялись.
+
+Посторонние наблюдения, не исправленные этим этапом: Docker build повторил существующие предупреждения Node 20 / `undici` engine, четыре npm audit findings и frontend chunk size; первоначальные независимые public/ERP команды не выполнились из-за локального PowerShell escaping и были безопасно повторены отдельным read-only скриптом; встроенный браузер блокировал адрес до загрузки, а новый Chrome placement не инициализировал BX24 SDK, поэтому OAuth был считан только из уже разрешённого placement POST через временное CDP-наблюдение. Ни одно из этих наблюдений не вызвало повторный dry-run и не менялось в коде.
