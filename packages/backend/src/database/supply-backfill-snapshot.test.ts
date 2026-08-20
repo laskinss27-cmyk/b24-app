@@ -70,6 +70,67 @@ test('stale request revision is reported instead of guessed', () => {
 	assert.ok(plan.issues.some((item) => item.code === 'stale_request_key' && item.identity === 'PO-1'));
 });
 
+test('historical submitted receipt preserves its order link without inventing a missing line allocation', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts[0]!['items'] = [{ name: 'PRI-OLD', item_code: '999', qty: 1, warehouse: 'Incoming' }];
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.ok(plan.links.some((item) => item.identity === 'erpnext:purchase_receipt:PR-1->erpnext:purchase_order:PO-1:received_against_order'));
+	assert.ok(plan.issues.some((item) => item.severity === 'warning' && item.code === 'historical_source_line_unavailable' && item.identity === 'PR-1:1'));
+	assert.ok(!plan.allocations.some((item) => item.targetLineIdentity.startsWith('erpnext:purchase_receipt:PR-1:')));
+});
+
+test('historical canceled receipt uses the same evidence-only missing-line policy', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts[0]!['docstatus'] = 2;
+	raw.purchaseReceipts[0]!['status'] = 'Cancelled';
+	raw.purchaseReceipts[0]!['items'] = [{ name: 'PRI-CANCELED', item_code: '999', qty: 1, warehouse: 'Incoming' }];
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.ok(plan.issues.some((item) => item.severity === 'warning' && item.code === 'historical_source_line_unavailable' && item.identity === 'PR-1:1'));
+	assert.ok(!plan.allocations.some((item) => item.targetLineIdentity.startsWith('erpnext:purchase_receipt:PR-1:')));
+});
+
+test('draft receipt with a missing current order line stays a blocker', () => {
+	const raw = rawSources();
+	raw.purchaseReceipts[0]!['docstatus'] = 0;
+	raw.purchaseReceipts[0]!['items'] = [{ name: 'PRI-CURRENT', item_code: '999', qty: 1, warehouse: 'Incoming' }];
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.severity === 'error' && item.code === 'missing_line_match' && item.identity === 'PR-1:1'));
+	assert.ok(!plan.issues.some((item) => item.code === 'historical_source_line_unavailable' && item.identity === 'PR-1:1'));
+});
+
+test('historical received transfer with submitted ship and receive evidence does not invent a missing purchase line allocation', () => {
+	const raw = rawSources();
+	const transfer = JSON.parse(String(raw.transferItems[0]!['DETAIL_TEXT'])) as Record<string, unknown>;
+	transfer['status'] = 'received';
+	transfer['lines'] = [...transfer['lines'] as unknown[], { productId: 999, name: 'Historical item', qty: 1 }];
+	raw.transferItems[0]!['DETAIL_TEXT'] = JSON.stringify(transfer);
+	raw.stockEntries.push({ ...raw.stockEntries[0]!, name: 'MAT-STE-SHIP', b24_transfer_phase: 'ship' });
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.ok(plan.issues.some((item) => item.severity === 'warning' && item.code === 'historical_source_line_unavailable' && item.identity === '10:2'));
+	assert.ok(!plan.allocations.some((item) => item.targetLineIdentity === 'bitrix:transfer:10:ordinal:2'));
+});
+
+test('terminal transfer without a complete submitted ship and receive lifecycle stays a blocker', () => {
+	const raw = rawSources();
+	const transfer = JSON.parse(String(raw.transferItems[0]!['DETAIL_TEXT'])) as Record<string, unknown>;
+	transfer['status'] = 'received';
+	transfer['lines'] = [...transfer['lines'] as unknown[], { productId: 999, name: 'Current item', qty: 1 }];
+	raw.transferItems[0]!['DETAIL_TEXT'] = JSON.stringify(transfer);
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.severity === 'error' && item.code === 'missing_line_match' && item.identity === '10:2'));
+	assert.ok(!plan.issues.some((item) => item.code === 'historical_source_line_unavailable' && item.identity === '10:2'));
+});
+
 test('standalone purchase orders and transfers are valid graph roots', () => {
 	const raw = rawSources();
 	raw.materialRequests = [];

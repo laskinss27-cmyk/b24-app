@@ -55,6 +55,8 @@ Bitrix deal
 
 Production baseline подтвердил граф: 54 заявки связаны с 89 перемещениями, 78 заказами поставщикам и 54 приёмками; на одну заявку приходится до 7 перемещений, 9 закупок и 13 transfer/purchase документов суммарно. Одна заявка и одна закупка могут иметь несколько строк и downstream-документов. Поэтому будущая связь не должна кодироваться одним nullable foreign key в `documents`: нужны отдельные `document_links`, `document_lines` и количественные line allocations с внешней системой, внешним ID и стабильным ключом строки.
 
+Семь оставшихся `missing_line_match` проверены отдельным [read-only аудитом](sql-supply-line-mismatch-audit-2026-08-20.md). Две ошибки находятся в живых draft order/request связках и остаются fail-closed blockers. Пять относятся к проведённым/отменённым downstream-документам: явная document link доказана, но соответствующая строка исчезла из текущего source. Узкий локальный change set сохраняет такие links и возвращает warning без line allocation только по документированным terminal/age/evidence условиям; он протестирован, но ещё не развёрнут и production-поведение не меняет.
+
 ## Минимальная будущая схема домена
 
 Read-only аудит снаба сузил и локально зафиксировал первый DDL change set из четырёх one-statement migrations:
@@ -166,9 +168,10 @@ Production restore требует остановить записи прилож
 5. Post-DDL backup, external read-back и isolated restore gate пустой новой схемы выполнены; source/restore signatures и 0 domain rows совпали, временные объекты удалены guarded cleanup.
 6. Read-only route развёрнут, первый production dry-run выполнен и fail-closed остановлен на 64 коррелированных legacy issues; workflow остаётся на Bitrix/ERPNext, SQL domain tables пусты.
 7. Standalone roots и ручные transfer requests смоделированы и развёрнуты без SQL/runtime-записи; второй dry-run подтвердил устранение ожидаемых 29 ложных blockers без новых issue, SQL domain rows остались нулевыми.
-8. Submitted-only gate доказал, что реальные 12 ERP references отменены; отдельная canceled-evidence ветка развёрнута. Четвёртый dry-run подтвердил пять tombstone, 12 восстановленных links, 12 warnings и отсутствие придуманных line allocations. Далее отдельными change sets разобрать семь line mismatches и четыре stale revision links.
-9. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
-10. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
-11. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
+8. Submitted-only gate доказал, что реальные 12 ERP references отменены; отдельная canceled-evidence ветка развёрнута. Четвёртый dry-run подтвердил пять tombstone, 12 восстановленных links, 12 warnings и отсутствие придуманных line allocations.
+9. Read-only аудит семи line mismatch завершён: две live draft-связки не имеют доказанного соответствия, пять historical downstream-связок имеют явные document links, но не доказанные line allocations. Узкая warning-модель реализована локально и прошла focused `22/22`, полный backend `208/208` и typecheck; deploy и production dry-run не выполнялись. Четыре stale revision links остаются отдельным change set.
+10. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
+11. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
+12. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 
 Каждый пункт имеет собственные тесты «до/после», сравнение результатов и отдельный список посторонних ошибок. Коммит, push и deploy требуют явной команды.

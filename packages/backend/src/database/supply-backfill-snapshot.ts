@@ -49,14 +49,27 @@ function erpTimestampMs(value: unknown): number | null {
 	const parsed = Date.parse(withZone);
 	return Number.isFinite(parsed) ? parsed : null;
 }
-function isHistoricalTransferEvidence(entry: Record<string, unknown>, observedAt: string, expectedDocstatus: 1 | 2): boolean {
+function isHistoricalErpEvidence(entry: Record<string, unknown>, observedAt: string, expectedDocstatus: 1 | 2): boolean {
 	if (Number(entry['docstatus']) !== expectedDocstatus) return false;
 	const observedMs = Date.parse(observedAt);
 	const entryMs = erpTimestampMs(text(entry['modified']) || entry['creation']);
 	return Number.isFinite(observedMs) && entryMs !== null && observedMs - entryMs >= HISTORICAL_TOMBSTONE_GRACE_MS;
 }
+function isHistoricalTerminalErpDocument(document: Record<string, unknown>, observedAt: string): boolean {
+	const docstatus = Number(document['docstatus']);
+	return (docstatus === 1 || docstatus === 2) && isHistoricalErpEvidence(document, observedAt, docstatus);
+}
+function hasHistoricalSubmittedTransferLifecycle(entries: Record<string, unknown>[], transferId: string, observedAt: string): boolean {
+	const references = entries.filter((entry) => text(entry[TRANSFER_DOCUMENT_FIELD]) === transferId);
+	if (!references.length || !references.every((entry) => isHistoricalErpEvidence(entry, observedAt, 1))) return false;
+	const phases = new Set(references.map((entry) => text(entry[TRANSFER_PHASE_FIELD])));
+	return phases.has('ship') && (phases.has('receive') || phases.has('legacy_receive'));
+}
 function docRef(documentType: MirrorDocumentRef['documentType'], externalId: unknown, externalSystem: MirrorDocumentRef['externalSystem'] = 'erpnext'): MirrorDocumentRef {
 	return { externalSystem, documentType, externalId: text(externalId) };
+}
+function documentIdentity(document: MirrorDocumentRef): string {
+	return `${document.externalSystem}:${document.documentType}:${document.externalId}`;
 }
 function lineRef(document: MirrorDocumentRef, line: Record<string, unknown>, index: number): MirrorLineRef {
 	const key = text(line['name']);
@@ -201,9 +214,18 @@ function indexedLineRef(
 	itemCode: string,
 	issues: SupplyMirrorPlanIssue[],
 	evidenceIdentity: string,
+	options: { historicalMissingLine?: boolean } = {},
 ): MirrorLineRef | null {
 	const matches = index.get(`${document.externalSystem}:${document.documentType}:${document.externalId}:${itemCode}`) ?? [];
 	if (matches.length !== 1) {
+		if (!matches.length && options.historicalMissingLine) {
+			issues.push(warning(
+				'historical_source_line_unavailable',
+				evidenceIdentity,
+				`${document.documentType} ${document.externalId}: item ${itemCode} is absent from the current source; line allocation was not invented`,
+			));
+			return null;
+		}
 		issues.push(issue(matches.length ? 'ambiguous_line_match' : 'missing_line_match', evidenceIdentity, `${document.documentType} ${document.externalId}: item ${itemCode} matched ${matches.length} lines`));
 		return null;
 	}
@@ -309,9 +331,9 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 	const missingTransferReferences = new Map<string, Record<string, unknown>[]>();
 	const missingTransferEvidenceStates = new Map<string, MissingTransferEvidenceState>();
 	for (const [transferId, candidates] of missingTransferCandidates) {
-		const evidenceState = candidates.every(({ entry }) => isHistoricalTransferEvidence(entry, observedAt, 1))
+		const evidenceState = candidates.every(({ entry }) => isHistoricalErpEvidence(entry, observedAt, 1))
 			? 'submitted'
-			: candidates.every(({ entry }) => isHistoricalTransferEvidence(entry, observedAt, 2))
+			: candidates.every(({ entry }) => isHistoricalErpEvidence(entry, observedAt, 2))
 				? 'canceled'
 				: null;
 		if (!evidenceState) {
@@ -330,6 +352,7 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 
 	const links: SupplyMirrorSourceLink[] = [];
 	const allocations: SupplyMirrorSourceAllocation[] = [];
+	const observedDocumentIdentities = new Set(documents.map((document) => documentIdentity(document)));
 	const addLink = (from: MirrorDocumentRef, to: MirrorDocumentRef, relationType: SupplyMirrorSourceLink['relationType'], evidenceSource: string, payload: unknown): void => {
 		links.push({ from, to, relationType, evidenceKind: 'explicit_external_field', evidenceSource, observedAt, sourcePayload: payload });
 	};
@@ -367,8 +390,10 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 			continue;
 		}
 		const orderRef = docRef('purchase_order', orderName);
+		const historicalMissingLine = observedDocumentIdentities.has(documentIdentity(orderRef))
+			&& isHistoricalTerminalErpDocument(receipt, observedAt);
 		rawLines(receipt).forEach((line, lineIndex) => {
-			const source = indexedLineRef(index, orderRef, text(line['item_code']), issues, `${text(receipt['name'])}:${lineIndex + 1}`);
+			const source = indexedLineRef(index, orderRef, text(line['item_code']), issues, `${text(receipt['name'])}:${lineIndex + 1}`, { historicalMissingLine });
 			const quantity = Number(line['qty']);
 			if (source && Number.isFinite(quantity) && quantity > 0) allocations.push({ source, target: lineRef(receiptRef, line, lineIndex), allocationType: 'received', quantity, evidenceKind: 'explicit_external_field', evidenceSource: `${SUPPLY_PURCHASE_ORDER_FIELD}+item_code`, observedAt, sourcePayload: line });
 		});
@@ -390,8 +415,15 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		if (requestRef) addLink(transferRef, requestRef, 'transfers_for_request', manualRequestId ? 'DETAIL_TEXT.supplyRequestKey' : 'DETAIL_TEXT.supplyRequest', transfer);
 		if (transfer.purchaseOrder) addLink(transferRef, docRef('purchase_order', transfer.purchaseOrder), 'transfers_for_purchase', 'DETAIL_TEXT.purchaseOrder', transfer);
 		if (transfer.correctionOf) addLink(transferRef, docRef('transfer', transfer.correctionOf, 'bitrix'), 'corrects_transfer', 'DETAIL_TEXT.correctionOf', transfer);
+		const historicalMissingLine = Boolean(
+			transfer.purchaseOrder
+			&& basis?.documentType === 'purchase_order'
+			&& observedDocumentIdentities.has(documentIdentity(basis))
+			&& (transfer.status === 'posted' || transfer.status === 'received')
+			&& hasHistoricalSubmittedTransferLifecycle(raw.stockEntries, String(transfer.id), observedAt),
+		);
 		if (basis) transfer.lines.forEach((line, lineIndex) => {
-			const source = indexedLineRef(index, basis, String(line.productId), issues, `${transfer.id}:${lineIndex + 1}`);
+			const source = indexedLineRef(index, basis, String(line.productId), issues, `${transfer.id}:${lineIndex + 1}`, { historicalMissingLine });
 			if (source && line.qty > 0) allocations.push({ source, target: { document: transferRef, lineOrdinal: lineIndex + 1 }, allocationType: 'transferred', quantity: line.qty, evidenceKind: 'derived_match', evidenceSource: 'explicit_document_ref+productId', observedAt, sourcePayload: line });
 		});
 	}

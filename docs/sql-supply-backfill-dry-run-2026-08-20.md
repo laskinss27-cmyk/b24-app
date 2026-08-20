@@ -30,7 +30,7 @@
 
 ## Следующий gate
 
-Отдельно выбрать проверяемую модель для пяти исчезнувших исторических transfer ID, не выдумывая их исходный payload и строки. Затем отдельными change sets разобрать семь SKU mismatch и четыре stale revision links. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после нового dry-run с объяснённым паритетом; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
+Пять исчезнувших исторических transfer ID уже получили проверяемую canceled/submitted tombstone-модель без выдуманного payload и строк. Семь оставшихся SKU mismatch разобраны отдельным [read-only аудитом](sql-supply-line-mismatch-audit-2026-08-20.md): две live draft-связки остаются blockers, пять historical downstream-связок допускают только warning без line allocation. Узкая модель реализована и протестирована локально, но ещё не развёрнута; четыре stale revision links остаются отдельной задачей. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после нового dry-run с объяснённым паритетом; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
 
 ## Production deploy и первый dry-run
 
