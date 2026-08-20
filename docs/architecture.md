@@ -117,7 +117,7 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 
 Первым проверен домен снаба: production-кардинальности требуют нормализованных документов, строк, типизированных document links и количественных line allocations. Точные наблюдения и граница change set приведены в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md). Четыре one-statement DDL migrations применены отдельным ручным runner и независимо сверены при 0 domain rows; текущий workflow не изменён.
 
-Следующий локальный change set — read-only dry-run снаба. Он собирает полный snapshot через официальные API, строго проверяет внешние ссылки и выдаёт только агрегированный отчёт/hash; SQL-подключение и запись отсутствуют. Даже после его deployment пользовательские экраны продолжают читать Bitrix/ERPNext. Mirror apply, shadow comparison и source switch остаются тремя отдельными этапами.
+Read-only dry-run снаба развёрнут отдельно от workflow runtime. Он собирает полный snapshot через официальные API, строго проверяет внешние ссылки и выдаёт только агрегированный отчёт/hash; SQL-подключение и запись отсутствуют. Первый production run fail-closed остановился на legacy standalone/manual/historical links и line mismatches. Пользовательские экраны продолжают читать Bitrix/ERPNext; mirror apply, shadow comparison и source switch остаются отдельными этапами.
 
 ## Будущая проекция остатков в Tilda
 

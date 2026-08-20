@@ -4,7 +4,7 @@
 
 Подготовлен только owner-only диагностический путь `POST /api/admin/sql-migration/supply/dry-run`. Он читает ERPNext официальным REST API и `ctv_transfers` OAuth-контекстом владельца, строит нормализованный граф и возвращает агрегированный отчёт с blockers и стабильным hash исходного плана.
 
-В change set отсутствуют SQL writer, checkpoint, вызов migrations, runtime-чтение workflow tables, frontend-кнопка и source switch. Production не менялся: backend остаётся на прежнем image, `B24_APP_DB_MODE=readiness`, четыре domain tables пусты, Bitrix/ERPNext остаются источниками текущего поведения.
+В change set отсутствуют SQL writer, checkpoint, вызов migrations, runtime-чтение workflow tables, frontend-кнопка и source switch. Bitrix/ERPNext остаются источниками текущего поведения.
 
 ## Fail-closed проверки
 
@@ -30,3 +30,24 @@
 ## Следующий gate
 
 Сначала отдельно разрешаются commit/push и read-only deploy по production runbook. После internal/public health, ERP read и network inspect dry-run вызывается из существующей OAuth-сессии владельца. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после разбора production-отчёта; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
+
+## Production deploy и первый dry-run
+
+Commit `98eee50` опубликован и 2026-08-20 развёрнут только как диагностический backend image `b24-app:98eee50`. Работавший `b24-app:596bddb` остановлен и сохранён как `b24-backend-prev-before-98eee50`. Новый контейнер сохранил `/srv/b24-state:/app/state`, `127.0.0.1:3000:8080`, `unless-stopped`, `B24_APP_DB_MODE=readiness` и `erpnext_frappe_network`; restart count после deploy и dry-run равен 0. Internal/public health, readiness и официальный ERPNext read успешны.
+
+Owner-only production dry-run выполнен один раз в `2026-08-20T14:21:54.072Z` через временный локальный SSH tunnel; tunnel закрыт, browser runtime с OAuth token сброшен. Источники прочитаны полностью: ERPNext `383`, Bitrix transfers `108`. План `359fe92e45d548ac7f60cb80d1e03b91dcc4b30bbaad8dcc5cc2f61737a7384d` содержит:
+
+- 491 documents: 55 Material Request, 83 Purchase Order, 56 Purchase Receipt, 108 Bitrix transfer и 189 Stock Entry;
+- 974 lines, 495 typed document links и 692 line allocations;
+- 64 fail-closed issues, поэтому `readyToApply=false`.
+
+64 issue — коррелированные проявления шести сценариев, а не 64 подтверждённых повреждения данных:
+
+- 15 standalone transfers без purchase/request basis;
+- три Purchase Order с виртуальным `__standalone__`: 3 missing document links + 3 missing line matches;
+- три transfer, ссылающиеся на ручные `Заказ на перемещение #...`: 3 missing document links + 5 missing line matches;
+- пять отсутствующих в текущем Bitrix registry старых transfer ID, на которые ссылаются 12 сохранённых ERP Stock Entry: 12 missing links + 12 missing line matches;
+- семь отдельных несовпадений SKU между связанными Material Request / Purchase Order / Purchase Receipt / transfer;
+- четыре документа со старым immutable request key для пересозданного `MAT-MR-2026-00002`.
+
+Ни один сценарий не исправлялся и не был автоматически объявлен порчей данных. После dry-run runtime SELECT подтвердил 4 migration rows и `0|0|0|0` во всех четырёх workflow tables. Следующий change set обязан сначала корректно смоделировать standalone roots, ручные transfer requests и исторические/tombstone links, затем отдельно разобрать семь line mismatches и stale revision identity. SQL writer не проектируется до нового dry-run с объяснённым паритетом.
