@@ -124,3 +124,16 @@ Commit `9b6b80c` опубликован и развёрнут как `b24-app:9b
 Четыре предшествующие production POST завершились fail-closed на `user.current invalid_token` до чтения источников: initial placement `AUTH_ID` оказался устаревшим даже после reload/new tab. Успешный запрос использовал только актуальный token из `BX24.getAuth()` живого iframe. Отдельная локальная попытка была остановлена сетевым sandbox до достижения endpoint и в production log отсутствует. Это операторская OAuth-диагностика, не ошибка planner и не изменение данных.
 
 После полного прохода `readyToApply=false`: historical stale revisions объяснены, но две live line-связки всё ещё не имеют доказанного соответствия. Независимый post-check подтвердил internal/public health, readiness `up`, официальный ERPNext read, `b24-app:9b6b80c`, restart count 0, `erpnext_frappe_network`, rollback `b24-app:b799329`, 4 migration rows и SQL domain rows `0|0|0|0`. SQL writer, backfill apply и source switch не выполнялись.
+
+## Седьмой production dry-run
+
+Commit `4579048` опубликован и развёрнут как `b24-app:4579048`; предыдущий `b24-app:9b6b80c` сохранён остановленным в `b24-backend-prev-before-4579048`. Первый canary-check завершился до готовности HTTP listener и не переключил production; после добавления retry в одноразовый deploy-скрипт canary и switch прошли. Это операторское наблюдение не меняло код приложения. Production сохранил `/srv/b24-state:/app/state`, `127.0.0.1:3000:8080`, `unless-stopped`, `B24_APP_DB_MODE=readiness` и `erpnext_frappe_network`; restart count 0.
+
+После отдельного action-time разрешения один полный owner OAuth dry-run выполнен в `2026-08-20T18:38:35.406Z`, HTTP 200. Production log содержит ровно один входящий запрос и один `complete`. План `beb0d8563674cefeff40b78fa7969e37e2572c3ec0bf96cdfefcc250cf9b1881` полностью совпал с локальным прогнозом:
+
+- полные источники: ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5`;
+- 510 documents / 991 lines / 518 links / 705 allocations;
+- 0 errors;
+- 22 warnings: 4 `historical_request_revision_unavailable`, 6 `historical_source_line_unavailable`, 12 `historical_transfer_line_unavailable`.
+
+`readyToApply=true` фиксирует только объяснённый read-only план. Независимый post-check подтвердил internal/public health, readiness `up`, официальный ERPNext GET, отсутствие migration credentials в runtime, rollback image `9b6b80c`, 4 migration rows и ноль строк в `workflow_documents`, `workflow_document_lines`, `workflow_document_links`, `workflow_line_allocations`. OAuth runtime и временные deploy/post-check файлы удалены. SQL writer, backfill apply, shadow read и source switch не выполнялись.

@@ -2,13 +2,13 @@
 
 ## Статус и граница текущего этапа
 
-На 2026-08-20 выполнены этап 0, schema/readiness-фундамент этапа 1 и read-only моделирование supply mirror этапа 2 без DML. Runtime commit `9b6b80c` развёрнут в `B24_APP_DB_MODE=readiness` с отдельным credential и только `USAGE + SELECT`; `/ready` выполняет `SELECT 1`. Ранее ручной one-shot runner из `5b9a6d8` применил `0001`-`0004`: production содержит metadata и четыре пустые supply identity/graph tables, 4 migration rows и 0 domain rows.
+На 2026-08-20 выполнены этап 0, schema/readiness-фундамент этапа 1 и read-only моделирование supply mirror этапа 2 без DML. Runtime commit `4579048` развёрнут в `B24_APP_DB_MODE=readiness` с отдельным credential и только `USAGE + SELECT`; `/ready` выполняет `SELECT 1`. Ранее ручной one-shot runner из `5b9a6d8` применил `0001`-`0004`: production содержит metadata и четыре пустые supply identity/graph tables, 4 migration rows и 0 domain rows.
 
 Read-only production preflight, фактические network/backup результаты и следующий change set записаны отдельно: [sql-preflight-2026-08-20.md](sql-preflight-2026-08-20.md). Реальные связи и минимальная модель первого модуля зафиксированы в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md).
 
 `b24_app` пока **не является источником данных**. Без production env безопасным default остаётся `B24_APP_DB_MODE=off`; текущий явно разрешённый production mode — `readiness`. Приложение открывает ограниченный pool только для dependency probe, не запускает миграции при старте, не зеркалирует данные и не меняет текущие workflow чтения/записи. Исправленная пагинация Bitrix24 из `f3ae38e` остаётся рабочим fallback.
 
-Owner-only `POST /api/admin/sql-migration/supply/dry-run` сейчас развёрнут в image `9b6b80c`. Он строит только отчёт и детерминированный hash плана, не подключается к `b24_app` и не содержит SQL writer. ERPNext читается исключительно `GET /api/resource` без `ensure/setup` helpers; `ctv_transfers` и `ctv_tr_requests` читаются OAuth-токеном владельца с защищённой пагинацией. Ошибка/403 Bitrix, неполный JSON, stale request key, неоднозначная строка, отсутствующая ссылка или quantity evidence делают `readyToApply=false`, а не превращаются в пустой реестр.
+Owner-only `POST /api/admin/sql-migration/supply/dry-run` сейчас развёрнут в image `4579048`. Он строит только отчёт и детерминированный hash плана, не подключается к `b24_app` и не содержит SQL writer. ERPNext читается исключительно `GET /api/resource` без `ensure/setup` helpers; `ctv_transfers` и `ctv_tr_requests` читаются OAuth-токеном владельца с защищённой пагинацией. Ошибка/403 Bitrix, неполный JSON, stale request key, неоднозначная строка, отсутствующая ссылка или quantity evidence делают `readyToApply=false`, а не превращаются в пустой реестр.
 
 Второй production dry-run прочитал все три источника полностью, получил 505 documents / 991 lines / 508 links / 705 allocations и 35 errors вместо 64. Все ожидаемые 29 ложных blockers standalone/manual исчезли без новых issue; остались 24 проявления пяти исторических transfer gaps, семь line mismatches и четыре stale revisions. Точный отчёт записан в [журнале dry-run](sql-supply-backfill-dry-run-2026-08-20.md); workflow SQL tables остались пустыми.
 
@@ -19,6 +19,8 @@ Owner-only `POST /api/admin/sql-migration/supply/dry-run` сейчас разв�
 Read-only [аудит четырёх stale revisions](sql-supply-stale-request-audit-2026-08-20.md) показал одну старую удалённую версию `MAT-MR-2026-00002`: canceled receipt и три canceled Stock Entry не имеют пересечения SKU с новой draft-заявкой, созданной под тем же именем. Перепривязка по имени запрещена. Узкий planner change сохраняет исторические документы как evidence, исключает две ложные links canceled receipt к текущим request/PO и оставляет только доказанные links Stock Entry к canceled transfer tombstone. Focused `26/26`, полный backend `212/212` и typecheck успешны; change развёрнут в `9b6b80c` без SQL DML.
 
 Шестой production dry-run на `9b6b80c` полностью прочитал ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5` и получил 510 documents / 991 lines / 518 links / 705 allocations. Четыре stale revision errors стали явными warnings, две ложные links исчезли. Остались 2 live `missing_line_match` errors и 20 historical warnings, поэтому `readyToApply=false`. Независимый post-check подтвердил 4 migration rows и 0 domain rows.
+
+Седьмой production dry-run на `4579048` получил те же 510 documents / 991 lines / 518 links / 705 allocations, 0 errors и 22 historical warnings. Две последние связи доказаны как старые app-canceled draft PO с точными request keys; document links сохранены, line allocations не придуманы. `readyToApply=true` означает паритет read-only плана, а не разрешение на запись. Post-check снова подтвердил 4 migration rows и 0 domain rows.
 
 ## Текущая source-of-truth matrix
 
@@ -177,8 +179,8 @@ Production restore требует остановить записи прилож
 8. Submitted-only gate доказал, что реальные 12 ERP references отменены; отдельная canceled-evidence ветка развёрнута. Четвёртый dry-run подтвердил пять tombstone, 12 восстановленных links, 12 warnings и отсутствие придуманных line allocations.
 9. Read-only аудит семи line mismatch завершён: две live draft-связки не имеют доказанного соответствия, пять historical downstream-связок имеют явные document links, но не доказанные line allocations. Узкая warning-модель прошла focused `22/22`, полный backend `208/208`, typecheck и production dry-run `6 errors / 17 warnings`; SQL domain rows остались нулевыми.
 10. Четыре stale revisions разобраны как одна старая canceled версия переиспользованного request name. Fail-closed модель прошла focused `26/26`, полный backend `212/212`, typecheck, commit/deploy и шестой production dry-run; ожидаемая дельта подтверждена, SQL domain rows остались нулевыми.
-11. Две последние `missing_line_match` официально разобраны как старые app-canceled draft PO с точными request keys. Узкая локальная evidence-only модель прошла focused `29/29`, backend `215/215` и typecheck; ожидает отдельные commit/deploy/dry-run gates. До production-подтверждения apply не проектировать.
-12. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
+11. Две последние `missing_line_match` официально разобраны как старые app-canceled draft PO с точными request keys. Evidence-only модель прошла focused `29/29`, backend `215/215`, typecheck, commit/deploy и седьмой production dry-run; подтверждены 0 errors / 22 warnings и нулевые SQL domain rows.
+12. Следующий отдельный change set: спроектировать и протестировать идемпотентный mirror writer/checkpoint локально. Production backfill apply остаётся отдельным разрешаемым gate и не переключает чтения.
 13. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 14. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 
