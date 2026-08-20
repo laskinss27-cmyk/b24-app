@@ -8,9 +8,11 @@ Read-only production preflight, фактические network/backup резул
 
 `b24_app` пока **не является источником данных**. Без production env безопасным default остаётся `B24_APP_DB_MODE=off`; текущий явно разрешённый production mode — `readiness`. Приложение открывает ограниченный pool только для dependency probe, не запускает миграции при старте, не зеркалирует данные и не меняет текущие workflow чтения/записи. Исправленная пагинация Bitrix24 из `f3ae38e` остаётся рабочим fallback.
 
-Owner-only `POST /api/admin/sql-migration/supply/dry-run` развёрнут в image `38ce403`. Он строит только отчёт и детерминированный hash плана, не подключается к `b24_app` и не содержит SQL writer. ERPNext читается исключительно `GET /api/resource` без `ensure/setup` helpers; `ctv_transfers` и `ctv_tr_requests` читаются OAuth-токеном владельца с защищённой пагинацией. Ошибка/403 Bitrix, неполный JSON, stale request key, неоднозначная строка, отсутствующая ссылка или quantity evidence делают `readyToApply=false`, а не превращаются в пустой реестр.
+Owner-only `POST /api/admin/sql-migration/supply/dry-run` развёрнут в image `dbd7b3c`. Он строит только отчёт и детерминированный hash плана, не подключается к `b24_app` и не содержит SQL writer. ERPNext читается исключительно `GET /api/resource` без `ensure/setup` helpers; `ctv_transfers` и `ctv_tr_requests` читаются OAuth-токеном владельца с защищённой пагинацией. Ошибка/403 Bitrix, неполный JSON, stale request key, неоднозначная строка, отсутствующая ссылка или quantity evidence делают `readyToApply=false`, а не превращаются в пустой реестр.
 
 Второй production dry-run прочитал все три источника полностью, получил 505 documents / 991 lines / 508 links / 705 allocations и 35 errors вместо 64. Все ожидаемые 29 ложных blockers standalone/manual исчезли без новых issue; остались 24 проявления пяти исторических transfer gaps, семь line mismatches и четыре stale revisions. Точный отчёт записан в [журнале dry-run](sql-supply-backfill-dry-run-2026-08-20.md); workflow SQL tables остались пустыми.
+
+Третий production dry-run на `dbd7b3c` сохранил те же кардинальности и получил 40 errors / 0 warnings. Дополнительный официальный ERP read объяснил результат: все 12 references пяти исчезнувших transfer принадлежат отменённым Stock Entry `docstatus=2`, поэтому submitted-only tombstone gate правильно отказал. Локальный follow-up моделирует однородное canceled evidence отдельно, не выдавая его за проведённое и не реконструируя строки; production SQL остаётся 4 migration rows и 0 domain rows.
 
 ## Текущая source-of-truth matrix
 
@@ -164,7 +166,7 @@ Production restore требует остановить записи прилож
 5. Post-DDL backup, external read-back и isolated restore gate пустой новой схемы выполнены; source/restore signatures и 0 domain rows совпали, временные объекты удалены guarded cleanup.
 6. Read-only route развёрнут, первый production dry-run выполнен и fail-closed остановлен на 64 коррелированных legacy issues; workflow остаётся на Bitrix/ERPNext, SQL domain tables пусты.
 7. Standalone roots и ручные transfer requests смоделированы и развёрнуты без SQL/runtime-записи; второй dry-run подтвердил устранение ожидаемых 29 ложных blockers без новых issue, SQL domain rows остались нулевыми.
-8. Для пяти исторических transfer ID локально подготовлена evidence-only tombstone-модель: только ERP reference evidence, ноль выдуманных строк и warnings вместо неподтверждённых line allocations. После отдельного commit/deploy повторить dry-run; затем разобрать семь line mismatches и четыре stale revision links.
+8. Submitted-only tombstone-модель развёрнута и fail-closed доказала, что реальные 12 ERP references отменены. Локально добавлена отдельная canceled-evidence ветка: только однородные `docstatus=2` старше 24 часов, ноль выдуманных строк и warnings вместо line allocations. После отдельного commit/deploy повторить dry-run; затем разобрать семь line mismatches и четыре stale revision links.
 9. Только для плана с объяснённым паритетом: идемпотентный mirror writer/checkpoint и отдельный backfill apply без переключения.
 10. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 11. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.

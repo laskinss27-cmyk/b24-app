@@ -171,6 +171,60 @@ test('recent missing transfer stays an error instead of becoming a tombstone', (
 	assert.ok(!plan.documents.some((item) => item.externalStatus === 'source_missing'));
 });
 
+test('missing transfer backed only by old canceled Stock Entries becomes a canceled evidence tombstone', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseOrders = [];
+	raw.purchaseReceipts = [];
+	raw.transferItems = [];
+	raw.transferRequestItems = [];
+	raw.stockEntries[0]!['docstatus'] = 2;
+	raw.stockEntries[0]!['status'] = 'Cancelled';
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	const report = summarizeSupplyMirrorPlan(plan);
+	const tombstone = plan.documents.find((item) => item.identity === 'bitrix:transfer:10');
+	assert.equal(plan.readyToApply, true);
+	assert.equal(tombstone?.externalStatus, 'source_missing_canceled');
+	assert.equal(plan.links.length, 1);
+	assert.equal(plan.allocations.length, 0);
+	assert.equal(report.counts.errors, 0);
+	assert.equal(report.counts.warnings, 1);
+});
+
+test('recent canceled missing transfer stays an error', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseOrders = [];
+	raw.purchaseReceipts = [];
+	raw.transferItems = [];
+	raw.transferRequestItems = [];
+	raw.stockEntries[0]!['docstatus'] = 2;
+	raw.stockEntries[0]!['creation'] = observedAt;
+	raw.stockEntries[0]!['modified'] = observedAt;
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.code === 'unconfirmed_missing_transfer' && item.identity === '10'));
+	assert.ok(!plan.documents.some((item) => item.externalStatus?.startsWith('source_missing')));
+});
+
+test('mixed submitted and canceled evidence stays an error instead of guessing transfer state', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseOrders = [];
+	raw.purchaseReceipts = [];
+	raw.transferItems = [];
+	raw.transferRequestItems = [];
+	raw.stockEntries[0]!['docstatus'] = 2;
+	raw.stockEntries.push({ ...raw.stockEntries[0]!, name: 'MAT-STE-2', docstatus: 1 });
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.ok(plan.issues.some((item) => item.code === 'unconfirmed_missing_transfer' && item.identity === '10'));
+	assert.ok(!plan.documents.some((item) => item.externalStatus?.startsWith('source_missing')));
+});
+
 test('ERP source collector uses list and get only', async () => {
 	const calls: string[] = [];
 	const erp = {

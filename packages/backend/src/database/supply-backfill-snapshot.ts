@@ -25,6 +25,7 @@ import type {
 
 const BITRIX_ENTITY_ITEM_ID = /^[1-9]\d*$/;
 const HISTORICAL_TOMBSTONE_GRACE_MS = 24 * 60 * 60 * 1_000;
+type MissingTransferEvidenceState = 'submitted' | 'canceled';
 
 function text(value: unknown): string { return String(value ?? '').trim(); }
 function numberOrNull(value: unknown): number | null {
@@ -48,8 +49,8 @@ function erpTimestampMs(value: unknown): number | null {
 	const parsed = Date.parse(withZone);
 	return Number.isFinite(parsed) ? parsed : null;
 }
-function isHistoricalTransferEvidence(entry: Record<string, unknown>, observedAt: string): boolean {
-	if (Number(entry['docstatus']) !== 1) return false;
+function isHistoricalTransferEvidence(entry: Record<string, unknown>, observedAt: string, expectedDocstatus: 1 | 2): boolean {
+	if (Number(entry['docstatus']) !== expectedDocstatus) return false;
 	const observedMs = Date.parse(observedAt);
 	const entryMs = erpTimestampMs(text(entry['modified']) || entry['creation']);
 	return Number.isFinite(observedMs) && entryMs !== null && observedMs - entryMs >= HISTORICAL_TOMBSTONE_GRACE_MS;
@@ -152,11 +153,16 @@ function transferRequestDocument(raw: Record<string, unknown>, request: StoredTr
 	};
 }
 
-function missingTransferDocument(transferId: string, references: Record<string, unknown>[], observedAt: string): SupplyMirrorSourceDocument {
+function missingTransferDocument(
+	transferId: string,
+	references: Record<string, unknown>[],
+	observedAt: string,
+	evidenceState: MissingTransferEvidenceState,
+): SupplyMirrorSourceDocument {
 	return {
 		...docRef('transfer', transferId, 'bitrix'),
 		externalRevisionKey: null,
-		externalStatus: 'source_missing',
+		externalStatus: evidenceState === 'canceled' ? 'source_missing_canceled' : 'source_missing',
 		externalDocstatus: null,
 		sourceCreatedAt: null,
 		sourceModifiedAt: null,
@@ -167,6 +173,7 @@ function missingTransferDocument(transferId: string, references: Record<string, 
 			entity: 'ctv_transfers',
 			externalId: transferId,
 			evidenceKind: 'erpnext_external_reference',
+			evidenceState,
 			references,
 		},
 		lines: [],
@@ -300,18 +307,25 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 	}
 	const historicalMissingTransferIds = new Set<string>();
 	const missingTransferReferences = new Map<string, Record<string, unknown>[]>();
+	const missingTransferEvidenceStates = new Map<string, MissingTransferEvidenceState>();
 	for (const [transferId, candidates] of missingTransferCandidates) {
-		if (!candidates.every(({ entry }) => isHistoricalTransferEvidence(entry, observedAt))) {
-			issues.push(issue('unconfirmed_missing_transfer', transferId, 'missing transfer is not backed only by submitted ERP Stock Entries older than 24 hours'));
+		const evidenceState = candidates.every(({ entry }) => isHistoricalTransferEvidence(entry, observedAt, 1))
+			? 'submitted'
+			: candidates.every(({ entry }) => isHistoricalTransferEvidence(entry, observedAt, 2))
+				? 'canceled'
+				: null;
+		if (!evidenceState) {
+			issues.push(issue('unconfirmed_missing_transfer', transferId, 'missing transfer is not backed only by uniformly submitted or canceled ERP Stock Entries older than 24 hours'));
 			continue;
 		}
 		historicalMissingTransferIds.add(transferId);
 		missingTransferReferences.set(transferId, candidates.map(({ reference }) => reference));
+		missingTransferEvidenceStates.set(transferId, evidenceState);
 	}
 	for (const transferId of [...historicalMissingTransferIds].sort((left, right) => left.localeCompare(right, 'en'))) {
 		const references = (missingTransferReferences.get(transferId) ?? [])
 			.sort((left, right) => text(left['externalId']).localeCompare(text(right['externalId']), 'en'));
-		documents.push(missingTransferDocument(transferId, references, observedAt));
+		documents.push(missingTransferDocument(transferId, references, observedAt, missingTransferEvidenceStates.get(transferId)!));
 	}
 
 	const links: SupplyMirrorSourceLink[] = [];
