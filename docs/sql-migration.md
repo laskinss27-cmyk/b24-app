@@ -29,6 +29,7 @@ Read-only production preflight, фактические network/backup резул
 | конструктор отчётов | filesystem backend | `/app/state/report-builder/<ownerId>.json` | изоляция по владельцу реализована в коде |
 | operation log | filesystem backend | `/app/state/operation-log/events.jsonl` | ограниченный журнал, не полный аудит workflow |
 | блокировки и кэши | память процесса | locks снаба/перемещений/инвентаризации, кэши каталога, реализаций и имён | исчезают при restart и не координируют несколько replicas |
+| сопоставление товаров Tilda (будущий контур, сейчас не работает) | `b24_app` после отдельной миграции; остаток всегда ERPNext | отдельная SQL-таблица внешних идентификаторов Tilda и ссылок на ERP Item; Tilda получает только проекцию | 33 из 150 stock-bearing строк требуют ручного подтверждения; до него экспорт для них запрещён |
 
 Инвентаризационный snapshot намеренно заморожен при создании. Движения после открытия компенсируются пользователем в пересчёте; будущая SQL-модель обязана хранить исходный snapshot неизменным и не заменять его текущим остатком ERPNext.
 
@@ -57,6 +58,10 @@ Bitrix deal
 - `document_links`: направленная типизированная связь между документами и внешними ссылками;
 - `events`: append-only аудит переходов и actor/idempotency key;
 - `sync_jobs`: курсор, попытки, ошибка и состояние backfill/shadow comparison.
+
+Отдельно от workflow-каркаса будущей интеграции Tilda нужна специализированная таблица `tilda_product_mappings`, а не новый файл в `/app/state`. Минимальные поля-кандидаты: уникальные `tilda_uid` и `tilda_external_id`, `tilda_sku`, nullable внешние ссылки `erp_item_code`/`erp_product_id`, `mapping_status` (`confirmed`, `unresolved`, `ignored`), явный тип строки parent/variant, nullable `parent_tilda_uid` и variant metadata, `audit_source`, `created_at`, `updated_at`, `last_seen_at` и nullable `confirmed_at`. Точный состав variant metadata и типы колонок определяются по исходному экспорту до миграции; универсальный payload «на всякий случай» не добавляется. Уникальность ERP-ссылки и SKU заранее не предполагается, пока аудит не подтвердит кардинальности.
+
+Исходный аудит экспорта Tilda: 177 строк = 131 parent + 46 variants; 150 stock-bearing SKU. Все `tilda_uid` и `tilda_external_id` уникальны. Из stock-bearing строк 117 однозначно сопоставляются с ERP, 33 остаются `unresolved` до ручной сверки. Эти числа являются baseline для будущего backfill/shadow-отчёта, а не разрешением создать таблицу или запустить синхронизацию.
 
 До подтверждения реального домена не создаются универсальные JSON-таблицы «на всякий случай» и не копируются ERPNext-таблицы.
 
@@ -97,7 +102,7 @@ Runtime DML-права не выдаются заранее: `INSERT/UPDATE/DELE
 
 До этапа, где `b24_app` принимает хотя бы одну авторитетную запись:
 
-1. расширить фактический `/root/sync/core-backup.sh` отдельным consistent dump базы `b24_app`;
+1. подключить отдельный consistent dump базы `b24_app` к проверяемому расписанию, не смешивая его retention с ERPNext;
 2. не включать `b24_app` в bench backup по предположению: bench сохраняет ERPNext site DB, а не отдельную базу;
 3. проверить `gzip -t`, checksum и наличие dump во внешнем хранилище;
 4. восстановить dump в отдельную временную БД и проверить migrations, row counts и выборочные связи;
@@ -106,24 +111,34 @@ Runtime DML-права не выдаются заранее: `INSERT/UPDATE/DELE
 
 ## Backup, restore и rollback
 
-Точная server-команда должна использовать filesystem root-only option file для ограниченного `b24_app_backup`, а не пароль в CLI или логах. В существующую backup job добавляется отдельный `mariadb-dump --single-transaction --quick --skip-lock-tables --triggers b24_app`, запись во временный файл, `gzip -t`, checksum и только затем атомарное переименование. Retention: подтверждённые 14 DB backups; внешняя копия должна идти тем же проверяемым каналом, что и ERPNext backup.
+Точная server-команда должна использовать filesystem root-only option file для ограниченного `b24_app_backup`, а не пароль в CLI или логах. Для `mariadb-dump --databases b24_app` нужен отдельный option file без строки `database=b24_app`: MariaDB 11.8 разбирает её как неоднозначный префикс опции `databases` и выдаёт предупреждение. В существующую backup job добавляется отдельный consistent dump, запись во временный файл, `gzip -t`, проверка ожидаемой schema, checksum и только затем атомарное переименование. Retention: подтверждённые 14 DB backups; внешняя копия должна идти тем же проверяемым каналом, что и ERPNext backup.
 
 Безопасная форма фрагмента для ревью существующего `/root/sync/core-backup.sh` (не запускать отдельно без проверки фактических переменных и upload-функции):
 
 ```bash
 umask 077
 B24_APP_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-B24_APP_FINAL="/root/sync/backups/b24_app-${B24_APP_STAMP}.sql.gz"
-B24_APP_TEMP=$(mktemp /root/sync/backups/.b24_app.XXXXXX.sql.gz)
-mariadb-dump --defaults-extra-file=/root/sync/b24-app-backup.cnf \
-  --single-transaction --quick --skip-lock-tables --triggers b24_app \
-  | gzip -c > "$B24_APP_TEMP"
+B24_APP_FINAL="/root/core-backups/b24_app/${B24_APP_STAMP}-b24_app-database.sql.gz"
+B24_APP_TEMP=$(mktemp /root/core-backups/b24_app/.b24_app.XXXXXX.sql.gz)
+docker run --rm --network erpnext_frappe_network \
+  -v /root/b24-app-secrets:/run/b24-app-secrets:ro mariadb:11.8 \
+  mariadb-dump --defaults-extra-file=/run/b24-app-secrets/backup-dump.cnf \
+  --single-transaction --quick --skip-lock-tables --triggers --hex-blob \
+  --default-character-set=utf8mb4 --databases b24_app \
+  | gzip -9 > "$B24_APP_TEMP"
 gzip -t "$B24_APP_TEMP"
+zgrep -q '^CREATE DATABASE.*`b24_app`' "$B24_APP_TEMP"
 mv "$B24_APP_TEMP" "$B24_APP_FINAL"
 sha256sum "$B24_APP_FINAL" > "${B24_APP_FINAL}.sha256"
 ```
 
-Скрипт обязан удалять незавершённый temporary file по trap, а внешний upload должен считаться успешным только после проверки удалённого файла/размера. Эти строки пока не применялись к production.
+Версионированная standalone-реализация находится в [`scripts/b24-app-backup.sh`](../scripts/b24-app-backup.sh). Она использует lock, удаляет только собственные незавершённые файлы по trap и публикует dump/checksum атомарными переименованиями. [`scripts/b24-app-backup-job.sh`](../scripts/b24-app-backup-job.sh) запускает dump, отдельный Disk uploader и только после успешного read-back применяет локальный retention. ERPNext `core-backup.sh` не изменён: job подключена независимой cron-строкой.
+
+20 августа 2026 года scheduled-кандидаты размещены отдельно от ERPNext в `/root/core-backups/b24_app`; ручные эталоны — в `manual/`, первый dump с предупреждением — в `diagnostic/`. Это устраняет пересечение с ERPNext-маской `*-database.sql.gz`. Полный ручной job создал `20260820_085654-b24_app-database.sql.gz`, проверил gzip/checksum/schema, загрузил dump и checksum в отдельную папку Bitrix Disk `b24_app_backups`, скачал оба файла обратно и подтвердил SHA-256. Локальный и внешний retention настроены на 14 пар; ветка фактического удаления ещё не исполнялась, потому что scheduled-пар меньше лимита.
+
+Полный последовательный rehearsal обеих cron-команд повторён в 10:25 UTC: неизменённый ERPNext job завершился за 21 секунду с успешным Disk upload и ротацией до 14 локальных копий; `b24_app` job завершился за 4 секунды и создал `20260820_102633-b24_app-database.sql.gz` с подтверждённым внешним read-back. Cron daemon был active, post-checks зелёные. Эти длительности относятся к пустой `b24_app` и не являются измеренным RPO/RTO для будущих доменных данных.
+
+Проверенным dump выполнен restore drill через [`scripts/b24-app-restore-drill.sh`](../scripts/b24-app-restore-drill.sh). Создана отдельная schema `b24_app_restore_20260820_084026` с `utf8mb4/utf8mb4_unicode_ci`, восстановлено 0 таблиц согласно пустому dump; число таблиц рабочей `b24_app` до и после осталось 0. Negative tests подтвердили отказ для имени `b24_app` и для уже существующей restore schema. После фиксации результата временная schema удалена guarded-скриптом с точным confirmation; повторная проверка показала 0 таблиц в рабочей `b24_app`. Backup gate для будущих авторитетных данных ещё не закрыт: после появления доменных таблиц restore drill повторяется с migrations, row counts и выборочными link chains; отдельно проверяется реальное срабатывание retention и измеряются RPO/RTO.
 
 Restore drill выполняется не поверх production: административный оператор создаёт временную БД, импортирует выбранный dump, проверяет `b24_app_schema_migrations`, counts и выборочные link chains, после чего удаляет только явно названную временную БД.
 
@@ -132,7 +147,7 @@ Production restore требует остановить записи прилож
 ## Порядок следующих малых этапов
 
 1. Отдельно provision database/users и проверить `/ready`; без доменных таблиц.
-2. Подключить backup и пройти restore drill.
+2. Подключить standalone backup к проверяемому расписанию/внешней копии; пустой restore drill уже пройден, доменный повтор остаётся обязательным.
 3. Добавить минимальные таблицы только после выборки реальных кардинальностей.
 4. Read-only backfill с checkpoint и отчётом, без переключения.
 5. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.

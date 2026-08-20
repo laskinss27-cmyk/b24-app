@@ -213,13 +213,14 @@ docker compose -p erpnext -f pwd.yml up -d
 
 ## Резервное копирование
 
-По подтверждённому production-аудиту рабочий cron запускает `/root/sync/core-backup.sh` ежедневно в 12:00. Скрипт делает bench site backup ERPNext, раз в неделю добавляет файлы, выгружает результат на Диск Битрикс24 и сохраняет 14 DB/4 file backups. Перед операцией всё равно заново проверить фактический crontab и содержимое скрипта: путь не является переносимой настройкой нового сервера.
+По состоянию на 2026-08-20 рабочий cron независимо запускает `/root/sync/core-backup.sh` ежедневно в 12:00 UTC и `/root/sync/b24-app-backup-job.sh` в 12:30 UTC. Первый делает bench site backup ERPNext, раз в неделю добавляет файлы, выгружает результат на Диск Битрикс24 и сохраняет 14 DB/4 file backups. Второй создаёт отдельный `b24_app` dump, проверяет внешний read-back и применяет свой retention. Перед операцией всё равно заново проверить фактический crontab и содержимое скриптов: путь не является переносимой настройкой нового сервера.
 
 Проверка:
 
 ```bash
 crontab -l
 sed -n '1,240p' /root/sync/core-backup.sh
+sed -n '1,260p' /root/sync/b24-app-backup-job.sh
 find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 ```
 
@@ -229,9 +230,17 @@ find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 
 Bench backup не включает отдельную базу `b24_app`. До её первых авторитетных записей оператор обязан расширить фактический backup script отдельным consistent dump, проверкой архива/checksum, внешней копией и retention, а затем выполнить restore drill в отдельную временную БД. Runtime, migrator и backup используют разных ограниченных пользователей; root не передаётся backend.
 
-На 2026-08-20 пустая schema и три роли provisioned. Проверенные root-only credentials хранятся в `/root/b24-app-secrets`; не выводить их в shell history, логи или Git. Backend ещё не подключён, таблиц нет, migration runner не запускался. Следующий gate — отдельный dump и restore drill, а не deploy.
+На 2026-08-20 пустая schema и три роли provisioned. Проверенные root-only credentials хранятся в `/root/b24-app-secrets`; не выводить их в shell history, логи или Git. Backend ещё не подключён, таблиц нет, migration runner не запускался.
 
-Полный gate, порядок восстановления и отката описаны в [sql-migration.md](sql-migration.md). На текущем этапе `B24_APP_DB_MODE=off`, поэтому существующий production backup не изменяется этой локальной работой.
+Standalone `/root/sync/b24-app-backup.sh` пишет только в root-only `/root/core-backups/b24_app`. Для dump используется отдельный `/root/b24-app-secrets/backup-dump.cnf` без поля `database=`; это исключает конфликт с `mariadb-dump --databases`. Ручные архивы лежат в `manual/`, диагностический — в `diagnostic/`, поэтому ERPNext retention их не видит.
+
+Job `/root/sync/b24-app-backup-job.sh` в 12:30 UTC загружает dump/checksum в изолированную папку Bitrix Disk `b24_app_backups`, скачивает их обратно и сравнивает SHA-256. Только затем создаётся `.uploaded` и применяется локальный retention 14 пар; внешний retention также ограничен 14 парами и строгим шаблоном внутри этой папки. Предыдущий crontab сохранён root-only в `/root/sync/crontab.before-b24-app-20260820`.
+
+20 августа 2026 года обе cron-команды вручную прогнаны последовательно с тем же окружением и логированием. ERPNext job заняла 21 секунду, создала валидный `20260820_072540-frontend-database.sql.gz`, получила успешный Disk ID и штатно сохранила 14 локальных DB-копий, удалив только старейшую `20260806_090004-frontend-database.sql.gz`. `b24_app` job заняла 4 секунды, создала `20260820_102633-b24_app-database.sql.gz`, проверила gzip/checksum, внешний read-back SHA-256 и `.uploaded`. После rehearsal cron service active, процессов backup не осталось, оба health, ERP read, MariaDB health и network check прошли. Это проверяет сами cron-команды; факт первого запуска именно планировщиком всё равно подтверждается по следующей записи в логах.
+
+Restore drill пустого dump выполнен в `b24_app_restore_20260820_084026`: charset/collation и 0 таблиц совпали, рабочая `b24_app` осталась с 0 таблиц. Guard-скрипт запретил рабочее имя и повторный restore; после отдельного разрешения cleanup-скрипт удалил только временную schema. Backup gate ещё не закрыт для авторитетных данных: нужен повторный drill после появления доменных migrations/данных, измеренные RPO/RTO и фактическая проверка ветки retention после превышения лимита.
+
+Полный gate, порядок восстановления и отката описаны в [sql-migration.md](sql-migration.md). На текущем этапе `B24_APP_DB_MODE=off`; backend и ERPNext backup script не изменены, добавлена только независимая `b24_app` backup job.
 
 ### Текущее состояние `/app/state`
 

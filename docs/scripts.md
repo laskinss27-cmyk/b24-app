@@ -9,9 +9,16 @@
 | `sos-status.sh` | чтение состояния backend, ERPNext, nginx, сертификата и бэкапа |
 | `core-backup.sh` | ежедневный бэкап ERPNext |
 | `core-backup-disk.ts` | отправка дампа БД на Диск Битрикс24 |
+| `b24-app-backup.sh` | standalone consistent dump `b24_app`; сам не меняет cron, retention или внешний upload |
+| `b24-app-backup-disk.ts` | upload dump/checksum в изолированную папку Bitrix Disk с read-back SHA-256 и retention 14 пар |
+| `b24-app-backup-job.sh` | scheduled-цепочка dump → внешний read-back → локальный retention 14 подтверждённых пар |
+| `b24-app-restore-drill.sh` | ручное восстановление dump только в новую БД `b24_app_restore_*`; не содержит `DROP DATABASE` |
+| `b24-app-drop-restore-db.sh` | guarded удаление только `b24_app_restore_*` с точным confirmation env |
 | `smoke-security.ts` | проверка базовых защитных заголовков |
 
 Рабочее расположение бэкап-скриптов задаётся закрытой конфигурацией сервера. Перед изменением нужно сравнить серверную копию с репозиторием.
+
+SQL-скрипты `b24_app` требуют отдельного разрешения на production-запуск. Backup-скрипт использует root-only option file ограниченного dump-пользователя и публикует архив только после gzip/checksum/schema-проверок. Job удаляет локальную старую пару только при наличии `.uploaded`, а Disk uploader работает только внутри папки `b24_app_backups` и строгого шаблона имён. Restore drill использует административный доступ только внутри MariaDB-контейнера, запрещает имя рабочей БД и отказывается перезаписывать уже существующую временную schema. Cleanup требует отдельное точное confirmation-значение.
 
 ## Миграции
 
