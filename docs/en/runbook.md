@@ -231,7 +231,7 @@ find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 
 Bench backup does not include the separate `b24_app` database. Before its first authoritative write, extend the effective backup job with a consistent dump, archive/checksum validation, external copy and retention, then complete a restore drill into a separately named temporary database. Runtime, migrator and backup must use separate least-privilege accounts; the backend never receives root credentials. The authoritative staged gate is documented in [the SQL migration plan](../sql-migration.md).
 
-As of 2026-08-20, the empty schema and three least-privilege roles have been provisioned. Verified root-only credentials are stored under `/root/b24-app-secrets`; never print them to shell history, logs, or Git. The backend is still disconnected, there are no tables, and the migration runner has not been executed. The next gate is a separate dump and restore drill, not a deployment.
+As of 2026-08-20, the schema and three least-privilege roles have been provisioned. Verified root-only credentials are stored under `/root/b24-app-secrets`; never print them to shell history, logs, or Git. The deployed backend remains disconnected with only `B24_APP_DB_MODE=off` and no SQL credentials. A one-shot migration runner created only `b24_app_schema_migrations`; it has zero rows and there are no domain tables. The next gate is a fresh dump and isolated restore drill of that metadata table, not a workflow source switch.
 
 ### Current `/app/state` status
 

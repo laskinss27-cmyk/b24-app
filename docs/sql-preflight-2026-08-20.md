@@ -110,3 +110,13 @@ A-C не требуют остановки менеджеров: они не м�
 - локальный Git повторяет существующие environment-предупреждения о недоступном global ignore и преобразовании LF/CRLF.
 
 Эти пункты не проявились как ошибки тестов или production health-check, но требуют отдельных change sets со своими baseline и rollback; обновление Node/dependencies или разбиение frontend bundle с SQL rollout не совмещать.
+
+## Follow-up: первая metadata migration
+
+После отдельного разрешения пользователя 2026-08-20 в 11:16:38 UTC запущен одноразовый контейнер `b24-app:596bddb` с отдельным root-only `migrator.env`. Перед запуском подтверждены 0 таблиц, валидный checksum последнего пустого dump `20260820_102633-b24_app-database.sql.gz`, отсутствие backup-процессов, 0 доменных `.sql` в image и успешные health/ERP checks.
+
+Runner сообщил `No pending migrations`: доменных файлов нет. Его обязательный metadata bootstrap изменил число таблиц с 0 на 1. После запуска в schema существует только `b24_app_schema_migrations`, в ней 0 строк. Одноразовый контейнер удалён.
+
+Production backend не перезапускался: image `b24-app:596bddb`, `restart_count=0`, единственная SQL-переменная `B24_APP_DB_MODE=off`, `/ready` сообщает `database: disabled`. Internal/public health, ERPNext read, network membership и rollback-контейнер после DDL подтверждены повторно. Локальный baseline после этапа: backend 184/184, frontend 117/117 и полный typecheck.
+
+Rollback этого шага намеренно не выполняет автоматический `DROP TABLE`: текущий безопасный rollback — оставить metadata неиспользуемой при `MODE=off`. Перед readiness нужен свежий backup и отдельный restore drill дампа с одной metadata-таблицей.

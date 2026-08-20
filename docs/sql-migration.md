@@ -2,7 +2,7 @@
 
 ## Статус и граница текущего этапа
 
-На 2026-08-20 выполнены этап 0 и отключённый фундамент этапа 1. Исходный код проверен на commit `aabda5173872302752a27165b079bbd1dc9abc97`: 176 backend-тестов, typecheck и полная сборка прошли до изменений. Позже отдельным разрешённым bootstrap создана пустая production schema `b24_app` и три ограниченные роли; доменных таблиц и migration metadata ещё нет, backend по-прежнему работает без SQL env.
+На 2026-08-20 выполнены этап 0 и отключённый фундамент этапа 1. Disabled-каркас commit `596bddb06cf853a0a8816281bb2468ccdf9b3cfd` развёрнут с единственной SQL-переменной `B24_APP_DB_MODE=off`, без credentials и runtime-соединения. Отдельным bootstrap созданы schema `b24_app` и три ограниченные роли. Ручной migration runner создал только `b24_app_schema_migrations`; доменных таблиц нет, metadata-таблица содержит 0 применённых migration rows.
 
 Read-only production preflight, фактические network/backup результаты и следующий change set записаны отдельно: [sql-preflight-2026-08-20.md](sql-preflight-2026-08-20.md).
 
@@ -95,7 +95,7 @@ Runtime DML-права не выдаются заранее: `INSERT/UPDATE/DELE
 - `GET /health` не изменён и проверяет процесс backend.
 - `GET /ready` при `B24_APP_DB_MODE=off` возвращает database `disabled`; при `readiness` выполняет `SELECT 1` и отдаёт 503 при недоступности.
 - `npm -w @b24-app/backend run db:migrate` — только ручная команда. Она требует отдельные `B24_APP_MIGRATION_DB_USER/PASSWORD`, advisory lock и проверяет checksum уже применённых файлов.
-- каталог `packages/backend/migrations` пока не содержит доменных SQL. Первый ручной запуск создаст только `b24_app_schema_migrations`.
+- каталог `packages/backend/migrations` пока не содержит доменных SQL. Первый ручной запуск 2026-08-20 создал только `b24_app_schema_migrations`; до запуска было 0 таблиц, после — одна metadata-таблица с 0 строк.
 - после применения файл миграции неизменяем; исправление оформляется новой миграцией.
 
 ## Обязательный gate перед авторитетными записями
@@ -146,11 +146,12 @@ Production restore требует остановить записи прилож
 
 ## Порядок следующих малых этапов
 
-1. Отдельно provision database/users и проверить `/ready`; без доменных таблиц.
-2. Подключить standalone backup к проверяемому расписанию/внешней копии; пустой restore drill уже пройден, доменный повтор остаётся обязательным.
-3. Добавить минимальные таблицы только после выборки реальных кардинальностей.
-4. Read-only backfill с checkpoint и отчётом, без переключения.
-5. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
-6. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
+1. Provision database/users, disabled deploy, отдельный backup и metadata migration выполнены; runtime остаётся `off`.
+2. Сделать свежий dump и restore drill одной metadata-таблицы, не затрагивая рабочую schema.
+3. Отдельным deploy включить только `B24_APP_DB_MODE=readiness` с read-only runtime credential и проверить `/ready`; workflow остаётся на Bitrix/ERPNext.
+4. Добавить минимальные таблицы только после выборки реальных кардинальностей.
+5. Read-only backfill с checkpoint и отчётом, без переключения.
+6. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
+7. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 
 Каждый пункт имеет собственные тесты «до/после», сравнение результатов и отдельный список посторонних ошибок. Коммит, push и deploy требуют явной команды.
