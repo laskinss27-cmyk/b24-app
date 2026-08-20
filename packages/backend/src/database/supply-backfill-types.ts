@@ -82,6 +82,7 @@ export interface SupplyMirrorSnapshot {
 	sources: {
 		erpnext: SupplyMirrorSourceStatus;
 		bitrixTransfers: SupplyMirrorSourceStatus;
+		bitrixTransferRequests: SupplyMirrorSourceStatus;
 	};
 	documents: SupplyMirrorSourceDocument[];
 	links: SupplyMirrorSourceLink[];

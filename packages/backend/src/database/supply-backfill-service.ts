@@ -1,7 +1,12 @@
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
 import { buildSupplyMirrorPlan, supplyMirrorSourceHash } from './supply-backfill-plan.js';
-import { readSupplyBackfillErpSources, readSupplyBackfillTransferSource, type SupplyBackfillRawSources } from './supply-backfill-read.js';
+import {
+	readSupplyBackfillErpSources,
+	readSupplyBackfillTransferRequestSource,
+	readSupplyBackfillTransferSource,
+	type SupplyBackfillRawSources,
+} from './supply-backfill-read.js';
 import { buildSupplyMirrorSnapshot } from './supply-backfill-snapshot.js';
 import type { SupplyMirrorPlan } from './supply-backfill-types.js';
 
@@ -61,17 +66,20 @@ export function summarizeSupplyMirrorPlan(plan: SupplyMirrorPlan): SupplyBackfil
 
 export async function runSupplyBackfillDryRun(erp: ErpClient, client: B24Client, now = new Date()): Promise<SupplyBackfillDryRunReport> {
 	const observedAt = now.toISOString();
-	const [erpResult, transfersResult] = await Promise.allSettled([
+	const [erpResult, transfersResult, transferRequestsResult] = await Promise.allSettled([
 		readSupplyBackfillErpSources(erp),
 		readSupplyBackfillTransferSource(client),
+		readSupplyBackfillTransferRequestSource(client),
 	]);
-	const emptyErp: Omit<SupplyBackfillRawSources, 'transferItems'> = { materialRequests: [], purchaseOrders: [], purchaseReceipts: [], stockEntries: [] };
+	const emptyErp: Omit<SupplyBackfillRawSources, 'transferItems' | 'transferRequestItems'> = { materialRequests: [], purchaseOrders: [], purchaseReceipts: [], stockEntries: [] };
 	const raw: SupplyBackfillRawSources = {
 		...(erpResult.status === 'fulfilled' ? erpResult.value : emptyErp),
 		transferItems: transfersResult.status === 'fulfilled' ? transfersResult.value : [],
+		transferRequestItems: transferRequestsResult.status === 'fulfilled' ? transferRequestsResult.value : [],
 	};
 	const snapshot = buildSupplyMirrorSnapshot(raw, observedAt);
 	if (erpResult.status === 'rejected') snapshot.sources.erpnext = { complete: false, records: 0, error: errorText(erpResult.reason) };
 	if (transfersResult.status === 'rejected') snapshot.sources.bitrixTransfers = { complete: false, records: 0, error: errorText(transfersResult.reason) };
+	if (transferRequestsResult.status === 'rejected') snapshot.sources.bitrixTransferRequests = { complete: false, records: 0, error: errorText(transferRequestsResult.reason) };
 	return summarizeSupplyMirrorPlan(buildSupplyMirrorPlan(snapshot));
 }

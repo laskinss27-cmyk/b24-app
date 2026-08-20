@@ -11,6 +11,7 @@ import {
 	SUPPLY_REQUEST_KEY_FIELD,
 } from '../erp/stock-transfers.js';
 import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
+import { parseTransferRequestItem, type StoredTransferRequest } from '../transfers/request-model.js';
 import { TRANSFER_DOCUMENT_FIELD, TRANSFER_PHASE_FIELD, type SupplyBackfillRawSources } from './supply-backfill-read.js';
 import type {
 	MirrorDocumentRef,
@@ -109,6 +110,33 @@ function transferDocument(raw: Record<string, unknown>, transfer: StoredTransfer
 	};
 }
 
+function transferRequestDocument(raw: Record<string, unknown>, request: StoredTransferRequest, observedAt: string): SupplyMirrorSourceDocument {
+	return {
+		...docRef('supply_request', request.id, 'bitrix'),
+		externalRevisionKey: text(raw['DATE_MODIFY'] ?? raw['MODIFIED_BY']),
+		externalStatus: request.status,
+		externalDocstatus: request.status === 'canceled' ? 2 : 0,
+		sourceCreatedAt: request.createdAt || text(raw['DATE_CREATE']) || null,
+		sourceModifiedAt: text(raw['DATE_MODIFY']) || null,
+		observedAt,
+		sourcePayload: raw,
+		lines: request.lines.map((line, index) => ({
+			lineOrdinal: index + 1,
+			erpItemCode: String(line.productId),
+			plannedQty: line.qty,
+			sourceWarehouse: request.fromStore || null,
+			targetWarehouse: request.toStore || null,
+			sourcePayload: line,
+		})),
+	};
+}
+
+function manualTransferRequestId(key: string): number | null {
+	const match = /^transfer-request:(\d+)$/.exec(key.trim());
+	const id = Number(match?.[1]);
+	return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 function byItem(documents: SupplyMirrorSourceDocument[]): Map<string, Array<{ document: SupplyMirrorSourceDocument; line: SupplyMirrorSourceDocument['lines'][number] }>> {
 	const out = new Map<string, Array<{ document: SupplyMirrorSourceDocument; line: SupplyMirrorSourceDocument['lines'][number] }>>();
 	for (const document of documents) for (const line of document.lines) {
@@ -159,6 +187,32 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		...raw.purchaseReceipts.map((row) => erpDocument(row, 'purchase_receipt', observedAt, { actual: 'qty' })),
 		...raw.stockEntries.map((row) => erpDocument(row, 'stock_entry', observedAt, { actual: 'qty' })),
 	];
+	let invalidTransferRequests = 0;
+	for (const item of raw.transferRequestItems) {
+		const parsed = parseTransferRequestItem(item);
+		if (!parsed) {
+			invalidTransferRequests += 1;
+			issues.push(issue('invalid_transfer_request_record', text(item['ID'] ?? item['id']) || 'unknown', 'transfer request JSON or ID is invalid'));
+			continue;
+		}
+		// ctv_tr_requests also contains a separate "supply" workflow. This first
+		// mirror stage only imports manager-to-warehouse transfer requests.
+		if (parsed.kind !== 'transfer') continue;
+		let invalid = false;
+		let detail: Record<string, unknown> = {};
+		try { detail = item['DETAIL_TEXT'] ? JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown> : {}; }
+		catch { /* parseTransferRequestItem already reported this path */ }
+		if (Array.isArray(detail['lines']) && detail['lines'].length !== parsed.lines.length) {
+			invalid = true;
+			issues.push(issue('invalid_transfer_request_lines', String(parsed.id), 'one or more transfer request lines failed validation'));
+		}
+		if (!parsed.lines.length) {
+			invalid = true;
+			issues.push(issue('empty_transfer_request_lines', String(parsed.id), 'transfer request has no valid lines'));
+		}
+		if (invalid) invalidTransferRequests += 1;
+		documents.push(transferRequestDocument(item, parsed, observedAt));
+	}
 	const transfers = new Map<number, StoredTransfer>();
 	let invalidTransfers = 0;
 	for (const item of raw.transferItems) {
@@ -193,7 +247,9 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 	for (const order of raw.purchaseOrders) {
 		const orderRef = docRef('purchase_order', order['name']);
 		const requestName = text(order[SUPPLY_REQUEST_FIELD]);
-		if (!requestName) continue;
+		// This sentinel is intentionally written for purchase orders created
+		// without an upstream manager request. It is not a missing document.
+		if (!requestName || requestName === '__standalone__') continue;
 		const requestRef = docRef('supply_request', requestName);
 		addLink(orderRef, requestRef, 'ordered_for_request', SUPPLY_REQUEST_FIELD, { order: order['name'], requestName, requestKey: order[SUPPLY_REQUEST_KEY_FIELD] });
 		rawLines(order).forEach((line, lineIndex) => {
@@ -229,10 +285,19 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 
 	for (const transfer of transfers.values()) {
 		const transferRef = docRef('transfer', transfer.id, 'bitrix');
-		const basis = transfer.purchaseOrder ? docRef('purchase_order', transfer.purchaseOrder) : transfer.supplyRequest ? docRef('supply_request', transfer.supplyRequest) : null;
-		if (transfer.supplyRequest) addLink(transferRef, docRef('supply_request', transfer.supplyRequest), 'transfers_for_request', 'DETAIL_TEXT.supplyRequest', transfer);
+		const hasManualRequestKey = transfer.supplyRequestKey.startsWith('transfer-request:');
+		const manualRequestId = manualTransferRequestId(transfer.supplyRequestKey);
+		const requestRef = manualRequestId
+			? docRef('supply_request', manualRequestId, 'bitrix')
+			: !hasManualRequestKey && transfer.supplyRequest && transfer.supplyRequest !== '__standalone__'
+				? docRef('supply_request', transfer.supplyRequest)
+				: null;
+		const basis = transfer.purchaseOrder ? docRef('purchase_order', transfer.purchaseOrder) : requestRef;
+		if (hasManualRequestKey && !manualRequestId) {
+			issues.push(issue('invalid_transfer_request_key', String(transfer.id), `invalid manual request key ${transfer.supplyRequestKey}`));
+		}
+		if (requestRef) addLink(transferRef, requestRef, 'transfers_for_request', manualRequestId ? 'DETAIL_TEXT.supplyRequestKey' : 'DETAIL_TEXT.supplyRequest', transfer);
 		if (transfer.purchaseOrder) addLink(transferRef, docRef('purchase_order', transfer.purchaseOrder), 'transfers_for_purchase', 'DETAIL_TEXT.purchaseOrder', transfer);
-		if (!basis) issues.push(issue('missing_transfer_basis', String(transfer.id), 'transfer has neither purchaseOrder nor supplyRequest'));
 		if (transfer.correctionOf) addLink(transferRef, docRef('transfer', transfer.correctionOf, 'bitrix'), 'corrects_transfer', 'DETAIL_TEXT.correctionOf', transfer);
 		if (basis) transfer.lines.forEach((line, lineIndex) => {
 			const source = indexedLineRef(index, basis, String(line.productId), issues, `${transfer.id}:${lineIndex + 1}`);
@@ -269,6 +334,9 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 			bitrixTransfers: invalidTransfers
 				? { complete: false, records: raw.transferItems.length, error: `${invalidTransfers} invalid transfer records` }
 				: { complete: true, records: raw.transferItems.length },
+			bitrixTransferRequests: invalidTransferRequests
+				? { complete: false, records: raw.transferRequestItems.length, error: `${invalidTransferRequests} invalid transfer request records` }
+				: { complete: true, records: raw.transferRequestItems.length },
 		},
 		documents,
 		links,

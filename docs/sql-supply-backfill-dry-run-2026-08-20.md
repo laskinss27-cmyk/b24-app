@@ -2,13 +2,13 @@
 
 ## Граница
 
-Подготовлен только owner-only диагностический путь `POST /api/admin/sql-migration/supply/dry-run`. Он читает ERPNext официальным REST API и `ctv_transfers` OAuth-контекстом владельца, строит нормализованный граф и возвращает агрегированный отчёт с blockers и стабильным hash исходного плана.
+Подготовлен только owner-only диагностический путь `POST /api/admin/sql-migration/supply/dry-run`. Развёрнутая версия читает ERPNext официальным REST API и `ctv_transfers` OAuth-контекстом владельца, строит нормализованный граф и возвращает агрегированный отчёт с blockers и стабильным hash исходного плана. Локальный follow-up дополнительно читает `ctv_tr_requests`; он ещё не закоммичен и не развёрнут.
 
 В change set отсутствуют SQL writer, checkpoint, вызов migrations, runtime-чтение workflow tables, frontend-кнопка и source switch. Bitrix/ERPNext остаются источниками текущего поведения.
 
 ## Fail-closed проверки
 
-- 403/ошибка чтения `ctv_transfers` — incomplete source, не пустой список;
+- 403/ошибка чтения `ctv_transfers` или локально добавленного `ctv_tr_requests` — incomplete source, не пустой список;
 - invalid JSON/ID/primary lines перемещения — blocker;
 - stale Material Request key, отсутствующий документ/строка, неоднозначный SKU match или дубликат identity — blocker;
 - отсутствующий `b24_request_qty` для allocation заказа — blocker;
@@ -22,6 +22,7 @@
 - промежуточный planner checkpoint: backend 190/190 и backend typecheck успешны;
 - после полного dry-run change set: backend 195/195, frontend 117/117, общий backend/frontend typecheck успешен;
 - focused planner/snapshot suite: 9/9;
+- локальный follow-up standalone/manual: исходный focused baseline 9/9 и typecheck; после изменения focused 12/12, полный backend 198/198 и общий typecheck успешны;
 - backend production build (`tsc -p tsconfig.json`) успешен;
 - `git diff --check` не нашёл ошибок.
 
@@ -50,4 +51,6 @@ Owner-only production dry-run выполнен один раз в `2026-08-20T14
 - семь отдельных несовпадений SKU между связанными Material Request / Purchase Order / Purchase Receipt / transfer;
 - четыре документа со старым immutable request key для пересозданного `MAT-MR-2026-00002`.
 
-Ни один сценарий не исправлялся и не был автоматически объявлен порчей данных. После dry-run runtime SELECT подтвердил 4 migration rows и `0|0|0|0` во всех четырёх workflow tables. Следующий change set обязан сначала корректно смоделировать standalone roots, ручные transfer requests и исторические/tombstone links, затем отдельно разобрать семь line mismatches и stale revision identity. SQL writer не проектируется до нового dry-run с объяснённым паритетом.
+Ни один сценарий не исправлялся и не был автоматически объявлен порчей данных. После dry-run runtime SELECT подтвердил 4 migration rows и `0|0|0|0` во всех четырёх workflow tables.
+
+Локальный follow-up моделирует `__standalone__` Purchase Order и перемещения без basis как допустимые корни графа. Ручная заявка `kind=transfer` читается из `ctv_tr_requests` как `bitrix:supply_request:<id>`, а связь берётся из устойчивого `transfer-request:<id>`, не из отображаемого имени. Записи `kind=supply` этим маленьким этапом не импортируются. Для пяти исчезнувших исторических transfer ID tombstone пока не создаётся: нельзя выдумывать отсутствующий payload или строки; это остаётся отдельным design gate вместе с семью line mismatches и четырьмя stale revision links. SQL writer не проектируется до нового dry-run с объяснённым паритетом.

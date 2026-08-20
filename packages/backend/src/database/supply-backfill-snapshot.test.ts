@@ -32,6 +32,7 @@ function rawSources(): SupplyBackfillRawSources {
 				supplyRequest: 'MR-1', supplyRequestKey: 'MR-1@2026-08-01 10:00:00', purchaseOrder: 'PO-1', dealId: '42', fromStore: 'Incoming', toStore: 'Target', status: 'posted', lines: [{ productId: 100, name: 'Item', qty: 2 }], acceptedLines: [{ productId: 100, name: 'Item', qty: 2 }], createdAt: '2026-08-04T09:00:00.000Z', createdById: '1858', createdByName: 'Owner', history: [],
 			}),
 		}],
+		transferRequestItems: [],
 	};
 }
 
@@ -68,6 +69,63 @@ test('stale request revision is reported instead of guessed', () => {
 	assert.ok(plan.issues.some((item) => item.code === 'stale_request_key' && item.identity === 'PO-1'));
 });
 
+test('standalone purchase orders and transfers are valid graph roots', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseReceipts = [];
+	raw.stockEntries = [];
+	raw.purchaseOrders[0]!['b24_supply_request'] = '__standalone__';
+	raw.purchaseOrders[0]!['b24_supply_request_key'] = '';
+	const transfer = JSON.parse(String(raw.transferItems[0]!['DETAIL_TEXT'])) as Record<string, unknown>;
+	transfer['supplyRequest'] = '';
+	transfer['supplyRequestKey'] = '';
+	transfer['purchaseOrder'] = '';
+	raw.transferItems[0]!['DETAIL_TEXT'] = JSON.stringify(transfer);
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.deepEqual(plan.issues, []);
+	assert.equal(plan.documents.length, 2);
+	assert.equal(plan.links.length, 0);
+	assert.equal(plan.allocations.length, 0);
+});
+
+test('manual Bitrix transfer request is a real graph document keyed by transfer-request id', () => {
+	const raw = rawSources();
+	raw.materialRequests = [];
+	raw.purchaseOrders = [];
+	raw.purchaseReceipts = [];
+	raw.stockEntries = [];
+	raw.transferRequestItems = [{
+		ID: '5', NAME: 'Заказ на перемещение #5: A → B', DETAIL_TEXT: JSON.stringify({
+			kind: 'transfer', fromStore: 'A', toStore: 'B', status: 'converted', createdAt: '2026-08-01T10:00:00.000Z',
+			lines: [{ productId: 100, name: 'Item', qty: 2 }], supplyLines: [], transferId: 10,
+		}),
+	}];
+	const transfer = JSON.parse(String(raw.transferItems[0]!['DETAIL_TEXT'])) as Record<string, unknown>;
+	transfer['supplyRequest'] = 'Заказ на перемещение #5';
+	transfer['supplyRequestKey'] = 'transfer-request:5';
+	transfer['purchaseOrder'] = '';
+	raw.transferItems[0]!['DETAIL_TEXT'] = JSON.stringify(transfer);
+
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, true);
+	assert.deepEqual(plan.issues, []);
+	assert.ok(plan.documents.some((item) => item.identity === 'bitrix:supply_request:5'));
+	assert.ok(plan.links.some((item) => item.identity === 'bitrix:transfer:10->bitrix:supply_request:5:transfers_for_request'));
+	assert.equal(plan.allocations.length, 1);
+});
+
+test('invalid Bitrix transfer request JSON makes its source incomplete', () => {
+	const raw = rawSources();
+	raw.transferRequestItems = [{ ID: '5', DETAIL_TEXT: '{broken' }];
+	const plan = buildSupplyMirrorPlan(buildSupplyMirrorSnapshot(raw, observedAt));
+	assert.equal(plan.readyToApply, false);
+	assert.equal(plan.sourceStatus.bitrixTransferRequests.complete, false);
+	assert.ok(plan.issues.some((item) => item.code === 'invalid_transfer_request_record'));
+	assert.ok(plan.issues.some((item) => item.code === 'incomplete_source' && item.identity === 'bitrixTransferRequests'));
+});
+
 test('ERP source collector uses list and get only', async () => {
 	const calls: string[] = [];
 	const erp = {
@@ -84,5 +142,6 @@ test('Bitrix access failure is an explicit non-applicable report, never an empty
 	const report = await runSupplyBackfillDryRun(erp, client, new Date(observedAt));
 	assert.equal(report.readyToApply, false);
 	assert.deepEqual(report.sources.bitrixTransfers, { complete: false, records: 0, error: 'entity.item.get: access denied' });
+	assert.deepEqual(report.sources.bitrixTransferRequests, { complete: false, records: 0, error: 'entity.item.get: access denied' });
 	assert.ok(report.issues.some((item) => item.code === 'incomplete_source'));
 });

@@ -13,6 +13,7 @@ function completeSnapshot(): SupplyMirrorSnapshot {
 		sources: {
 			erpnext: { complete: true, records: 2 },
 			bitrixTransfers: { complete: true, records: 0 },
+			bitrixTransferRequests: { complete: true, records: 0 },
 		},
 		documents: [
 			{

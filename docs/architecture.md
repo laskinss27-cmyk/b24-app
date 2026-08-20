@@ -119,6 +119,8 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 
 Read-only dry-run снаба развёрнут отдельно от workflow runtime. Он собирает полный snapshot через официальные API, строго проверяет внешние ссылки и выдаёт только агрегированный отчёт/hash; SQL-подключение и запись отсутствуют. Первый production run fail-closed остановился на legacy standalone/manual/historical links и line mismatches. Пользовательские экраны продолжают читать Bitrix/ERPNext; mirror apply, shadow comparison и source switch остаются отдельными этапами.
 
+В локальном follow-up автономные закупки/перемещения представлены корнями графа, а ручные заявки на перемещение — отдельными Bitrix `supply_request` с внешним ID записи `ctv_tr_requests` и явным ключом `transfer-request:<id>`. Отображаемое имя не используется как identity. Исторические удалённые transfer не синтезируются без отдельной проверяемой tombstone-политики. Этот follow-up ещё не развёрнут и не меняет текущий runtime.
+
 ## Будущая проекция остатков в Tilda
 
 Tilda подключается только отдельным поздним этапом и не входит в текущий SQL foundation. Поток односторонний: backend читает остаток через официальный ERPNext API, соединяет его только с `confirmed`-сопоставлениями из `b24_app` и публикует проекцию в Tilda через ограниченный интеграционный контур. Tilda не пишет остатки обратно и не используется для восстановления ERPNext.

@@ -1,6 +1,6 @@
 import type { B24Client } from '../b24/client.js';
 import { listAllEntityItems } from '../b24/entity-items.js';
-import { TRANSFERS_ENTITY } from '../b24/placement.js';
+import { TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
 import type { ErpClient } from '../erp/client.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import {
@@ -17,6 +17,7 @@ export interface SupplyBackfillRawSources {
 	purchaseReceipts: Record<string, unknown>[];
 	stockEntries: Record<string, unknown>[];
 	transferItems: Record<string, unknown>[];
+	transferRequestItems: Record<string, unknown>[];
 }
 
 async function mapConcurrent<T, R>(values: T[], concurrency: number, fn: (value: T) => Promise<R>): Promise<R[]> {
@@ -49,7 +50,7 @@ async function readFullDocuments(
 }
 
 /** Read-only source collection. It deliberately never calls any ensure/setup helper. */
-export async function readSupplyBackfillErpSources(erp: ErpClient): Promise<Omit<SupplyBackfillRawSources, 'transferItems'>> {
+export async function readSupplyBackfillErpSources(erp: ErpClient): Promise<Omit<SupplyBackfillRawSources, 'transferItems' | 'transferRequestItems'>> {
 	// Keep the production read load bounded: at most eight child-document GETs,
 	// and only one doctype scan, are active at a time.
 	const materialRequests = await readFullDocuments(erp, 'Material Request', ['name', DEAL_FIELD], [[DEAL_FIELD, '!=', '']]);
@@ -63,10 +64,15 @@ export async function readSupplyBackfillTransferSource(client: B24Client): Promi
 	return listAllEntityItems(client, TRANSFERS_ENTITY, { ID: 'ASC' });
 }
 
+export async function readSupplyBackfillTransferRequestSource(client: B24Client): Promise<Record<string, unknown>[]> {
+	return listAllEntityItems(client, TRANSFER_REQUESTS_ENTITY, { ID: 'ASC' });
+}
+
 export async function readSupplyBackfillSources(erp: ErpClient, client: B24Client): Promise<SupplyBackfillRawSources> {
-	const [erpSources, transferItems] = await Promise.all([
+	const [erpSources, transferItems, transferRequestItems] = await Promise.all([
 		readSupplyBackfillErpSources(erp),
 		readSupplyBackfillTransferSource(client),
+		readSupplyBackfillTransferRequestSource(client),
 	]);
-	return { ...erpSources, transferItems };
+	return { ...erpSources, transferItems, transferRequestItems };
 }
