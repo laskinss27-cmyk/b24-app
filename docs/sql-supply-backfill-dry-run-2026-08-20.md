@@ -2,13 +2,13 @@
 
 ## Граница
 
-Подготовлен только owner-only диагностический путь `POST /api/admin/sql-migration/supply/dry-run`. Развёрнутая версия читает ERPNext официальным REST API и `ctv_transfers` OAuth-контекстом владельца, строит нормализованный граф и возвращает агрегированный отчёт с blockers и стабильным hash исходного плана. Локальный follow-up дополнительно читает `ctv_tr_requests`; он ещё не закоммичен и не развёрнут.
+Подготовлен только owner-only диагностический путь `POST /api/admin/sql-migration/supply/dry-run`. Развёрнутая версия читает ERPNext официальным REST API, `ctv_transfers` и `ctv_tr_requests` OAuth-контекстом владельца, строит нормализованный граф и возвращает агрегированный отчёт с blockers и стабильным hash исходного плана.
 
 В change set отсутствуют SQL writer, checkpoint, вызов migrations, runtime-чтение workflow tables, frontend-кнопка и source switch. Bitrix/ERPNext остаются источниками текущего поведения.
 
 ## Fail-closed проверки
 
-- 403/ошибка чтения `ctv_transfers` или локально добавленного `ctv_tr_requests` — incomplete source, не пустой список;
+- 403/ошибка чтения `ctv_transfers` или `ctv_tr_requests` — incomplete source, не пустой список;
 - invalid JSON/ID/primary lines перемещения — blocker;
 - stale Material Request key, отсутствующий документ/строка, неоднозначный SKU match или дубликат identity — blocker;
 - отсутствующий `b24_request_qty` для allocation заказа — blocker;
@@ -30,7 +30,7 @@
 
 ## Следующий gate
 
-Сначала отдельно разрешаются commit/push и read-only deploy по production runbook. После internal/public health, ERP read и network inspect dry-run вызывается из существующей OAuth-сессии владельца. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после разбора production-отчёта; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
+Отдельно выбрать проверяемую модель для пяти исчезнувших исторических transfer ID, не выдумывая их исходный payload и строки. Затем отдельными change sets разобрать семь SKU mismatch и четыре stale revision links. Любой blocker оставляет SQL tables пустыми. Mirror writer проектируется только после нового dry-run с объяснённым паритетом; его deploy/apply и тем более source switch требуют новых отдельных разрешений.
 
 ## Production deploy и первый dry-run
 
@@ -53,4 +53,18 @@ Owner-only production dry-run выполнен один раз в `2026-08-20T14
 
 Ни один сценарий не исправлялся и не был автоматически объявлен порчей данных. После dry-run runtime SELECT подтвердил 4 migration rows и `0|0|0|0` во всех четырёх workflow tables.
 
-Локальный follow-up моделирует `__standalone__` Purchase Order и перемещения без basis как допустимые корни графа. Ручная заявка `kind=transfer` читается из `ctv_tr_requests` как `bitrix:supply_request:<id>`, а связь берётся из устойчивого `transfer-request:<id>`, не из отображаемого имени. Записи `kind=supply` этим маленьким этапом не импортируются. Для пяти исчезнувших исторических transfer ID tombstone пока не создаётся: нельзя выдумывать отсутствующий payload или строки; это остаётся отдельным design gate вместе с семью line mismatches и четырьмя stale revision links. SQL writer не проектируется до нового dry-run с объяснённым паритетом.
+Follow-up `38ce403` моделирует `__standalone__` Purchase Order и перемещения без basis как допустимые корни графа. Ручная заявка `kind=transfer` читается из `ctv_tr_requests` как `bitrix:supply_request:<id>`, а связь берётся из устойчивого `transfer-request:<id>`, не из отображаемого имени. Записи `kind=supply` этим маленьким этапом не импортируются.
+
+## Второй production dry-run
+
+Image `b24-app:38ce403` развёрнут с сохранением `b24-backend-prev-before-38ce403` (`b24-app:98eee50`). Internal/public health, readiness, ERP read, state mount, port, restart policy и `erpnext_frappe_network` успешны; restart count 0. Один owner OAuth dry-run выполнен в `2026-08-20T15:06:45.424Z`, после чего SSH tunnel закрыт и browser runtime с OAuth token сброшен.
+
+Все три источника прочитаны полностью: ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5`. План `cdad4b534ea4e17cb0973cd04ee7e36fc66609e35e45fcc113b9c8c597eea876` содержит 505 documents / 991 lines / 508 links / 705 allocations и 35 errors. Изменение данных между двумя запуска́ми отражает продолжающуюся рабочую эксплуатацию, поэтому абсолютные counts не используются как статичный fixture.
+
+Ожидаемые 29 ложных blockers исчезли без новых issue: 15 standalone transfers, 6 проявлений виртуального `__standalone__` и 8 проявлений трёх ручных transfer requests. Остались ровно исходные независимые группы:
+
+- 24 проявления пяти отсутствующих transfer ID: 12 missing document links + 12 missing line matches;
+- 7 SKU line mismatches в существующих связанных документах;
+- 4 stale request keys для пересозданного `MAT-MR-2026-00002`.
+
+`readyToApply=false`. Независимый post-check подтвердил `B24_APP_DB_MODE=readiness`, 4 migration rows и `0|0|0|0` во всех workflow tables. Для пяти исчезнувших исторических transfer ID tombstone пока не создаётся: нельзя выдумывать отсутствующий payload или строки. SQL writer не проектируется до нового dry-run с объяснённым паритетом.

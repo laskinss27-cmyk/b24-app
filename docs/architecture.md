@@ -119,7 +119,7 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 
 Read-only dry-run снаба развёрнут отдельно от workflow runtime. Он собирает полный snapshot через официальные API, строго проверяет внешние ссылки и выдаёт только агрегированный отчёт/hash; SQL-подключение и запись отсутствуют. Первый production run fail-closed остановился на legacy standalone/manual/historical links и line mismatches. Пользовательские экраны продолжают читать Bitrix/ERPNext; mirror apply, shadow comparison и source switch остаются отдельными этапами.
 
-В локальном follow-up автономные закупки/перемещения представлены корнями графа, а ручные заявки на перемещение — отдельными Bitrix `supply_request` с внешним ID записи `ctv_tr_requests` и явным ключом `transfer-request:<id>`. Отображаемое имя не используется как identity. Исторические удалённые transfer не синтезируются без отдельной проверяемой tombstone-политики. Этот follow-up ещё не развёрнут и не меняет текущий runtime.
+В развёрнутом read-only follow-up автономные закупки/перемещения представлены корнями графа, а ручные заявки на перемещение — отдельными Bitrix `supply_request` с внешним ID записи `ctv_tr_requests` и явным ключом `transfer-request:<id>`. Отображаемое имя не используется как identity. Второй dry-run устранил все 29 ожидаемых standalone/manual blockers без новых issue; пользовательский runtime и SQL source-of-truth не менялись. Исторические удалённые transfer не синтезируются без отдельной проверяемой tombstone-политики.
 
 ## Будущая проекция остатков в Tilda
 
