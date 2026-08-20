@@ -215,16 +215,25 @@ docker compose -p erpnext -f pwd.yml up -d
 
 ## Backups
 
-The production crontab runs `/srv/b24-service/core-backup.sh`. The exact schedule is managed outside the repository. A database dump is created daily; public and private file archives are added periodically. Retention and external-storage policies are held in private configuration.
+The verified production crontab runs `/root/sync/core-backup.sh` daily at 12:00. It creates an ERPNext bench site backup, adds files weekly, uploads through Bitrix24 Drive, and retains 14 database/4 file backups. Re-read the effective crontab and script before every operational change; this path is not a portable default for a new server.
 
 Verification:
 
 ```bash
-tail -100 /srv/b24-service/core-backup.log
-ls -lhtr /srv/b24-backups | tail
+crontab -l
+sed -n '1,240p' /root/sync/core-backup.sh
+find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 ```
 
 `sync.sh` is retained as a migration tool, but is absent from the production crontab and does not run automatically.
+
+### Separate `b24_app` database
+
+Bench backup does not include the separate `b24_app` database. Before its first authoritative write, extend the effective backup job with a consistent dump, archive/checksum validation, external copy and retention, then complete a restore drill into a separately named temporary database. Runtime, migrator and backup must use separate least-privilege accounts; the backend never receives root credentials. The authoritative staged gate is documented in [the SQL migration plan](../sql-migration.md).
+
+### Current `/app/state` status
+
+The 2026-08-20 read-only audit confirmed `/srv/b24-state:/app/state`, but found no copy of that directory in `core-backup.sh`, a separate cron entry, or a backup timer. Contracts, contract sequences, templates and the operation log must not be described as recoverable from the ERPNext backup. Treat state backup and its restore drill as a separate change rather than combining it with SQL provisioning.
 
 ## ERPNext recovery
 

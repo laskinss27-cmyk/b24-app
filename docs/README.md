@@ -20,6 +20,8 @@
 | [failure-map.md](failure-map.md) | зависимость функций от Битрикс24, backend и ERPNext |
 | [scripts.md](scripts.md) | безопасное использование служебных скриптов |
 | [sklad-vynos.md](sklad-vynos.md) | границы складского ядра и правила работы с данными |
+| [sql-migration.md](sql-migration.md) | поэтапный план `b24_app`, source-of-truth matrix и backup/rollback gates |
+| [sql-preflight-2026-08-20.md](sql-preflight-2026-08-20.md) | read-only проверка production и change set перед provision |
 | [b24-rest-grabli.md](b24-rest-grabli.md) | проверенные особенности REST API Битрикс24 |
 
 ## Документы решений и история

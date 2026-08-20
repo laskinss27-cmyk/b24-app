@@ -7,6 +7,7 @@
 | Метод и путь | Назначение |
 |---|---|
 | `GET /health` | состояние процесса backend |
+| `GET /ready` | readiness необязательной `b24_app`: `disabled`, `up` или HTTP 503 `down` |
 | `GET|POST /app/handler` | основной вход локального приложения |
 | `POST /install` | установка и первичная привязка placement |
 | `POST /uninstall` | уведомление об удалении приложения |

@@ -9,6 +9,7 @@ Example public base URL: `https://app.example.com`. The production value is mana
 | Method and path | Purpose |
 |---|---|
 | `GET /health` | backend process status |
+| `GET /ready` | optional `b24_app` readiness: `disabled`, `up`, or HTTP 503 `down` |
 | `GET|POST /app/handler` | main local-application entry point |
 | `POST /install` | installation and initial placement binding |
 | `POST /uninstall` | application-removal notification |

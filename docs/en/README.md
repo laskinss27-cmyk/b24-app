@@ -20,6 +20,8 @@ This documentation describes the production system running on the corporate VPS.
 | [failure-map.md](failure-map.md) | feature dependencies on Bitrix24, the backend, and ERPNext |
 | [scripts.md](scripts.md) | safe use of operational scripts |
 | [sklad-vynos.md](sklad-vynos.md) | inventory-core boundaries and data-handling rules |
+| [SQL migration plan (Russian)](../sql-migration.md) | staged `b24_app` source-of-truth, backup, restore, and rollback gates |
+| [SQL production preflight (Russian)](../sql-preflight-2026-08-20.md) | read-only production evidence and the proposed change set |
 | [b24-rest-grabli.md](b24-rest-grabli.md) | verified Bitrix24 REST API behaviour and pitfalls |
 
 ## Decision records and history

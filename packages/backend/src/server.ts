@@ -1,10 +1,13 @@
 import 'dotenv/config';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { loadDatabaseConfig } from './database/config.js';
+import { createDatabaseRuntime } from './database/runtime.js';
 
 const config = loadConfig();
+const database = createDatabaseRuntime(loadDatabaseConfig());
 
-const app = await buildApp({ config });
+const app = await buildApp({ config, database });
 
 try {
 	const address = await app.listen({ port: config.port, host: config.host });

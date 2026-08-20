@@ -7,3 +7,12 @@
 - Treat every filesystem path in `docs/runbook.md` as a placeholder unless private production configuration confirms it. When updating an existing `b24-backend`, derive its effective environment, `/app/state` source, and public URL from the running container as documented; never assume an env-file path.
 - After every deployment, verify all three checks: `GET /health` internally, `GET /health` through the public entry point, and a read-only request from `b24-backend` to ERPNext. The two HTTP health checks alone do not prove that the backend can reach the core.
 - Do not consider a deployment complete until `docker inspect b24-backend` confirms membership in `erpnext_frappe_network`.
+
+## b24_app SQL migration
+
+- Keep `B24_APP_DB_MODE=off` unless a user explicitly authorizes the next production step. Never run migrations automatically at backend startup.
+- Never read or write ERPNext tables directly. ERPNext stock and submitted accounting documents remain accessible only through the official ERPNext API.
+- Do not run a production `b24_app` migration, backfill, shadow write, source switch, or deploy without an explicit user command. Preserve the Bitrix entity-store pagination path as fallback until parity is proven.
+- Use separate least-privilege runtime, migration, and backup users for `b24_app`; never give MariaDB root credentials to the application.
+- Bench backups do not include the separate `b24_app` database. Before authoritative SQL writes, extend the verified `/root/sync/core-backup.sh`, complete a restore drill, record the result, and confirm rollback as described in `docs/sql-migration.md`.
+- Preserve frozen inventory snapshots. Movements after inventory opening are compensated in the physical-count workflow and do not make the stored snapshot stale data to rewrite.

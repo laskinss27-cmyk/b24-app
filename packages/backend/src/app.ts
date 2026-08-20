@@ -6,7 +6,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import formbody from '@fastify/formbody';
 import fastifyStatic from '@fastify/static';
 import type { Config } from './config.js';
-import { registerHealthRoute } from './routes/health.js';
+import type { DatabaseRuntime } from './database/runtime.js';
+import { registerHealthRoute, registerReadinessRoute } from './routes/health.js';
 import { registerInstallRoute } from './routes/install.js';
 import { registerUninstallRoute } from './routes/uninstall.js';
 import { registerPlacementDealTabRoute } from './routes/placement-deal-tab.js';
@@ -53,9 +54,10 @@ const FRONTEND_DIST = resolve(__dirname, '..', '..', 'frontend', 'dist');
 
 export interface AppOptions {
 	config: Config;
+	database?: DatabaseRuntime;
 }
 
-export async function buildApp({ config }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ config, database }: AppOptions): Promise<FastifyInstance> {
 	const app = Fastify({
 		// Фото ремонтов едут data-URL'ами в JSON (превью ужимается на клиенте), поэтому поднимаем
 		// лимит тела с дефолтных 1МБ. Документы (Word/Excel/PDF) грузятся на Диск Б24 ссылкой
@@ -114,6 +116,8 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerOperationLog(app);
 
 	registerHealthRoute(app);
+	registerReadinessRoute(app, database);
+	if (database) app.addHook('onClose', async () => database.close());
 	registerInstallRoute(app);
 	registerUninstallRoute(app);
 	registerPlacementDealTabRoute(app);

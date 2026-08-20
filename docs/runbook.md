@@ -213,16 +213,27 @@ docker compose -p erpnext -f pwd.yml up -d
 
 ## Резервное копирование
 
-В рабочем crontab настроен запуск `/srv/b24-service/core-backup.sh`. Точное расписание хранится вне репозитория. Каждый день создаётся дамп БД; периодически добавляются публичные и приватные файлы. Политика ротации и внешнего хранения задаётся закрытой конфигурацией.
+По подтверждённому production-аудиту рабочий cron запускает `/root/sync/core-backup.sh` ежедневно в 12:00. Скрипт делает bench site backup ERPNext, раз в неделю добавляет файлы, выгружает результат на Диск Битрикс24 и сохраняет 14 DB/4 file backups. Перед операцией всё равно заново проверить фактический crontab и содержимое скрипта: путь не является переносимой настройкой нового сервера.
 
 Проверка:
 
 ```bash
-tail -100 /srv/b24-service/core-backup.log
-ls -lhtr /srv/b24-backups | tail
+crontab -l
+sed -n '1,240p' /root/sync/core-backup.sh
+find /root/sync -maxdepth 2 -type f -name '*.log' -o -name '*.sql.gz'
 ```
 
 `sync.sh` сохранён как миграционный инструмент, но в рабочем crontab отсутствует и автоматически не запускается.
+
+### Отдельная база `b24_app`
+
+Bench backup не включает отдельную базу `b24_app`. До её первых авторитетных записей оператор обязан расширить фактический backup script отдельным consistent dump, проверкой архива/checksum, внешней копией и retention, а затем выполнить restore drill в отдельную временную БД. Runtime, migrator и backup используют разных ограниченных пользователей; root не передаётся backend.
+
+Полный gate, порядок восстановления и отката описаны в [sql-migration.md](sql-migration.md). На текущем этапе `B24_APP_DB_MODE=off`, поэтому существующий production backup не изменяется этой локальной работой.
+
+### Текущее состояние `/app/state`
+
+Read-only аудит 2026-08-20 подтвердил bind mount `/srv/b24-state:/app/state`, но не нашёл его копирования в `core-backup.sh`, отдельном cron или backup timer. Это отдельный существующий риск: договоры, contract sequences, шаблоны и operation log нельзя считать восстановимыми из описанного выше ERPNext backup. Исправление state backup не смешивать с SQL provision; провести отдельный restore drill и только после него обновить этот статус.
 
 ## Восстановление ERPNext
 
