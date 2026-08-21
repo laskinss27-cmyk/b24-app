@@ -22,6 +22,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 Седьмой production dry-run на `4579048` получил те же 510 documents / 991 lines / 518 links / 705 allocations, 0 errors и 22 historical warnings. Две последние связи доказаны как старые app-canceled draft PO с точными request keys; document links сохранены, line allocations не придуманы. `readyToApply=true` означает паритет read-only плана, а не разрешение на запись. Post-check снова подтвердил 4 migration rows и 0 domain rows.
 
+21 августа локально подготовлен [атомарный supply mirror writer](sql-supply-mirror-writer-2026-08-21.md) и append-only migration `0005` для checkpoint. Реальная изолированная MariaDB 11.8 проверка подтвердила DDL, idempotency, update, rollback и запрет DDL для DML-only user. Этот код не развёрнут: production всё ещё содержит только `0001`-`0004`, 4 migration rows и 0 domain rows; backfill credential и HTTP apply route отсутствуют.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |
@@ -74,7 +76,7 @@ Read-only аудит снаба сузил и локально зафиксир�
 - `workflow_document_links`: направленная типизированная связь между документами;
 - `workflow_line_allocations`: количественная связь строк для split между несколькими закупками, приёмками и перемещениями.
 
-`workflow_events`/idempotency относятся к этапу 4, а `sync_jobs`/checkpoints добавляются вместе с управляемым backfill. Они не входят в первый DDL «на всякий случай». Точные поля, ограничения и relation types перечислены в [аудите домена](sql-supply-domain-audit-2026-08-20.md).
+`workflow_events`/business idempotency относятся к этапу 4. Узкий технический `supply_mirror_checkpoints` подготовлен локально вместе с управляемым writer и хранит только hash/cardinalities/timestamps, без JSON payload и scheduler. Общий `sync_jobs` пока не добавляется. Точные поля, ограничения и relation types перечислены в [аудите домена](sql-supply-domain-audit-2026-08-20.md).
 
 Отдельно от workflow-каркаса будущей интеграции Tilda нужна специализированная таблица `tilda_product_mappings`, а не новый файл в `/app/state`. Минимальные поля-кандидаты: уникальные `tilda_uid` и `tilda_external_id`, `tilda_sku`, nullable внешние ссылки `erp_item_code`/`erp_product_id`, `mapping_status` (`confirmed`, `unresolved`, `ignored`), явный тип строки parent/variant, nullable `parent_tilda_uid` и variant metadata, `audit_source`, `created_at`, `updated_at`, `last_seen_at` и nullable `confirmed_at`. Точный состав variant metadata и типы колонок определяются по исходному экспорту до миграции; универсальный payload «на всякий случай» не добавляется. Уникальность ERP-ссылки и SKU заранее не предполагается, пока аудит не подтвердит кардинальности.
 
@@ -85,9 +87,10 @@ Read-only аудит снаба сузил и локально зафиксир�
 ## Безопасность и роли
 
 - MariaDB root не используется приложением, миграциями или backup job.
-- `b24_app_runtime`: доступ только к `b24_app`; на текущем этапе нужен лишь connect/readiness, позже выдаются только необходимые DML-права.
+- `b24_app_runtime`: постоянный read-only доступ только к `b24_app`; на текущем этапе используется лишь для readiness и не получает workflow DML.
 - `b24_app_migrator`: отдельный секрет и DDL-права только на `b24_app`; отсутствует в постоянном env контейнера.
 - `b24_app_backup`: отдельный read-only секрет для dump.
+- `b24_app_backfill`: будущий one-shot credential только с `SELECT/INSERT/UPDATE`, без DDL/`DELETE`; отсутствует в постоянном env и ещё не создан в production.
 - имя хоста базы берётся из проверенной production-конфигурации; имя контейнера не считается стабильным DNS-контрактом.
 - backend по-прежнему запускается в `erpnext_frappe_network`, но никогда не пишет напрямую в ERPNext schema.
 
@@ -105,14 +108,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES
 GRANT SELECT, SHOW VIEW, TRIGGER ON b24_app.* TO 'b24_app_backup'@'<BACKUP_HOST_PART>';
 ```
 
-Runtime DML-права не выдаются заранее: `INSERT/UPDATE/DELETE` добавляются по таблицам только на этапе первого разрешённого writer. Provision базы и users выполняет существующая DBA-роль, не MariaDB root из backend-команд.
+Runtime DML-права не выдаются: первый mirror apply использует отдельный one-shot backfill credential только с `SELECT/INSERT/UPDATE` на пяти supply tables. `DELETE` writer не использует. Provision базы и users выполняет существующая DBA-роль, не MariaDB root из backend-команд.
 
 ## Миграции и readiness
 
 - `GET /health` не изменён и проверяет процесс backend.
 - `GET /ready` при `B24_APP_DB_MODE=off` возвращает database `disabled`; при `readiness` выполняет `SELECT 1` и отдаёт 503 при недоступности.
 - `npm -w @b24-app/backend run db:migrate` — только ручная команда. Она требует отдельные `B24_APP_MIGRATION_DB_USER/PASSWORD`, advisory lock и проверяет checksum уже применённых файлов.
-- каталог `packages/backend/migrations` содержит применённые `0001`-`0004` для supply identity/graph mirror. Production runner 2026-08-20 записал их точные filenames/checksums в `b24_app_schema_migrations`; четыре domain tables остаются пустыми и runtime их не читает/не пишет.
+- каталог `packages/backend/migrations` содержит применённые production `0001`-`0004` для supply identity/graph mirror и локальную неприменённую `0005` для checkpoint. Production runner 2026-08-20 записал только первые четыре filenames/checksums в `b24_app_schema_migrations`; четыре domain tables остаются пустыми и runtime их не читает/не пишет.
 - после применения файл миграции неизменяем; исправление оформляется новой миграцией.
 
 ## Обязательный gate перед авторитетными записями
@@ -180,7 +183,7 @@ Production restore требует остановить записи прилож
 9. Read-only аудит семи line mismatch завершён: две live draft-связки не имеют доказанного соответствия, пять historical downstream-связок имеют явные document links, но не доказанные line allocations. Узкая warning-модель прошла focused `22/22`, полный backend `208/208`, typecheck и production dry-run `6 errors / 17 warnings`; SQL domain rows остались нулевыми.
 10. Четыре stale revisions разобраны как одна старая canceled версия переиспользованного request name. Fail-closed модель прошла focused `26/26`, полный backend `212/212`, typecheck, commit/deploy и шестой production dry-run; ожидаемая дельта подтверждена, SQL domain rows остались нулевыми.
 11. Две последние `missing_line_match` официально разобраны как старые app-canceled draft PO с точными request keys. Evidence-only модель прошла focused `29/29`, backend `215/215`, typecheck, commit/deploy и седьмой production dry-run; подтверждены 0 errors / 22 warnings и нулевые SQL domain rows.
-12. Следующий отдельный change set: спроектировать и протестировать идемпотентный mirror writer/checkpoint локально. Production backfill apply остаётся отдельным разрешаемым gate и не переключает чтения.
+12. Идемпотентный mirror writer/checkpoint подготовлен локально: focused `41/41`, backend `220/220`, общий typecheck и изолированный MariaDB 11.8 rehearsal успешны. Migration `0005`, credential, deploy и production apply не выполнялись.
 13. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 14. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 

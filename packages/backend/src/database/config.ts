@@ -48,3 +48,15 @@ export function loadMigrationDatabaseConfig(env: NodeJS.ProcessEnv = process.env
 	if (!user || !password) throw new Error('Separate B24_APP_MIGRATION_DB_USER/PASSWORD are required');
 	return { ...runtime, user, password };
 }
+
+/** Manual mirror writes use a DML-only account, never runtime or migration credentials. */
+export function loadBackfillDatabaseConfig(env: NodeJS.ProcessEnv = process.env): Exclude<DatabaseConfig, { mode: 'off' }> {
+	const runtime = loadDatabaseConfig(env);
+	if (runtime.mode === 'off') throw new Error('B24_APP_DB_MODE=readiness is required for manual backfill');
+	const user = String(env['B24_APP_BACKFILL_DB_USER'] ?? '').trim();
+	const password = String(env['B24_APP_BACKFILL_DB_PASSWORD'] ?? '');
+	if (!user || !password) throw new Error('Separate B24_APP_BACKFILL_DB_USER/PASSWORD are required');
+	if (user === runtime.user) throw new Error('Backfill database user must differ from runtime user');
+	if (user === String(env['B24_APP_MIGRATION_DB_USER'] ?? '').trim()) throw new Error('Backfill database user must differ from migration user');
+	return { ...runtime, user, password };
+}

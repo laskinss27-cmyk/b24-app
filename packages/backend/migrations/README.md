@@ -11,6 +11,11 @@ idempotent second runner invocation. This rehearsal did not connect to the
 production database. Provision every target database explicitly as
 `utf8mb4/utf8mb4_unicode_ci`; do not rely on the MariaDB image default.
 
+`0005` adds only an atomic supply mirror checkpoint keyed by the deterministic
+plan hash. It does not add a startup job, writer permission, data rows, or a
+source switch. It remains unapplied until a separate migration rehearsal,
+backup gate and explicit production authorization.
+
 Future files must use `NNNN_short_name.sql`, be append-only after application,
 and contain one idempotent MariaDB statement per file. A changed checksum stops
 the runner. The first production run independently verified columns, indexes,

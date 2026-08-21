@@ -46,7 +46,7 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 | служебная память отдельных процессов | entity-хранилища Битрикс24 |
 | публичный остаток Tilda (будущая односторонняя проекция) | ERPNext; Tilda не становится источником правды |
 
-Точная карта entity stores, `/app/state`, связей ERPNext и поэтапного перехода на отдельную базу приведена в [sql-migration.md](sql-migration.md). На текущем этапе runtime использует `b24_app` только как readiness dependency: ограниченное соединение выполняет `SELECT 1`. Четыре пустые supply identity/graph tables уже созданы ручными migrations, но workflow-чтений, backfill и записей в них нет.
+Точная карта entity stores, `/app/state`, связей ERPNext и поэтапного перехода на отдельную базу приведена в [sql-migration.md](sql-migration.md). На текущем этапе runtime использует `b24_app` только как readiness dependency: ограниченное соединение выполняет `SELECT 1`. Четыре пустые supply identity/graph tables уже созданы ручными migrations, но workflow-чтений, backfill и записей в них нет. Локальный writer/checkpoint-каркас существует только в source tree и не развёрнут.
 
 Регулярного зеркалирования остатков из Битрикс24 в ERPNext нет. Старые миграционные скрипты не являются частью рабочего контура.
 
@@ -117,7 +117,9 @@ Frontend собирается в `packages/frontend/dist`; backend отдаёт 
 
 Первым проверен домен снаба: production-кардинальности требуют нормализованных документов, строк, типизированных document links и количественных line allocations. Точные наблюдения и граница change set приведены в [read-only аудите снаба](sql-supply-domain-audit-2026-08-20.md). Четыре one-statement DDL migrations применены отдельным ручным runner и независимо сверены при 0 domain rows; текущий workflow не изменён.
 
-Read-only dry-run снаба развёрнут отдельно от workflow runtime. Он собирает полный snapshot через официальные API, строго проверяет внешние ссылки и выдаёт только агрегированный отчёт/hash; SQL-подключение и запись отсутствуют. Первый production run fail-closed остановился на legacy standalone/manual/historical links и line mismatches. Пользовательские экраны продолжают читать Bitrix/ERPNext; mirror apply, shadow comparison и source switch остаются отдельными этапами.
+Read-only dry-run снаба развёрнут отдельно от workflow runtime. Он собирает полный snapshot через официальные API, строго проверяет внешние ссылки и выдаёт только агрегированный отчёт/hash; production SQL-подключение и запись отсутствуют. Седьмой production dry-run подтвердил полный план с 0 errors / 22 historical warnings. Пользовательские экраны продолжают читать Bitrix/ERPNext; mirror apply, shadow comparison и source switch остаются отдельными этапами.
+
+Локальный mirror writer применяет только план без errors и с тремя полными источниками. Весь граф и checkpoint по детерминированному plan hash записываются одной транзакцией под MariaDB lock; ошибка откатывает весь проход, повтор того же hash является no-op. Отсутствующие в новом snapshot старые строки не удаляются: актуальный срез определяется `observed_at` последнего checkpoint. Отдельный one-shot backfill credential имеет только `SELECT/INSERT/UPDATE`; runtime остаётся read-only, migrator — DDL-only. Миграция checkpoint, создание production credential и первый apply требуют независимых разрешений.
 
 В развёрнутом read-only follow-up автономные закупки/перемещения представлены корнями графа, а ручные заявки на перемещение — отдельными Bitrix `supply_request` с внешним ID записи `ctv_tr_requests` и явным ключом `transfer-request:<id>`. Отображаемое имя не используется как identity. Второй dry-run устранил все 29 ожидаемых standalone/manual blockers без новых issue; пользовательский runtime и SQL source-of-truth не менялись. Исторические удалённые transfer не синтезируются без отдельной проверяемой tombstone-политики.
 

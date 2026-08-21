@@ -13,6 +13,7 @@
 - Keep `B24_APP_DB_MODE=off` unless a user explicitly authorizes the next production step. Never run migrations automatically at backend startup.
 - Never read or write ERPNext tables directly. ERPNext stock and submitted accounting documents remain accessible only through the official ERPNext API.
 - Do not run a production `b24_app` migration, backfill, shadow write, source switch, or deploy without an explicit user command. Preserve the Bitrix entity-store pagination path as fallback until parity is proven.
-- Use separate least-privilege runtime, migration, and backup users for `b24_app`; never give MariaDB root credentials to the application.
+- Use separate least-privilege runtime, migration, backup, and one-shot backfill users for `b24_app`; never give MariaDB root credentials to the application. The backfill user must not have DDL or `DELETE` and must never be placed in the permanent backend environment.
+- A mirror apply must remain manual, atomic, guarded by a deterministic checkpoint, and fail closed for incomplete/error plans. Never add a startup writer or silently retry a different plan.
 - Bench backups do not include the separate `b24_app` database. Before authoritative SQL writes, extend the verified `/root/sync/core-backup.sh`, complete a restore drill, record the result, and confirm rollback as described in `docs/sql-migration.md`.
 - Preserve frozen inventory snapshots. Movements after inventory opening are compensated in the physical-count workflow and do not make the stored snapshot stale data to rewrite.

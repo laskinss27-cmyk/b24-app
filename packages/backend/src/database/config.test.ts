@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadDatabaseConfig, loadMigrationDatabaseConfig } from './config.js';
+import { loadBackfillDatabaseConfig, loadDatabaseConfig, loadMigrationDatabaseConfig } from './config.js';
 
 test('application database stays disabled by default', () => {
 	assert.deepEqual(loadDatabaseConfig({}), { mode: 'off' });
@@ -31,4 +31,30 @@ test('manual migrations require separate credentials', () => {
 		B24_APP_DB_USER: 'b24_app_runtime',
 		B24_APP_DB_PASSWORD: 'secret',
 	}), /Separate B24_APP_MIGRATION_DB_USER\/PASSWORD are required/);
+});
+
+test('manual backfill requires its own credential', () => {
+	const base = {
+		B24_APP_DB_MODE: 'readiness',
+		B24_APP_DB_HOST: 'db.internal',
+		B24_APP_DB_USER: 'b24_app_runtime',
+		B24_APP_DB_PASSWORD: 'runtime-secret',
+	};
+	assert.throws(() => loadBackfillDatabaseConfig(base), /Separate B24_APP_BACKFILL_DB_USER\/PASSWORD are required/);
+	assert.throws(() => loadBackfillDatabaseConfig({
+		...base,
+		B24_APP_BACKFILL_DB_USER: 'b24_app_runtime',
+		B24_APP_BACKFILL_DB_PASSWORD: 'backfill-secret',
+	}), /must differ from runtime user/);
+	assert.throws(() => loadBackfillDatabaseConfig({
+		...base,
+		B24_APP_MIGRATION_DB_USER: 'b24_app_migrator',
+		B24_APP_BACKFILL_DB_USER: 'b24_app_migrator',
+		B24_APP_BACKFILL_DB_PASSWORD: 'backfill-secret',
+	}), /must differ from migration user/);
+	assert.equal(loadBackfillDatabaseConfig({
+		...base,
+		B24_APP_BACKFILL_DB_USER: 'b24_app_backfill',
+		B24_APP_BACKFILL_DB_PASSWORD: 'backfill-secret',
+	}).user, 'b24_app_backfill');
 });

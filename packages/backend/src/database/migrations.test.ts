@@ -31,16 +31,17 @@ test('migration filenames have a stable version prefix', async () => {
 	}
 });
 
-test('supply mirror schema is four ordered DDL-only statements', async () => {
+test('supply mirror schema is five ordered DDL-only statements', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
 	assert.deepEqual(migrations.map((migration) => migration.filename), [
 		'0001_create_workflow_documents.sql',
 		'0002_create_workflow_document_lines.sql',
 		'0003_create_workflow_document_links.sql',
 		'0004_create_workflow_line_allocations.sql',
+		'0005_create_supply_mirror_checkpoints.sql',
 	]);
 	for (const migration of migrations) {
-		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS workflow_[a-z_]+ \(/);
+		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_)[a-z_]+ \(/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
 		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
@@ -52,7 +53,7 @@ test('supply mirror schema is four ordered DDL-only statements', async () => {
 
 test('supply mirror schema preserves external identity and explicit graph links', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
-	const [documents, lines, links, allocations] = migrations.map((migration) => migration.sql);
+	const [documents, lines, links, allocations, checkpoints] = migrations.map((migration) => migration.sql);
 
 	assert.match(documents!, /UNIQUE KEY uq_workflow_documents_external \(external_system, document_type, external_id\)/);
 	assert.match(documents!, /external_revision_key VARCHAR\(255\)/);
@@ -78,4 +79,9 @@ test('supply mirror schema preserves external identity and explicit graph links'
 	assert.match(allocations!, /allocation_type IN \('ordered', 'received', 'transferred', 'fulfilled', 'cancelled'\)/);
 	assert.match(allocations!, /quantity > 0/);
 	assert.match(allocations!, /source_line_id <> target_line_id/);
+
+	assert.match(checkpoints!, /UNIQUE KEY uq_supply_mirror_checkpoints_hash \(plan_hash\)/);
+	assert.match(checkpoints!, /plan_hash BINARY\(32\) NOT NULL/);
+	assert.match(checkpoints!, /document_count INT UNSIGNED NOT NULL/);
+	assert.doesNotMatch(checkpoints!, /\bJSON\b/i);
 });

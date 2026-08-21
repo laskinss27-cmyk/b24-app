@@ -270,6 +270,8 @@ Commit `4579048` опубликован и развёрнут как read-only `
 
 Один полный owner OAuth dry-run в `2026-08-20T18:38:35.406Z` прочитал ERPNext `392`, `ctv_transfers` `110`, `ctv_tr_requests` `5` и построил 510 documents / 991 lines / 518 links / 705 allocations, 0 errors и 22 warnings; plan hash `beb0d8563674cefeff40b78fa7969e37e2572c3ec0bf96cdfefcc250cf9b1881`. Production log содержит ровно один вход и один `complete`. Post-check подтвердил runtime без migration credentials, 4 migration rows и SQL domain rows `0|0|0|0`. `readyToApply=true` не запускал writer/backfill/source switch; OAuth runtime и временные файлы удалены.
 
+21 августа локально подготовлены migration `0005` и атомарный supply mirror writer/checkpoint. Изолированный MariaDB 11.8 rehearsal подтвердил первый apply, no-op повтор, update существующих identities, полный rollback и DML-only grants. На production этот change set не применялся: текущий image остаётся `b24-app:4579048`, migration rows `4`, SQL domain rows `0|0|0|0`, backfill user отсутствует, workflow продолжает читать Bitrix/ERPNext. Подробности — в [`sql-supply-mirror-writer-2026-08-21.md`](sql-supply-mirror-writer-2026-08-21.md).
+
 ### Текущее состояние `/app/state`
 
 Read-only аудит 2026-08-20 подтвердил bind mount `/srv/b24-state:/app/state`, но не нашёл его копирования в `core-backup.sh`, отдельном cron или backup timer. Это отдельный существующий риск: договоры, contract sequences, шаблоны и operation log нельзя считать восстановимыми из описанного выше ERPNext backup. Исправление state backup не смешивать с SQL provision; провести отдельный restore drill и только после него обновить этот статус.
