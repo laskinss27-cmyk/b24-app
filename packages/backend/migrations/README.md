@@ -13,8 +13,9 @@ production database. Provision every target database explicitly as
 
 `0005` adds only an atomic supply mirror checkpoint keyed by the deterministic
 plan hash. It does not add a startup job, writer permission, data rows, or a
-source switch. It remains unapplied until a separate migration rehearsal,
-backup gate and explicit production authorization.
+source switch. It was applied to production by a separately authorized
+one-shot runner on 2026-08-21; the checkpoint table was empty before and after
+the post-DDL backup/restore drill.
 
 Future files must use `NNNN_short_name.sql`, be append-only after application,
 and contain one idempotent MariaDB statement per file. A changed checksum stops

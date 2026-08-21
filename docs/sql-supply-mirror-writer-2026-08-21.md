@@ -20,7 +20,7 @@
 
 ## Migration `0005`
 
-Append-only one-statement migration создаёт только `supply_mirror_checkpoints`: plan hash, source cardinalities, row counts, warning count, observed/applied timestamps. JSON, scheduler, payload storage и source switch не добавляются. Production по-прежнему содержит только применённые `0001`-`0004`, 4 migration rows и четыре пустые domain tables.
+Append-only one-statement migration создаёт только `supply_mirror_checkpoints`: plan hash, source cardinalities, row counts, warning count, observed/applied timestamps. JSON, scheduler, payload storage и source switch не добавляются. После отдельного разрешения production содержит применённые `0001`-`0005`, 5 migration rows и пять пустых workflow/checkpoint tables.
 
 ## Проверки до и после
 
@@ -44,7 +44,7 @@ Append-only one-statement migration создаёт только `supply_mirror_c
 1. Проверить diff, создать commit и опубликовать его — выполнено: `d46475d` в `origin/main`.
 2. До production DDL создать свежий safety backup, проверить checksum/external read-back и committed hash `0005` — выполнено отдельным preflight ниже.
 3. Отдельно создать ограниченного production backfill user и независимо проверить grants — выполнено, см. ниже.
-4. Применить только `0005`, повторить backup/restore drill уже с checkpoint table.
+4. Применить только `0005`, повторить backup/restore drill уже с checkpoint table — выполнено, временная restore-схема сохранена до отдельного cleanup.
 5. Только новым разрешением выполнить один полный mirror apply; после него сверить counts, hashes и выборочные graph chains, не переключая чтения.
 6. После нескольких успешных shadow comparisons отдельно проектировать SQL read path с Bitrix fallback.
 
@@ -63,3 +63,22 @@ Commit `d46475d` опубликован в `origin/main`, но backend не ра
 Независимая проверка через отдельный `mariadb:11.8` container подтвердила login, текущую базу `b24_app`, пять доступных таблиц и четыре migration rows. Фактические `DELETE` и `CREATE TABLE` получили отказ; schema privileges вне `b24_app` равны нулю. До и после проверки counts были `0|0|0|0|4`, probe table отсутствует. Internal/public health, readiness `up`, официальный ERPNext GET, `erpnext_frappe_network`, image `b24-app:4579048`, running state и restart count 0 подтверждены после provision. Migration `0005`, deploy, mirror apply и source switch не выполнялись; временные operator scripts удалены.
 
 Первая команда cleanup не выполнилась из-за ошибки кавычек PowerShell до исполнения удалённого shell body. Исправленная команда удалила четыре точных временных файла; production runtime и SQL-состояние этот операторский артефакт не затронул.
+
+## Production migration `0005` и restore drill
+
+Непосредственно перед DDL повторный preflight подтвердил safety dump `20260821_072214-b24_app-database.sql.gz`, свободные backup locks, 5 tables / 4 migrations, отсутствие checkpoint и domain rows `0|0|0|0`, `B24_APP_DB_MODE=readiness`, отсутствие migration/backfill credentials в backend env, internal/public health, readiness, ERPNext API и network.
+
+One-shot image `b24-app:migrate-d46475d-0005` собран из clean archive commit `d46475d`; внутри независимо подтверждены ровно `0001`-`0005` и SHA-256 `0005` `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. Container `b24-app-migrate-d46475d-0005` применил только `0005` и завершился `exit 0`. Production после DDL: 6 tables / 5 migrations, 12 checkpoint columns, 3 index rows, 2 CHECK, InnoDB `utf8mb4_unicode_ci`, checkpoint 0 и workflow rows `0|0|0|0`.
+
+Полный job создал `/root/core-backups/b24_app/20260821_074553-b24_app-database.sql.gz`, 2782 bytes и 6 table definitions. Checksum/gzip, Bitrix Disk upload/read-back и marker успешны; IDs dump `103730`, checksum `103728`. Dump содержит checkpoint DDL и migration `0005`, но не содержит workflow/checkpoint INSERT.
+
+Официальный restore drill восстановил dump только в `b24_app_restore_20260821_074553`, source остался на 6 tables. Независимые signatures production/restore совпали: `utf8mb4/utf8mb4_unicode_ci`, 6 tables, 66 columns, 37 index rows, 5 FK, 22 CHECK, 5 migration rows и counts `0|0|0|0|0`. Временная restore schema, exited runner и migration image намеренно сохранены до отдельного cleanup-разрешения. Staging scripts/archive удалены. Финальный post-check подтвердил backend `b24-app:4579048`, running, restart 0, network, health/readiness и ERP read. Deploy, mirror apply, shadow read и source switch не выполнялись.
+
+После документации повторены полный backend test `220/220`, workspace typecheck и `git diff --check`; все успешны. Прежнее npm warning о deprecated single-hyphen `-ws` не исправлялось.
+
+### Посторонние наблюдения этапа
+
+- Первый Windows `git archive` преобразовал LF migration в CRLF. Archive checksum совпал с переданным файлом, но migration hash не совпал с committed `885e…`; fail-closed build остановился до image и DDL. Повторный archive с `core.autocrlf=false`/`core.eol=lf` побайтово совпал с Git blob.
+- Первая LF-valid build-попытка не оставила image; повтор из того же проверенного archive успешно использовал Docker cache. В build output остались прежние предупреждения: `undici@8.4.1` требует Node `>=22.19.0` при image Node `20.20.2`, npm сообщил 2 moderate/2 high dependency vulnerabilities, Vite — chunk больше 500 kB. Они не исправлялись в SQL-этапе.
+- После успешной сборки диагностический `find -printf` не поддерживался BusyBox. Точный hash уже прошёл, а список пяти migration files независимо подтверждён через `ls`; runner запускался только после этой проверки.
+- Три вспомогательные команды с `$()`/`${…}` или shell loop были остановлены локальным PowerShell parsing/quoting до полезного remote body. Исправленные команды без подстановок прошли; production DDL/DML и runtime эти операторские ошибки не затронули.

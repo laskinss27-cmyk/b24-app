@@ -22,7 +22,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 Седьмой production dry-run на `4579048` получил те же 510 documents / 991 lines / 518 links / 705 allocations, 0 errors и 22 historical warnings. Две последние связи доказаны как старые app-canceled draft PO с точными request keys; document links сохранены, line allocations не придуманы. `readyToApply=true` означает паритет read-only плана, а не разрешение на запись. Post-check снова подтвердил 4 migration rows и 0 domain rows.
 
-21 августа подготовлен [атомарный supply mirror writer](sql-supply-mirror-writer-2026-08-21.md) и append-only migration `0005` для checkpoint; commit `d46475d` опубликован, но не развёрнут. Реальная изолированная MariaDB 11.8 проверка подтвердила DDL, idempotency, update, rollback и запрет DDL/`DELETE` для DML-only user. Production preflight создал и внешне проверил safety dump `20260821_072214-b24_app-database.sql.gz`; committed hash `0005` — `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. Production всё ещё содержит только `0001`-`0004`, 4 migration rows и 0 domain rows; backfill credential и HTTP apply route отсутствуют.
+21 августа подготовлен [атомарный supply mirror writer](sql-supply-mirror-writer-2026-08-21.md) и append-only migration `0005` для checkpoint; commit `d46475d` опубликован, но backend не развёрнут. Реальная изолированная MariaDB 11.8 проверка подтвердила DDL, idempotency, update, rollback и запрет DDL/`DELETE` для DML-only user. Production preflight создал и внешне проверил safety dump `20260821_072214-b24_app-database.sql.gz`; committed hash `0005` — `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. После отдельных разрешений создан backfill credential и применена только `0005`: production содержит 6 таблиц, 5 migration rows и 0 workflow/checkpoint rows. Post-DDL dump `20260821_074553-b24_app-database.sql.gz` прошёл внешний read-back и изолированный restore parity. HTTP apply route отсутствует, source switch не выполнялся.
 
 ## Текущая source-of-truth matrix
 
@@ -115,7 +115,7 @@ Runtime DML-права не выдаются: первый mirror apply испо
 - `GET /health` не изменён и проверяет процесс backend.
 - `GET /ready` при `B24_APP_DB_MODE=off` возвращает database `disabled`; при `readiness` выполняет `SELECT 1` и отдаёт 503 при недоступности.
 - `npm -w @b24-app/backend run db:migrate` — только ручная команда. Она требует отдельные `B24_APP_MIGRATION_DB_USER/PASSWORD`, advisory lock и проверяет checksum уже применённых файлов.
-- каталог `packages/backend/migrations` содержит применённые production `0001`-`0004` для supply identity/graph mirror и локальную неприменённую `0005` для checkpoint. Production runner 2026-08-20 записал только первые четыре filenames/checksums в `b24_app_schema_migrations`; четыре domain tables остаются пустыми и runtime их не читает/не пишет.
+- каталог `packages/backend/migrations` содержит применённые production `0001`-`0005`: первые четыре supply identity/graph tables и checkpoint. Отдельный runner 2026-08-21 применил только `0005` с hash `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`; все пять workflow/checkpoint tables пусты, runtime их не читает и не пишет.
 - после применения файл миграции неизменяем; исправление оформляется новой миграцией.
 
 ## Обязательный gate перед авторитетными записями
@@ -183,7 +183,7 @@ Production restore требует остановить записи прилож
 9. Read-only аудит семи line mismatch завершён: две live draft-связки не имеют доказанного соответствия, пять historical downstream-связок имеют явные document links, но не доказанные line allocations. Узкая warning-модель прошла focused `22/22`, полный backend `208/208`, typecheck и production dry-run `6 errors / 17 warnings`; SQL domain rows остались нулевыми.
 10. Четыре stale revisions разобраны как одна старая canceled версия переиспользованного request name. Fail-closed модель прошла focused `26/26`, полный backend `212/212`, typecheck, commit/deploy и шестой production dry-run; ожидаемая дельта подтверждена, SQL domain rows остались нулевыми.
 11. Две последние `missing_line_match` официально разобраны как старые app-canceled draft PO с точными request keys. Evidence-only модель прошла focused `29/29`, backend `215/215`, typecheck, commit/deploy и седьмой production dry-run; подтверждены 0 errors / 22 warnings и нулевые SQL domain rows.
-12. Идемпотентный mirror writer/checkpoint подготовлен локально: focused `41/41`, backend `220/220`, общий typecheck и изолированный MariaDB 11.8 rehearsal успешны. Migration `0005`, credential, deploy и production apply не выполнялись.
+12. Идемпотентный mirror writer/checkpoint подготовлен: focused `41/41`, backend `220/220`, общий typecheck и изолированный MariaDB 11.8 rehearsal успешны. Отдельный DML-only credential создан, `0005` применена one-shot runner, post-DDL backup/external read-back/restore parity успешны; writer deploy, mirror apply и source switch не выполнялись.
 13. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
 14. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
 
