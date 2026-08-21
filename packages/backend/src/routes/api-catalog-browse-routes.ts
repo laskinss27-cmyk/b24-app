@@ -37,6 +37,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 		const canEditPrices = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices)
 			&& appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
 		const canEditCard = appPermission(req, 'catalog.edit_card', legacyAccess.canEditCard);
+		const canCreateProduct = appPermission(req, 'catalog.create', legacyAccess.canCreateProduct);
 		const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 		const marketplaceMode = body.marketplaceMode === true;
 		const canEditMarketplaceOldId = marketplaceMode && (
@@ -75,6 +76,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 				stores,
 				generatedAt: data.generatedAt,
 				cached,
+				canCreateProduct,
 				canEditCard,
 				canEditPrices,
 				canEditMarketplaceOldId,

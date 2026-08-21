@@ -100,6 +100,7 @@ export function ProductBase({
 	const [marketplaceExportError, setMarketplaceExportError] = useState('');
 	const [uid, setUid] = useState('');
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
+	const [canCreateProduct, setCanCreateProduct] = useState(false);
 	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [canEditMarketplaceOldId, setCanEditMarketplaceOldId] = useState(false);
@@ -162,6 +163,7 @@ export function ProductBase({
 				setRows(base.rows);
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
+				setCanCreateProduct(base.canCreateProduct);
 				setCanEditCard(base.canEditCard);
 				setCanEditPrices(base.canEditPrices);
 				setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
@@ -218,6 +220,7 @@ export function ProductBase({
 			setRows(base.rows);
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
+			setCanCreateProduct(base.canCreateProduct);
 			setCanEditCard(base.canEditCard);
 			setCanEditPrices(base.canEditPrices);
 			setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
@@ -235,7 +238,7 @@ export function ProductBase({
 	};
 	const canQuickSale = !readOnly && permissionAllows('realizations.create', QUICKSALE_USER_IDS.includes(uid));
 	const canPrintPriceTags = permissionAllows('catalog.print_price_tags', true);
-	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canEditPrices);
+	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canCreateProduct);
 	const canExportComparison = permissionAllows('catalog.export_comparison', canEditPrices || canQuickSale);
 	const canViewSalesReport = permissionAllows('reports.sales', !readOnly);
 	const canUseAdminConsole = uid === APP_OWNER_USER_ID;

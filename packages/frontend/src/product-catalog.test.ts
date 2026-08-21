@@ -53,6 +53,7 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 	const requests = captureResponses([jsonResponse({
 		ok: true,
 		rows: [{ id: 17, iblockId: 24, name: 'Товар', isService: false, retail: null, purchase: null, total: 0, stockByStore: {} }],
+		canCreateProduct: true,
 	})]);
 
 	const result = await fetchProductBase(true, true);
@@ -69,6 +70,7 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 		stores: [],
 		generatedAt: '',
 		cached: false,
+		canCreateProduct: true,
 		canEditCard: false,
 		canEditPrices: false,
 		canEditMarketplaceOldId: false,

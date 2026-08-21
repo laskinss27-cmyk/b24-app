@@ -1,6 +1,7 @@
 import { SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
 
 export interface CatalogAccess {
+	canCreateProduct: boolean;
 	canEditCard: boolean;
 	canEditPrices: boolean;
 }
@@ -15,6 +16,11 @@ export interface CatalogAccessUser {
 
 const CATALOG_ADMIN_USER_IDS = new Set([1858, 986, 1]);
 export const CATALOG_KONSTANTIN_LASKIN_USER_ID = 1246;
+export const CATALOG_EGOR_KABARDIN_USER_ID = 22;
+const CATALOG_PRODUCT_CREATOR_USER_IDS = new Set([
+	CATALOG_KONSTANTIN_LASKIN_USER_ID,
+	CATALOG_EGOR_KABARDIN_USER_ID,
+]);
 
 function normalized(value: unknown): string {
 	return String(value ?? '')
@@ -35,16 +41,18 @@ export function catalogAccessForUser(user: CatalogAccessUser | null): CatalogAcc
 		);
 	const canEditPrices = departments.includes(SUPPLY_DEPARTMENT_ID) || isKonstantinLaskin;
 	const isPortalAdmin = user?.ADMIN === true || String(user?.ADMIN ?? '').toUpperCase() === 'Y';
+	const canEditCard = canEditPrices || isPortalAdmin || CATALOG_ADMIN_USER_IDS.has(Number(user?.ID));
 	return {
+		canCreateProduct: canEditCard || CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID)),
 		canEditPrices,
-		canEditCard: canEditPrices || isPortalAdmin || CATALOG_ADMIN_USER_IDS.has(Number(user?.ID)),
+		canEditCard,
 	};
 }
 
 /**
- * Системная запись в каталог — узкое исключение только для конкретной учётной
- * записи Константина. Совпадения имени недостаточно для делегированной записи.
+ * Системная запись в каталог — узкое исключение только для конкретных учётных
+ * записей, которым разрешено создание. Совпадения имени недостаточно.
  */
 export function canDelegateCatalogProductCreation(user: CatalogAccessUser | null): boolean {
-	return Number(user?.ID) === CATALOG_KONSTANTIN_LASKIN_USER_ID;
+	return CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID));
 }

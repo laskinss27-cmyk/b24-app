@@ -30,7 +30,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const currentUser = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
 		const legacyAccess = catalogAccessForUser(currentUser);
-		if (!appPermission(req, 'catalog.create', legacyAccess.canEditCard)) {
+		if (!appPermission(req, 'catalog.create', legacyAccess.canCreateProduct)) {
 			return reply.code(403).send({ ok: false, error: 'нет права создавать карточки товаров' });
 		}
 		const erp = ErpClient.fromEnv();

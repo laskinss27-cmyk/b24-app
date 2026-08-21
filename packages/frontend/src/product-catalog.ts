@@ -41,6 +41,8 @@ export interface ProductBaseResult {
 	generatedAt: string;
 	/** true — отдано из кэша бэкенда (не пересобиралось). */
 	cached: boolean;
+	/** Право создать новую карточку независимо от права менять существующие. */
+	canCreateProduct: boolean;
 	/** Право менять справочные поля и фото карточки независимо от цен. */
 	canEditCard: boolean;
 	/** Право менять справочные цены: отдел снабжения или Константин Ласкин. */
@@ -60,13 +62,14 @@ export async function fetchProductBase(force = false, marketplaceMode = false): 
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canCreateProduct?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return {
 		rows: json.rows ?? [],
 		stores: json.stores ?? [],
 		generatedAt: json.generatedAt ?? '',
 		cached: Boolean(json.cached),
+		canCreateProduct: Boolean(json.canCreateProduct),
 		canEditCard: Boolean(json.canEditCard),
 		canEditPrices: Boolean(json.canEditPrices),
 		canEditMarketplaceOldId: Boolean(json.canEditMarketplaceOldId),
