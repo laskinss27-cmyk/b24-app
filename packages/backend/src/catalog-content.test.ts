@@ -115,7 +115,7 @@ test('catalog card access is independent from price access', () => {
 		ID: 77,
 		NAME: 'Сотрудник',
 		LAST_NAME: 'Снабжения',
-		UF_DEPARTMENT: [10],
+		UF_DEPARTMENT: [12],
 	}), { canEditCard: true, canEditPrices: true });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1,
