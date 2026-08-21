@@ -41,9 +41,17 @@ Append-only one-statement migration создаёт только `supply_mirror_c
 
 ## Следующие отдельные gates
 
-1. Проверить diff и создать commit только по явной команде.
-2. До production DDL: свежий safety backup, checksum/read-back и rehearsal точного `0005` hash.
+1. Проверить diff, создать commit и опубликовать его — выполнено: `d46475d` в `origin/main`.
+2. До production DDL создать свежий safety backup, проверить checksum/external read-back и committed hash `0005` — выполнено отдельным preflight ниже.
 3. Отдельно создать ограниченного production backfill user и независимо проверить grants.
 4. Применить только `0005`, повторить backup/restore drill уже с checkpoint table.
 5. Только новым разрешением выполнить один полный mirror apply; после него сверить counts, hashes и выборочные graph chains, не переключая чтения.
 6. После нескольких успешных shadow comparisons отдельно проектировать SQL read path с Bitrix fallback.
+
+## Production preflight перед `0005`
+
+Commit `d46475d` опубликован в `origin/main`, но backend не развёртывался и остался на `b24-app:4579048`. Committed checksum `0005_create_supply_mirror_checkpoints.sql` — `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`; он совпадает с hash, прошедшим локальный MariaDB 11.8 rehearsal.
+
+Один явно разрешённый safety job создал `/root/core-backups/b24_app/20260821_072214-b24_app-database.sql.gz` размером 2513 bytes. Локальные `gzip -t` и SHA-256 успешны; Bitrix Disk upload/read-back подтверждён для dump ID `103718` и checksum ID `103716`. Dump содержит ровно пять текущих table definitions, четыре migration metadata rows, не содержит `supply_mirror_checkpoints` и domain INSERT.
+
+До и после backup production подтвердил `B24_APP_DB_MODE=readiness`, отсутствие migration/backfill credentials в runtime, internal/public health, readiness `up`, официальный ERPNext GET, image `b24-app:4579048`, restart count 0, migrations `0001`-`0004` и SQL domain rows `0|0|0|0`. Backup lock освобождён, временные diagnostic-файлы удалены. Migration `0005`, backfill user, deploy, mirror apply и source switch не выполнялись.

@@ -272,6 +272,8 @@ Commit `4579048` опубликован и развёрнут как read-only `
 
 21 августа локально подготовлены migration `0005` и атомарный supply mirror writer/checkpoint. Изолированный MariaDB 11.8 rehearsal подтвердил первый apply, no-op повтор, update существующих identities, полный rollback и DML-only grants. На production этот change set не применялся: текущий image остаётся `b24-app:4579048`, migration rows `4`, SQL domain rows `0|0|0|0`, backfill user отсутствует, workflow продолжает читать Bitrix/ERPNext. Подробности — в [`sql-supply-mirror-writer-2026-08-21.md`](sql-supply-mirror-writer-2026-08-21.md).
 
+Перед `0005` commit `d46475d` опубликован без deploy. Safety job `20260821_072214-b24_app-database.sql.gz` (2513 bytes) прошёл локальные gzip/checksum и Bitrix Disk read-back, IDs `103718/103716`; dump содержит пять текущих tables, четыре migration rows и 0 domain rows. Hash committed `0005` — `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. Post-check подтвердил internal/public health, readiness, ERPNext read, `b24-app:4579048`, restart count 0 и отсутствие migration/backfill env. Migration, credential, deploy и backfill не выполнялись.
+
 ### Текущее состояние `/app/state`
 
 Read-only аудит 2026-08-20 подтвердил bind mount `/srv/b24-state:/app/state`, но не нашёл его копирования в `core-backup.sh`, отдельном cron или backup timer. Это отдельный существующий риск: договоры, contract sequences, шаблоны и operation log нельзя считать восстановимыми из описанного выше ERPNext backup. Исправление state backup не смешивать с SQL provision; провести отдельный restore drill и только после него обновить этот статус.

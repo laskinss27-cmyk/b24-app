@@ -22,7 +22,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 Седьмой production dry-run на `4579048` получил те же 510 documents / 991 lines / 518 links / 705 allocations, 0 errors и 22 historical warnings. Две последние связи доказаны как старые app-canceled draft PO с точными request keys; document links сохранены, line allocations не придуманы. `readyToApply=true` означает паритет read-only плана, а не разрешение на запись. Post-check снова подтвердил 4 migration rows и 0 domain rows.
 
-21 августа локально подготовлен [атомарный supply mirror writer](sql-supply-mirror-writer-2026-08-21.md) и append-only migration `0005` для checkpoint. Реальная изолированная MariaDB 11.8 проверка подтвердила DDL, idempotency, update, rollback и запрет DDL для DML-only user. Этот код не развёрнут: production всё ещё содержит только `0001`-`0004`, 4 migration rows и 0 domain rows; backfill credential и HTTP apply route отсутствуют.
+21 августа подготовлен [атомарный supply mirror writer](sql-supply-mirror-writer-2026-08-21.md) и append-only migration `0005` для checkpoint; commit `d46475d` опубликован, но не развёрнут. Реальная изолированная MariaDB 11.8 проверка подтвердила DDL, idempotency, update, rollback и запрет DDL/`DELETE` для DML-only user. Production preflight создал и внешне проверил safety dump `20260821_072214-b24_app-database.sql.gz`; committed hash `0005` — `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. Production всё ещё содержит только `0001`-`0004`, 4 migration rows и 0 domain rows; backfill credential и HTTP apply route отсутствуют.
 
 ## Текущая source-of-truth matrix
 
