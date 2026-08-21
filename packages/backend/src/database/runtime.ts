@@ -1,9 +1,11 @@
 import mariadb, { type Pool } from 'mariadb';
 import type { DatabaseConfig } from './config.js';
+import { readLatestSupplyMirrorSnapshot, type StoredSupplyMirrorSnapshot } from './supply-mirror-reader.js';
 
 export interface DatabaseRuntime {
 	readonly mode: DatabaseConfig['mode'];
 	ping(): Promise<void>;
+	readLatestSupplyMirrorSnapshot(): Promise<StoredSupplyMirrorSnapshot | null>;
 	close(): Promise<void>;
 }
 
@@ -27,6 +29,7 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 		return {
 			mode: 'off',
 			async ping() {},
+			async readLatestSupplyMirrorSnapshot() { return null; },
 			async close() {},
 		};
 	}
@@ -36,6 +39,9 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 		mode: config.mode,
 		async ping() {
 			await pool.query('SELECT 1 AS ok');
+		},
+		async readLatestSupplyMirrorSnapshot() {
+			return readLatestSupplyMirrorSnapshot(pool);
 		},
 		async close() {
 			await pool.end();

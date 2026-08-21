@@ -66,7 +66,7 @@ export function summarizeSupplyMirrorPlan(plan: SupplyMirrorPlan): SupplyBackfil
 	};
 }
 
-export async function runSupplyBackfillDryRun(erp: ErpClient, client: B24Client, now = new Date()): Promise<SupplyBackfillDryRunReport> {
+export async function buildCurrentSupplyMirrorPlan(erp: ErpClient, client: B24Client, now = new Date()): Promise<SupplyMirrorPlan> {
 	const observedAt = now.toISOString();
 	const [erpResult, transfersResult, transferRequestsResult] = await Promise.allSettled([
 		readSupplyBackfillErpSources(erp),
@@ -83,5 +83,9 @@ export async function runSupplyBackfillDryRun(erp: ErpClient, client: B24Client,
 	if (erpResult.status === 'rejected') snapshot.sources.erpnext = { complete: false, records: 0, error: errorText(erpResult.reason) };
 	if (transfersResult.status === 'rejected') snapshot.sources.bitrixTransfers = { complete: false, records: 0, error: errorText(transfersResult.reason) };
 	if (transferRequestsResult.status === 'rejected') snapshot.sources.bitrixTransferRequests = { complete: false, records: 0, error: errorText(transferRequestsResult.reason) };
-	return summarizeSupplyMirrorPlan(buildSupplyMirrorPlan(snapshot));
+	return buildSupplyMirrorPlan(snapshot);
+}
+
+export async function runSupplyBackfillDryRun(erp: ErpClient, client: B24Client, now = new Date()): Promise<SupplyBackfillDryRunReport> {
+	return summarizeSupplyMirrorPlan(await buildCurrentSupplyMirrorPlan(erp, client, now));
 }

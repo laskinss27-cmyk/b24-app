@@ -20,26 +20,29 @@ const ConfigSchema = z.object({
 	devWebhook: z.string().url().optional(),
 	/** Узкая системная запись карточки товара после Access Denied у разрешённого пользователя. */
 	catalogWriteWebhook: z.string().url().optional(),
+	/** Ручное owner-only сравнение актуального supply graph с SQL mirror. */
+	supplyShadowCompare: z.enum(['off', 'on']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-export function loadConfig(): Config {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 	const parsed = ConfigSchema.safeParse({
-		port: process.env['PORT'],
-		host: process.env['HOST'],
-		portalDomain: process.env['PORTAL_DOMAIN'],
-		publicBaseUrl: process.env['PUBLIC_BASE_URL'],
-		appSectionUrl: process.env['APP_SECTION_URL'],
-		inventoryNotify: process.env['INVENTORY_NOTIFY'],
-		appClientId: process.env['APP_CLIENT_ID'],
-		appClientSecret: process.env['APP_CLIENT_SECRET'],
-		appSecret: process.env['APP_SECRET'],
-		autozadachiWebhook: process.env['AUTOZADACHI_WEBHOOK'],
-		devWebhook: process.env['DEV_WEBHOOK'],
-		catalogWriteWebhook: process.env['CATALOG_WRITE_WEBHOOK'],
-		nodeEnv: process.env['NODE_ENV'],
+		port: env['PORT'],
+		host: env['HOST'],
+		portalDomain: env['PORTAL_DOMAIN'],
+		publicBaseUrl: env['PUBLIC_BASE_URL'],
+		appSectionUrl: env['APP_SECTION_URL'],
+		inventoryNotify: env['INVENTORY_NOTIFY'],
+		appClientId: env['APP_CLIENT_ID'],
+		appClientSecret: env['APP_CLIENT_SECRET'],
+		appSecret: env['APP_SECRET'],
+		autozadachiWebhook: env['AUTOZADACHI_WEBHOOK'],
+		devWebhook: env['DEV_WEBHOOK'],
+		catalogWriteWebhook: env['CATALOG_WRITE_WEBHOOK'],
+		supplyShadowCompare: env['B24_APP_SUPPLY_SHADOW_COMPARE'],
+		nodeEnv: env['NODE_ENV'],
 	});
 
 	if (!parsed.success) {

@@ -13,6 +13,7 @@ test('process health keeps its existing response contract', async () => {
 		publicBaseUrl: 'https://app.example.com',
 		appSectionUrl: '',
 		inventoryNotify: 'off',
+		supplyShadowCompare: 'off',
 		nodeEnv: 'test',
 	};
 	const app = Fastify();
@@ -45,6 +46,7 @@ test('readiness fails explicitly when an enabled database is down', async () => 
 	const database: DatabaseRuntime = {
 		mode: 'readiness',
 		async ping() { throw new Error('secret connection details'); },
+		async readLatestSupplyMirrorSnapshot() { return null; },
 		async close() {},
 	};
 	const app = Fastify();

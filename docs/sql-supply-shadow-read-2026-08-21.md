@@ -1,8 +1,10 @@
-# Supply shadow-read: локальный фундамент
+# Supply shadow-read и ручной endpoint
 
 ## Граница change set
 
 Добавлены только два изолированных backend-модуля: read-only SQL reader последнего supply mirror snapshot и чистый parity comparator. Они не подключены к server, HTTP route, startup, scheduler или пользовательскому workflow. Новых env, migrations и SQL-записей нет. Production и source-of-truth matrix не менялись.
+
+Следующий отдельный change set (на момент этой записи локальный, ещё без commit/deploy) подключает comparator только к ручному `POST /api/admin/sql-migration/supply/shadow-compare`. До чтения проверяются OAuth точного владельца, `B24_APP_SUPPLY_SHADOW_COMPARE=on` и SQL runtime mode `readiness`. Default флага — `off`; route не имеет UI, scheduler или startup-вызова, не получает migration/backfill credential и не выполняет DML. Одновременно разрешён только один полный scan.
 
 ## Read contract
 
@@ -27,8 +29,11 @@ Reader восстанавливает стабильные document/line/link/al
 
 Первый production build остановился только из-за Windows sandbox `Access is denied` при чтении Vite config; повтор той же команды вне sandbox прошёл. Прежние npm warning о deprecated single-hyphen `-ws` и Vite warning о chunk больше 500 kB не исправлялись в этом этапе.
 
+Перед endpoint change set тот же focused SQL/supply baseline прошёл `49/49`. После добавления строгого env gate и шести route/config regression tests расширенный набор прошёл `55/55`; полный backend — `235/235`, workspace typecheck и production build успешны. Новая MariaDB rehearsal не требовалась: schema, SQL reader queries и comparator не менялись, а endpoint не имеет write path. Прежний Vite warning о chunk больше 500 kB оставлен как постороннее наблюдение.
+
 ## Следующие отдельные gates
 
-1. Отдельным решением commit/push локального фундамента.
-2. Новым change set добавить только owner-only ручной shadow endpoint/runner с default-off gate; ответ workflow всегда оставить Bitrix/ERP.
-3. Только после разрешённого deploy и нескольких успешных production comparisons проектировать SQL read path с Bitrix fallback.
+1. Отдельным решением commit/push и deploy endpoint с сохранением `B24_APP_SUPPLY_SHADOW_COMPARE=off`.
+2. Отдельно пересоздать backend с флагом `on`, выполнить один owner OAuth comparison и записать полный результат; workflow всё время оставить на Bitrix/ERP.
+3. Если snapshot ожидаемо устарел, отдельно согласовать новый неавторитетный mirror apply и повторить compare, не исправляя расхождения вслепую.
+4. Только после нескольких успешных production `match` проектировать SQL read path с Bitrix fallback.

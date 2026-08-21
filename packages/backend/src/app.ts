@@ -42,6 +42,7 @@ import { registerApiAdminDealDocumentsRoute } from './routes/api-admin-deal-docu
 import { registerApiAdminDealFulfillmentRoute } from './routes/api-admin-deal-fulfillment.js';
 import { registerApiAdminControlRoute } from './routes/api-admin-control.js';
 import { registerApiAdminSupplyBackfillRoute } from './routes/api-admin-supply-backfill.js';
+import { registerApiAdminSupplyShadowRoute } from './routes/api-admin-supply-shadow.js';
 import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -139,6 +140,7 @@ export async function buildApp({ config, database }: AppOptions): Promise<Fastif
 	registerApiAdminDealFulfillmentRoute(app);
 	registerApiAdminControlRoute(app);
 	registerApiAdminSupplyBackfillRoute(app);
+	registerApiAdminSupplyShadowRoute(app, database);
 	registerApiTransfersRoute(app);
 	registerApiStockRoute(app);
 	registerPlacementStockRoute(app);

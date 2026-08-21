@@ -242,6 +242,8 @@ Restore drill пустого dump выполнен в `b24_app_restore_20260820_
 
 Полный gate, порядок восстановления и отката описаны в [sql-migration.md](sql-migration.md). На текущем этапе `B24_APP_DB_MODE=readiness`; это dependency probe без переключения источников. ERPNext backup script не изменён, добавлена только независимая `b24_app` backup job.
 
+Ручной `POST /api/admin/sql-migration/supply/shadow-compare` дополнительно требует `B24_APP_SUPPLY_SHADOW_COMPARE=on` и OAuth точного владельца приложения. Без переменной безопасный default — `off`; при `B24_APP_DB_MODE=off` маршрут также закрыт. Включение флага требует отдельного согласованного пересоздания backend из фактического env текущего контейнера. Маршрут читает ERPNext только по API и SQL runtime credential только через `SELECT`, не запускает migration/backfill и не меняет ответ рабочего снаба.
+
 Disabled-каркас `b24-app:596bddb` развёрнут 2026-08-20 с сохранением предыдущего контейнера как `b24-backend-prev-before-596bddb`. После замены независимо подтверждены internal/public `/health`, `/ready` со статусом `database: disabled`, авторизованный ERPNext read, bind mount `/srv/b24-state:/app/state`, порт `127.0.0.1:3000`, restart policy `unless-stopped` и членство в `erpnext_frappe_network`. У нового контейнера `restart_count=0`; единственная переменная с префиксом `B24_APP_DB_` — `B24_APP_DB_MODE=off`. Это не переключение чтений или записей на SQL.
 
 В 11:16:38 UTC одноразовый контейнер с отдельным migrator credential выполнил ручной runner. До запуска в `b24_app` было 0 таблиц, после — ровно одна `b24_app_schema_migrations` с 0 строк; каталог образа содержал 0 доменных `.sql`. Одноразовый контейнер удалён, production backend не перезапускался и остался в `MODE=off`.
