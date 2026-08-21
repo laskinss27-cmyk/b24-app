@@ -324,7 +324,7 @@ Commit `ef4fecb` с opt-in rotating owner OAuth vault развёрнут без 
 
 После отдельного разрешения one-shot DML-only runner применил точный plan `22ad…f831` одной транзакцией; повтор того же in-memory plan был no-op. SQL теперь `552|1064|563|753|2|5`, latest sources `425|119|5`, warnings `22`, orphan counts `0|0|0`, lock свободен. Два ранних runner-прохода безопасно остановились до writer на несовместимых диагностических запросах (`current_user` alias и отсутствующая `ROUTINE_PRIVILEGES`); counts/hash оставались прежними. Успешный runner вывел полный success JSON, а внешний shell code `1` возник только из-за проверки env до `EXIT trap`; env и `--rm` container независимо подтверждены отсутствующими, apply не повторялся. Post-apply dump `20260821_125943-b24_app-database.sql.gz` (`173731` bytes) прошёл checksum/gzip и Disk read-back, IDs `103952/103950`. Restore `b24_app_restore_20260821_125943` совпал с source по структуре, counts/latest hash и checksums всех таблиц и сохранён до cleanup. Повторный shadow compare дал точный `match`, `0` differences/errors; root-only audit `/root/b24-app-audits/20260821-130225-supply-shadow-report-match.json`, SHA-256 `8755697d248189ebb4242307c0dd8fcaa4ee6200a73647faf2411427b2f01381`. Before/after focused tests `56/56`; production `ef4fecb`, restart `0`, network/mount/port, internal/public health, readiness и ERP read зелёные, shadow flag `off`, source switch не выполнялся.
 
-### Автоматическая проекция остатков Tilda — пока выключена
+### Автоматическая проекция остатков Tilda — включена 2026-08-21
 
 Локальный кандидат запускает ровно один reconciliation cycle и не встроен в
 startup/HTTP backend. Он требует `TILDA_STOCK_SYNC=on`, отдельный
@@ -368,6 +368,47 @@ one-shot, оставив рабочий `b24-backend` без restart.
 проходам пересекаться. Ошибка чтения, изменение формы каталога или отсутствие
 ERP Item завершают цикл до Tilda write. Ошибка после публикации запускает
 проверяемый rollback. Таблицу аудита при оперативном откате не удалять.
+
+Фактическая production-активация прошла все восемь ворот выше. До `0007`
+создан и проверен backup
+`/root/core-backups/b24_app/20260821_165454-b24_app-database.sql.gz`; после DDL —
+`20260821_170009-b24_app-database.sql.gz`. Второй dump восстановлен в сохранённую
+изолированную schema `b24_app_restore_20260821_170009`: совпали 8 таблиц,
+100 колонок, 51 index row, 54 constraint, 31 CHECK, все table checksum,
+7 migration rows, 177 mappings и workflow counts `552|1064|563|753|2`.
+Migration `0007` применена one-shot runner с hash
+`e779aca97b15a90286beca000b6c8ab1dac92fd72eba6aab6d1a2f0784258466`.
+
+Отдельный `b24_app_tilda_sync` имеет только `SELECT` на mappings и
+`SELECT,INSERT,UPDATE` на sync journal; `DELETE`, DDL и workflow DML отклонены.
+Root-only env `/root/b24-app-secrets/tilda-sync.env` имеет mode `0600`, wrapper
+`/root/sync/tilda-stock-sync-job.sh` — `0700` и SHA-256
+`58c943f6d36702b2c678b97c5f9cad0069cd3d2c6a9e62485d47f9866cbeed09`.
+Целевой Tilda-проект подтверждён как `Shelly Россия` (`projectid=5103503`);
+проект `Просмарт` не использовался и не изменялся.
+
+Ручной cycle из exact image `b24-app:faffa98` завершился `no_op`: 132 targets,
+0 differences, 2 сохранённые unlimited строки, projection hash
+`4889fd511f150c38441426704cf035d0263b85d22f63599663f0ee49aec82110`
+и content hash
+`9665ff7ff329cccd1553c9a6671596c4c6d79cbaba2d824963b8cc217325beea`.
+Независимый postcheck повторил `131 parents / 150 stock rows / 0 differences`;
+SQL journal содержит один успешный manual `no_op`, без `running`/`failed`.
+
+Cron установлен одной строкой `*/2 * * * *` с фиксированным образом и env path;
+предыдущий crontab сохранён в
+`/root/sync/crontab.before-tilda-sync-20260821_173353`. Первый запуск самого
+планировщика вернул `no_op`, `auditWritten=false`, доказав и исполнение, и
+idempotent dedup. Финальный postcheck: рабочий backend не заменялся и остался
+`b24-app:ef4fecb`, running, restart `0`, без Tilda credentials; internal/public
+health, readiness `database: up`, официальный ERP read и
+`erpnext_frappe_network` успешны. One-shot Tilda containers отсутствуют.
+
+Несколько операторских diagnostic-команд завершились до mutation из-за
+несовместимого SQL alias/BigInt JSON, попытки прочитать Docker env-file как
+shell-файл и двух ошибок quoting в read-only postcheck. После исправления те же
+проверки прошли; migration, mapping counts, backend и каталог не менялись этими
+неуспешными попытками.
 
 ### Текущее состояние `/app/state`
 

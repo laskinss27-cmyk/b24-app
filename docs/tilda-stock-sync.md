@@ -1,8 +1,10 @@
 # Tilda stock projection
 
-Status: mapping foundation applied to production on 2026-08-21. A separately
-authorized one-time stock-only publication reached exact ERP/Tilda parity and
-preserved the non-quantity catalog hash. No scheduler has been enabled.
+Status: production automation enabled on 2026-08-21 for the `Shelly Россия`
+project (`projectid=5103503`). A separately authorized stock-only publication
+reached exact ERP/Tilda parity and preserved the non-quantity catalog hash;
+the guarded two-minute scheduler subsequently passed its manual and scheduled
+no-op gates. The `Просмарт` project was not used or changed.
 
 ## Source of truth and identity
 
@@ -36,10 +38,11 @@ versioned 2026-08-21 seed. The seed preserves all historical Tilda SKU values.
   zero-stock Item without a `Bin` row from a missing Item, rejects an incomplete
   ERP response, clamps negative totals to zero, floors fractional totals and produces a
   CommerceML document plus a timestamp-independent SHA-256 projection hash.
-- The protocol client is used only by explicit one-shot commands: it validates the
+- The protocol client is used only by isolated worker commands: it validates the
   official connector host, maintains one authenticated session, enforces the
   advertised file limit and accepts only `import*.xml`/`offers*.xml` filenames.
-  There is no runtime publishing endpoint or enabled scheduler.
+  There is no runtime publishing endpoint; production scheduling is the external
+  guarded cron described below.
 - Outgoing incremental offer rows contain only the existing Tilda External ID
   and numeric quantity. They contain no title, SKU, description, price, image,
   URL, category or SEO value.
@@ -270,10 +273,9 @@ The temporary credential and one-shot containers were removed; production
 backend `b24-app:ef4fecb` was not replaced or restarted and remained in
 `erpnext_frappe_network`.
 
-This establishes a verified one-time parity snapshot. It does not enable a
-scheduler or automatic writes: subsequent ERP changes will require another
-authorized run until the separately reviewed lock/idempotency/audit scheduler is
-committed and deployed.
+This established the verified parity snapshot used as the scheduler activation
+baseline. The later guarded worker activation is recorded below; this historical
+publication did not itself enable a scheduler.
 
 1. Retain the exact pre-write public-catalog snapshot and generated numeric
    rollback file for the 132 reversible offers. Also export and retain a fresh
@@ -294,27 +296,29 @@ verify the public catalog again; the retained CSV remains a secondary backup.
 SQL rollback does not repair Tilda quantities, so the independent catalog
 snapshot and rollback artifact are mandatory.
 
-## Later automation
+## Production automation
 
-Automation is a later, separately authorized stage. It requires a SQL audit/run
-record, a distributed lock, projection-hash idempotency, bounded retries and an
-alert on any unresolved mapping or ERP read failure. A failed ERP read must stop
-the run; it must never be converted to an empty catalog or all-zero projection.
-CommerceML credentials remain outside Git and must be scoped only to this
-integration. The ordinary Tilda content API is GET-only and is not treated as a
-catalog stock-write API: https://help.tilda.cc/api
+Automation was separately authorized and activated only after the SQL audit/run
+record, distributed locks, projection-hash idempotency, bounded retries and
+rollback gates passed. A failed ERP read stops the run; it is never converted to
+an empty catalog or all-zero projection. CommerceML credentials remain outside
+Git and are scoped only to this integration. The ordinary Tilda content API is
+GET-only and is not treated as a catalog stock-write API:
+https://help.tilda.cc/api
 
 The intended initial cadence is a two-minute one-way reconciliation from the
 official ERPNext API to Tilda, publishing only when the projection hash changes.
 An ERP event hook may later reduce latency, but the periodic reconciliation
-remains the safety net. No scheduler is enabled yet.
+remains the safety net. Production cron now runs every two minutes from the
+version-pinned `b24-app:faffa98` image.
 
-## Disabled reconciliation candidate
+## Guarded reconciliation worker
 
-The repository now contains a disabled one-cycle worker; this is not production
-activation. `TILDA_STOCK_SYNC=on` is mandatory, and the normal backend never
-calls it at startup or through HTTP. A versioned host wrapper is also inert
-until copied to the server and explicitly added to cron.
+The repository contains a one-cycle worker that remains disabled unless
+`TILDA_STOCK_SYNC=on` is explicitly passed. The normal backend never calls it at
+startup or through HTTP. Production activation is isolated in a versioned host
+wrapper and one cron line; removing that line stops scheduling without changing
+backend or ERPNext behavior.
 
 Each cycle holds both a host `flock` and connection-scoped MariaDB `GET_LOCK`,
 then reads 150 SQL stock mappings, all 134 confirmed ERP Items through the
@@ -333,16 +337,20 @@ The existing verified rollback path runs on any publication/verification
 failure. Interrupted `running` rows are marked failed by the next lock holder.
 
 Migration `0007_create_tilda_stock_sync_runs.sql` contains only the bounded run
-journal. The future `b24_app_tilda_sync` account must be distinct from runtime,
-migration, backfill and backup roles and receive only:
+journal. The production `b24_app_tilda_sync` account is distinct from runtime,
+migration, backfill and backup roles and receives only:
 
 ```sql
 GRANT SELECT ON b24_app.tilda_product_mappings TO 'b24_app_tilda_sync'@'<SYNC_HOST_PART>';
 GRANT SELECT, INSERT, UPDATE ON b24_app.tilda_stock_sync_runs TO 'b24_app_tilda_sync'@'<SYNC_HOST_PART>';
 ```
 
-The two-minute cron is enabled only after: pre-DDL backup, manual `0007`
+The two-minute cron was enabled only after: pre-DDL backup, manual `0007`
 migration, post-DDL backup/restore drill, grant verification, a version-pinned
-manual no-op cycle and independent public parity. Rollback of scheduling is to
-remove the cron line; the normal backend and ERP workflow are unaffected. Do
-not drop the audit table as an operational rollback.
+manual no-op cycle and independent public parity. The first scheduler execution
+returned `no_op` with `auditWritten=false`; SQL retained one manual audit row and
+no `running` or `failed` rows. Public parity remained `131 parents / 150 stock
+rows / 132 reversible targets / 2 unlimited exclusions / 0 differences`, with
+the exact projection and content hashes recorded above. Rollback of scheduling
+is to remove the cron line; the normal backend and ERP workflow are unaffected.
+Do not drop the audit table as an operational rollback.
