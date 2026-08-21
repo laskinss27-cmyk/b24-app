@@ -168,7 +168,7 @@ export function SupplyDocumentDetail({ document, suppliers, busy, canDelete, onC
 						</div>
 					)}
 					<div className="supply-document-lines">
-						<table><thead><tr><th>Позиция</th><th>Количество</th><th>Цена</th><th>Сумма</th>{canReceivePurchase && <th>К приходу</th>}{canCreatePurchaseTransfer && <th>К перемещению</th>}<th aria-label="Удалить" /></tr></thead><tbody>
+						<table><thead><tr><th>Позиция</th><th>Количество</th><th>Закупочная цена, ₽</th><th>Сумма</th>{canReceivePurchase && <th>К приходу</th>}{canCreatePurchaseTransfer && <th>К перемещению</th>}<th aria-label="Удалить" /></tr></thead><tbody>
 							{purchaseLines.map((line) => {
 								const transferMax = transferAvailable.get(line.productId) ?? 0;
 								return <tr key={line.key}>

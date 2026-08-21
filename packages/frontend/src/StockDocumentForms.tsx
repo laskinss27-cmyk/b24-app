@@ -114,8 +114,8 @@ function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPric
 						<input type="number" min="0" step="any" autoFocus style={{ ...inp, width: 120 }} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
 						{withPrices && (
 							<div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-								<div><label style={fieldLabel}>Закупка ₽</label><input type="number" min="0" step="any" style={{ ...inp, width: 120 }} value={purchase} onChange={(e) => setPurchase(Number(e.target.value))} /></div>
-								<div><label style={fieldLabel}>Розница ₽ (необяз.)</label><input type="number" min="0" step="any" style={{ ...inp, width: 120 }} value={retail} onChange={(e) => setRetail(Number(e.target.value))} /></div>
+								<div><label style={fieldLabel}>Закупочная цена, ₽</label><input type="number" min="0" step="any" style={{ ...inp, width: 120 }} value={purchase} onChange={(e) => setPurchase(Number(e.target.value))} /></div>
+								<div><label style={fieldLabel}>Розничная цена, ₽ (необяз.)</label><input type="number" min="0" step="any" style={{ ...inp, width: 120 }} value={retail} onChange={(e) => setRetail(Number(e.target.value))} /></div>
 							</div>
 						)}
 					</>
@@ -171,7 +171,7 @@ export function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClos
 				<button style={btnGhost} onClick={() => setAddOpen(true)}>➕ Добавить товар</button>
 				{lines.length > 0 && (
 					<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
-						<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Закупка ₽</th><th style={TH}>Розница ₽</th><th style={TH}></th></tr></thead>
+						<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Закупочная цена, ₽</th><th style={TH}>Розничная цена, ₽</th><th style={TH}></th></tr></thead>
 						<tbody>
 							{lines.map((l) => (
 								<tr key={l.productId}>
@@ -187,7 +187,7 @@ export function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClos
 				)}
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
-				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Розница (если заполнена) уйдёт в каталог Б24. Пусто — цену не трогаем.</p>
+				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Розничная цена (если заполнена) станет текущей ценой каталога. Пусто — текущую цену не меняем.</p>
 				{addOpen && <AddItemModal withPrices onAdd={add} onClose={() => setAddOpen(false)} />}
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
