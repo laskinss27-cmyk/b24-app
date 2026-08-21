@@ -113,3 +113,9 @@ Post-apply job `/root/sync/b24-app-backup-job.sh` создал `/root/core-backu
 - Первые CRLF-копии двух read-only preflight scripts завершились служебной ошибкой `$'\r'` уже после всех проверок. Повтор с удалением CR прошёл; production это не затронуло.
 - Один диагностический `SHOW GRANTS` вывел authentication hash, не пароль, в закрытый operator output. Значение не переносилось в файлы/документацию; дальнейшие проверки выполнялись через `information_schema` только по именам privileges. Эту форму диагностики не повторять.
 - Одна локальная PowerShell-команда с pipe не дошла до remote shell, а один read-only `sed` по SSH выполнялся около 44 секунд. Оба события не меняли production.
+
+## Восстановление доступа снабжения после mirror apply
+
+Реальный вход сотрудника показал, что перенесённое из `0162f23` значение department `12` закрывает снабжение: фактический ID отдела снабжения — `10`, а `12` — сервисный центр. Commit `280e5e4` вернул только этот access constant и его fixtures, не меняя supply mirror или SQL-границы. Before/after tests: focused `10/10`, backend `221/221`, frontend `117/117`, typecheck и production build успешны.
+
+Clean image `b24-app:280e5e4` развёрнут с обязательной сетью и сохранением `b24-app:740403a` как `b24-backend-prev-before-280e5e4`. Независимый post-check подтвердил internal/public health и readiness, официальный ERP read, network/mount/port/restart policy, department `10` в image и успешные живые supply requests. SQL осталось `516|1002|527|716|1|5` с исходным checkpoint hash, `22` warnings, нулевыми orphan checks и свободным lock. Runtime по-прежнему только `readiness`; source switch не выполнялся.
