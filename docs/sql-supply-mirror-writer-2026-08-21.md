@@ -20,7 +20,7 @@
 
 ## Migration `0005`
 
-Append-only one-statement migration создаёт только `supply_mirror_checkpoints`: plan hash, source cardinalities, row counts, warning count, observed/applied timestamps. JSON, scheduler, payload storage и source switch не добавляются. После отдельного разрешения production содержит применённые `0001`-`0005`, 5 migration rows и пять пустых workflow/checkpoint tables.
+Append-only one-statement migration создаёт только `supply_mirror_checkpoints`: plan hash, source cardinalities, row counts, warning count, observed/applied timestamps. JSON, scheduler, payload storage и source switch не добавляются. После отдельных разрешений production содержит применённые `0001`-`0005`, 5 migration rows и первый неавторитетный supply mirror; точные counts приведены ниже.
 
 ## Проверки до и после
 
@@ -45,7 +45,7 @@ Append-only one-statement migration создаёт только `supply_mirror_c
 2. До production DDL создать свежий safety backup, проверить checksum/external read-back и committed hash `0005` — выполнено отдельным preflight ниже.
 3. Отдельно создать ограниченного production backfill user и независимо проверить grants — выполнено, см. ниже.
 4. Применить только `0005`, повторить backup/restore drill уже с checkpoint table — выполнено, временная restore-схема сохранена до отдельного cleanup.
-5. Только новым разрешением выполнить один полный mirror apply; после него сверить counts, hashes и выборочные graph chains, не переключая чтения.
+5. Только новым разрешением выполнить один полный mirror apply; после него сверить counts, hashes и выборочные graph chains, не переключая чтения — выполнено, см. ниже.
 6. После нескольких успешных shadow comparisons отдельно проектировать SQL read path с Bitrix fallback.
 
 ## Production preflight перед `0005`
@@ -94,3 +94,22 @@ Read-only аудит rollback подтвердил `4579048`, exit 0, отсут
 `740403a` опубликован fast-forward в `origin/main`, собран из clean LF archive и развёрнут после отдельного canary. Static image checks подтвердили department `12`, `/ready`, пять migration files, writer module и hash `0005` `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. Два ранних canary/release curl получили connection reset до готовности listener и успешно прошли встроенные retries; rollback не потребовался.
 
 Финальный независимый post-check: `b24-app:740403a`, running/restart 0, internal/public health и readiness `up`, ERP GET, state mount, localhost port, runtime env и network успешны. SQL осталось `6|5|0|0|0|0|0`; backup/restore/migration artifacts сохранены, новые логи только level 30. Rollback chain: `b24-backend-prev-before-740403a` → `b24-app:0162f23`, затем `b24-backend-prev-before-0162f23` → `b24-app:4579048`, оба exited 0. Canary, env snapshot, build directory и staging archives удалены. Mirror apply, shadow read и source switch не выполнялись.
+
+## Первый production mirror apply
+
+Перед DML повторный read-only preflight подтвердил неизменный runtime `b24-app:740403a`, restart 0, `erpnext_frappe_network`, internal/public health, readiness `up`, официальный ERPNext read, SQL `6 tables / 5 migrations / 0 domain/checkpoint rows`, свободный mirror lock и только `SELECT/INSERT/UPDATE` у `b24_app_backfill`. Локальный baseline backend перед этапом прошёл `221/221`.
+
+Свежий owner-authorized план с `observedAt=2026-08-21T09:03:35.037Z` полностью прочитал ERPNext `398`, `ctv_transfers` `110` и `ctv_tr_requests` `5`. План получил hash `181e72d285b576b9b22c00993d88eb9451ceb10f669bfcc2366a4e2cf35d02e6`, `516` documents / `1002` lines / `527` links / `716` allocations, `0` errors / `22` historical warnings и `readyToApply=true`. По сравнению с предыдущим полным планом прирост `+6/+11/+9/+11` объясняется новыми ERP records; warnings не ухудшились.
+
+После отдельного явного разрешения one-shot process передал writer точный ожидаемый hash. Одна транзакция создала `516|1002|527|716` graph rows и один checkpoint; migration count остался `5`, lock освободился, orphan checks для lines/links/allocations равны `0|0|0`. Checkpoint сохранил точные source cardinalities, counts и `22` warnings. Немедленный повтор того же hash вернул `alreadyApplied=true` и не изменил counts. Выборочно проверены полные цепочки `заявка → заказ → приёмка → перемещение → реализация`, включая `MAT-MR-2026-00057 ← PUR-ORD-2026-00095 ← MAT-PRE-2026-00130` и `PUR-ORD-2026-00095 ← 20982 ← MAT-STE-2026-00265`.
+
+Постоянный backend не менялся: image `740403a`, `B24_APP_DB_MODE=readiness`, read-only runtime credential, Bitrix/ERPNext workflow и fallback pagination остались прежними. Apply route, scheduler, shadow read и source switch не добавлялись. OAuth владельца был получен только разрешённым локальным loopback capture для одного операторского запуска; raw capture, OAuth и временный runtime env удалены сразу после проверки, one-shot containers отсутствуют.
+
+Post-apply job `/root/sync/b24-app-backup-job.sh` создал `/root/core-backups/b24_app/20260821_090845-b24_app-database.sql.gz`, `163253` bytes и 6 table definitions. Gzip/checksum, Bitrix Disk upload/read-back и marker успешны; IDs dump `103800`, checksum `103798`. Официальный restore drill восстановил dump только в `b24_app_restore_20260821_090845`. Source/restore совпали по `utf8mb4/utf8mb4_unicode_ci`, 6 tables, 66 columns, 37 indexes, 40 constraints, 22 CHECK, 5 FK, всем шести row checksums и итоговым counts/hash `516|1002|527|716|1|5|181e…d02e6`. Source не изменился. Restore schema и безопасный staging без secrets сохранены до отдельного cleanup-разрешения.
+
+### Посторонние операторские наблюдения mirror apply
+
+- Browser/Windows automation дважды остановилась до действий, потому что не смогла достаточно уверенно определить URL активного браузера. Production mutation не было; после отдельного разрешения использован узкий loopback capture.
+- Первые CRLF-копии двух read-only preflight scripts завершились служебной ошибкой `$'\r'` уже после всех проверок. Повтор с удалением CR прошёл; production это не затронуло.
+- Один диагностический `SHOW GRANTS` вывел authentication hash, не пароль, в закрытый operator output. Значение не переносилось в файлы/документацию; дальнейшие проверки выполнялись через `information_schema` только по именам privileges. Эту форму диагностики не повторять.
+- Одна локальная PowerShell-команда с pipe не дошла до remote shell, а один read-only `sed` по SSH выполнялся около 44 секунд. Оба события не меняли production.
