@@ -38,7 +38,7 @@ export function StockDocumentDetailModal({ doctype, name, printKind: requestedPr
 						</div>
 						{d.dealId ? <div style={{ marginBottom: 8 }}><StockDealCell dealId={d.dealId} ownerName={d.ownerName} /></div> : null}
 						<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-							<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>Цена ₽</th></tr></thead>
+							<thead><tr><th style={TH}>Товар</th><th style={TH}>Кол-во</th><th style={TH}>Склад</th><th style={TH}>{printKind === 'receipt' ? 'Закупочная цена, ₽' : 'Цена, ₽'}</th></tr></thead>
 							<tbody>
 								{d.items.map((it, i) => (
 									<tr key={i}><td style={TD}>{it.itemName || ('#' + it.productId)}</td><td style={TD}>{it.qty}</td><td style={TD}>{it.store || '—'}</td><td style={TD}>{it.rate ? it.rate.toLocaleString('ru-RU') : '—'}</td></tr>

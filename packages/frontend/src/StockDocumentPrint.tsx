@@ -29,7 +29,7 @@ export function StockBlank({ doc }: { doc: PrintDoc }): JSX.Element {
 						<th style={{ width: 64 }}>Код</th>
 						<th>Товар</th>
 						<th className="sb-num" style={{ width: 80 }}>Кол-во</th>
-						{doc.withMoney ? <th className="sb-num" style={{ width: 90 }}>Цена</th> : null}
+						{doc.withMoney ? <th className="sb-num" style={{ width: 90 }}>Закупочная цена</th> : null}
 						{doc.withMoney ? <th className="sb-num" style={{ width: 100 }}>Сумма</th> : null}
 					</tr>
 				</thead>

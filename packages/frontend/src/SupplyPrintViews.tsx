@@ -32,7 +32,7 @@ export function SupplyPurchasePrint({ order, name, supplier, expectedAt, lines }
 				<div><dt>Основание</dt><dd>{order.standalone ? 'Самостоятельная закупка' : order.name}</dd></div>
 			</dl>
 			<table className="supply-print-table">
-				<thead><tr><th>№</th><th>Код</th><th>Наименование</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th></tr></thead>
+				<thead><tr><th>№</th><th>Код</th><th>Наименование</th><th>Кол-во</th><th>Закупочная цена, ₽</th><th>Сумма, ₽</th></tr></thead>
 				<tbody>{lines.map((line, index) => <tr key={`${line.productId}-${index}`}><td>{index + 1}</td><td>{line.productId}</td><td>{line.itemName}</td><td className="num">{line.qty}</td><td className="num">{line.rate > 0 ? printMoney(line.rate) : '—'}</td><td className="num">{line.rate > 0 ? printMoney(line.qty * line.rate) : '—'}</td></tr>)}</tbody>
 				<tfoot><tr><td colSpan={5}>Итого</td><td className="num">{total > 0 ? `${printMoney(total)} ₽` : '—'}</td></tr></tfoot>
 			</table>
@@ -66,7 +66,7 @@ export function SupplyApprovalPrint({ order }: { order: SupplyOrderRow }): JSX.E
 			</dl>
 			{order.note && <p className="supply-print-note"><b>Комментарий:</b> {order.note}</p>}
 			<table className="supply-print-table supply-print-approval-table">
-				<thead><tr><th>Поставщик / заявка</th><th>Код</th><th>Наименование</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th></tr></thead>
+				<thead><tr><th>Поставщик / заявка</th><th>Код</th><th>Наименование</th><th>Кол-во</th><th>Закупочная цена, ₽</th><th>Сумма, ₽</th></tr></thead>
 				{purchases.map((purchase) => {
 					const subtotal = purchaseAmount(purchase);
 					return <tbody key={purchase.name}>

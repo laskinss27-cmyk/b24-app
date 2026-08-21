@@ -1,3 +1,5 @@
+import { SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
+
 export interface CatalogAccess {
 	canEditCard: boolean;
 	canEditPrices: boolean;
@@ -11,7 +13,6 @@ export interface CatalogAccessUser {
 	ADMIN?: boolean | string;
 }
 
-const SUPPLY_DEPARTMENT_ID = 10;
 const CATALOG_ADMIN_USER_IDS = new Set([1858, 986, 1]);
 export const CATALOG_KONSTANTIN_LASKIN_USER_ID = 1246;
 

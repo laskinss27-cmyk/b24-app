@@ -1,6 +1,6 @@
 import type { B24Client } from '../b24/client.js';
+import { SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
 
-const SUPPLY_DEPARTMENT_ID = 10;
 const STOCK_ADMIN_IDS = new Set(['1', '986', '1858']);
 
 export interface StockAccess {
