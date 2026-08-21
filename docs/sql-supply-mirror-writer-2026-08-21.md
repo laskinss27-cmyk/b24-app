@@ -2,7 +2,7 @@
 
 ## Граница этапа
 
-Подготовлен только локальный атомарный writer для уже существующего read-only supply plan. Production не читался и не изменялся: migration `0005` не применялась, backfill credential не создавался, SQL domain rows не записывались, backend не разворачивался, workflow по-прежнему использует Bitrix24 и официальный ERPNext API.
+Изначально был подготовлен только локальный атомарный writer для уже существующего read-only supply plan. В этом change set migration `0005` не применялась, SQL domain rows не записывались, backend не разворачивался, workflow по-прежнему использует Bitrix24 и официальный ERPNext API. Последующее отдельное создание production backfill credential зафиксировано ниже.
 
 ## Контракт writer
 
@@ -16,7 +16,7 @@
 - writer не выполняет `DELETE`: строки старого snapshot сохраняются как история, а текущий срез определяется `observed_at` последнего checkpoint;
 - writer не запускается при старте backend и не подключён к HTTP route.
 
-Отдельная функция конфигурации требует `B24_APP_BACKFILL_DB_USER/PASSWORD`, запрещает совпадение имени с runtime/migration user и не меняет постоянный runtime pool. Предполагаемые права one-shot пользователя: только `SELECT`, `INSERT`, `UPDATE` на `b24_app`; DDL и `DELETE` запрещены.
+Отдельная функция конфигурации требует `B24_APP_BACKFILL_DB_USER/PASSWORD`, запрещает совпадение имени с runtime/migration user и не меняет постоянный runtime pool. Права one-shot пользователя: только `SELECT`, `INSERT`, `UPDATE` на `b24_app`; DDL и `DELETE` запрещены.
 
 ## Migration `0005`
 
@@ -43,7 +43,7 @@ Append-only one-statement migration создаёт только `supply_mirror_c
 
 1. Проверить diff, создать commit и опубликовать его — выполнено: `d46475d` в `origin/main`.
 2. До production DDL создать свежий safety backup, проверить checksum/external read-back и committed hash `0005` — выполнено отдельным preflight ниже.
-3. Отдельно создать ограниченного production backfill user и независимо проверить grants.
+3. Отдельно создать ограниченного production backfill user и независимо проверить grants — выполнено, см. ниже.
 4. Применить только `0005`, повторить backup/restore drill уже с checkpoint table.
 5. Только новым разрешением выполнить один полный mirror apply; после него сверить counts, hashes и выборочные graph chains, не переключая чтения.
 6. После нескольких успешных shadow comparisons отдельно проектировать SQL read path с Bitrix fallback.
@@ -54,4 +54,12 @@ Commit `d46475d` опубликован в `origin/main`, но backend не ра
 
 Один явно разрешённый safety job создал `/root/core-backups/b24_app/20260821_072214-b24_app-database.sql.gz` размером 2513 bytes. Локальные `gzip -t` и SHA-256 успешны; Bitrix Disk upload/read-back подтверждён для dump ID `103718` и checksum ID `103716`. Dump содержит ровно пять текущих table definitions, четыре migration metadata rows, не содержит `supply_mirror_checkpoints` и domain INSERT.
 
-До и после backup production подтвердил `B24_APP_DB_MODE=readiness`, отсутствие migration/backfill credentials в runtime, internal/public health, readiness `up`, официальный ERPNext GET, image `b24-app:4579048`, restart count 0, migrations `0001`-`0004` и SQL domain rows `0|0|0|0`. Backup lock освобождён, временные diagnostic-файлы удалены. Migration `0005`, backfill user, deploy, mirror apply и source switch не выполнялись.
+До и после backup production подтвердил `B24_APP_DB_MODE=readiness`, отсутствие migration/backfill credentials в runtime, internal/public health, readiness `up`, официальный ERPNext GET, image `b24-app:4579048`, restart count 0, migrations `0001`-`0004` и SQL domain rows `0|0|0|0`. Backup lock освобождён, временные diagnostic-файлы удалены. На момент этого preflight migration `0005`, backfill user, deploy, mirror apply и source switch не выполнялись.
+
+## Production backfill credential
+
+21 августа после отдельного разрешения создан `b24_app_backfill`@`%`. Случайный credential сохранён только в `/root/b24-app-secrets/backfill.env` и `backfill.cnf`; оба файла принадлежат `root:root` и имеют mode `600`. Постоянный env `b24-backend` не менялся и не содержит `B24_APP_BACKFILL_DB_*`.
+
+Независимая проверка через отдельный `mariadb:11.8` container подтвердила login, текущую базу `b24_app`, пять доступных таблиц и четыре migration rows. Фактические `DELETE` и `CREATE TABLE` получили отказ; schema privileges вне `b24_app` равны нулю. До и после проверки counts были `0|0|0|0|4`, probe table отсутствует. Internal/public health, readiness `up`, официальный ERPNext GET, `erpnext_frappe_network`, image `b24-app:4579048`, running state и restart count 0 подтверждены после provision. Migration `0005`, deploy, mirror apply и source switch не выполнялись; временные operator scripts удалены.
+
+Первая команда cleanup не выполнилась из-за ошибки кавычек PowerShell до исполнения удалённого shell body. Исправленная команда удалила четыре точных временных файла; production runtime и SQL-состояние этот операторский артефакт не затронул.

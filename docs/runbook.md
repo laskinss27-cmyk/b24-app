@@ -274,6 +274,8 @@ Commit `4579048` опубликован и развёрнут как read-only `
 
 Перед `0005` commit `d46475d` опубликован без deploy. Safety job `20260821_072214-b24_app-database.sql.gz` (2513 bytes) прошёл локальные gzip/checksum и Bitrix Disk read-back, IDs `103718/103716`; dump содержит пять текущих tables, четыре migration rows и 0 domain rows. Hash committed `0005` — `885e8222db301725daf7fa3ef792ddbdc07328f0afaad5f1d6e6991e35a5fd97`. Post-check подтвердил internal/public health, readiness, ERPNext read, `b24-app:4579048`, restart count 0 и отсутствие migration/backfill env. Migration, credential, deploy и backfill не выполнялись.
 
+После отдельного разрешения 21 августа создан `b24_app_backfill`@`%` только с `SELECT/INSERT/UPDATE` на `b24_app.*`. Root-only credentials находятся в `/root/b24-app-secrets/backfill.env` и `backfill.cnf`, mode `600`; backend env их не получил. Отдельный login успешен; реальные `DELETE` и DDL отклонены, schema privileges вне `b24_app` отсутствуют. Counts до/после `0|0|0|0|4`, probe table отсутствует. Post-check подтвердил internal/public health, readiness, ERPNext API, network, `b24-app:4579048`, running/restart 0. Migration `0005`, deploy, mirror apply и source switch не выполнялись; временные scripts удалены.
+
 ### Текущее состояние `/app/state`
 
 Read-only аудит 2026-08-20 подтвердил bind mount `/srv/b24-state:/app/state`, но не нашёл его копирования в `core-backup.sh`, отдельном cron или backup timer. Это отдельный существующий риск: договоры, contract sequences, шаблоны и operation log нельзя считать восстановимыми из описанного выше ERPNext backup. Исправление state backup не смешивать с SQL provision; провести отдельный restore drill и только после него обновить этот статус.

@@ -90,7 +90,7 @@ Read-only аудит снаба сузил и локально зафиксир�
 - `b24_app_runtime`: постоянный read-only доступ только к `b24_app`; на текущем этапе используется лишь для readiness и не получает workflow DML.
 - `b24_app_migrator`: отдельный секрет и DDL-права только на `b24_app`; отсутствует в постоянном env контейнера.
 - `b24_app_backup`: отдельный read-only секрет для dump.
-- `b24_app_backfill`: будущий one-shot credential только с `SELECT/INSERT/UPDATE`, без DDL/`DELETE`; отсутствует в постоянном env и ещё не создан в production.
+- `b24_app_backfill`: one-shot credential только с `SELECT/INSERT/UPDATE`, без DDL/`DELETE`; создан отдельно 21 августа, хранится root-only и отсутствует в постоянном env.
 - имя хоста базы берётся из проверенной production-конфигурации; имя контейнера не считается стабильным DNS-контрактом.
 - backend по-прежнему запускается в `erpnext_frappe_network`, но никогда не пишет напрямую в ERPNext schema.
 
