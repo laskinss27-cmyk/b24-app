@@ -292,6 +292,10 @@ Post-apply job `/root/sync/b24-app-backup-job.sh` создал `/root/core-backu
 
 Деплой не менял SQL-режим или данные: `B24_APP_DB_MODE=readiness`, counts `516|1002|527|716|1|5`, checkpoint `181e72d285b576b9b22c00993d88eb9451ceb10f669bfcc2366a4e2cf35d02e6`, warnings `22`, orphan checks `0|0|0`, lock свободен. Source switch, shadow read, migration и mirror write не выполнялись. Rollback `b24-backend-prev-before-280e5e4` с image `b24-app:740403a` сохранён в exited 0; canary и env snapshot удалены. Первые мгновенные canary/release checks опередили готовность HTTP listener; встроенные retries прошли, откат не потребовался.
 
+Commit `2823a57` с read-only supply mirror reader/comparator foundation и точечным правом создания каталога был развёрнут без env/source switch; rollback `b24-backend-prev-before-2823a57` сохранил `b24-app:280e5e4`. Internal/public health и `/ready`, официальный ERP read, network, state, port и restart 0 прошли; comparator ещё не имел runtime route.
+
+Commit `147f876` добавил только owner-only ручной `POST /api/admin/sql-migration/supply/shadow-compare` и развёрнут с эффективным `B24_APP_SUPPLY_SHADOW_COMPARE=off`. До и после switch прошли internal/public health и `/ready` (`database: up`) и официальный ERPNext read; независимо подтверждены image, restart 0, `unless-stopped`, `/srv/b24-state:/app/state`, `127.0.0.1:3000` и `erpnext_frappe_network`. Неавторизованный endpoint отвечает `403`; config из собранного image возвращает `off`. Shadow compare, migration, mirror write и source switch не запускались. Rollback `b24-backend-prev-before-147f876` сохраняет `b24-app:2823a57` в exited state.
+
 ### Текущее состояние `/app/state`
 
 Read-only аудит 2026-08-20 подтвердил bind mount `/srv/b24-state:/app/state`, но не нашёл его копирования в `core-backup.sh`, отдельном cron или backup timer. Это отдельный существующий риск: договоры, contract sequences, шаблоны и operation log нельзя считать восстановимыми из описанного выше ERPNext backup. Исправление state backup не смешивать с SQL provision; провести отдельный restore drill и только после него обновить этот статус.

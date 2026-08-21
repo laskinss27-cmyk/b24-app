@@ -2,9 +2,9 @@
 
 ## Граница change set
 
-Добавлены только два изолированных backend-модуля: read-only SQL reader последнего supply mirror snapshot и чистый parity comparator. Они не подключены к server, HTTP route, startup, scheduler или пользовательскому workflow. Новых env, migrations и SQL-записей нет. Production и source-of-truth matrix не менялись.
+Первый change set добавил только два изолированных backend-модуля: read-only SQL reader последнего supply mirror snapshot и чистый parity comparator. В commit `2823a57` они ещё не были подключены к server, HTTP route, startup, scheduler или пользовательскому workflow. Новых migrations и SQL-записей не появилось; source-of-truth matrix не менялась.
 
-Следующий отдельный change set (на момент этой записи локальный, ещё без commit/deploy) подключает comparator только к ручному `POST /api/admin/sql-migration/supply/shadow-compare`. До чтения проверяются OAuth точного владельца, `B24_APP_SUPPLY_SHADOW_COMPARE=on` и SQL runtime mode `readiness`. Default флага — `off`; route не имеет UI, scheduler или startup-вызова, не получает migration/backfill credential и не выполняет DML. Одновременно разрешён только один полный scan.
+Commit `147f876` подключил comparator только к ручному `POST /api/admin/sql-migration/supply/shadow-compare` и развёрнут с подтверждённым production default `off`. До чтения проверяются OAuth точного владельца, `B24_APP_SUPPLY_SHADOW_COMPARE=on` и SQL runtime mode `readiness`. Route не имеет UI, scheduler или startup-вызова, не получает migration/backfill credential и не выполняет DML. Одновременно разрешён только один полный scan.
 
 ## Read contract
 
@@ -33,7 +33,6 @@ Reader восстанавливает стабильные document/line/link/al
 
 ## Следующие отдельные gates
 
-1. Отдельным решением commit/push и deploy endpoint с сохранением `B24_APP_SUPPLY_SHADOW_COMPARE=off`.
-2. Отдельно пересоздать backend с флагом `on`, выполнить один owner OAuth comparison и записать полный результат; workflow всё время оставить на Bitrix/ERP.
-3. Если snapshot ожидаемо устарел, отдельно согласовать новый неавторитетный mirror apply и повторить compare, не исправляя расхождения вслепую.
-4. Только после нескольких успешных production `match` проектировать SQL read path с Bitrix fallback.
+1. Отдельно пересоздать backend с флагом `on`, выполнить один owner OAuth comparison и записать полный результат; workflow всё время оставить на Bitrix/ERP.
+2. Если snapshot ожидаемо устарел, отдельно согласовать новый неавторитетный mirror apply и повторить compare, не исправляя расхождения вслепую.
+3. Только после нескольких успешных production `match` проектировать SQL read path с Bitrix fallback.
