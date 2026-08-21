@@ -61,6 +61,8 @@ export async function getContractContext(client: B24Client, dealId: number): Pro
 		selectedTemplateId: 'universal_work',
 		workDuration: 14,
 		workDurationUnit: 'working',
+		supplyPrepaymentPercent: 80,
+		supplyDeliveryDays: 35,
 	};
 }
 

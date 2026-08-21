@@ -85,6 +85,8 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 			objectName?: unknown;
 			workDuration?: unknown;
 			workDurationUnit?: unknown;
+			supplyPrepaymentPercent?: unknown;
+			supplyDeliveryDays?: unknown;
 		};
 		const client = clientFrom(body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
@@ -94,16 +96,25 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 		const customerKind = String(body.customerKind ?? '');
 		const workDuration = Number(body.workDuration);
 		const workDurationUnit = String(body.workDurationUnit ?? '');
+		const supplyPrepaymentPercent = Number(body.supplyPrepaymentPercent);
+		const supplyDeliveryDays = Number(body.supplyDeliveryDays);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		if (!Number.isInteger(companyId) || companyId <= 0) return reply.code(400).send({ ok: false, error: 'bad companyId' });
 		if (!['universal_work', 'supply', 'design', 'smart_home'].includes(templateId)) return reply.code(400).send({ ok: false, error: 'bad templateId' });
 		if (!['company', 'ip', 'person'].includes(customerKind)) return reply.code(400).send({ ok: false, error: 'bad customerKind' });
 		const template = CONTRACT_TEMPLATES.find((item) => item.id === templateId);
+		if (template?.id === 'supply' && customerKind === 'person') return reply.code(400).send({ ok: false, error: 'supply contract is not available for person' });
 		if (template?.usesWorkDuration && (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650)) {
 			return reply.code(400).send({ ok: false, error: 'bad workDuration' });
 		}
 		if (template?.usesWorkDuration && workDurationUnit !== 'calendar' && workDurationUnit !== 'working') {
 			return reply.code(400).send({ ok: false, error: 'bad workDurationUnit' });
+		}
+		if (template?.usesSupplyTerms && (!Number.isInteger(supplyPrepaymentPercent) || supplyPrepaymentPercent < 0 || supplyPrepaymentPercent > 100)) {
+			return reply.code(400).send({ ok: false, error: 'bad supplyPrepaymentPercent' });
+		}
+		if (template?.usesSupplyTerms && (!Number.isInteger(supplyDeliveryDays) || supplyDeliveryDays < 1 || supplyDeliveryDays > 3650)) {
+			return reply.code(400).send({ ok: false, error: 'bad supplyDeliveryDays' });
 		}
 		try {
 			const result = await generateDealContract(client, dealId, {
@@ -117,6 +128,8 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 				workDurationUnit: template?.usesWorkDuration
 					? workDurationUnit as 'calendar' | 'working'
 					: 'calendar',
+				supplyPrepaymentPercent: template?.usesSupplyTerms ? supplyPrepaymentPercent : 80,
+				supplyDeliveryDays: template?.usesSupplyTerms ? supplyDeliveryDays : 35,
 			});
 			app.log.info({ dealId, companyId, templateId, contractNumber: result.contractNumber }, '[api/contracts/generate] ok');
 			return reply.header('Cache-Control', 'no-store').send({ ok: true, document: result.document });

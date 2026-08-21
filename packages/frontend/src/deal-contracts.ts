@@ -25,6 +25,7 @@ export interface ContractTemplateInfo {
 	usesObjectAddress: boolean;
 	usesObjectName: boolean;
 	usesWorkDuration: boolean;
+	usesSupplyTerms: boolean;
 }
 
 export interface DealContractContext {
@@ -42,6 +43,8 @@ export interface DealContractContext {
 	selectedTemplateId: ContractTemplateId;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
+	supplyPrepaymentPercent: number;
+	supplyDeliveryDays: number;
 }
 
 export interface StoredDealContractDocument {
@@ -93,6 +96,8 @@ export async function createDealContract(input: {
 	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
+	supplyPrepaymentPercent: number;
+	supplyDeliveryDays: number;
 }): Promise<StoredDealContractDocument> {
 	const res = await fetch('/api/contracts/generate', {
 		method: 'POST',

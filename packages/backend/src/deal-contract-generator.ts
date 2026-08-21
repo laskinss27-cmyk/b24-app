@@ -44,6 +44,9 @@ export async function generateDealContract(
 	const template = CONTRACT_TEMPLATES.find((item) => item.id === input.templateId);
 	if (!template) throw new Error('неизвестный шаблон договора');
 	if (!template.available) throw new Error(`шаблон «${template.title}» пока не подключён`);
+	if (template.id === 'supply' && customer.kind === 'person') {
+		throw new Error('договор поставки доступен только для компаний и ИП');
+	}
 	const objectAddress = contractObjectAddress(input.objectAddress);
 	if (template.usesObjectAddress && !objectAddress) throw new Error('не указан адрес объекта');
 	const objectName = clean(input.objectName);
@@ -51,10 +54,18 @@ export async function generateDealContract(
 	if (template.usesWorkDuration && (!Number.isInteger(input.workDuration) || input.workDuration < 1 || input.workDuration > 3650)) {
 		throw new Error('срок работ должен быть целым числом от 1 до 3650 дней');
 	}
+	if (template.usesSupplyTerms && (!Number.isInteger(input.supplyPrepaymentPercent) || input.supplyPrepaymentPercent < 0 || input.supplyPrepaymentPercent > 100)) {
+		throw new Error('предоплата должна быть целым числом от 0 до 100 процентов');
+	}
+	if (template.usesSupplyTerms && (!Number.isInteger(input.supplyDeliveryDays) || input.supplyDeliveryDays < 1 || input.supplyDeliveryDays > 3650)) {
+		throw new Error('срок поставки должен быть целым числом от 1 до 3650 календарных дней');
+	}
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
-	const lines = await loadContractLines(client, erp, dealId);
-	if (!lines.length) throw new Error('в сделке нет товаров или работ для сметы');
+	const lines = await loadContractLines(client, erp, dealId, template.id === 'supply');
+	if (!lines.length) throw new Error(template.id === 'supply'
+		? 'в сделке нет товаров для спецификации'
+		: 'в сделке нет товаров или работ для сметы');
 	const contractNumber = await allocateContractNumber(client, company, '');
 	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
 	const contractDate = contractDateText(dateIso);
@@ -68,6 +79,8 @@ export async function generateDealContract(
 		objectName,
 		workDuration: input.workDuration,
 		workDurationUnit: input.workDurationUnit,
+		supplyPrepaymentPercent: input.supplyPrepaymentPercent,
+		supplyDeliveryDays: input.supplyDeliveryDays,
 		lines,
 	});
 	const vatRate = contractVatRate(company);

@@ -90,6 +90,8 @@ test('contract generation preserves complete input payload and document response
 		objectName: 'Apartment',
 		workDuration: 15,
 		workDurationUnit: 'working' as const,
+		supplyPrepaymentPercent: 80,
+		supplyDeliveryDays: 35,
 	};
 	const requests = captureResponses([jsonResponse({ ok: true, document: documentRow })]);
 

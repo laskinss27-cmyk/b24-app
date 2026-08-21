@@ -23,6 +23,8 @@ export function ContractModal({ dealId, onClose, onDone }: {
 	const [objectName, setObjectName] = useState('');
 	const [workDuration, setWorkDuration] = useState(14);
 	const [workDurationUnit, setWorkDurationUnit] = useState<ContractDurationUnit>('working');
+	const [supplyPrepaymentPercent, setSupplyPrepaymentPercent] = useState(80);
+	const [supplyDeliveryDays, setSupplyDeliveryDays] = useState(35);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +40,8 @@ export function ContractModal({ dealId, onClose, onDone }: {
 			setObjectAddress(data.objectAddress);
 			setWorkDuration(data.workDuration);
 			setWorkDurationUnit(data.workDurationUnit);
+			setSupplyPrepaymentPercent(data.supplyPrepaymentPercent);
+			setSupplyDeliveryDays(data.supplyDeliveryDays);
 		}).catch((reason) => {
 			if (alive) setError(String(reason instanceof Error ? reason.message : reason));
 		});
@@ -55,6 +59,9 @@ export function ContractModal({ dealId, onClose, onDone }: {
 		...(template?.usesObjectAddress && !objectAddress.trim() ? ['Не указан адрес объекта'] : []),
 		...(template?.usesObjectName && !objectName.trim() ? ['Не указано наименование объекта'] : []),
 		...(template?.usesWorkDuration && (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650) ? ['Срок работ должен быть целым числом от 1 до 3650 дней'] : []),
+		...(template?.usesSupplyTerms && customerKind === 'person' ? ['Договор поставки доступен только для компаний и ИП'] : []),
+		...(template?.usesSupplyTerms && (!Number.isInteger(supplyPrepaymentPercent) || supplyPrepaymentPercent < 0 || supplyPrepaymentPercent > 100) ? ['Предоплата должна быть целым числом от 0 до 100%'] : []),
+		...(template?.usesSupplyTerms && (!Number.isInteger(supplyDeliveryDays) || supplyDeliveryDays < 1 || supplyDeliveryDays > 3650) ? ['Срок поставки должен быть целым числом от 1 до 3650 дней'] : []),
 	];
 
 	const generate = async (): Promise<void> => {
@@ -72,6 +79,8 @@ export function ContractModal({ dealId, onClose, onDone }: {
 				objectName: objectName.trim(),
 				workDuration,
 				workDurationUnit,
+				supplyPrepaymentPercent,
+				supplyDeliveryDays,
 			});
 			await onDone(`✅ Договор № ${document.contractNumber} сформирован и добавлен в документы сделки.`);
 		} catch (reason) {
@@ -99,7 +108,7 @@ export function ContractModal({ dealId, onClose, onDone }: {
 						<label><span>Тип клиента</span><select value={customerKind} disabled={busy} onChange={(event) => setCustomerKind(event.target.value as ContractPartyKind)}>
 							<option value="ip">ИП</option>
 							<option value="company">ООО</option>
-							<option value="person">Физическое лицо</option>
+							<option value="person" disabled={template?.usesSupplyTerms}>Физическое лицо</option>
 						</select></label>
 						<label><span>НДС автоматически</span><input value={`НДС ${vatRate}%`} readOnly /></label>
 						<label><span>Дата договора</span><input type="date" value={contractDate} disabled={busy} onChange={(event) => setContractDate(event.target.value)} /></label>
@@ -111,6 +120,10 @@ export function ContractModal({ dealId, onClose, onDone }: {
 								<option value="working">Рабочие дни</option>
 								<option value="calendar">Календарные дни</option>
 							</select></label>
+						</>}
+						{template?.usesSupplyTerms && <>
+							<label><span>Предоплата, %</span><input type="number" min={0} max={100} step={1} value={supplyPrepaymentPercent} disabled={busy} onChange={(event) => setSupplyPrepaymentPercent(Number(event.target.value))} /></label>
+							<label><span>Срок поставки, календарных дней</span><input type="number" min={1} max={3650} step={1} value={supplyDeliveryDays} disabled={busy} onChange={(event) => setSupplyDeliveryDays(Number(event.target.value))} /></label>
 						</>}
 						{template?.usesObjectAddress && <label className="wide"><span>Адрес объекта</span><input value={objectAddress} disabled={busy} onChange={(event) => setObjectAddress(event.target.value)} /></label>}
 					</div>

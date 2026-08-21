@@ -131,6 +131,7 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 			delivered: Number(it['delivered_qty'] ?? 0),
 			isService: productId === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
 			lineKey: String(it[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(it['name'] ?? '').trim(),
+			uom: String(it['uom'] ?? it['stock_uom'] ?? '').trim() || 'шт.',
 		}];
 	});
 }

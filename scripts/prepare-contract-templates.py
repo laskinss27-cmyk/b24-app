@@ -41,21 +41,112 @@ def remove_highlights(document) -> None:
             run.font.highlight_color = None
 
 
+def document_paragraphs(document):
+    paragraphs = list(document.paragraphs)
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                paragraphs.extend(cell.paragraphs)
+    return paragraphs
+
+
+def replace_everywhere(document, old: str, new: str) -> None:
+    for paragraph in document_paragraphs(document):
+        replace_in_paragraph(paragraph, old, new)
+
+
+def unique_row_cells(row):
+    result = []
+    seen = set()
+    for cell in row.cells:
+        marker = id(cell._tc)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(cell)
+    return result
+
+
+def remove_paragraph(paragraph) -> None:
+    element = paragraph._element
+    element.getparent().remove(element)
+    paragraph._p = paragraph._element = None
+
+
 def prepare_supply() -> None:
     path = ASSETS / "contract-supply.docx"
     document = Document(path)
+
+    corrections = {
+        "5.3.4. в момент сдачи": "5.3.3. в момент сдачи",
+        "участия в составления соответствующего Акта": "участия в составлении соответствующего Акта",
+        "указывать кода (артикула) Товара": "указывать код (артикул) Товара",
+        "ремонт осуществляются на платной основе": "ремонт осуществляется на платной основе",
+        "Стороны преследует исключительно деловые цели": "Стороны преследуют исключительно деловые цели",
+        "Поставщик не несет ответственность за нарушение сроков поставки": "Поставщик не несет ответственности за нарушение сроков поставки",
+        "указанный в разделе 13 настоящего Договора": "указанный в разделе 14 настоящего Договора",
+        "№ 63 ФЗ «Об электронной подписи»": "№ 63-ФЗ «Об электронной подписи»",
+        "в соответствии с нормами Федеральным законом": "в соответствии с нормами Федерального закона",
+    }
+    for old, new in corrections.items():
+        replace_everywhere(document, old, new)
+
     set_paragraph(document.paragraphs[0], "ДОГОВОР ПОСТАВКИ № {{CONTRACT_NUMBER}}")
-    set_paragraph(document.paragraphs[1], "{{CITY}}\t{{CONTRACT_DATE}}")
-    set_paragraph(document.paragraphs[3], "{{CONTRACTOR_PREAMBLE}}")
-    set_paragraph(document.paragraphs[4], "{{CUSTOMER_PREAMBLE}}")
-    replace_in_paragraph(
-        document.paragraphs[9],
-        "ИП «Нагайцев О.А»",
-        "Поставщику",
+    set_paragraph(document.paragraphs[2], "{{CONTRACTOR_PREAMBLE}}")
+    set_paragraph(document.paragraphs[3], "{{CUSTOMER_PREAMBLE}}")
+    header = document.tables[0]
+    set_paragraph(header.cell(0, 0).paragraphs[0], "{{CITY}}")
+    set_paragraph(header.cell(0, 1).paragraphs[0], "{{CONTRACT_DATE}}")
+
+    for paragraph in document_paragraphs(document):
+        replace_in_paragraph(paragraph, "buh@homelogicsoft.com", "{{CONTRACTOR_EMAIL}}")
+
+    mark_requisites_table(document.tables[1])
+
+    set_paragraph(
+        document.paragraphs[153],
+        "к Договору поставки № {{CONTRACT_NUMBER}} от {{CONTRACT_DATE}}",
     )
-    replace_in_paragraph(document.paragraphs[23], "buh@umdim.ru", "{{CONTRACTOR_EMAIL}}")
-    mark_requisites_table(document.tables[0])
-    mark_signature_table(document.tables[1])
+    set_paragraph(document.paragraphs[155], "СПЕЦИФИКАЦИЯ № 1 (к отдельной поставке)")
+    set_paragraph(document.paragraphs[157], "{{CITY}}\t{{CONTRACT_DATE}}")
+    set_paragraph(document.paragraphs[158], "{{CONTRACTOR_SPEC_PREAMBLE}}")
+    set_paragraph(document.paragraphs[159], "{{CUSTOMER_SPEC_PREAMBLE}}")
+
+    products = document.tables[2]
+    while len(products.rows) > 3:
+        products._tbl.remove(products.rows[2]._tr)
+    product_cells = unique_row_cells(products.rows[1])
+    product_values = (
+        "{{PRODUCT_INDEX}}",
+        "{{PRODUCT_NAME}}",
+        "{{PRODUCT_UNIT}}",
+        "{{PRODUCT_PRICE}}",
+        "{{PRODUCT_QTY}}",
+        "{{PRODUCT_TOTAL}}",
+    )
+    if len(product_cells) != len(product_values):
+        raise RuntimeError(f"unexpected supply product columns: {len(product_cells)}")
+    for cell, value in zip(product_cells, product_values):
+        set_paragraph(cell.paragraphs[0], value)
+    set_paragraph(unique_row_cells(products.rows[-1])[-1].paragraphs[0], "{{TOTAL}}")
+
+    set_paragraph(
+        document.paragraphs[163],
+        "Общая стоимость оборудования по настоящей Спецификации составляет "
+        "{{TOTAL}} ({{TOTAL_WORDS}}), включая НДС {{VAT_RATE}}%.",
+    )
+    set_paragraph(
+        document.paragraphs[164],
+        "Предоплата в размере {{SUPPLY_PREPAYMENT_PERCENT}}% составляет "
+        "{{ADVANCE}} ({{ADVANCE_WORDS}}), включая НДС {{VAT_RATE}}%.",
+    )
+    set_paragraph(
+        document.paragraphs[165],
+        "Срок передачи Товара: {{SUPPLY_DELIVERY_DURATION}} с момента оплаты предоплаты "
+        "и заключения Договора.",
+    )
+    mark_requisites_table(document.tables[3])
+    remove_paragraph(document.paragraphs[166])
     remove_highlights(document)
     document.save(path)
 

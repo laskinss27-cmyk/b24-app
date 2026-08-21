@@ -11,6 +11,7 @@ export interface ContractTemplateInfo {
 	usesObjectAddress: boolean;
 	usesObjectName: boolean;
 	usesWorkDuration: boolean;
+	usesSupplyTerms: boolean;
 }
 
 type Address = Record<string, unknown>;
@@ -53,6 +54,8 @@ export interface ContractContext {
 	selectedTemplateId: ContractTemplateId;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
+	supplyPrepaymentPercent: number;
+	supplyDeliveryDays: number;
 }
 
 export interface ContractGenerateInput {
@@ -64,6 +67,8 @@ export interface ContractGenerateInput {
 	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
+	supplyPrepaymentPercent: number;
+	supplyDeliveryDays: number;
 }
 
 export interface ContractLine {
@@ -71,6 +76,7 @@ export interface ContractLine {
 	price: number;
 	quantity: number;
 	total: number;
+	unit?: string;
 }
 
 export interface StoredDealContractDocument {

@@ -8,7 +8,7 @@ export {
 	allocatePersistentContractNumber,
 	contractNumberStartByInn,
 } from './deal-contract-numbering.js';
-export { contractLinesFromB24ProductRows } from './deal-contract-lines.js';
+export { contractLinesFromB24ProductRows, contractLinesFromPlan } from './deal-contract-lines.js';
 export { contractDateText, contractWorkDuration } from './deal-contract-text.js';
 export { buildContractDocx } from './deal-contract-docx.js';
 export { getContractContext } from './deal-contract-bitrix.js';

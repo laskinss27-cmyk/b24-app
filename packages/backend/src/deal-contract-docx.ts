@@ -44,6 +44,8 @@ export async function buildContractDocx(data: {
 	objectName: string;
 	workDuration: number;
 	workDurationUnit: ContractDurationUnit;
+	supplyPrepaymentPercent?: number;
+	supplyDeliveryDays?: number;
 	lines: ContractLine[];
 }): Promise<Buffer> {
 	const template = CONTRACT_TEMPLATES.find((item) => item.id === data.templateId);
@@ -109,12 +111,17 @@ export async function buildContractDocx(data: {
 			row = replaceToken(row, 'PRODUCT_NAME', line.name);
 			row = replaceToken(row, 'PRODUCT_PRICE', formatMoney(line.price));
 			row = replaceToken(row, 'PRODUCT_QTY', String(line.quantity));
+			row = replaceToken(row, 'PRODUCT_UNIT', line.unit || 'шт.');
 			row = replaceToken(row, 'PRODUCT_TOTAL', formatMoney(line.total));
 			return row;
 		}).join('');
 	});
 	const total = data.lines.reduce((sum, line) => sum + line.total, 0);
-	const advance = total / 2;
+	const supplyPrepaymentPercent = data.supplyPrepaymentPercent ?? 80;
+	const supplyDeliveryDays = data.supplyDeliveryDays ?? 35;
+	const advance = data.templateId === 'supply'
+		? Math.round(total * supplyPrepaymentPercent) / 100
+		: total / 2;
 	const balance = total - advance;
 	const vatRate = contractVatRate(data.company);
 	const values: Record<string, string> = {
@@ -125,6 +132,8 @@ export async function buildContractDocx(data: {
 		CUSTOMER_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, именуемые в дальнейшем по отдельности «Сторона», а при совместном упоминании «Стороны», заключили настоящий договор (далее – «Договор») о нижеследующем:`,
 		CONTRACTOR_AGREEMENT_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
 		CUSTOMER_AGREEMENT_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, совместно именуемые «Стороны», заключили настоящее Дополнительное соглашение № 1 к Договору № ${data.contractNumber} от ${data.contractDate} (далее – «Договор») о нижеследующем:`,
+		CONTRACTOR_SPEC_PREAMBLE: `${partyPreamble(data.company, template.ourRole)}, с одной стороны, и`,
+		CUSTOMER_SPEC_PREAMBLE: `${partyPreamble(data.customer, template.customerRole)}, с другой стороны, именуемые в дальнейшем по отдельности «Сторона», а при совместном упоминании «Стороны», заключили настоящую Спецификацию № 1 к Договору поставки № ${data.contractNumber} от ${data.contractDate} (далее – «Спецификация») о нижеследующем:`,
 		CONTRACTOR_REQUISITES: partyRequisites(data.company),
 		CUSTOMER_REQUISITES: partyRequisites(data.customer),
 		CONTRACTOR_SIGNATURE: signature(data.company),
@@ -143,9 +152,19 @@ export async function buildContractDocx(data: {
 		BALANCE: formatMoney(balance),
 		BALANCE_WORDS: moneyWords(balance),
 		VAT_RATE: String(vatRate),
+		SUPPLY_PREPAYMENT_PERCENT: String(supplyPrepaymentPercent),
+		SUPPLY_DELIVERY_DURATION: contractWorkDuration(supplyDeliveryDays, 'calendar'),
 	};
 	for (const [token, value] of Object.entries(values)) xml = replaceToken(xml, token, value);
 	zip.file('word/document.xml', xml);
+	const relationshipsFile = zip.file('word/_rels/document.xml.rels');
+	if (relationshipsFile) {
+		let relationships = await relationshipsFile.async('string');
+		for (const templateEmail of ['buh@umdim.ru', 'buh@homelogicsoft.com', 'buh@dom-electro.ru', 'buh@umniydom.pro', 'buh@anemone.su']) {
+			relationships = relationships.split(`mailto:${templateEmail}`).join(`mailto:${contractorEmail(data.company)}`);
+		}
+		zip.file('word/_rels/document.xml.rels', relationships);
+	}
 	const settingsFile = zip.file('word/settings.xml');
 	if (settingsFile) {
 		let settings = await settingsFile.async('string');

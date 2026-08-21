@@ -10,6 +10,7 @@ import {
 	buildContractDocx,
 	contractFilename,
 	contractLinesFromB24ProductRows,
+	contractLinesFromPlan,
 	contractObjectAddress,
 	contractPartyAsKind,
 	contractDateText,
@@ -166,20 +167,53 @@ test('buildContractDocx fills markers and repeats both product tables', async ()
 
 test('all contract templates are connected and expose only their required fields', () => {
 	assert.deepEqual(
-		CONTRACT_TEMPLATES.map(({ id, available, usesObjectAddress, usesObjectName, usesWorkDuration }) => ({
+		CONTRACT_TEMPLATES.map(({ id, available, usesObjectAddress, usesObjectName, usesWorkDuration, usesSupplyTerms }) => ({
 			id,
 			available,
 			usesObjectAddress,
 			usesObjectName,
 			usesWorkDuration,
+			usesSupplyTerms,
 		})),
 		[
-			{ id: 'universal_work', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true },
-			{ id: 'supply', available: true, usesObjectAddress: false, usesObjectName: false, usesWorkDuration: false },
-			{ id: 'design', available: true, usesObjectAddress: true, usesObjectName: true, usesWorkDuration: false },
-			{ id: 'smart_home', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true },
+			{ id: 'universal_work', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true, usesSupplyTerms: false },
+			{ id: 'supply', available: true, usesObjectAddress: false, usesObjectName: false, usesWorkDuration: false, usesSupplyTerms: true },
+			{ id: 'design', available: true, usesObjectAddress: true, usesObjectName: true, usesWorkDuration: false, usesSupplyTerms: false },
+			{ id: 'smart_home', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true, usesSupplyTerms: false },
 		],
 	);
+});
+
+test('supply specification uses selected prepayment, delivery term and product units', async () => {
+	const file = await buildContractDocx({
+		templateId: 'supply',
+		contractNumber: '903',
+		contractDate: '«21» августа 2026 г.',
+		company,
+		customer: corporateCustomer,
+		objectAddress: '',
+		objectName: '',
+		workDuration: 14,
+		workDurationUnit: 'calendar',
+		supplyPrepaymentPercent: 80,
+		supplyDeliveryDays: 35,
+		lines: [{ name: 'Shelly Pro 4PM', price: 12_200, quantity: 61, total: 744_200, unit: 'шт.' }],
+	});
+	const zip = await JSZip.loadAsync(file);
+	const xml = await zip.file('word/document.xml')?.async('string');
+	assert.ok(xml);
+	const text = plainDocumentText(xml);
+	assert.doesNotMatch(text, /\{\{[A-Z_]+\}\}/);
+	assert.match(text, /Предоплата в размере 80% составляет 595[\s ]360,00/);
+	assert.match(text, /35 \(тридцать пять\) календарных дней/);
+	assert.match(text, /Shelly Pro 4PM/);
+	assert.match(text, /шт\./);
+	assert.match(text, /заключили настоящую Спецификацию № 1/);
+	assert.doesNotMatch(text, /заключили настоящий договор \(далее [–-] «Договор поставки»\)/);
+	assert.doesNotMatch(text, /744 200 руб\.|595 360 руб\.|НДС 22%\.\./);
+	assert.doesNotMatch(text, /Подписи Сторон:/);
+	const rels = await zip.file('word/_rels/document.xml.rels')?.async('string');
+	if (rels) assert.doesNotMatch(rels, /mailto:buh@umdim\.ru/);
 });
 
 test('new contract templates replace sample parties, dates, numbers and object data', async () => {
@@ -332,6 +366,16 @@ test('contractLinesFromB24ProductRows uses visible deal rows and skips the colla
 	assert.deepEqual(lines, [
 		{ name: 'Панель BAS-IP', price: 16980, quantity: 1, total: 16980 },
 		{ name: 'Монитор', price: 14390, quantity: 2, total: 28780 },
+	]);
+});
+
+test('supply contract lines keep ERP units and exclude services', () => {
+	const common = { priceListRate: 100, discountPercent: 0, delivered: 0, lineKey: '' };
+	assert.deepEqual(contractLinesFromPlan([
+		{ ...common, productId: 101, itemName: 'Кабель', qty: 10, rate: 100, isService: false, uom: 'м' },
+		{ ...common, productId: 202, itemName: 'Монтаж', qty: 1, rate: 500, isService: true, uom: 'усл.' },
+	], true), [
+		{ name: 'Кабель', price: 100, quantity: 10, total: 1000, unit: 'м' },
 	]);
 });
 

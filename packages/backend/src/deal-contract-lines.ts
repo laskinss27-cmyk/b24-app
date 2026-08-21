@@ -8,9 +8,9 @@ const B24_COLLAPSE_SERVICE_NAME = 'Отгрузка подтверждена н�
 
 const clean = (value: unknown): string => String(value ?? '').trim();
 
-function linesFromPlan(plan: PlanItem[]): ContractLine[] {
+export function contractLinesFromPlan(plan: PlanItem[], goodsOnly = false): ContractLine[] {
 	return plan
-		.filter((item) => item.qty > 0)
+		.filter((item) => item.qty > 0 && (!goodsOnly || !item.isService))
 		.map((item) => {
 			const price = Math.round(item.rate * 100) / 100;
 			return {
@@ -18,6 +18,7 @@ function linesFromPlan(plan: PlanItem[]): ContractLine[] {
 				price,
 				quantity: item.qty,
 				total: Math.round(price * item.qty * 100) / 100,
+				unit: item.uom || 'шт.',
 			};
 		});
 }
@@ -45,7 +46,7 @@ export function contractLinesFromB24ProductRows(rows: Array<Record<string, unkno
 	});
 }
 
-export async function loadContractLines(client: B24Client, erp: ErpClient, dealId: number): Promise<ContractLine[]> {
+export async function loadContractLines(client: B24Client, erp: ErpClient, dealId: number, goodsOnly = false): Promise<ContractLine[]> {
 	void client;
-	return linesFromPlan(await listDealPlan(erp, dealId));
+	return contractLinesFromPlan(await listDealPlan(erp, dealId), goodsOnly);
 }

@@ -14,6 +14,7 @@ export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
 		usesObjectAddress: true,
 		usesObjectName: false,
 		usesWorkDuration: true,
+		usesSupplyTerms: false,
 	},
 	{
 		id: 'supply',
@@ -24,6 +25,7 @@ export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
 		usesObjectAddress: false,
 		usesObjectName: false,
 		usesWorkDuration: false,
+		usesSupplyTerms: true,
 	},
 	{
 		id: 'design',
@@ -34,6 +36,7 @@ export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
 		usesObjectAddress: true,
 		usesObjectName: true,
 		usesWorkDuration: false,
+		usesSupplyTerms: false,
 	},
 	{
 		id: 'smart_home',
@@ -44,6 +47,7 @@ export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
 		usesObjectAddress: true,
 		usesObjectName: false,
 		usesWorkDuration: true,
+		usesSupplyTerms: false,
 	},
 ] as const;
 
