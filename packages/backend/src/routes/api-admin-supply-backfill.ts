@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { accessClientFrom, type AccessAuthBody } from '../access-policy.js';
-import { canUseAdminConsole } from '../admin/owner-access.js';
+import type { AccessAuthBody } from '../access-policy.js';
+import { resolveOwnerOAuthClient } from '../admin/owner-oauth-client.js';
 import { runSupplyBackfillDryRun } from '../database/supply-backfill-service.js';
 import { ErpClient } from '../erp/client.js';
 
@@ -10,11 +10,9 @@ export function registerApiAdminSupplyBackfillRoute(app: FastifyInstance): void 
 	app.post('/api/admin/sql-migration/supply/dry-run', async (req, reply) => {
 		const body = (req.body ?? {}) as AccessAuthBody;
 		try {
-			// Keep the OAuth client: entity.item.get is unavailable through the production webhook.
-			const client = accessClientFrom(app, body);
+			// A live owner token or the separately authenticated encrypted vault is required.
+			const client = await resolveOwnerOAuthClient(app, body, req.headers.authorization);
 			if (!client) return reply.code(403).send({ ok: false, error: ACCESS_ERROR });
-			const user = await client.call<{ ID?: string | number }>('user.current', {});
-			if (!canUseAdminConsole(user?.ID)) return reply.code(403).send({ ok: false, error: ACCESS_ERROR });
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(503).send({ ok: false, error: 'Ядро склада не настроено.' });
 			const report = await runSupplyBackfillDryRun(erp, client);

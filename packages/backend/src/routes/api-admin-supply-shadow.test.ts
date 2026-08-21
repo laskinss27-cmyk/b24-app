@@ -35,6 +35,7 @@ function config(mode: 'off' | 'on'): Config {
 		publicBaseUrl: 'https://app.example.com',
 		appSectionUrl: '',
 		inventoryNotify: 'off',
+		appOAuthVault: 'off',
 		supplyShadowCompare: mode,
 		nodeEnv: 'test',
 	};

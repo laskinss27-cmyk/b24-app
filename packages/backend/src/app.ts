@@ -44,6 +44,7 @@ import { registerApiAdminControlRoute } from './routes/api-admin-control.js';
 import { registerApiAdminSupplyBackfillRoute } from './routes/api-admin-supply-backfill.js';
 import { registerApiAdminSupplyShadowRoute } from './routes/api-admin-supply-shadow.js';
 import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
+import { createOwnerOAuthVault, type OwnerOAuthVault } from './b24/owner-oauth-vault.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,9 +58,10 @@ const FRONTEND_DIST = resolve(__dirname, '..', '..', 'frontend', 'dist');
 export interface AppOptions {
 	config: Config;
 	database?: DatabaseRuntime;
+	ownerOAuthVault?: OwnerOAuthVault | null;
 }
 
-export async function buildApp({ config, database }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ config, database, ownerOAuthVault = createOwnerOAuthVault(config) }: AppOptions): Promise<FastifyInstance> {
 	const app = Fastify({
 		// Фото ремонтов едут data-URL'ами в JSON (превью ужимается на клиенте), поэтому поднимаем
 		// лимит тела с дефолтных 1МБ. Документы (Word/Excel/PDF) грузятся на Диск Б24 ссылкой
@@ -71,8 +73,8 @@ export async function buildApp({ config, database }: AppOptions): Promise<Fastif
 			// OAuth-токены не утекут в рабочие логи.
 			redact: {
 				paths: [
-					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'client_secret',
-					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.accessToken', '*.refreshToken', '*.client_secret',
+					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'client_secret', 'authorization', 'appOperatorToken',
+					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.accessToken', '*.refreshToken', '*.client_secret', '*.authorization', '*.appOperatorToken',
 				],
 				censor: '[REDACTED]',
 			},
@@ -105,6 +107,7 @@ export async function buildApp({ config, database }: AppOptions): Promise<Fastif
 	}
 
 	app.decorate('config', config);
+	app.decorate('ownerOAuthVault', ownerOAuthVault);
 	app.decorate('frontendDist', FRONTEND_DIST);
 	app.decorate('readFrontendIndex', async () => {
 		if (!existsSync(FRONTEND_DIST)) return null;
@@ -160,6 +163,7 @@ export async function buildApp({ config, database }: AppOptions): Promise<Fastif
 declare module 'fastify' {
 	interface FastifyInstance {
 		config: Config;
+		ownerOAuthVault: OwnerOAuthVault | null;
 		frontendDist: string;
 		readFrontendIndex: () => Promise<string | null>;
 	}

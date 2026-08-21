@@ -25,6 +25,7 @@ const mobileConfig: Config = {
 	publicBaseUrl: 'https://app.example.com',
 	appSectionUrl: '',
 	inventoryNotify: 'off',
+	appOAuthVault: 'off',
 	supplyShadowCompare: 'off',
 	appClientId: 'local.test',
 	appClientSecret: 'secret',

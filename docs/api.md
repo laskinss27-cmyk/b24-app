@@ -73,7 +73,7 @@ Backend:
 
 Писать прямые вызовы Битрикс24 из React не следует: это усложняет права, таймауты и аудит.
 
-Диагностический `POST /api/admin/sql-migration/supply/dry-run` сохраняет именно OAuth-контекст владельца после `user.current`: production webhook не имеет доступа к `entity.item.get`. Маршрут читает ERPNext и `ctv_transfers`, возвращает source status, counts, типы связей, blockers и hash плана. Он не вызывает migrations, не открывает database runtime и не пишет ни в одну систему.
+Диагностический `POST /api/admin/sql-migration/supply/dry-run` использует именно OAuth-контекст владельца после `user.current`: production webhook не имеет доступа к `entity.item.get`. Контекст приходит либо из живого пользовательского OAuth, либо — только при opt-in `B24_APP_OAUTH_VAULT=on` — из зашифрованного rotating vault после проверки отдельного server-only bearer. Маршрут читает ERPNext и `ctv_transfers`, возвращает source status, counts, типы связей, blockers и hash плана. Он не вызывает migrations, не открывает database runtime и не пишет ни в одну систему.
 
 ## Правила изменений
 

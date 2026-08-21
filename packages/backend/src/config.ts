@@ -16,6 +16,10 @@ const ConfigSchema = z.object({
 	appClientId: z.string().optional(),
 	appClientSecret: z.string().optional(),
 	appSecret: z.string().optional(),
+	/** Persistent owner OAuth is opt-in; off preserves the current browser-token flow. */
+	appOAuthVault: z.enum(['off', 'on']).default('off'),
+	/** Separate bearer used only for server-side owner diagnostics. */
+	appOperatorToken: z.string().min(32).optional(),
 	autozadachiWebhook: z.string().url().optional(),
 	devWebhook: z.string().url().optional(),
 	/** Узкая системная запись карточки товара после Access Denied у разрешённого пользователя. */
@@ -38,6 +42,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		appClientId: env['APP_CLIENT_ID'],
 		appClientSecret: env['APP_CLIENT_SECRET'],
 		appSecret: env['APP_SECRET'],
+		appOAuthVault: env['B24_APP_OAUTH_VAULT'],
+		appOperatorToken: env['B24_APP_OPERATOR_TOKEN'],
 		autozadachiWebhook: env['AUTOZADACHI_WEBHOOK'],
 		devWebhook: env['DEV_WEBHOOK'],
 		catalogWriteWebhook: env['CATALOG_WRITE_WEBHOOK'],

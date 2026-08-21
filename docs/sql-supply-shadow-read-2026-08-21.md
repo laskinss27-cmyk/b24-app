@@ -31,8 +31,19 @@ Reader восстанавливает стабильные document/line/link/al
 
 Перед endpoint change set тот же focused SQL/supply baseline прошёл `49/49`. После добавления строгого env gate и шести route/config regression tests расширенный набор прошёл `55/55`; полный backend — `235/235`, workspace typecheck и production build успешны. Новая MariaDB rehearsal не требовалась: schema, SQL reader queries и comparator не менялись, а endpoint не имеет write path. Прежний Vite warning о chunk больше 500 kB оставлен как постороннее наблюдение.
 
+Первый production gate 21 августа начался с повторного focused baseline `55/55` и неизменного SQL checkpoint `181e72d285b576b9b22c00993d88eb9451ceb10f669bfcc2366a4e2cf35d02e6` (`398/110/5`, `516/1002/527/716`, `22` warnings). Тот же image `147f876` был временно пересоздан с `B24_APP_SUPPLY_SHADOW_COMPARE=on`, а исходный контейнер целиком сохранён. Internal/public health, readiness, официальный ERP GET, network/mount/port/restart и owner gate прошли.
+
+Единственный POST получил исходный placement `AUTH_ID` и завершился `403` за `1.86 ms`. Это произошло до запуска comparator и до чтения ERP/Bitrix/SQL: initial placement token снова оказался непригоден для owner OAuth, как и в прежнем dry-run. Повторный POST не выполнялся. Исходный контейнер возвращён с эффективным default `off`; post-check подтвердил тот же checkpoint и cardinalities, health/readiness, ERP API, network и restart `0`. Остановленный `b24-backend-shadow-on-first-compare-403` сохранён как диагностическое evidence; OAuth runtime и временные operator scripts удалены.
+
+## Операторский OAuth contract
+
+Initial placement `AUTH_ID` запрещено использовать для owner-only compare: reload или новая placement-вкладка не доказывают его свежесть. Нужен только результат `BX24.getAuth()` после инициализации SDK. Если browser isolation не даёт обратиться к `BX24` напрямую, разрешённый fallback — заранее включить узкое наблюдение и взять `domain/accessToken` из одного обычного JSON POST, который frontend отправляет к собственному backend после SDK init (`/api/supply/orders` или `/api/stock/form-data`), но не из placement POST. Значение остаётся только в памяти, не попадает в output/files/log/shell history; наблюдение прекращается сразу после capture, а browser runtime очищается после единственного согласованного диагностического запроса. Отсутствие такого live request — стоп, а не повод снова перебирать initial tokens, reloads, tabs или webhook.
+
+Этот browser contract остаётся fallback, пока отдельный `B24_APP_OAUTH_VAULT` не развёрнут, явно включён и инициализирован повторной авторизацией точного владельца. После этого server-side compare может использовать зашифрованный rotating token только вместе с отдельным operator bearer и повторной проверкой `user.current`; bearer и OAuth-токены не выводятся и не передаются frontend.
+
 ## Следующие отдельные gates
 
-1. Отдельно пересоздать backend с флагом `on`, выполнить один owner OAuth comparison и записать полный результат; workflow всё время оставить на Bitrix/ERP.
-2. Если snapshot ожидаемо устарел, отдельно согласовать новый неавторитетный mirror apply и повторить compare, не исправляя расхождения вслепую.
-3. Только после нескольких успешных production `match` проектировать SQL read path с Bitrix fallback.
+1. Отдельно согласовать деплой выключенного OAuth-vault, затем его config-активацию и однократную переавторизацию локального приложения. До завершения этого gate использовать только живой SDK-authenticated API request, никогда initial placement `AUTH_ID`.
+2. После отдельного подтверждения временно включить shadow flag и выполнить один owner comparison через server-only operator bearer; workflow всё время оставить на Bitrix/ERP.
+3. Если snapshot ожидаемо устарел, отдельно согласовать новый неавторитетный mirror apply и повторить compare, не исправляя расхождения вслепую.
+4. Только после нескольких успешных production `match` проектировать SQL read path с Bitrix fallback.

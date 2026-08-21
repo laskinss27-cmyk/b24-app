@@ -7,6 +7,7 @@ import {
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { bindDealTabPlacement, bindInventoryMenuPlacement, bindStockMenuPlacement, reconcilePlacements, DEAL_TAB_PLACEMENT } from '../b24/placement.js';
 import { verifyBitrixRequest } from '../security.js';
+import { canUseAdminConsole } from '../admin/owner-access.js';
 
 /**
  * POST /install — Б24 шлёт POST при установке приложения.
@@ -20,15 +21,16 @@ import { verifyBitrixRequest } from '../security.js';
  *   status          — "L" локальное, "P" платное, и т.п.
  *   PLACEMENT       — "DEFAULT" при первой установке
  *
- * Что мы делаем в Sprint 1:
+ * Что мы делаем:
  *   1. Берём AUTH_ID + DOMAIN
  *   2. Через B24Client вызываем placement.bind(CRM_DEAL_DETAIL_TAB)
  *   3. Возвращаем installFinish HTML — Б24 его покажет в окне установки
  *
- * Sprint 1 НЕ делает:
- *   - Не сохраняет токены долгосрочно. Это для следующих фаз когда нужно будет
- *     ходить в Б24 от имени приложения вне install-flow (например, фоновые задачи).
- *     Сейчас всё что фронт делает — он делает своим токеном через BX24.callMethod.
+ * По умолчанию токены по-прежнему не сохраняются. Только при явном
+ * B24_APP_OAUTH_VAULT=on REFRESH_ID сохраняется зашифрованно для ручных
+ * server-side диагностик; пользовательские запросы продолжают работать через BX24.
+ *
+ * НЕ делает:
  *   - Не создаёт UF (per-deal коэффициент, аудит-лог HL-блок) — отложено
  *     до момента когда они реально понадобятся (open questions с заказчиком).
  */
@@ -64,10 +66,28 @@ export function registerInstallRoute(app: FastifyInstance): void {
 
 		// Регистрируем placement, если есть auth-контекст.
 		if (auth) {
+			const client = new B24Client({
+				auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken },
+			});
+			if (app.ownerOAuthVault) {
+				try {
+					const installer = await client.call<{ ID?: string | number }>('user.current', {});
+					if (!canUseAdminConsole(installer?.ID)) {
+						app.log.warn({ installerId: String(installer?.ID ?? ''), domain: auth.domain }, '[install] owner OAuth vault rejected non-owner installation');
+					} else {
+						const captured = await app.ownerOAuthVault.captureInstallAuth(auth);
+						if (captured) {
+							app.log.info({ domain: auth.domain, memberId: auth.memberId, scope: auth.scope }, '[install] owner OAuth vault initialized');
+						} else {
+							app.log.warn({ domain: auth.domain, hasRefreshToken: Boolean(auth.refreshToken) }, '[install] owner OAuth vault not initialized');
+						}
+					}
+				} catch (error) {
+					// Auth persistence must never prevent the existing placement installation.
+					app.log.error({ error: String(error), domain: auth.domain }, '[install] owner OAuth vault capture failed');
+				}
+			}
 			try {
-				const client = new B24Client({
-					auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken },
-				});
 				const result = await bindDealTabPlacement({
 					client,
 					publicBaseUrl: app.config.publicBaseUrl,
