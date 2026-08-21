@@ -24,6 +24,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 21 августа подготовлен [атомарный supply mirror writer](sql-supply-mirror-writer-2026-08-21.md) и append-only migration `0005` для checkpoint. Реальная изолированная MariaDB 11.8 проверка подтвердила DDL, idempotency, update, rollback и запрет DDL/`DELETE` для DML-only user. После safety backup, отдельного credential, `0005` и post-DDL restore drill writer source развёрнут в объединённом `740403a` без HTTP apply route. Затем отдельным явно разрешённым one-shot process применён свежий план `181e72d285b576b9b22c00993d88eb9451ceb10f669bfcc2366a4e2cf35d02e6`: SQL содержит `516|1002|527|716` graph rows, один checkpoint и 5 migration rows; точный повтор был no-op, orphan counts нулевые. Post-apply dump `20260821_090845-b24_app-database.sql.gz` прошёл внешний read-back и точный изолированный restore parity. Source switch не выполнялся.
 
+Следующий локальный change set добавил только [read-only reader и parity comparator](sql-supply-shadow-read-2026-08-21.md). Reader берёт последний checkpoint и фильтрует каждую graph table по его `observed_at`; comparator даёт статусы `match`, `mismatch`, `plan_blocked` и `no_snapshot` и ограничивает детали отчёта. Модули не импортируются runtime/server, не имеют route, scheduler или env switch; production не менялся.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |

@@ -5,7 +5,9 @@ import mariadb, { type Pool } from 'mariadb';
 import { applyMigrations } from './migrations.js';
 import { buildSupplyMirrorPlan } from './supply-backfill-plan.js';
 import type { SupplyMirrorSnapshot } from './supply-backfill-types.js';
+import { readLatestSupplyMirrorSnapshot, type SupplyMirrorReadPool } from './supply-mirror-reader.js';
 import { applySupplyMirrorPlan, type SupplyMirrorWriterPool } from './supply-mirror-writer.js';
+import { compareSupplyMirrorShadow } from './supply-shadow-compare.js';
 
 const enabled = process.env['B24_WRITER_TEST_MARIADB'] === '1';
 const database = 'b24_writer_rehearsal';
@@ -106,6 +108,8 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 			scalar(schemaPool, 'workflow_line_allocations'),
 			scalar(schemaPool, 'supply_mirror_checkpoints'),
 		]), [2, 2, 1, 1, 1]);
+		const initialStored = await readLatestSupplyMirrorSnapshot(writerPool as unknown as SupplyMirrorReadPool);
+		assert.equal(compareSupplyMirrorShadow(initialPlan, initialStored).status, 'match');
 
 		const changedPlan = buildSupplyMirrorPlan(snapshot('cancelled', '2026-08-21T08:05:00.000Z'));
 		const changed = await applySupplyMirrorPlan(writerPool as unknown as SupplyMirrorWriterPool, changedPlan);
@@ -115,6 +119,8 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 		);
 		assert.equal(statusRows[0]?.['external_status'], 'cancelled');
 		assert.equal(await scalar(schemaPool, 'supply_mirror_checkpoints'), 2);
+		const changedStored = await readLatestSupplyMirrorSnapshot(writerPool as unknown as SupplyMirrorReadPool);
+		assert.equal(compareSupplyMirrorShadow(changedPlan, changedStored).status, 'match');
 
 		const invalidPlan = buildSupplyMirrorPlan(snapshot('broken', '2026-08-21T08:10:00.000Z'));
 		invalidPlan.lines[0]!.erpItemCode = 'x'.repeat(192);
