@@ -17,6 +17,20 @@ source switch. It was applied to production by a separately authorized
 one-shot runner on 2026-08-21; the checkpoint table was empty before and after
 the post-DDL backup/restore drill.
 
+`0006` defines the separate Tilda product-identity mapping table. It preserves
+Tilda UID, External ID and the historical Tilda SKU while treating ERP Item
+codes as external references. The migration contains no catalog rows, no
+startup job and no Tilda/ERP write path. `confirmed` rows require an ERP Item;
+`unresolved` and `ignored` rows can never enter the stock projection.
+
+`0007` adds the narrow Tilda reconciliation run journal. It stores hashes,
+counts, timestamps and a bounded redacted error only; it contains no payload or
+credentials and does not create a scheduler. The external one-shot worker uses
+a connection-scoped MariaDB lock and a dedicated account limited to `SELECT` on
+the mapping table plus `SELECT/INSERT/UPDATE` on this journal. Applying `0007`,
+creating that account and installing cron remain three separate production
+operations.
+
 Future files must use `NNNN_short_name.sql`, be append-only after application,
 and contain one idempotent MariaDB statement per file. A changed checksum stops
 the runner. The first production run independently verified columns, indexes,

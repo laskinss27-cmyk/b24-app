@@ -60,3 +60,32 @@ export function loadBackfillDatabaseConfig(env: NodeJS.ProcessEnv = process.env)
 	if (user === String(env['B24_APP_MIGRATION_DB_USER'] ?? '').trim()) throw new Error('Backfill database user must differ from migration user');
 	return { ...runtime, user, password };
 }
+
+/** Scheduled Tilda reconciliation uses a narrow DML account, never the read-only backend identity. */
+export function loadTildaSyncDatabaseConfig(env: NodeJS.ProcessEnv = process.env): Exclude<DatabaseConfig, { mode: 'off' }> {
+	const mode = String(env['B24_APP_DB_MODE'] ?? 'off').trim();
+	if (mode !== 'readiness') throw new Error('B24_APP_DB_MODE=readiness is required for Tilda sync');
+	const user = String(env['B24_APP_TILDA_DB_USER'] ?? '').trim();
+	const password = String(env['B24_APP_TILDA_DB_PASSWORD'] ?? '');
+	if (!user || !password) throw new Error('Separate B24_APP_TILDA_DB_USER/PASSWORD are required');
+	const runtimeUser = String(env['B24_APP_DB_USER'] ?? '').trim();
+	if (!runtimeUser) throw new Error('B24_APP_DB_USER is required to verify the separate Tilda sync identity');
+	const forbiddenUsers = [runtimeUser, env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER']]
+		.map((value) => String(value ?? '').trim())
+		.filter(Boolean);
+	if (forbiddenUsers.includes(user)) throw new Error('Tilda sync database user must be separate');
+	const parsed = DatabaseReadinessConfigSchema.safeParse({
+		mode,
+		host: env['B24_APP_DB_HOST'],
+		port: env['B24_APP_DB_PORT'],
+		database: env['B24_APP_DB_NAME'],
+		user,
+		password,
+		connectionLimit: Math.min(Number(env['B24_APP_DB_CONNECTION_LIMIT'] ?? 4), 2),
+		connectTimeoutMs: env['B24_APP_DB_CONNECT_TIMEOUT_MS'],
+	});
+	if (!parsed.success) {
+		throw new Error(`Invalid Tilda sync database configuration: ${parsed.error.issues.map((issue) => issue.path.join('.')).join(', ')}`);
+	}
+	return parsed.data;
+}

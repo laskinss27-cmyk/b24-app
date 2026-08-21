@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadBackfillDatabaseConfig, loadDatabaseConfig, loadMigrationDatabaseConfig } from './config.js';
+import { loadBackfillDatabaseConfig, loadDatabaseConfig, loadMigrationDatabaseConfig, loadTildaSyncDatabaseConfig } from './config.js';
 
 test('application database stays disabled by default', () => {
 	assert.deepEqual(loadDatabaseConfig({}), { mode: 'off' });
@@ -57,4 +57,31 @@ test('manual backfill requires its own credential', () => {
 		B24_APP_BACKFILL_DB_USER: 'b24_app_backfill',
 		B24_APP_BACKFILL_DB_PASSWORD: 'backfill-secret',
 	}).user, 'b24_app_backfill');
+});
+
+test('scheduled Tilda sync requires a fourth bounded database identity', () => {
+	const base = {
+		B24_APP_DB_MODE: 'readiness',
+		B24_APP_DB_HOST: 'database',
+		B24_APP_DB_USER: 'runtime',
+		B24_APP_DB_CONNECTION_LIMIT: '8',
+		B24_APP_MIGRATION_DB_USER: 'migration',
+		B24_APP_BACKFILL_DB_USER: 'backfill',
+	};
+	assert.throws(() => loadTildaSyncDatabaseConfig(base), /B24_APP_TILDA_DB_USER/);
+	assert.throws(() => loadTildaSyncDatabaseConfig({ ...base, B24_APP_TILDA_DB_USER: 'runtime', B24_APP_TILDA_DB_PASSWORD: 'secret' }), /must be separate/);
+	assert.deepEqual(loadTildaSyncDatabaseConfig({
+		...base,
+		B24_APP_TILDA_DB_USER: 'tilda_sync',
+		B24_APP_TILDA_DB_PASSWORD: 'sync-secret',
+	}), {
+		mode: 'readiness',
+		host: 'database',
+		port: 3306,
+		database: 'b24_app',
+		user: 'tilda_sync',
+		password: 'sync-secret',
+		connectionLimit: 2,
+		connectTimeoutMs: 3000,
+	});
 });

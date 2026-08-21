@@ -298,6 +298,8 @@ Commit `4579048` опубликован и развёрнут как read-only `
 
 `740403a` был развёрнут с `B24_APP_DB_MODE=readiness`, department ID `12`, writer source и `0001`-`0005`; writer не вызывался. Перед первым mirror apply его internal/public health и `/ready`, официальный ERP read, `/srv/b24-state`, `127.0.0.1:3000`, `unless-stopped`, restart 0 и `erpnext_frappe_network` были подтверждены независимо. Полный журнал и посторонние build-наблюдения — в [`sql-supply-mirror-writer-2026-08-21.md`](sql-supply-mirror-writer-2026-08-21.md).
 
+21 августа отдельно разрешён Tilda mapping foundation без deploy и без Tilda write. Safety backup `20260821_140011-b24_app-database.sql.gz` прошёл Disk read-back. One-shot migrator применил только `0006_create_tilda_product_mappings.sql` (`b96e52a710b8ca2549f8271110d2cf801e4b90f81a881328a7e1a797ed6023f5`); post-DDL restore `b24_app_restore_20260821_140418` совпал по структуре и всем table checksums. DML-only backfill записал `177|134 confirmed|43 ignored|0 unresolved`, повтор сохранил checksum `616442171`. Post-backfill dump `20260821_141039-b24_app-database.sql.gz` и restore `b24_app_restore_20260821_141039` подтвердили те же строки и полную parity семи таблиц. Fresh official ERP preview: 134 offers, 16 skipped stock-bearing ignored, 63 zero, 71 positive, total 1274, hash `4889fd511f150c38441426704cf035d0263b85d22f63599663f0ee49aec82110`; audit `/root/b24-app-audits/20260821-1408-tilda-stock-preview.json`. Runtime остался `b24-app:ef4fecb`, readiness-only, restart 0, без Tilda/one-shot env; health/readiness/public health/ERP/network зелёные. Retention штатно удалил две старейшие пары `20260820_085056` и `20260820_085654` локально и на Disk; 14 актуальных пар сохранены. Exited credential-bearing one-shot containers удалены, restore schemas/staging сохранены. Следующий gate — свежий Tilda CSV backup и отдельно разрешённая публикация только количеств.
+
 После отдельного разрешения первый production supply mirror был выполнен one-shot операторским процессом, не backend runtime. Свежий полный план прочитал ERPNext `398`, `ctv_transfers` `110`, `ctv_tr_requests` `5`, получил hash `181e72d285b576b9b22c00993d88eb9451ceb10f669bfcc2366a4e2cf35d02e6`, `516` documents / `1002` lines / `527` links / `716` allocations, `0` errors / `22` historical warnings. Атомарный apply создал один checkpoint; точный повтор hash вернул no-op. Независимая проверка подтвердила counts `516|1002|527|716|1|5`, свободный lock, нулевые orphan counts и выборочные полные graph chains. Runtime остался `b24-app:740403a` в `B24_APP_DB_MODE=readiness`; SQL-чтения workflow, HTTP apply route и source switch не включались, временные OAuth/capture/env-файлы удалены.
 
 Post-apply job `/root/sync/b24-app-backup-job.sh` создал `/root/core-backups/b24_app/20260821_090845-b24_app-database.sql.gz` размером `163253` bytes; gzip/checksum и внешний Bitrix Disk read-back успешны, dump ID `103800`, checksum ID `103798`. Официальный restore drill восстановил его только в `b24_app_restore_20260821_090845`. Source и restore точно совпали по charset/collation, 6 tables, 66 columns, 37 indexes, 40 constraints, 22 CHECK, 5 FK, всем шести row checksums и counts/hash. Restore schema намеренно сохранена до отдельного cleanup-разрешения; прежняя `b24_app_restore_20260821_074553`, migration runner/image и безопасные staging-артефакты также не удалялись.
@@ -315,6 +317,57 @@ Commit `147f876` добавил только owner-only ручной `POST /api/
 Commit `ef4fecb` с opt-in rotating owner OAuth vault развёрнут без его активации: production имеет явный `B24_APP_OAUTH_VAULT=off`, не имеет `B24_APP_OPERATOR_TOKEN`, а `/app/state/oauth/owner.v1.enc` отсутствует. Canary с read-only state mount прошёл internal health/readiness и официальный ERP read до switch. После switch независимо подтверждены image `b24-app:ef4fecb`, restart `0`, `unless-stopped`, bind mount `/srv/b24-state:/app/state`, порт `127.0.0.1:3000`, `erpnext_frappe_network`, internal/public health, readiness `database: up` и официальный ERP read. Rollback `b24-backend-prev-before-ef4fecb` сохраняет `b24-app:147f876` в exited state. SQL checkpoint остался `516|1002|527|716|1|5`, hash `181e72d285b576b9b22c00993d88eb9451ceb10f669bfcc2366a4e2cf35d02e6`, sources `398|110|5`, warnings `22`. App reauthorization, token capture/refresh, shadow compare, migrations, mirror writes и source switch не выполнялись. Deploy-скрипт после успешной строки `deployed=ef4fecb` получил только завершающую CRLF shell-ошибку временного файла; полный независимый post-check прошёл. Наблюдавшиеся npm engine/audit и Vite chunk warnings оставлены как посторонние build warnings и в этом этапе не исправлялись.
 
 21 августа тот же image `b24-app:ef4fecb` отдельным config-only switch переведён в `B24_APP_OAUTH_VAULT=on`; случайный operator token длиной 64 символа создан и сохранён только в production env без вывода значения. Предыдущая конфигурация сохранена как exited rollback `b24-backend-prev-before-oauth-vault-on-20260821-1225` с тем же image и `B24_APP_OAUTH_VAULT=off`. После ручной переустановки локального приложения Bitrix24 ID `54` с уже выбранным scope `entity` журнал подтвердил точного владельца, создание vault и повторную привязку ожидаемых placements. Зашифрованный envelope `/srv/b24-state/oauth/owner.v1.enc` создан с mode `0600` в каталоге mode `0700`; структура AES-256-GCM валидна, открытых маркеров access/refresh token, OAuth host или portal domain нет. Внутренний operator POST к выключенному shadow endpoint вернул ожидаемый `503 disabled`: vault успешно расшифрован и владелец подтверждён, но comparator и чтение источников не запускались. Post-check подтвердил running/restart `0`, `unless-stopped`, state mount, локальный порт, `erpnext_frappe_network`, internal/public health, readiness `database: up` и официальный ERP Item GET `200` с одной строкой. SQL остался `516|1002|527|716|1|5` с тем же hash, sources `398|110|5` и warnings `22`; migrations, mirror writes и source switch не выполнялись. Временный activation script после своей успешной финальной строки завершился только из-за CRLF в конце файла; независимая проверка всех перечисленных инвариантов прошла.
+
+Первый успешный owner shadow compare выполнен ровно один раз через временный canary того же `ef4fecb`; production-контейнер не менялся, state был подключён canary только read-only, а shadow flag оставался выключен в production. Полный план от `12:43:38 UTC` дал `552|1064|563|753`, `22` warnings и hash `22ad151b5f2881b525d84c687583bcd23948dbc18f66219734f8091abda0f831`; checkpoint от `09:03:35 UTC` ожидаемо устарел (`516|1002|527|716`). Результат `mismatch`, `comparable=true`, `planErrors=0`, всего `233` differences; первые `100` ограничены контрактом, поэтому полный parity не заявлен. Root-only отчёт `/root/b24-app-audits/20260821-124338-supply-shadow-report.json` имеет mode `0600` и SHA-256 `6109cf4c0cee74107a4c575c7392ca0fca6a4acbe32f285adc0e555ac7167f9a`. Canary и временный env удалены. Повторный post-check подтвердил прежний SQL counts/hash, internal/public health, readiness, официальный ERP read, network/mount/port и restart `0`; DML, migration и source switch не выполнялись. Детали и следующий gate записаны в [`sql-supply-shadow-read-2026-08-21.md`](sql-supply-shadow-read-2026-08-21.md).
+
+Перед refresh mirror safety job добавил двенадцатый dump `20260821_124850-b24_app-database.sql.gz`; при лимите `14` retention не сработал ни локально, ни на Bitrix Disk. Checksum/gzip, внешний read-back и сохранность старейшего локального dump подтверждены; Disk IDs `103948/103946`. Новый owner dry-run повторил hash `22ad151b5f2881b525d84c687583bcd23948dbc18f66219734f8091abda0f831`, sources `425|119|5`, rows `552|1064|563|753`, `0` errors, `22` warnings и `readyToApply=true`. После него SQL остался `516|1002|527|716|1|5` с прежним hash, health/readiness зелёные. Это только safety/pre-DML gate; mirror apply не выполнялся.
+
+После отдельного разрешения one-shot DML-only runner применил точный plan `22ad…f831` одной транзакцией; повтор того же in-memory plan был no-op. SQL теперь `552|1064|563|753|2|5`, latest sources `425|119|5`, warnings `22`, orphan counts `0|0|0`, lock свободен. Два ранних runner-прохода безопасно остановились до writer на несовместимых диагностических запросах (`current_user` alias и отсутствующая `ROUTINE_PRIVILEGES`); counts/hash оставались прежними. Успешный runner вывел полный success JSON, а внешний shell code `1` возник только из-за проверки env до `EXIT trap`; env и `--rm` container независимо подтверждены отсутствующими, apply не повторялся. Post-apply dump `20260821_125943-b24_app-database.sql.gz` (`173731` bytes) прошёл checksum/gzip и Disk read-back, IDs `103952/103950`. Restore `b24_app_restore_20260821_125943` совпал с source по структуре, counts/latest hash и checksums всех таблиц и сохранён до cleanup. Повторный shadow compare дал точный `match`, `0` differences/errors; root-only audit `/root/b24-app-audits/20260821-130225-supply-shadow-report-match.json`, SHA-256 `8755697d248189ebb4242307c0dd8fcaa4ee6200a73647faf2411427b2f01381`. Before/after focused tests `56/56`; production `ef4fecb`, restart `0`, network/mount/port, internal/public health, readiness и ERP read зелёные, shadow flag `off`, source switch не выполнялся.
+
+### Автоматическая проекция остатков Tilda — пока выключена
+
+Локальный кандидат запускает ровно один reconciliation cycle и не встроен в
+startup/HTTP backend. Он требует `TILDA_STOCK_SYNC=on`, отдельный
+`b24_app_tilda_sync` credential и migration `0007`. Скрипт
+`scripts/tilda-stock-sync-job.sh` также ничего не планирует сам: cron появляется
+только отдельным изменением на production. Backend container ради worker не
+нужно заменять — один и тот же version-pinned image можно сначала проверить как
+one-shot, оставив рабочий `b24-backend` без restart.
+
+Порядок первой активации:
+
+1. Зафиксировать baseline: полный backend test/typecheck/build, текущий public
+   parity, health/readiness, официальный ERP read, network и restart count.
+2. Запустить фактический `b24_app` backup job и проверить checksum, gzip и
+   внешний Disk read-back.
+3. Применить только `0007_create_tilda_stock_sync_runs.sql` существующим ручным
+   migration runner. Не добавлять migration credential в постоянный backend.
+4. Повторить backup и изолированный restore drill, включая migration hash,
+   структуру `tilda_stock_sync_runs`, 177 mappings и checksum domain tables.
+5. Создать отдельного пользователя. Выдать только `SELECT` на
+   `tilda_product_mappings` и `SELECT, INSERT, UPDATE` на
+   `tilda_stock_sync_runs`; проверить отсутствие global grants, workflow DML,
+   DDL и `DELETE`.
+6. Создать root-owned mode `0600` env-файл по фактическим значениям production.
+   Он содержит DB host/port/name/mode, имя runtime user только для проверки
+   разделения ролей, отдельные Tilda DB credentials, ERP API token, официальный
+   public-catalog URL и CommerceML credentials. Runtime DB password, migrator,
+   backfill и backup secrets worker не нужны.
+7. Запустить version-pinned image вручную с `TILDA_SYNC_TRIGGER=manual` в
+   `erpnext_frappe_network`. При текущем parity ожидается `no_op`: Tilda write не
+   вызывается. Независимо подтвердить 132 совпадения, две точные unlimited строки,
+   неизменный content hash и корректную audit row.
+8. Только после отдельного разрешения установить wrapper root-owned с mode
+   `0700` и добавить
+   строку `*/2 * * * *` с фиксированным image tag и абсолютным env path. После
+   первого запуска проверить cron log, SQL audit, public parity и отсутствие
+   credential-bearing exited containers.
+
+Для остановки удалить/закомментировать одну cron-строку; backend и ERPNext
+продолжают работать без изменений. Host `flock` и MariaDB `GET_LOCK` не дают
+проходам пересекаться. Ошибка чтения, изменение формы каталога или отсутствие
+ERP Item завершают цикл до Tilda write. Ошибка после публикации запускает
+проверяемый rollback. Таблицу аудита при оперативном откате не удалять.
 
 ### Текущее состояние `/app/state`
 

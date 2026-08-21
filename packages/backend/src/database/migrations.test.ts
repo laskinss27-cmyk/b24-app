@@ -31,7 +31,7 @@ test('migration filenames have a stable version prefix', async () => {
 	}
 });
 
-test('supply mirror schema is five ordered DDL-only statements', async () => {
+test('application SQL foundation is seven ordered DDL-only statements', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
 	assert.deepEqual(migrations.map((migration) => migration.filename), [
 		'0001_create_workflow_documents.sql',
@@ -39,9 +39,11 @@ test('supply mirror schema is five ordered DDL-only statements', async () => {
 		'0003_create_workflow_document_links.sql',
 		'0004_create_workflow_line_allocations.sql',
 		'0005_create_supply_mirror_checkpoints.sql',
+		'0006_create_tilda_product_mappings.sql',
+		'0007_create_tilda_stock_sync_runs.sql',
 	]);
 	for (const migration of migrations) {
-		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_)[a-z_]+ \(/);
+		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_)[a-z_]+ \(/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
 		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
@@ -51,9 +53,9 @@ test('supply mirror schema is five ordered DDL-only statements', async () => {
 	}
 });
 
-test('supply mirror schema preserves external identity and explicit graph links', async () => {
+test('SQL schemas preserve workflow links and Tilda external identity', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
-	const [documents, lines, links, allocations, checkpoints] = migrations.map((migration) => migration.sql);
+	const [documents, lines, links, allocations, checkpoints, tildaMappings, tildaRuns] = migrations.map((migration) => migration.sql);
 
 	assert.match(documents!, /UNIQUE KEY uq_workflow_documents_external \(external_system, document_type, external_id\)/);
 	assert.match(documents!, /external_revision_key VARCHAR\(255\)/);
@@ -84,4 +86,25 @@ test('supply mirror schema preserves external identity and explicit graph links'
 	assert.match(checkpoints!, /plan_hash BINARY\(32\) NOT NULL/);
 	assert.match(checkpoints!, /document_count INT UNSIGNED NOT NULL/);
 	assert.doesNotMatch(checkpoints!, /\bJSON\b/i);
+
+	assert.match(tildaMappings!, /UNIQUE KEY uq_tilda_product_mappings_uid \(tilda_uid\)/);
+	assert.match(tildaMappings!, /UNIQUE KEY uq_tilda_product_mappings_external \(tilda_external_id\)/);
+	assert.match(tildaMappings!, /tilda_sku VARCHAR\(120\) NULL/);
+	assert.match(tildaMappings!, /erp_item_code VARCHAR\(191\) NULL/);
+	assert.doesNotMatch(tildaMappings!, /UNIQUE KEY[^\n]+(?:tilda_sku|erp_item_code)/);
+	assert.match(tildaMappings!, /mapping_status IN \('confirmed', 'unresolved', 'ignored'\)/);
+	assert.match(tildaMappings!, /row_kind IN \('parent', 'variant'\)/);
+	assert.match(tildaMappings!, /parent_tilda_uid VARCHAR\(64\) NULL/);
+	assert.match(tildaMappings!, /variant_label VARCHAR\(255\) NULL/);
+	assert.match(tildaMappings!, /audit_source VARCHAR\(191\) NOT NULL/);
+	assert.match(tildaMappings!, /source_seen_at DATETIME\(6\) NOT NULL/);
+	assert.match(tildaMappings!, /mapping_status <> 'confirmed' OR \(tilda_sku IS NOT NULL AND erp_item_code IS NOT NULL AND confirmed_at IS NOT NULL\)/);
+	assert.doesNotMatch(tildaMappings!, /\bJSON\b/i);
+
+	assert.match(tildaRuns!, /UNIQUE KEY uq_tilda_stock_sync_runs_uuid \(run_uuid\)/);
+	assert.match(tildaRuns!, /projection_hash BINARY\(32\) NULL/);
+	assert.match(tildaRuns!, /status IN \('running', 'no_op', 'verified', 'failed'\)/);
+	assert.match(tildaRuns!, /trigger_source IN \('scheduled', 'manual'\)/);
+	assert.match(tildaRuns!, /error_message VARCHAR\(500\) NULL/);
+	assert.doesNotMatch(tildaRuns!, /\bJSON\b/i);
 });

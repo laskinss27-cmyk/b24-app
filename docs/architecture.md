@@ -142,4 +142,12 @@ Read-only dry-run снаба развёрнут отдельно от workflow r
 
 Tilda подключается только отдельным поздним этапом и не входит в текущий SQL foundation. Поток односторонний: backend читает остаток через официальный ERPNext API, соединяет его только с `confirmed`-сопоставлениями из `b24_app` и публикует проекцию в Tilda через ограниченный интеграционный контур. Tilda не пишет остатки обратно и не используется для восстановления ERPNext.
 
-Сопоставление хранится в SQL-таблице `tilda_product_mappings`, не в `/app/state`: уникальные Tilda UID/External ID, SKU, внешние `erp_item_code`/`erp_product_id`, статус `confirmed`/`unresolved`/`ignored`, parent/variant metadata, timestamps и audit source. Экспорт-baseline содержит 177 строк (131 parent, 46 variants), из них 150 stock-bearing SKU; 117 сопоставлены однозначно, 33 требуют ручной сверки. `unresolved` и `ignored` не попадают в публикацию. Реализация таблицы, backfill, Tilda API, ключи, cache/rate limits и расписание синхронизации требуют отдельных разрешённых этапов.
+Сопоставление хранится в SQL-таблице `tilda_product_mappings`, не в `/app/state`: уникальные Tilda UID/External ID, старый SKU, внешняя ссылка `erp_item_code`, статус `confirmed`/`unresolved`/`ignored`, parent/variant metadata, timestamps и audit source. Production foundation 2026-08-21 содержит 177 строк (131 parent, 46 variants), из них 150 stock-bearing SKU: 134 подтверждены, 16 отсутствуют в ERPNext и явно `ignored`; ещё 27 строк — родители вариантов без собственного SKU. Нерешённых строк нет. Backup/restore и одноразовая stock-only ERP-to-Tilda parity-публикация подтверждены; `unresolved` и `ignored` не попадают в проекцию.
+
+Периодическая проекция намеренно вынесена из HTTP backend: version-pinned
+one-shot контейнер позже может запускаться раз в две минуты под host `flock` и
+MariaDB connection lock. Отдельная least-privilege роль читает mappings, пишет
+только ограниченный run journal и читает ERPNext исключительно через официальный
+API. Совпавшая проекция является no-op; неполный input останавливает цикл;
+изменение проходит три public read-back и verified rollback. Worker и cron
+остаются выключены до отдельных production gates из `docs/tilda-stock-sync.md`.

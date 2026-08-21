@@ -26,6 +26,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 Развёрнутый `147f876` добавил к [read-only reader и parity comparator ручной endpoint](sql-supply-shadow-read-2026-08-21.md). Reader берёт последний checkpoint и фильтрует каждую graph table по его `observed_at`; comparator даёт статусы `match`, `mismatch`, `plan_blocked` и `no_snapshot` и ограничивает детали отчёта. `POST /api/admin/sql-migration/supply/shadow-compare` требует точного владельца, runtime SQL mode `readiness` и отдельный `B24_APP_SUPPLY_SHADOW_COMPARE=on`; production default подтверждён как `off`. Endpoint не имеет scheduler, не вызывается пользовательским workflow, не получает write credential и отклоняет параллельный полный scan.
 
+После активации зашифрованного owner OAuth vault первый production compare корректно показал устаревший checkpoint. Отдельно разрешённый второй mirror refresh применил полный plan `22ad151b5f2881b525d84c687583bcd23948dbc18f66219734f8091abda0f831` (`552/1064/563/753`, sources `425/119/5`, `22` warnings) ограниченным DML-only user; повтор был no-op, orphan counts нулевые. Post-apply backup, внешний read-back и изолированный restore дали полную parity, после чего второй shadow compare вернул точный `match` с `0` differences. SQL всё ещё не является source of truth; production shadow flag остаётся `off`, пользовательские чтения/записи и fallback не переключались.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |
@@ -47,7 +49,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 | конструктор отчётов | filesystem backend | `/app/state/report-builder/<ownerId>.json` | изоляция по владельцу реализована в коде |
 | operation log | filesystem backend | `/app/state/operation-log/events.jsonl` | ограниченный журнал, не полный аудит workflow |
 | блокировки и кэши | память процесса | locks снаба/перемещений/инвентаризации, кэши каталога, реализаций и имён | исчезают при restart и не координируют несколько replicas |
-| сопоставление товаров Tilda (будущий контур, сейчас не работает) | `b24_app` после отдельной миграции; остаток всегда ERPNext | отдельная SQL-таблица внешних идентификаторов Tilda и ссылок на ERP Item; Tilda получает только проекцию | 33 из 150 stock-bearing строк требуют ручного подтверждения; до него экспорт для них запрещён |
+| сопоставление и проекция товаров Tilda | `b24_app` хранит identity; остаток всегда ERPNext | 177 SQL mappings: 134 confirmed, 43 ignored; Tilda содержит одностороннюю проекцию 132 обратимых остатков | one-time parity подтверждён; scheduler пока отсутствует, 2 unlimited строки не затрагиваются |
 
 Инвентаризационный snapshot намеренно заморожен при создании. Движения после открытия компенсируются пользователем в пересчёте; будущая SQL-модель обязана хранить исходный snapshot неизменным и не заменять его текущим остатком ERPNext.
 
@@ -82,7 +84,7 @@ Read-only аудит снаба сузил и локально зафиксир�
 
 Отдельно от workflow-каркаса будущей интеграции Tilda нужна специализированная таблица `tilda_product_mappings`, а не новый файл в `/app/state`. Минимальные поля-кандидаты: уникальные `tilda_uid` и `tilda_external_id`, `tilda_sku`, nullable внешние ссылки `erp_item_code`/`erp_product_id`, `mapping_status` (`confirmed`, `unresolved`, `ignored`), явный тип строки parent/variant, nullable `parent_tilda_uid` и variant metadata, `audit_source`, `created_at`, `updated_at`, `last_seen_at` и nullable `confirmed_at`. Точный состав variant metadata и типы колонок определяются по исходному экспорту до миграции; универсальный payload «на всякий случай» не добавляется. Уникальность ERP-ссылки и SKU заранее не предполагается, пока аудит не подтвердит кардинальности.
 
-Исходный аудит экспорта Tilda: 177 строк = 131 parent + 46 variants; 150 stock-bearing SKU. Все `tilda_uid` и `tilda_external_id` уникальны. Из stock-bearing строк 117 однозначно сопоставляются с ERP, 33 остаются `unresolved` до ручной сверки. Эти числа являются baseline для будущего backfill/shadow-отчёта, а не разрешением создать таблицу или запустить синхронизацию.
+Обновлённый аудит экспорта Tilda: 177 строк = 131 parent + 46 variants; 150 stock-bearing SKU. Все `tilda_uid`, `tilda_external_id` и непустые SKU уникальны. Из stock-bearing строк 134 подтверждены по структурированным ERP-полям и ручной проверке, 16 товаров отсутствуют в ERPNext и по решению владельца имеют статус `ignored`; автоматически создавать их запрещено. Ещё 27 строк являются родителями вариантов без собственного SKU и также `ignored`. Нерешённых строк в seed 2026-08-21 нет. Это не разрешение применить migration/backfill или запустить публикацию; порядок первого запуска и rollback описан в `docs/tilda-stock-sync.md`.
 
 До подтверждения реального домена не создаются универсальные JSON-таблицы «на всякий случай» и не копируются ERPNext-таблицы.
 
@@ -93,6 +95,7 @@ Read-only аудит снаба сузил и локально зафиксир�
 - `b24_app_migrator`: отдельный секрет и DDL-права только на `b24_app`; отсутствует в постоянном env контейнера.
 - `b24_app_backup`: отдельный read-only секрет для dump.
 - `b24_app_backfill`: one-shot credential только с `SELECT/INSERT/UPDATE`, без DDL/`DELETE`; создан отдельно 21 августа, хранится root-only и отсутствует в постоянном env.
+- `b24_app_tilda_sync`: будущий scheduler credential только с `SELECT` mappings и `SELECT/INSERT/UPDATE` run journal; не получает workflow DML, DDL или `DELETE` и не хранится в backend env.
 - имя хоста базы берётся из проверенной production-конфигурации; имя контейнера не считается стабильным DNS-контрактом.
 - backend по-прежнему запускается в `erpnext_frappe_network`, но никогда не пишет напрямую в ERPNext schema.
 
@@ -187,7 +190,13 @@ Production restore требует остановить записи прилож
 11. Две последние `missing_line_match` официально разобраны как старые app-canceled draft PO с точными request keys. Evidence-only модель прошла focused `29/29`, backend `215/215`, typecheck, commit/deploy и седьмой production dry-run; подтверждены 0 errors / 22 warnings и нулевые SQL domain rows.
 12. Идемпотентный mirror writer/checkpoint подготовлен: focused `41/41`, backend `220/220`, общий typecheck и изолированный MariaDB 11.8 rehearsal успешны. Отдельный DML-only credential создан, `0005` применена one-shot runner, post-DDL backup/external read-back/restore parity успешны; writer source развёрнут без HTTP/startup вызова.
 13. Первый production mirror apply выполнен отдельным разрешённым one-shot process: свежий план имел 0 errors / 22 warnings, атомарная запись и точный no-op repeat подтверждены, graph/orphan checks успешны, post-apply backup/external read-back/restore parity точны. Runtime остался readiness-only, source switch не выполнялся.
-14. Shadow reads и автоматическое сравнение с Bitrix/ERPNext.
+14. Owner OAuth vault, ручной shadow endpoint и первый refresh-cycle завершены: устаревший checkpoint дал объяснимый `mismatch`, новый mirror apply прошёл backup/restore, следующий compare дал точный `match` с 0 differences. До source switch нужны несколько независимых `match` во времени.
 15. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
+
+Отдельный Tilda mapping foundation применён 21 августа: migration `0006`, 177
+mapping rows, idempotent repeat, post-write backup/restore и свежий официальный
+ERP preview прошли. Runtime backend не менялся и Tilda publication не
+выполнялась; точные hashes/counts и следующий разрешительный gate находятся в
+[`tilda-stock-sync.md`](tilda-stock-sync.md).
 
 Каждый пункт имеет собственные тесты «до/после», сравнение результатов и отдельный список посторонних ошибок. Коммит, push и deploy требуют явной команды.
