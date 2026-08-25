@@ -404,6 +404,27 @@ idempotent dedup. Финальный postcheck: рабочий backend не за
 health, readiness `database: up`, официальный ERP read и
 `erpnext_frappe_network` успешны. One-shot Tilda containers отсутствуют.
 
+25 августа commit `05cdb20` перевёл только источник Tilda-проекции на активный
+leaf warehouse `Shelly` и добавил DOM-only статусы `В наличии` / `Под заказ`.
+Перед переключением clean image прошёл read-only preview: 134 confirmed, 16
+skipped, 66 zero, 68 positive, total 1225, `sourceStore=Shelly`. Backend
+`b24-app:a2ea255` был сохранён остановленным как
+`b24-backend-prev-before-05cdb20`; новый `b24-app:05cdb20` прошёл canary,
+internal/public health, readiness `database: up`, официальный ERP read,
+`/srv/b24-state:/app/state`, `127.0.0.1:3000`, restart policy
+`unless-stopped`, restart count `0` и `erpnext_frappe_network`.
+
+На время Tilda gate одна cron-строка была удалена с root-only копией
+`/root/b24-app-ops/crontab.before-tilda-secret-rotation.20260825T155210Z`.
+Ручной guarded cycle обновил 19 из 132 обратимых остатков и завершился
+`verified`; non-quantity content hash до и после остался
+`9665ff7ff329cccd1553c9a6671596c4c6d79cbaba2d824963b8cc217325beea`.
+Повторный ручной cycle вернул `no_op`. Cron затем восстановлен с exact image
+`b24-app:05cdb20`; первый штатный запуск в 16:00 UTC также вернул `no_op` с
+Shelly projection hash
+`144cae376caa2b157b1db4d8359d4333d3279267aad62faefad84bb81d7bc5a6`.
+SQL source switch, migration и warehouse-document writes не выполнялись.
+
 Несколько операторских diagnostic-команд завершились до mutation из-за
 несовместимого SQL alias/BigInt JSON, попытки прочитать Docker env-file как
 shell-файл и двух ошибок quoting в read-only postcheck. После исправления те же

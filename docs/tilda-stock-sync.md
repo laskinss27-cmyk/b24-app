@@ -310,7 +310,28 @@ The intended initial cadence is a two-minute one-way reconciliation from the
 official ERPNext API to Tilda, publishing only when the projection hash changes.
 An ERP event hook may later reduce latency, but the periodic reconciliation
 remains the safety net. Production cron now runs every two minutes from the
-version-pinned `b24-app:faffa98` image.
+version-pinned `b24-app:05cdb20` image.
+
+On 2026-08-25 the projection source was narrowed from the ERP-wide warehouse
+total to the single active leaf warehouse `Shelly`. A read-only production
+preview from the clean `05cdb20` image returned 134 confirmed offers, 16
+skipped mappings, 66 zero and 68 positive quantities, total quantity 1225,
+`sourceStore=Shelly` and projection hash
+`144cae376caa2b157b1db4d8359d4333d3279267aad62faefad84bb81d7bc5a6`.
+The first guarded manual cycle updated 19 of the 132 reversible quantities and
+completed as `verified`; its before/after non-quantity content hash remained
+exactly
+`9665ff7ff329cccd1553c9a6671596c4c6d79cbaba2d824963b8cc217325beea`.
+A second manual cycle and the first scheduler cycle both returned `no_op` with
+the same Shelly projection and content hashes. Titles, descriptions, prices,
+images, SKU, sections, characteristics and SEO fields were not published.
+
+The cron line was disabled during the manual gate and re-enabled only after the
+verified write and idempotent no-op. Root-only rollback snapshots are retained
+under `/root/b24-app-ops`; the exact pre-change crontab is
+`crontab.before-tilda-secret-rotation.20260825T155210Z`. Operational rollback is
+still to install that snapshot (or remove the single Tilda cron line) and, if
+required, run the reconciliation journal's retained numeric rollback artifact.
 
 ## Storefront availability presentation
 
