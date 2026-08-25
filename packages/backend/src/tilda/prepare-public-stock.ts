@@ -61,7 +61,7 @@ try {
 			differences: comparison.differences.length,
 		},
 		publicCatalogContentHash: publicCatalog.contentHash,
-		excludedStores: preview.excludedStores,
+		sourceStore: preview.sourceStore,
 		fullProjectionHash: preview.projectionHash,
 		safeProjectionXmlSha256: sha256(projectionXml),
 		rollbackXmlSha256: sha256(rollbackXml),

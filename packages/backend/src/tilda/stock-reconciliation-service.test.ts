@@ -31,7 +31,7 @@ function fixture(difference = false): {
 		});
 		rows.push({ tildaUid, sku, quantity: index < 2 ? null : (difference && index === 2 ? 0 : 5) });
 		if (confirmed) {
-			stocks.set(productId, { warehouse: 5 });
+			stocks.set(productId, { Shelly: 5 });
 			offers.push({ productId, tildaUid, externalId: `external-${index}`, sku, title: `Title ${index}`, quantity: 5 });
 		}
 	}

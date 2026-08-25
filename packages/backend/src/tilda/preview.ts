@@ -24,7 +24,7 @@ try {
 		zeroQuantityCount: zeroQuantity.length,
 		positiveQuantityCount: preview.offers.length - zeroQuantity.length,
 		totalQuantity: preview.offers.reduce((sum, offer) => sum + offer.quantity, 0),
-		excludedStores: preview.excludedStores,
+		sourceStore: preview.sourceStore,
 		projectionHash: preview.projectionHash,
 		xmlBytes: Buffer.byteLength(preview.xml),
 		zeroQuantity: zeroQuantity.map(({ productId, tildaUid, externalId, sku }) => ({

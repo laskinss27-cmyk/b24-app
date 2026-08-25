@@ -1,0 +1,111 @@
+<!--
+  Shelly catalog availability presentation.
+  Paste this snippet once into Tilda's site-wide custom HTML inside HEAD.
+  It changes only the rendered page; catalog fields, descriptions and SEO data stay untouched.
+-->
+<style>
+  .b24-stock-status {
+    margin-top: 8px;
+    color: #4f7a59;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.35;
+  }
+
+  .b24-stock-status[data-stock-status="preorder"] {
+    color: #806f4c;
+  }
+
+  .t-store__card .b24-stock-status {
+    text-align: center;
+  }
+
+  .t-store__product-snippet .b24-stock-status {
+    margin-top: 10px;
+    text-align: left;
+  }
+</style>
+<script>
+  (function () {
+    'use strict';
+
+    var PRODUCT_SELECTOR = '.js-product[data-product-inv]';
+    var STATUS_CLASS = 'b24-stock-status';
+    var scheduled = false;
+
+    function readQuantity(product) {
+      var raw = product.getAttribute('data-product-inv');
+      if (raw === null || raw.trim() === '') return null;
+
+      var quantity = Number(raw);
+      return Number.isFinite(quantity) ? quantity : null;
+    }
+
+    function setText(element, text) {
+      if (element && element.textContent.trim() !== text) element.textContent = text;
+    }
+
+    function renderStatus(product) {
+      var quantity = readQuantity(product);
+      if (quantity === null) return;
+
+      var isAvailable = quantity > 0;
+      var text = isAvailable ? 'В наличии' : 'Под заказ';
+      var status = product.querySelector('.' + STATUS_CLASS);
+      var price = product.querySelector(
+        '.t-store__card__price-wrapper, .t-store__prod-popup__price-wrapper'
+      );
+
+      if (!status && price) {
+        status = document.createElement('div');
+        status.className = STATUS_CLASS;
+        price.insertAdjacentElement('afterend', status);
+      }
+
+      if (status) {
+        status.setAttribute('data-stock-status', isAvailable ? 'available' : 'preorder');
+        status.textContent = text;
+      }
+
+      if (!isAvailable) {
+        product.querySelectorAll(
+          '.t-store__prod-popup__btn_disabled .t-store__card__btn-text, ' +
+          '.t-store__prod-popup__btn_disabled .js-store-prod-popup-buy-btn-txt'
+        ).forEach(function (buttonText) {
+          setText(buttonText, 'Под заказ');
+        });
+      }
+
+      product.querySelectorAll('.js-store-prod-charcs').forEach(function (characteristic) {
+        if (/^\s*Наличие\s*:/u.test(characteristic.textContent)) {
+          setText(characteristic, 'Наличие: ' + text);
+        }
+      });
+    }
+
+    function renderAll() {
+      scheduled = false;
+      document.querySelectorAll(PRODUCT_SELECTOR).forEach(renderStatus);
+    }
+
+    function scheduleRender() {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(renderAll);
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scheduleRender, { once: true });
+    } else {
+      scheduleRender();
+    }
+
+    new MutationObserver(scheduleRender).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-product-inv'],
+      childList: true,
+      subtree: true
+    });
+  })();
+</script>

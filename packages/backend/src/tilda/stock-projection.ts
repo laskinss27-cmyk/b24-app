@@ -21,18 +21,19 @@ export interface TildaStockOffer {
 export interface TildaStockPreview {
 	offers: TildaStockOffer[];
 	skipped: Array<TildaProductMapping & { reason: 'mapping_not_confirmed' }>;
-	excludedStores: string[];
+	sourceStore: string;
 }
 
-export const DEFAULT_TILDA_EXCLUDED_STORES = ['Goods In Transit', 'Склад Прихода'] as const;
+export const TILDA_STOCK_SOURCE_STORE = 'Shelly';
 
 function normalizedStore(value: string): string {
 	return value.trim().toLocaleLowerCase('ru');
 }
 
-function sellableQuantity(stocks: Record<string, number>, excludedStores: Set<string>): number {
+function sourceStoreQuantity(stocks: Record<string, number>, sourceStore: string): number {
+	const normalizedSourceStore = normalizedStore(sourceStore);
 	const total = Object.entries(stocks).reduce((sum, [store, rawQuantity]) => {
-		if (excludedStores.has(normalizedStore(store))) return sum;
+		if (normalizedStore(store) !== normalizedSourceStore) return sum;
 		const quantity = Number(rawQuantity);
 		return Number.isFinite(quantity) ? sum + quantity : sum;
 	}, 0);
@@ -42,9 +43,8 @@ function sellableQuantity(stocks: Record<string, number>, excludedStores: Set<st
 export function buildTildaStockPreview(
 	mappings: TildaProductMapping[],
 	stocksByProduct: Map<number, Record<string, number>>,
-	excludedStoreNames: readonly string[] = DEFAULT_TILDA_EXCLUDED_STORES,
+	sourceStore = TILDA_STOCK_SOURCE_STORE,
 ): TildaStockPreview {
-	const excludedStores = new Set(excludedStoreNames.map(normalizedStore));
 	const seenExternalIds = new Set<string>();
 	const seenTildaUids = new Set<string>();
 	const offers: TildaStockOffer[] = [];
@@ -71,10 +71,10 @@ export function buildTildaStockPreview(
 			externalId,
 			sku: mapping.sku.trim(),
 			title: mapping.title.trim(),
-			quantity: sellableQuantity(stocksByProduct.get(mapping.productId) ?? {}, excludedStores),
+			quantity: sourceStoreQuantity(stocksByProduct.get(mapping.productId) ?? {}, sourceStore),
 		});
 	}
 
 	offers.sort((left, right) => left.externalId.localeCompare(right.externalId));
-	return { offers, skipped, excludedStores: [...excludedStoreNames] };
+	return { offers, skipped, sourceStore };
 }

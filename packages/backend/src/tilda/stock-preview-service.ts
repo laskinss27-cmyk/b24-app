@@ -14,14 +14,14 @@ export interface TildaStockPreviewServices {
 export interface PreparedTildaStockPreview {
 	offers: TildaStockOffer[];
 	skippedCount: number;
-	excludedStores: string[];
+	sourceStore: string;
 	projectionHash: string;
 	xml: string;
 }
 
 export async function prepareTildaStockPreview(
 	services: TildaStockPreviewServices,
-	excludedStores?: readonly string[],
+	sourceStore?: string,
 	generatedAt = new Date(),
 ): Promise<PreparedTildaStockPreview> {
 	const mappings = await services.readMappings();
@@ -33,11 +33,11 @@ export async function prepareTildaStockPreview(
 	if (missingProductIds.length) {
 		throw new Error(`ERP stock response is incomplete for confirmed Items: ${missingProductIds.join(', ')}`);
 	}
-	const preview = buildTildaStockPreview(mappings, stocks, excludedStores);
+	const preview = buildTildaStockPreview(mappings, stocks, sourceStore);
 	const xml = buildTildaOffersXml(preview.offers, generatedAt);
 	const projection = JSON.stringify({
 		version: 1,
-		excludedStores: preview.excludedStores,
+		sourceStore: preview.sourceStore,
 		offers: preview.offers.map(({ productId, tildaUid, externalId, sku, quantity }) => ({
 			productId,
 			tildaUid,
@@ -49,7 +49,7 @@ export async function prepareTildaStockPreview(
 	return {
 		offers: preview.offers,
 		skippedCount: preview.skipped.length,
-		excludedStores: preview.excludedStores,
+		sourceStore: preview.sourceStore,
 		projectionHash: createHash('sha256').update(projection).digest('hex'),
 		xml,
 	};

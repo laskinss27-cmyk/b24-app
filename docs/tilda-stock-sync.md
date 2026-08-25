@@ -33,8 +33,8 @@ versioned 2026-08-21 seed. The seed preserves all historical Tilda SKU values.
   acquires a MariaDB lock, validates UID/External ID conflicts and writes in one
   transaction. It is never called at backend startup.
 - The preview service reads stock-bearing SQL mappings, requests ERP stock only
-  for `confirmed` ERP Items, excludes `Goods In Transit` and `Склад Прихода`,
-  verifies that every confirmed Item is active, distinguishes an active
+  for `confirmed` ERP Items, projects only the active leaf warehouse `Shelly`,
+  verifies that both this warehouse and every confirmed Item are active, distinguishes an active
   zero-stock Item without a `Bin` row from a missing Item, rejects an incomplete
   ERP response, clamps negative totals to zero, floors fractional totals and produces a
   CommerceML document plus a timestamp-independent SHA-256 projection hash.
@@ -311,6 +311,33 @@ official ERPNext API to Tilda, publishing only when the projection hash changes.
 An ERP event hook may later reduce latency, but the periodic reconciliation
 remains the safety net. Production cron now runs every two minutes from the
 version-pinned `b24-app:faffa98` image.
+
+## Storefront availability presentation
+
+The versioned `scripts/tilda-availability-status.html` snippet derives its
+visible status only from Tilda's rendered numeric `data-product-inv` value. A
+positive quantity is shown as `В наличии`; zero is shown as `Под заказ` in both
+the catalog card and product detail. Blank quantities remain untouched because
+they mean unlimited stock in Tilda. For zero-stock products the existing
+disabled Tilda button is relabelled from `Нет в наличии` to `Под заказ`; it does
+not become an order action.
+
+The snippet changes only the rendered DOM. It does not write product titles,
+descriptions, characteristics, images, prices, SKU or SEO fields. The existing
+custom `Наличие` filter stays in place: Tilda's system quantity filter supports
+only the one-way `Только товары в наличии` checkbox and cannot replace the
+current separate `В наличии` / `Под заказ` choices.
+
+The snippet was installed after the existing Yandex Metrika HEAD code and all
+23 pages of project `5103503` were republished on 2026-08-25. A fresh uncached
+public check found 40/40 rendered catalog cards with statuses, including a
+positive `В наличии` row and a zero-stock `Под заказ` row; the zero-stock detail
+page kept its product description and showed `Под заказ` in both the status and
+disabled button. The ordinary catalog URL initially returned an older CDN copy,
+while a cache-busted request already returned the new HEAD code. A pre-existing
+catalog-only `SyntaxError: Unexpected token '<'` reproduced on both the old page
+without this snippet and the freshly published page; it is recorded as unrelated
+and was not changed in this gate.
 
 ## Guarded reconciliation worker
 

@@ -13,7 +13,7 @@ const confirmed = (patch: Partial<TildaProductMapping> = {}): TildaProductMappin
 	...patch,
 });
 
-test('Tilda stock preview sums sellable stores and excludes incoming and transit stock', () => {
+test('Tilda stock preview reads only the Shelly warehouse', () => {
 	const preview = buildTildaStockPreview([confirmed()], new Map([
 		[18178, {
 			Shelly: 3,
@@ -23,8 +23,8 @@ test('Tilda stock preview sums sellable stores and excludes incoming and transit
 		}],
 	]));
 
-	assert.equal(preview.offers[0]?.quantity, 5);
-	assert.deepEqual(preview.excludedStores, ['Goods In Transit', 'Склад Прихода']);
+	assert.equal(preview.offers[0]?.quantity, 3);
+	assert.equal(preview.sourceStore, 'Shelly');
 });
 
 test('Tilda stock preview floors fractional stock and never publishes a negative quantity', () => {
