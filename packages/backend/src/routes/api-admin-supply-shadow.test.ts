@@ -37,6 +37,7 @@ function config(mode: 'off' | 'on'): Config {
 		inventoryNotify: 'off',
 		appOAuthVault: 'off',
 		supplyShadowCompare: mode,
+		supplySqlRead: 'off',
 		nodeEnv: 'test',
 	};
 }

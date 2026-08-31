@@ -31,7 +31,7 @@ test('migration filenames have a stable version prefix', async () => {
 	}
 });
 
-test('application SQL foundation is seven ordered DDL-only statements', async () => {
+test('application SQL migrations are ordered and use narrowly scoped DDL', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
 	assert.deepEqual(migrations.map((migration) => migration.filename), [
 		'0001_create_workflow_documents.sql',
@@ -41,8 +41,9 @@ test('application SQL foundation is seven ordered DDL-only statements', async ()
 		'0005_create_supply_mirror_checkpoints.sql',
 		'0006_create_tilda_product_mappings.sql',
 		'0007_create_tilda_stock_sync_runs.sql',
+		'0008_make_line_ordinal_identity_conditional.sql',
 	]);
-	for (const migration of migrations) {
+	for (const migration of migrations.slice(0, 7)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_)[a-z_]+ \(/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
@@ -51,11 +52,21 @@ test('application SQL foundation is seven ordered DDL-only statements', async ()
 		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
 		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
 	}
+
+	const lineIdentityMigration = migrations[7]!.sql;
+	assert.equal(lineIdentityMigration.split(';').filter((statement) => statement.trim()).length, 1);
+	assert.match(lineIdentityMigration, /^ALTER TABLE workflow_document_lines\b/);
+	assert.doesNotMatch(lineIdentityMigration, /^\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/im);
+	assert.doesNotMatch(lineIdentityMigration, /\bDROP\s+(?:TABLE|DATABASE|COLUMN)\b/i);
+	assert.doesNotMatch(lineIdentityMigration, /\bJSON\b/i);
+	assert.match(lineIdentityMigration, /DROP INDEX uq_workflow_document_lines_ordinal/);
+	assert.match(lineIdentityMigration, /GENERATED ALWAYS AS \(CASE WHEN external_line_key IS NULL THEN line_ordinal ELSE NULL END\) STORED/);
+	assert.match(lineIdentityMigration, /UNIQUE KEY uq_workflow_document_lines_fallback_ordinal \(document_id, identity_line_ordinal\)/);
 });
 
 test('SQL schemas preserve workflow links and Tilda external identity', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
-	const [documents, lines, links, allocations, checkpoints, tildaMappings, tildaRuns] = migrations.map((migration) => migration.sql);
+	const [documents, lines, links, allocations, checkpoints, tildaMappings, tildaRuns, lineIdentity] = migrations.map((migration) => migration.sql);
 
 	assert.match(documents!, /UNIQUE KEY uq_workflow_documents_external \(external_system, document_type, external_id\)/);
 	assert.match(documents!, /external_revision_key VARCHAR\(255\)/);
@@ -71,6 +82,8 @@ test('SQL schemas preserve workflow links and Tilda external identity', async ()
 	assert.match(lines!, /target_warehouse VARCHAR\(191\)/);
 	assert.doesNotMatch(lines!, /UNIQUE KEY[^\n]+erp_item_code/);
 	assert.match(lines!, /planned_qty IS NOT NULL OR request_qty IS NOT NULL OR actual_qty IS NOT NULL/);
+	assert.match(lineIdentity!, /CASE WHEN external_line_key IS NULL THEN line_ordinal ELSE NULL END/);
+	assert.match(lineIdentity!, /UNIQUE KEY uq_workflow_document_lines_fallback_ordinal \(document_id, identity_line_ordinal\)/);
 
 	assert.match(links!, /UNIQUE KEY uq_workflow_document_links_relation \(from_document_id, to_document_id, relation_type\)/);
 	assert.match(links!, /relation_type IN \('ordered_for_request'.*'corrects_transfer'\)/);

@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { listAllEntityItems } from '../b24/entity-items.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
+import type { DatabaseRuntime } from '../database/runtime.js';
 import { ErpClient } from '../erp/client.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { listSupplyRequests, type SupplyRequest } from '../erp/operations.js';
 import { calculateRequestProgress, coverageBeyondBaseline, directReceiptFulfillment } from '../supply/progress.js';
+import { observeSupplySqlReadShadow } from '../supply/sql-read-shadow.js';
 import {
 	addCovered,
 	listPurchaseChildren,
@@ -18,7 +20,7 @@ import type { AuthBody, TransferProgress } from './api-supply-types.js';
 
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 
-export function registerSupplyOrdersRoute(app: FastifyInstance): void {
+export function registerSupplyOrdersRoute(app: FastifyInstance, database?: DatabaseRuntime): void {
 	app.post('/api/supply/orders', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody;
 		const client = supplyClientFrom(app, b);
@@ -27,6 +29,8 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 		if (!erp) return { ok: true, orders: [] as unknown[] };
 		try {
 			const reqs = await listSupplyRequests(erp);
+			let rawTransferRecordCount = 0;
+			let parsedTransfers: TransferProgress[] = [];
 			const standaloneToStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
 			const standaloneRequest: SupplyRequest = { name: STANDALONE_SUPPLY_REQUEST, requestKey: '', createdAt: '', dealId: '', date: '', deadline: '', status: '', toStore: standaloneToStore, note: '', items: [] };
 			// Название сделки — из Б24 (одним батч-вызовом по списку dealId). Статус «обеспечено» — из самой заявки.
@@ -49,7 +53,9 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 			try {
 				await ensureTransfersEntity(client);
 				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
-				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
+				rawTransferRecordCount = transferItems?.length ?? 0;
+				parsedTransfers = (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null);
+				for (const t of parsedTransfers) {
 					if (t.status === 'draft' || t.status === 'collected' || t.status === 'requested') {
 						for (const line of t.lines) {
 							const key = `${line.productId}:${t.fromStore}`;
@@ -175,6 +181,22 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 					closed: true,
 					standalone: true,
 				}] : enriched;
+			if (app.config.supplySqlRead === 'shadow') {
+				const sqlShadow = await observeSupplySqlReadShadow('shadow', database, {
+					rawRecordCount: rawTransferRecordCount,
+					transfers: parsedTransfers,
+				});
+				const shadowLog = {
+					status: sqlShadow.status,
+					storedPlanHash: sqlShadow.storedPlanHash,
+					checkpointObservedAt: sqlShadow.checkpointObservedAt,
+					legacyTransferCount: sqlShadow.legacyTransferCount,
+					storedTransferCount: sqlShadow.storedTransferCount,
+					differences: sqlShadow.differences,
+				};
+				if (sqlShadow.status === 'match') app.log.info(shadowLog, '[api/supply/orders] SQL shadow');
+				else app.log.warn(shadowLog, '[api/supply/orders] SQL shadow fallback');
+			}
 			app.log.info({ reqs: enriched.length, standalonePurchases: standalonePurchases.length, standaloneTransfers: standaloneTransfers.length }, '[api/supply/orders] ok');
 			return { ok: true, orders };
 		} catch (err) {

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { DatabaseRuntime } from '../database/runtime.js';
 import { registerSupplyOrdersRoute } from './api-supply-orders-route.js';
 import { registerSupplyRequestRoutes } from './api-supply-request-routes.js';
 import { registerSupplyDocumentCreationRoute } from './api-supply-document-creation-route.js';
@@ -15,8 +16,8 @@ import { registerSupplyPurchaseTransferRoute } from './api-supply-purchase-trans
  */
 const supplyCreationLocks = new Set<string>();
 
-export function registerApiSupplyRoute(app: FastifyInstance): void {
-	registerSupplyOrdersRoute(app);
+export function registerApiSupplyRoute(app: FastifyInstance, database?: DatabaseRuntime): void {
+	registerSupplyOrdersRoute(app, database);
 	registerSupplyRequestRoutes(app, supplyCreationLocks);
 	registerSupplyDocumentCreationRoute(app, supplyCreationLocks);
 	registerSupplySupplierRoutes(app);

@@ -27,6 +27,7 @@ const mobileConfig: Config = {
 	inventoryNotify: 'off',
 	appOAuthVault: 'off',
 	supplyShadowCompare: 'off',
+	supplySqlRead: 'off',
 	appClientId: 'local.test',
 	appClientSecret: 'secret',
 	nodeEnv: 'test',

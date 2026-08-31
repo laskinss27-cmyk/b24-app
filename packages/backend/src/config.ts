@@ -26,6 +26,8 @@ const ConfigSchema = z.object({
 	catalogWriteWebhook: z.string().url().optional(),
 	/** Ручное owner-only сравнение актуального supply graph с SQL mirror. */
 	supplyShadowCompare: z.enum(['off', 'on']).default('off'),
+	/** Per-request SQL graph observation; never replaces the legacy response. */
+	supplySqlRead: z.enum(['off', 'shadow']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 
@@ -48,6 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		devWebhook: env['DEV_WEBHOOK'],
 		catalogWriteWebhook: env['CATALOG_WRITE_WEBHOOK'],
 		supplyShadowCompare: env['B24_APP_SUPPLY_SHADOW_COMPARE'],
+		supplySqlRead: env['B24_APP_SUPPLY_SQL_READ'],
 		nodeEnv: env['NODE_ENV'],
 	});
 

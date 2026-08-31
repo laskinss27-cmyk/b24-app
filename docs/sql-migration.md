@@ -28,6 +28,10 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 После активации зашифрованного owner OAuth vault первый production compare корректно показал устаревший checkpoint. Отдельно разрешённый второй mirror refresh применил полный plan `22ad151b5f2881b525d84c687583bcd23948dbc18f66219734f8091abda0f831` (`552/1064/563/753`, sources `425/119/5`, `22` warnings) ограниченным DML-only user; повтор был no-op, orphan counts нулевые. Post-apply backup, внешний read-back и изолированный restore дали полную parity, после чего второй shadow compare вернул точный `match` с `0` differences. SQL всё ещё не является source of truth; production shadow flag остаётся `off`, пользовательские чтения/записи и fallback не переключались.
 
+31 августа выполнен следующий [production mirror refresh](sql-supply-mirror-refresh-2026-08-31.md). Append-only migration `0008` устранила конфликт стабильного внешнего line ID с изменяемым ordinal, сохранив fallback-уникальность для строк без внешнего ID. Свежий план `b411ebc943c19724a5c902a132efd381d5002c55f1b1d7bb72c5ea5259a57826` (`823/1516/847/1130`, sources `634/174/13`, `0` errors, `22` warnings) применён атомарно и повторён как no-op. Backup/restore совпали по checksums всех восьми таблиц, а независимый shadow compare вернул `match` с `0` differences. Физические append-only counts больше latest-среза из-за сохранённых исторических строк; reader по-прежнему фильтрует все graph tables по точному `latest.observed_at`. Runtime остался readiness-only, source switch не выполнялся.
+
+Следующий [read foundation](sql-supply-read-foundation-2026-08-31.md) добавляет только opt-in `off|shadow` проверку покрытой transfer-проекции. Default `off` не открывает SQL из `/api/supply/orders`; `shadow` всегда сохраняет legacy HTTP-ответ и fail-open fallback для пользователя. Полный режим `sql` намеренно отсутствует, потому что текущая mirror schema ещё не хранит UI-поля карточки, историю и action facts. Production deploy/activation этого foundation пока не выполнялись.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |

@@ -148,7 +148,7 @@ export async function buildApp({ config, database, ownerOAuthVault = createOwner
 	registerApiStockRoute(app);
 	registerPlacementStockRoute(app);
 	registerPlacementSupplyRoute(app);
-	registerApiSupplyRoute(app);
+	registerApiSupplyRoute(app, database);
 	registerApiMarketplacesRoute(app);
 	registerApiContractsRoute(app);
 	registerApiAccessControlRoute(app);

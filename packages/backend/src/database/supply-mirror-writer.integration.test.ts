@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import mariadb, { type Pool } from 'mariadb';
@@ -69,6 +72,20 @@ function snapshot(status = 'ordered', observedAt = '2026-08-21T08:00:00.000Z'): 
 	};
 }
 
+function snapshotWithReorderedRequestLines(observedAt: string, includeRemovedLine: boolean): SupplyMirrorSnapshot {
+	const value = snapshot('ordered', observedAt);
+	const request = value.documents[0]!;
+	request.lines = [
+		{ externalLineKey: 'MRI-1', lineOrdinal: 1, erpItemCode: '100', requestQty: 2, sourcePayload: { name: 'MRI-1', qty: 2 } },
+		{ externalLineKey: 'MRI-A', lineOrdinal: 2, erpItemCode: '101', requestQty: 1, sourcePayload: { name: 'MRI-A', qty: 1 } },
+		...(includeRemovedLine
+			? [{ externalLineKey: 'MRI-B', lineOrdinal: 3, erpItemCode: '102', requestQty: 1, sourcePayload: { name: 'MRI-B', qty: 1 } }]
+			: []),
+		{ externalLineKey: 'MRI-C', lineOrdinal: includeRemovedLine ? 4 : 3, erpItemCode: '103', requestQty: 1, sourcePayload: { name: 'MRI-C', qty: 1 } },
+	];
+	return value;
+}
+
 async function scalar(pool: Pool, table: string): Promise<number> {
 	const rows = await pool.query<Array<Record<string, unknown>>>(`SELECT COUNT(*) AS count FROM ${table}`);
 	return Number(rows[0]?.['count']);
@@ -82,15 +99,28 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 	assert.ok(rootPassword);
 
 	const root = mariadb.createPool({ host, port, user: 'root', password: rootPassword, connectionLimit: 1 });
+	const rehearsalMigrationsDirectory = await mkdtemp(join(tmpdir(), 'b24-writer-migrations-'));
 	let schemaPool: Pool | undefined;
 	let writerPool: Pool | undefined;
 	try {
+		const migrationFilenames = [
+			'0001_create_workflow_documents.sql',
+			'0002_create_workflow_document_lines.sql',
+			'0003_create_workflow_document_links.sql',
+			'0004_create_workflow_line_allocations.sql',
+			'0005_create_supply_mirror_checkpoints.sql',
+			'0006_create_tilda_product_mappings.sql',
+			'0007_create_tilda_stock_sync_runs.sql',
+		];
+		for (const filename of migrationFilenames) {
+			await copyFile(join(migrationsDirectory, filename), join(rehearsalMigrationsDirectory, filename));
+		}
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${backfillUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, migrationsDirectory)).length, 5);
-		assert.deepEqual(await applyMigrations(schemaPool, migrationsDirectory), []);
+		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 7);
+		assert.deepEqual(await applyMigrations(schemaPool, rehearsalMigrationsDirectory), []);
 
 		await root.query(`CREATE USER '${backfillUser}'@'%' IDENTIFIED BY '${backfillPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${backfillUser}'@'%'`);
@@ -122,14 +152,61 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 		const changedStored = await readLatestSupplyMirrorSnapshot(writerPool as unknown as SupplyMirrorReadPool);
 		assert.equal(compareSupplyMirrorShadow(changedPlan, changedStored).status, 'match');
 
+		const beforeReorderPlan = buildSupplyMirrorPlan(snapshotWithReorderedRequestLines('2026-08-21T08:06:00.000Z', true));
+		await applySupplyMirrorPlan(writerPool as unknown as SupplyMirrorWriterPool, beforeReorderPlan);
+		const afterReorderPlan = buildSupplyMirrorPlan(snapshotWithReorderedRequestLines('2026-08-21T08:07:00.000Z', false));
+		await assert.rejects(
+			() => applySupplyMirrorPlan(writerPool as unknown as SupplyMirrorWriterPool, afterReorderPlan),
+			/duplicate/i,
+		);
+		assert.equal(await scalar(schemaPool, 'supply_mirror_checkpoints'), 3);
+		const beforeMigrationStored = await readLatestSupplyMirrorSnapshot(writerPool as unknown as SupplyMirrorReadPool);
+		assert.equal(compareSupplyMirrorShadow(beforeReorderPlan, beforeMigrationStored).status, 'match');
+
+		const lineIdentityMigration = '0008_make_line_ordinal_identity_conditional.sql';
+		await copyFile(join(migrationsDirectory, lineIdentityMigration), join(rehearsalMigrationsDirectory, lineIdentityMigration));
+		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 1);
+		assert.deepEqual(await applyMigrations(schemaPool, rehearsalMigrationsDirectory), []);
+		await applySupplyMirrorPlan(writerPool as unknown as SupplyMirrorWriterPool, afterReorderPlan);
+		const reorderedStored = await readLatestSupplyMirrorSnapshot(writerPool as unknown as SupplyMirrorReadPool);
+		assert.equal(compareSupplyMirrorShadow(afterReorderPlan, reorderedStored).status, 'match');
+		const reorderedRows = await schemaPool.query<Array<Record<string, unknown>>>(`
+			SELECT external_line_key, line_ordinal, identity_line_ordinal
+			FROM workflow_document_lines l
+			JOIN workflow_documents d ON d.id = l.document_id
+			WHERE d.document_type = 'supply_request' AND d.external_id = 'MR-1'
+			ORDER BY external_line_key
+		`);
+		assert.deepEqual(reorderedRows.map((row) => [row['external_line_key'], row['line_ordinal'], row['identity_line_ordinal']]), [
+			['MRI-1', 1, null],
+			['MRI-A', 2, null],
+			['MRI-B', 3, null],
+			['MRI-C', 3, null],
+		]);
+
+		const requestIdRows = await schemaPool.query<Array<Record<string, unknown>>>(
+			"SELECT id FROM workflow_documents WHERE document_type = 'supply_request' AND external_id = 'MR-1'",
+		);
+		const requestId = requestIdRows[0]?.['id'];
+		await schemaPool.query(`
+			INSERT INTO workflow_document_lines (
+				document_id, external_line_key, line_ordinal, erp_item_code, request_qty, observed_at, source_hash
+			) VALUES (?, NULL, 20, 'fallback-a', 1, '2026-08-21 08:07:00.000000', UNHEX(REPEAT('11', 32)))
+		`, [requestId]);
+		await assert.rejects(() => schemaPool!.query(`
+			INSERT INTO workflow_document_lines (
+				document_id, external_line_key, line_ordinal, erp_item_code, request_qty, observed_at, source_hash
+			) VALUES (?, NULL, 20, 'fallback-b', 1, '2026-08-21 08:07:00.000000', UNHEX(REPEAT('22', 32)))
+		`, [requestId]), /duplicate/i);
+
 		const invalidPlan = buildSupplyMirrorPlan(snapshot('broken', '2026-08-21T08:10:00.000Z'));
 		invalidPlan.lines[0]!.erpItemCode = 'x'.repeat(192);
 		await assert.rejects(() => applySupplyMirrorPlan(writerPool as unknown as SupplyMirrorWriterPool, invalidPlan));
-		assert.equal(await scalar(schemaPool, 'supply_mirror_checkpoints'), 2);
+		assert.equal(await scalar(schemaPool, 'supply_mirror_checkpoints'), 4);
 		const rolledBackStatus = await schemaPool.query<Array<Record<string, unknown>>>(
 			"SELECT external_status FROM workflow_documents WHERE document_type = 'purchase_order' AND external_id = 'PO-1'",
 		);
-		assert.equal(rolledBackStatus[0]?.['external_status'], 'cancelled');
+		assert.equal(rolledBackStatus[0]?.['external_status'], 'ordered');
 
 		await assert.rejects(
 			() => writerPool!.query('DELETE FROM workflow_documents WHERE id = -1'),
@@ -145,5 +222,6 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${backfillUser}'@'%'`);
 		await root.end();
+		await rm(rehearsalMigrationsDirectory, { recursive: true, force: true });
 	}
 });
