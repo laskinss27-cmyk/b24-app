@@ -397,6 +397,31 @@ content setting and product/variant creation stays disabled. A separately
 approved one-product numeric canary must prove both price application and exact
 rollback before the full reversible set is published.
 
+The price projection was activated on 2026-08-31 after deploying commit
+`85a8218` with `TILDA_PRICE_SYNC=off`. The operator enabled only Tilda's
+`Обновлять цены` import setting. Fresh snapshot `20260831_113000` identified
+31 numeric price differences; the one-product canary changed Shelly BLU Gateway
+(UID `486784300532`, SKU `111118`) from `2466` to ERP `Standard Selling`
+`2150` while quantity stayed `62`. Three public reads verified the new price
+and the protected card-content hash remained
+`77e717cd1808e671920547ba4dc33e90534205ba72c5a8fe60463985f4704918`.
+
+Fresh snapshot `20260831_113200` retained 30 differences. The full guarded
+publication verified all 30 changes across 124 reversible numeric price
+targets, preserved the protected content hash and retained its complete
+numeric rollback artifact. Independent snapshot `20260831_113400` returned
+zero stock-or-price differences. Five mapped ERP Items without a retail price,
+three Tilda rows with a blank non-reversible current price and two unlimited
+stock rows remained untouched.
+
+The isolated worker env now has `TILDA_PRICE_SYNC=on` and cron is pinned to
+`b24-app:85a8218`. Both the immediate manual cycle and the first scheduled
+cycle returned `no_op`, `priceTargetCount=124`, `priceDifferenceCount=0`,
+`missingErpPriceCount=5` and `blockedMissingPublicPriceCount=3`. Root-only
+pre-activation rollback snapshots are
+`/root/b24-app-ops/tilda-sync.env.before-price-20260831_113500` and
+`/root/b24-app-ops/crontab.before-tilda-price-20260831_113500`.
+
 ## Guarded reconciliation worker
 
 The repository contains a one-cycle worker that remains disabled unless
