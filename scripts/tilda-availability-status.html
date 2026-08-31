@@ -1,7 +1,7 @@
 <!--
-  Shelly catalog availability presentation.
-  Paste this snippet once into Tilda's site-wide custom HTML inside HEAD.
-  It changes only the rendered page; catalog fields, descriptions and SEO data stay untouched.
+  Shelly catalog availability presentation and numeric stock filter.
+  Paste this snippet into the catalog page's existing T123 HTML block.
+  It reads only Tilda's rendered data-product-inv value. Catalog data and SEO stay untouched.
 -->
 <style>
   .b24-stock-status {
@@ -25,14 +25,106 @@
     margin-top: 10px;
     text-align: left;
   }
+
+  .b24-stock-filter-hidden,
+  .b24-legacy-availability-filter,
+  .b24-legacy-availability-characteristic {
+    display: none !important;
+  }
+
+  #rec405177713 a[data-b24-stock-filter] {
+    transition: opacity 0.2s ease;
+  }
+
+  html[data-b24-stock-filter="available"]
+    #rec405177713 a[data-b24-stock-filter="preorder"],
+  html[data-b24-stock-filter="preorder"]
+    #rec405177713 a[data-b24-stock-filter="available"] {
+    opacity: 0.62;
+  }
+
+  html.b24-stock-filter-loaded #rec1501255671 .t-store__pagination {
+    display: none !important;
+  }
+
+  html[data-b24-stock-filter="available"]
+    #rec1501255671 .t-store__grid-separator,
+  html[data-b24-stock-filter="preorder"]
+    #rec1501255671 .t-store__grid-separator {
+    display: none !important;
+  }
 </style>
 <script>
   (function () {
     'use strict';
 
+    var STORE_RECORD_ID = '1501255671';
+    var FILTER_RECORD_ID = '405177713';
+    var LEGACY_PROPERTY_PREFIX = 'tfc_charact:10171262[';
+    var FILTER_PARAM = 'b24_stock';
     var PRODUCT_SELECTOR = '.js-product[data-product-inv]';
+    var GRID_PRODUCT_SELECTOR = '#rec' + STORE_RECORD_ID + ' .js-store-grid-cont ' + PRODUCT_SELECTOR;
     var STATUS_CLASS = 'b24-stock-status';
     var scheduled = false;
+    var loadAttempts = 0;
+    var loadTimer = null;
+    var lastGridCount = 0;
+    var lastFirstProductUid = '';
+    var lastLoadAttemptCount = 0;
+
+    function normalizedMode(value) {
+      return value === 'available' || value === 'preorder' ? value : null;
+    }
+
+    function modeFromLegacyValue(value) {
+      if (value === 'В наличии') return 'available';
+      if (value === 'Под заказ') return 'preorder';
+      return null;
+    }
+
+    function normalizeInitialUrl() {
+      var url = new URL(window.location.href);
+      var mode = normalizedMode(url.searchParams.get(FILTER_PARAM));
+      var changed = false;
+      var hadLegacyAvailability = false;
+
+      Array.from(url.searchParams.entries()).forEach(function (entry) {
+        var key = entry[0];
+        if (key.indexOf(LEGACY_PROPERTY_PREFIX) !== 0) return;
+        mode = mode || modeFromLegacyValue(entry[1]);
+        url.searchParams.delete(key);
+        changed = true;
+        hadLegacyAvailability = true;
+      });
+
+      if (mode) {
+        if (url.searchParams.get(FILTER_PARAM) !== mode) changed = true;
+        url.searchParams.set(FILTER_PARAM, mode);
+      } else if (url.searchParams.has(FILTER_PARAM)) {
+        url.searchParams.delete(FILTER_PARAM);
+        changed = true;
+      }
+
+      var hasTildaFilter = Array.from(url.searchParams.keys()).some(function (key) {
+        return key.indexOf('tfc_') === 0 && key !== 'tfc_div';
+      });
+      if (!hasTildaFilter && url.searchParams.has('tfc_div')) {
+        url.searchParams.delete('tfc_div');
+        changed = true;
+      }
+
+      if (changed) {
+        var nextUrl = url.pathname + url.search + url.hash;
+        if (hadLegacyAvailability) {
+          window.location.replace(nextUrl);
+        } else {
+          window.history.replaceState(window.history.state, '', nextUrl);
+        }
+      }
+      return mode;
+    }
+
+    var activeFilter = normalizeInitialUrl();
 
     function readQuantity(product) {
       var raw = product.getAttribute('data-product-inv');
@@ -79,14 +171,142 @@
 
       product.querySelectorAll('.js-store-prod-charcs').forEach(function (characteristic) {
         if (/^\s*Наличие\s*:/u.test(characteristic.textContent)) {
-          setText(characteristic, 'Наличие: ' + text);
+          characteristic.classList.add('b24-legacy-availability-characteristic');
         }
       });
     }
 
+    function buttonMode(element) {
+      if (!element || !element.closest) return null;
+      var button = element.closest('#rec' + FILTER_RECORD_ID + ' a.tn-atom');
+      if (!button) return null;
+      var text = button.textContent.trim();
+      if (text === 'В наличии') return 'available';
+      if (text === 'Под заказ') return 'preorder';
+      return null;
+    }
+
+    function setupButtons() {
+      document.querySelectorAll('#rec' + FILTER_RECORD_ID + ' a.tn-atom').forEach(function (button) {
+        var mode = buttonMode(button);
+        if (!mode) return;
+        button.setAttribute('data-b24-stock-filter', mode);
+        button.setAttribute('role', 'button');
+        button.setAttribute('aria-pressed', String(activeFilter === mode));
+      });
+      document.documentElement.setAttribute('data-b24-stock-filter', activeFilter || 'all');
+    }
+
+    function writeFilterUrl() {
+      var url = new URL(window.location.href);
+      if (activeFilter) url.searchParams.set(FILTER_PARAM, activeFilter);
+      else url.searchParams.delete(FILTER_PARAM);
+      window.history.replaceState(
+        window.history.state,
+        '',
+        url.pathname + url.search + url.hash
+      );
+    }
+
+    function filterProducts() {
+      document.querySelectorAll(GRID_PRODUCT_SELECTOR).forEach(function (product) {
+        var quantity = readQuantity(product);
+        var visible = !activeFilter ||
+          (activeFilter === 'available' && quantity !== null && quantity > 0) ||
+          (activeFilter === 'preorder' && quantity !== null && quantity <= 0);
+        product.classList.toggle('b24-stock-filter-hidden', !visible);
+        if (visible) product.removeAttribute('aria-hidden');
+        else product.setAttribute('aria-hidden', 'true');
+      });
+    }
+
+    function smallestAvailabilityGroup(sidebar) {
+      var nodes = sidebar.querySelectorAll('*');
+      for (var index = 0; index < nodes.length; index += 1) {
+        var node = nodes[index];
+        if (node.textContent.trim() !== 'Наличие') continue;
+        var candidate = node;
+        while (candidate && candidate !== sidebar) {
+          var text = candidate.textContent.replace(/\s+/gu, ' ').trim();
+          if (text.indexOf('В наличии') !== -1 && text.indexOf('Под заказ') !== -1) {
+            return text.length <= 120 ? candidate : null;
+          }
+          candidate = candidate.parentElement;
+        }
+      }
+      return null;
+    }
+
+    function hideLegacyAvailabilityFilter() {
+      var sidebar = document.querySelector(
+        '#rec' + STORE_RECORD_ID + ' .js-store-parts-select-container'
+      );
+      if (!sidebar) return;
+      var group = smallestAvailabilityGroup(sidebar);
+      if (group) group.classList.add('b24-legacy-availability-filter');
+    }
+
+    function loadMoreVisible(button) {
+      if (!button || button.classList.contains('t-btn_sending')) return false;
+      if (button.disabled) return false;
+      if (button.style.display === 'none') return false;
+      return true;
+    }
+
+    function ensureAllProductsLoaded() {
+      window.clearTimeout(loadTimer);
+      if (!activeFilter) {
+        document.documentElement.classList.remove('b24-stock-filter-loaded');
+        lastLoadAttemptCount = 0;
+        return;
+      }
+
+      var store = document.querySelector('#rec' + STORE_RECORD_ID + ' .t-store');
+      var button = store && store.querySelector('.js-store-load-more-btn');
+      if (window.tStoreProductsRequested || (button && button.classList.contains('t-btn_sending'))) {
+        document.documentElement.classList.remove('b24-stock-filter-loaded');
+        loadTimer = window.setTimeout(scheduleRender, 250);
+        return;
+      }
+      if (!loadMoreVisible(button)) {
+        document.documentElement.classList.add('b24-stock-filter-loaded');
+        return;
+      }
+      var currentCount = document.querySelectorAll(GRID_PRODUCT_SELECTOR).length;
+      if (loadAttempts > 0 && currentCount === lastLoadAttemptCount) {
+        document.documentElement.classList.add('b24-stock-filter-loaded');
+        return;
+      }
+      if (loadAttempts >= 10) {
+        document.documentElement.classList.remove('b24-stock-filter-loaded');
+        console.error('b24 stock filter stopped after 10 catalog pages');
+        return;
+      }
+
+      document.documentElement.classList.remove('b24-stock-filter-loaded');
+      loadAttempts += 1;
+      lastLoadAttemptCount = currentCount;
+      button.click();
+      loadTimer = window.setTimeout(scheduleRender, 350);
+    }
+
     function renderAll() {
       scheduled = false;
+      var gridProducts = document.querySelectorAll(GRID_PRODUCT_SELECTOR);
+      var firstProductUid = gridProducts.length
+        ? String(gridProducts[0].getAttribute('data-product-uid') || '')
+        : '';
+      if (gridProducts.length < lastGridCount ||
+          (gridProducts.length <= 40 && lastFirstProductUid && firstProductUid !== lastFirstProductUid)) {
+        loadAttempts = 0;
+      }
+      lastGridCount = gridProducts.length;
+      lastFirstProductUid = firstProductUid;
       document.querySelectorAll(PRODUCT_SELECTOR).forEach(renderStatus);
+      setupButtons();
+      hideLegacyAvailabilityFilter();
+      filterProducts();
+      ensureAllProductsLoaded();
     }
 
     function scheduleRender() {
@@ -94,6 +314,29 @@
       scheduled = true;
       window.requestAnimationFrame(renderAll);
     }
+
+    function setActiveFilter(mode) {
+      activeFilter = normalizedMode(mode);
+      loadAttempts = 0;
+      lastLoadAttemptCount = 0;
+      writeFilterUrl();
+      scheduleRender();
+    }
+
+    document.addEventListener('click', function (event) {
+      var mode = buttonMode(event.target);
+      if (!mode) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setActiveFilter(activeFilter === mode ? null : mode);
+    }, true);
+
+    window.addEventListener('popstate', function () {
+      activeFilter = normalizedMode(new URL(window.location.href).searchParams.get(FILTER_PARAM));
+      loadAttempts = 0;
+      lastLoadAttemptCount = 0;
+      scheduleRender();
+    });
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', scheduleRender, { once: true });
@@ -107,5 +350,11 @@
       childList: true,
       subtree: true
     });
+
+    window.b24StockFilter = {
+      getMode: function () { return activeFilter; },
+      setMode: setActiveFilter,
+      refresh: scheduleRender
+    };
   })();
 </script>

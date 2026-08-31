@@ -12,6 +12,7 @@
     "build": "npm -ws --if-present run build",
     "typecheck": "npm -ws --if-present run typecheck",
     "lint": "npm -ws --if-present run lint",
+    "test:tilda-storefront": "node --test scripts/tilda-availability-status.test.mjs",
     "gen:types": "tsx scripts/gen-types.ts"
   },
   "devDependencies": {

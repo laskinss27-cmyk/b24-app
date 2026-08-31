@@ -335,22 +335,28 @@ required, run the reconciliation journal's retained numeric rollback artifact.
 
 ## Storefront availability presentation
 
-The versioned `scripts/tilda-availability-status.html` snippet derives its
-visible status only from Tilda's rendered numeric `data-product-inv` value. A
-positive quantity is shown as `В наличии`; zero is shown as `Под заказ` in both
-the catalog card and product detail. Blank quantities remain untouched because
-they mean unlimited stock in Tilda. For zero-stock products the existing
-disabled Tilda button is relabelled from `Нет в наличии` to `Под заказ`; it does
-not become an order action.
+The versioned `scripts/tilda-availability-status.html` snippet derives both its
+visible status and the two large catalog filters only from Tilda's rendered
+numeric `data-product-inv` value. A positive quantity is shown as `В наличии`;
+zero is shown as `Под заказ` in both the catalog card and product detail. Blank
+quantities remain unclassified because they mean unlimited/unknown stock in
+Tilda. For zero-stock products the existing disabled Tilda button is relabelled
+from `Нет в наличии` to `Под заказ`; it does not become an order action.
 
 The snippet changes only the rendered DOM. It does not write product titles,
-descriptions, characteristics, images, prices, SKU or SEO fields. The existing
-custom `Наличие` filter stays in place: Tilda's system quantity filter supports
-only the one-way `Только товары в наличии` checkbox and cannot replace the
-current separate `В наличии` / `Под заказ` choices.
+descriptions, characteristics, images, prices, SKU or SEO fields. The buttons
+use a local `b24_stock=available|preorder` URL state and never click Tilda's
+stored-characteristic checkboxes. An old `tfc_charact:10171262[...]` link is
+replaced with the numeric URL and reloaded once, while unrelated native category,
+price, search and sort parameters are preserved. Since the catalog is paged by
+40 products, an active stock filter automatically follows Tilda's own load-more
+control (maximum ten pages) before hiding non-matching cards. The legacy
+`Наличие` filter group and duplicate product-characteristic row are hidden; the
+stored characteristic itself is retained only as reversible historical data.
 
-The snippet was installed after the existing Yandex Metrika HEAD code and all
-23 pages of project `5103503` were republished on 2026-08-25. A fresh uncached
+The original status-only revision was installed after the existing Yandex
+Metrika HEAD code and all 23 pages of project `5103503` were republished on
+2026-08-25. A fresh uncached
 public check found 40/40 rendered catalog cards with statuses, including a
 positive `В наличии` row and a zero-stock `Под заказ` row; the zero-stock detail
 page kept its product description and showed `Под заказ` in both the status and
@@ -360,22 +366,19 @@ catalog-only `SyntaxError: Unexpected token '<'` reproduced on both the old page
 without this snippet and the freshly published page; it is recorded as unrelated
 and was not changed in this gate.
 
-### Native availability filter migration foundation
+### Abandoned native availability publication path
 
-The rendered status and Tilda's native characteristic filter are separate data
-paths. The DOM snippet above follows numeric quantity, while the native catalog
-buttons filter the stored `Наличие` characteristic. A read-only public audit on
-2026-08-31 found 28 stale values among the 112 parent cards that have complete
-confirmed ERP mappings: six must become `В наличии` and 22 must become
-`Под заказ` according to the current Shelly quantities.
+The rendered status and Tilda's native characteristic filter were originally
+separate data paths. A read-only public audit on 2026-08-31 found 28 stale
+`Наличие` values among the 112 parent cards that have complete confirmed ERP
+mappings: six needed `В наличии` and 22 needed `Под заказ` according to Shelly.
 
-The versioned foundation keeps `Наличие` as a technical native-filter index. A
-direct product is `В наличии` when its Shelly quantity is positive. A parent
-with variants is `В наличии` when at least one confirmed child variant is
-positive; otherwise it is `Под заказ`. Fourteen parent groups containing only
-ignored stock mappings and five parents without a stock-bearing SKU remain
-untouched. A missing ERP result, a mixed mapping-status group or changed public
-variant topology fails closed and is never converted to zero.
+The guarded foundation proved the intended projection: a direct product is
+`В наличии` when its Shelly quantity is positive; a parent with variants is
+`В наличии` when at least one confirmed child variant is positive; otherwise it
+is `Под заказ`. Fourteen ignored groups and five parents without a stock-bearing
+SKU remain untouched. Missing ERP results and changed variant topology fail
+closed.
 
 Availability publication is intentionally a separate manual command at this
 stage. It is not called by the normal backend or the scheduled stock/price
@@ -388,14 +391,22 @@ protects every public card field except current quantity, current price and the
 single exact `Наличие` characteristic, and attempts the complete characteristic
 rollback on failure.
 
-Production rollout remains gated: first enable only Tilda's characteristic
-update option, run one already-equal no-op parent canary to prove that the
-existing characteristic is updated rather than duplicated, then run one real
-reversible mismatch. Only after both checks preserve card content and native
-filter identity may the 112-parent projection be published and the scheduler
-integration be considered. The old catalog button interception script must not
-be removed until native-filter parity is proven and all catalog pages have been
-republished separately.
+Production canaries later proved that CommerceML characteristic updates are
+full replacements, not field merges. A 112-parent publish therefore removed
+unrelated multi-value characteristics. The exact 2026-08-20 Tilda CSV export
+was validated against untouched cards and used to restore all affected data;
+the final public check matched 112 target cards and 19 untouched cards exactly,
+with prices, quantities and all non-characteristic content unchanged. Tilda's
+`Обновлять характеристики` option is now off. Scheduled CommerceML continues to
+publish only stock and opted-in prices. Native availability publication must
+not be scheduled or retried.
+
+The numeric two-button filter replaced the old checkbox interception code in
+the catalog page's existing T123 block on 2026-08-31; only `/catalog` was
+republished. The live verification loaded all 131 parent cards and produced 63
+positive `В наличии`, 61 zero `Под заказ` and 7 blank/unclassified cards, with
+no cross-category matches. The legacy characteristic filter is hidden in the
+rendered catalog but retained in stored product data for rollback.
 
 Commit `aaf8730` deployed this foundation to the normal production backend on
 2026-08-31 without activating availability publication. The effective backend
