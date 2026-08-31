@@ -397,6 +397,22 @@ integration be considered. The old catalog button interception script must not
 be removed until native-filter parity is proven and all catalog pages have been
 republished separately.
 
+Commit `aaf8730` deployed this foundation to the normal production backend on
+2026-08-31 without activating availability publication. The effective backend
+environment has no `TILDA_AVAILABILITY_SYNC`; the scheduled stock/price cron
+remains pinned to `b24-app:85a8218` and continued returning verified `no_op`
+cycles. The new backend image `b24-app:aaf8730` passed an isolated read-only
+state canary, internal and public health, readiness with SQL `up`, an official
+ERPNext API read, the state/port/restart checks and explicit membership in
+`erpnext_frappe_network`. The previous running image is preserved as exited
+rollback container `b24-backend-prev-before-aaf8730` with exit code zero.
+
+No Tilda setting, characteristic, catalog card, quantity, price, cron entry,
+SQL data or source-of-truth switch changed in this deployment. The next gate is
+a separately approved fresh production preparation followed by pausing the
+Tilda cron, enabling only characteristic updates and running the already-equal
+no-op parent canary.
+
 ## Retail price projection foundation
 
 The price source is the official ERPNext `Item Price` API for price list
