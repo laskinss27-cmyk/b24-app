@@ -36,6 +36,21 @@ test('Tilda stock preview floors fractional stock and never publishes a negative
 	assert.deepEqual(previews.map((preview) => preview.offers[0]?.quantity), [3, 0]);
 });
 
+test('Tilda price projection uses only explicit positive ERP retail prices and leaves missing prices absent', () => {
+	const preview = buildTildaStockPreview(
+		[confirmed(), confirmed({ productId: 18124, tildaUid: 'other', externalId: 'other', sku: 'other' })],
+		new Map([[18178, { Shelly: 3 }], [18124, { Shelly: 4 }]]),
+		undefined,
+		new Map([[18178, 2150]]),
+	);
+	assert.equal(preview.offers[0]?.price, 2150);
+	assert.equal(preview.offers[1]?.price, undefined);
+	assert.deepEqual(preview.missingPrices.map((row) => row.productId), [18124]);
+	assert.throws(() => buildTildaStockPreview(
+		[confirmed()], new Map([[18178, { Shelly: 3 }]]), undefined, new Map([[18178, 0]]),
+	), /invalid ERP retail price/u);
+});
+
 test('unconfirmed mappings never enter the outgoing Tilda offer list', () => {
 	const preview = buildTildaStockPreview([
 		confirmed(),
@@ -77,6 +92,19 @@ test('CommerceML contains only external identifiers and non-negative quantities'
 test('CommerceML rejects invalid quantities before a request can be sent', () => {
 	assert.throws(() => buildTildaOffersXml([{ ...confirmed(), quantity: -1 }]), /invalid Tilda quantity/u);
 	assert.throws(() => buildTildaOffersXml([{ ...confirmed(), quantity: 1.5 }]), /invalid Tilda quantity/u);
+});
+
+test('CommerceML adds only Standard Selling RUB price fields when price sync is enabled', () => {
+	const xml = buildTildaOffersXml([{ ...confirmed(), quantity: 5, price: 2150 }]);
+	assert.match(xml, /<Ид>b24-app-standard-selling<\/Ид>/u);
+	assert.match(xml, /<Наименование>Standard Selling<\/Наименование>/u);
+	assert.match(xml, /<ЦенаЗаЕдиницу>2150\.00<\/ЦенаЗаЕдиницу>/u);
+	assert.match(xml, /<Валюта>RUB<\/Валюта>/u);
+	assert.match(xml, /<Единица>шт<\/Единица>/u);
+	assert.match(xml, /<Коэффициент>1<\/Коэффициент>/u);
+	assert.doesNotMatch(xml, /Артикул|Описание|Картинк|Групп|Характеристик|URL|SEO/iu);
+	assert.throws(() => buildTildaOffersXml([{ ...confirmed(), quantity: 5, price: 0 }]), /invalid Tilda price/u);
+	assert.throws(() => buildTildaOffersXml([{ ...confirmed(), quantity: 5, price: 10.001 }]), /invalid Tilda price/u);
 });
 
 test('CommerceML canary catalog contains exactly one existing product with only mandatory identity fields', () => {

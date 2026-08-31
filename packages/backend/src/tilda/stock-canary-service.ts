@@ -10,6 +10,7 @@ interface TildaPreparedStockOffer {
 	sku: string;
 	title: string;
 	quantity: number;
+	price?: number;
 }
 
 export interface TildaPreparedStockReport {

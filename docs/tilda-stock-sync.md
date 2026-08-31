@@ -360,6 +360,43 @@ catalog-only `SyntaxError: Unexpected token '<'` reproduced on both the old page
 without this snippet and the freshly published page; it is recorded as unrelated
 and was not changed in this gate.
 
+## Retail price projection foundation
+
+The price source is the official ERPNext `Item Price` API for price list
+`Standard Selling`. `Standard Buying`, valuation rate and prices copied into
+sales documents are not storefront price sources. Only one currently active,
+positive RUB price per mapped ERP Item is accepted; duplicate active rows,
+another currency, a non-positive value or a non-unit packing price fails closed.
+A mapped Item without `Standard Selling` is reported and skipped, never
+converted to a zero price.
+
+Price publication is an opt-in extension of the same guarded CommerceML cycle.
+`TILDA_PRICE_SYNC` defaults to `off`; with the flag absent/off the generated
+offers XML and stock projection hash remain stock-only. When explicitly enabled,
+the offers document adds only one CommerceML price type
+`b24-app-standard-selling` and the existing offer's numeric `ЦенаЗаЕдиницу`,
+RUB currency and unit coefficient. It does not add or update old price,
+discount, SKU, title, description, images, section, characteristics or SEO.
+
+The public reader keeps two hashes: the existing stock-only safety hash ignores
+only quantity and therefore still detects any price movement while price sync is
+off; the opt-in price safety hash ignores only quantity and current price while
+continuing to protect old price and every other public card field. Numeric Tilda
+prices are captured before publication and included in the rollback XML. A
+blank Tilda price is not numerically reversible and is therefore excluded from
+the first price projection without blocking stock reconciliation.
+
+A read-only production audit on 2026-08-31 found 134 confirmed mappings. The
+`Standard Selling` source had 129 unique positive RUB prices, no duplicates,
+invalid values, zero values or non-unit packing prices; five mapped Items had no
+retail price. Of the public Tilda rows, 95 prices already matched ERP, 31
+differed, three were blank and none had an old price. This audit did not change
+ERPNext, SQL, Tilda or the running worker. Before production activation the
+Tilda CommerceML setting `Обновлять цены` must be enabled while every card
+content setting and product/variant creation stays disabled. A separately
+approved one-product numeric canary must prove both price application and exact
+rollback before the full reversible set is published.
+
 ## Guarded reconciliation worker
 
 The repository contains a one-cycle worker that remains disabled unless

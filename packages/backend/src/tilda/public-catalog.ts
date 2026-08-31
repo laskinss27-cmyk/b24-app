@@ -4,22 +4,23 @@ export interface TildaPublicStockRow {
 	tildaUid: string;
 	sku: string;
 	quantity: number | null;
+	price?: number | null;
 }
 
-function withoutQuantities(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(withoutQuantities);
+function withoutMutableFields(value: unknown, excludedFields: ReadonlySet<string>): unknown {
+	if (Array.isArray(value)) return value.map((child) => withoutMutableFields(child, excludedFields));
 	if (!value || typeof value !== 'object') return value;
 	return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-		.filter(([key]) => key !== 'quantity')
+		.filter(([key]) => !excludedFields.has(key))
 		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([key, child]) => [key, withoutQuantities(child)]));
+		.map(([key, child]) => [key, withoutMutableFields(child, excludedFields)]));
 }
 
 function cardIdentity(value: Record<string, unknown>): string {
 	return String(value['uid'] ?? value['externalid'] ?? '').trim();
 }
 
-function publicContentHash(products: Record<string, unknown>[]): string {
+function publicContentHash(products: Record<string, unknown>[], excludedFields: ReadonlySet<string>): string {
 	const normalized = products
 		.map((product) => {
 			const copy = { ...product };
@@ -31,7 +32,7 @@ function publicContentHash(products: Record<string, unknown>[]): string {
 			return copy;
 		})
 		.sort((left, right) => cardIdentity(left).localeCompare(cardIdentity(right)));
-	return createHash('sha256').update(JSON.stringify(withoutQuantities(normalized))).digest('hex');
+	return createHash('sha256').update(JSON.stringify(withoutMutableFields(normalized, excludedFields))).digest('hex');
 }
 
 interface PublicCatalogPage {
@@ -56,10 +57,17 @@ function integerQuantity(value: unknown, uid: string): number | null {
 	return quantity;
 }
 
+function numericPrice(value: unknown, uid: string): number | null {
+	if (value === '' || value === null || value === undefined) return null;
+	const price = Math.round(Number(String(value).replace(/\s+/gu, '').replace(',', '.')) * 100) / 100;
+	if (!Number.isFinite(price) || price < 0) throw new Error(`Tilda public stock row ${uid} has invalid price`);
+	return price;
+}
+
 export async function readTildaPublicStockRows(
 	initialUrl: string,
 	fetchPage: typeof fetch = fetch,
-): Promise<{ parentCount: number; rows: TildaPublicStockRow[]; contentHash: string }> {
+): Promise<{ parentCount: number; rows: TildaPublicStockRow[]; contentHash: string; protectedContentHash: string }> {
 	let url: URL | null = publicCatalogUrl(initialUrl);
 	const seenSlices = new Set<number>();
 	const rows: TildaPublicStockRow[] = [];
@@ -92,7 +100,12 @@ export async function readTildaPublicStockRows(
 				const sku = String(edition['sku'] ?? product['sku'] ?? '').trim();
 				if (!sku) continue;
 				if (!tildaUid) throw new Error(`Tilda public stock row ${sku} has no UID`);
-				rows.push({ tildaUid, sku, quantity: integerQuantity(edition['quantity'] ?? product['quantity'], tildaUid) });
+				rows.push({
+					tildaUid,
+					sku,
+					quantity: integerQuantity(edition['quantity'] ?? product['quantity'], tildaUid),
+					price: numericPrice(edition['price'] ?? product['price'], tildaUid),
+				});
 			}
 		}
 		const nextSlice = page.nextslice === undefined || page.nextslice === null ? null : Number(page.nextslice);
@@ -109,5 +122,10 @@ export async function readTildaPublicStockRows(
 	if (parentCount !== expectedParents) throw new Error(`Tilda public catalog is incomplete: ${parentCount}/${expectedParents}`);
 	if (new Set(rows.map((row) => row.tildaUid)).size !== rows.length) throw new Error('Tilda public catalog has duplicate stock UIDs');
 	if (new Set(rows.map((row) => row.sku)).size !== rows.length) throw new Error('Tilda public catalog has duplicate stock SKUs');
-	return { parentCount, rows, contentHash: publicContentHash(contentProducts) };
+	return {
+		parentCount,
+		rows,
+		contentHash: publicContentHash(contentProducts, new Set(['quantity'])),
+		protectedContentHash: publicContentHash(contentProducts, new Set(['quantity', 'price'])),
+	};
 }

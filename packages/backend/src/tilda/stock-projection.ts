@@ -16,11 +16,13 @@ export interface TildaStockOffer {
 	sku: string;
 	title: string;
 	quantity: number;
+	price?: number;
 }
 
 export interface TildaStockPreview {
 	offers: TildaStockOffer[];
 	skipped: Array<TildaProductMapping & { reason: 'mapping_not_confirmed' }>;
+	missingPrices: Array<TildaProductMapping & { reason: 'missing_erp_retail_price' }>;
 	sourceStore: string;
 }
 
@@ -44,11 +46,13 @@ export function buildTildaStockPreview(
 	mappings: TildaProductMapping[],
 	stocksByProduct: Map<number, Record<string, number>>,
 	sourceStore = TILDA_STOCK_SOURCE_STORE,
+	pricesByProduct?: Map<number, number>,
 ): TildaStockPreview {
 	const seenExternalIds = new Set<string>();
 	const seenTildaUids = new Set<string>();
 	const offers: TildaStockOffer[] = [];
 	const skipped: TildaStockPreview['skipped'] = [];
+	const missingPrices: TildaStockPreview['missingPrices'] = [];
 
 	for (const mapping of mappings) {
 		if (mapping.status !== 'confirmed') {
@@ -65,16 +69,27 @@ export function buildTildaStockPreview(
 		if (seenTildaUids.has(tildaUid)) throw new Error(`duplicate Tilda UID: ${tildaUid}`);
 		seenExternalIds.add(externalId);
 		seenTildaUids.add(tildaUid);
-		offers.push({
+		const offer: TildaStockOffer = {
 			productId: mapping.productId,
 			tildaUid,
 			externalId,
 			sku: mapping.sku.trim(),
 			title: mapping.title.trim(),
 			quantity: sourceStoreQuantity(stocksByProduct.get(mapping.productId) ?? {}, sourceStore),
-		});
+		};
+		if (pricesByProduct) {
+			const rawPrice = pricesByProduct.get(mapping.productId);
+			if (rawPrice === undefined) {
+				missingPrices.push({ ...mapping, reason: 'missing_erp_retail_price' });
+			} else {
+				const price = Math.round(Number(rawPrice) * 100) / 100;
+				if (!Number.isFinite(price) || price <= 0) throw new Error(`invalid ERP retail price for #${mapping.productId}: ${String(rawPrice)}`);
+				offer.price = price;
+			}
+		}
+		offers.push(offer);
 	}
 
 	offers.sort((left, right) => left.externalId.localeCompare(right.externalId));
-	return { offers, skipped, sourceStore };
+	return { offers, skipped, missingPrices, sourceStore };
 }

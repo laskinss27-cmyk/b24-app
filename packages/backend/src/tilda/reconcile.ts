@@ -3,6 +3,7 @@ import { createDatabasePool } from '../database/runtime.js';
 import { ErpClient } from '../erp/client.js';
 import { TildaCommerceMlClient } from './commerce-ml-client.js';
 import { fetchCompleteTildaErpStocks } from './erp-stock-reader.js';
+import { fetchCompleteTildaErpPrices } from './erp-price-reader.js';
 import { readTildaProductMappings } from './product-mapping-reader.js';
 import { readTildaPublicStockRows } from './public-catalog.js';
 import { runTildaStockReconciliation } from './stock-reconciliation-service.js';
@@ -20,6 +21,9 @@ if (String(process.env['TILDA_STOCK_SYNC'] ?? 'off').trim() !== 'on') {
 const triggerValue = String(process.env['TILDA_SYNC_TRIGGER'] ?? 'scheduled').trim();
 if (!['scheduled', 'manual'].includes(triggerValue)) throw new Error('TILDA_SYNC_TRIGGER must be scheduled or manual');
 const trigger = triggerValue as TildaSyncTrigger;
+const priceSyncValue = String(process.env['TILDA_PRICE_SYNC'] ?? 'off').trim();
+if (!['on', 'off'].includes(priceSyncValue)) throw new Error('TILDA_PRICE_SYNC must be on or off');
+const priceSyncEnabled = priceSyncValue === 'on';
 const erp = ErpClient.fromEnv();
 if (!erp) throw new Error('ERPNEXT_URL/TOKEN are required');
 const client = new TildaCommerceMlClient({
@@ -41,6 +45,7 @@ try {
 		return runTildaStockReconciliation(trigger, {
 			readMappings: () => readTildaProductMappings(connection),
 			fetchStocks: (productIds) => fetchCompleteTildaErpStocks(erp, productIds),
+			...(priceSyncEnabled ? { fetchPrices: (productIds: number[]) => fetchCompleteTildaErpPrices(erp, productIds) } : {}),
 			readPublicCatalog: () => readTildaPublicStockRows(publicUrl),
 			publishProjection: exchange,
 			publishRollback: exchange,

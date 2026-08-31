@@ -10,11 +10,13 @@ interface PublicCatalogState {
 	parentCount: number;
 	rows: TildaPublicStockRow[];
 	contentHash: string;
+	protectedContentHash?: string;
 }
 
 export interface TildaStockReconciliationDependencies {
 	readMappings(): Promise<TildaProductMapping[]>;
 	fetchStocks(productIds: number[]): Promise<Map<number, Record<string, number>>>;
+	fetchPrices?(productIds: number[]): Promise<Map<number, number>>;
 	readPublicCatalog(): Promise<PublicCatalogState>;
 	publishProjection(catalogXml: string, offersXml: string): Promise<TildaCommerceMlExchangeResult>;
 	publishRollback(catalogXml: string, offersXml: string): Promise<TildaCommerceMlExchangeResult>;
@@ -25,7 +27,11 @@ export interface TildaStockReconciliationDependencies {
 }
 
 export type TildaStockReconciliationResult =
-	| { status: 'no_op'; targetCount: number; auditWritten: boolean; projectionHash: string; contentHash: string }
+	| {
+		status: 'no_op'; targetCount: number; priceTargetCount?: number; priceDifferenceCount?: number;
+		missingErpPriceCount?: number; blockedMissingPublicPriceCount?: number;
+		auditWritten: boolean; projectionHash: string; contentHash: string;
+	}
 	| TildaStockPublicationResult;
 
 const EXPECTED_UNLIMITED_UIDS = new Set(['124782539723', '708983630233']);
@@ -60,8 +66,13 @@ export async function runTildaStockReconciliation(
 		const preview = await prepareTildaStockPreview({
 			readMappings: async () => mappings,
 			fetchStocks: dependencies.fetchStocks,
+			...(dependencies.fetchPrices ? { fetchPrices: dependencies.fetchPrices } : {}),
 		}, undefined, dependencies.now?.() ?? new Date());
 		const publicCatalog = await dependencies.readPublicCatalog();
+		const contentHash = preview.priceSyncEnabled
+			? publicCatalog.protectedContentHash
+			: publicCatalog.contentHash;
+		if (!contentHash) throw new Error('Tilda public catalog has no required protected content hash');
 		const comparison = compareTildaPublicStock(mappings, preview.offers, publicCatalog.rows);
 		validateAuditedShape({
 			mappings,
@@ -74,16 +85,22 @@ export async function runTildaStockReconciliation(
 		});
 		const metrics = {
 			projectionHash: preview.projectionHash,
-			contentHashBefore: publicCatalog.contentHash,
+			contentHashBefore: contentHash,
 			targetCount: comparison.projectionOffers.length,
-			differenceCountBefore: comparison.differences.length,
-			blockedCount: comparison.blockedUnlimited.length,
+			differenceCountBefore: comparison.differences.length + comparison.priceDifferences.length,
+			blockedCount: comparison.blockedUnlimited.length + comparison.blockedMissingPrice.length + preview.missingPriceCount,
 		};
-		if (comparison.differences.length === 0) {
+		if (metrics.differenceCountBefore === 0) {
 			const auditWritten = await dependencies.audit.recordNoopIfChanged(trigger, metrics);
 			return {
 				status: 'no_op',
 				targetCount: metrics.targetCount,
+				...(preview.priceSyncEnabled ? {
+					priceTargetCount: comparison.projectionOffers.filter((offer) => offer.price !== undefined).length,
+					priceDifferenceCount: comparison.priceDifferences.length,
+					missingErpPriceCount: preview.missingPriceCount,
+					blockedMissingPublicPriceCount: comparison.blockedMissingPrice.length,
+				} : {}),
 				auditWritten,
 				projectionHash: metrics.projectionHash,
 				contentHash: metrics.contentHashBefore,
@@ -93,13 +110,20 @@ export async function runTildaStockReconciliation(
 		runUuid = await dependencies.audit.start(trigger, metrics);
 		const report: TildaPublicationReport = {
 			generatedAt: (dependencies.now?.() ?? new Date()).toISOString(),
-			publicCatalogContentHash: publicCatalog.contentHash,
+			publicCatalogContentHash: contentHash,
 			fullProjectionHash: preview.projectionHash,
+			...(preview.priceSyncEnabled ? { priceSyncEnabled: true } : {}),
 			counts: {
-				differences: comparison.differences.length,
+				differences: metrics.differenceCountBefore,
 				publicParents: publicCatalog.parentCount,
 				publicStockRows: publicCatalog.rows.length,
 				reversibleProjectionOffers: comparison.projectionOffers.length,
+				...(preview.priceSyncEnabled ? {
+					priceTargets: comparison.projectionOffers.filter((offer) => offer.price !== undefined).length,
+					priceDifferences: comparison.priceDifferences.length,
+					blockedMissingPrices: comparison.blockedMissingPrice.length,
+					missingErpPrices: preview.missingPriceCount,
+				} : {}),
 			},
 			projectionOffers: comparison.projectionOffers,
 			rollbackOffers: comparison.rollbackOffers,

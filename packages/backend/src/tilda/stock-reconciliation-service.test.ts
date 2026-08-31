@@ -70,6 +70,7 @@ test('reconciliation is idempotent and does not call Tilda when stocks match', a
 	const { deps, calls } = dependencies(false);
 	const result = await runTildaStockReconciliation('scheduled', deps);
 	assert.equal(result.status, 'no_op');
+	assert.equal('priceTargetCount' in result, false);
 	assert.deepEqual(calls, { start: 0, verified: 0, failed: 0, preparationFailed: 0, noOp: 1, published: 0 });
 });
 
@@ -79,6 +80,7 @@ test('reconciliation publishes a difference and records verified audit', async (
 	assert.equal(result.status, 'verified');
 	assert.equal(result.changedCount, 1);
 	assert.equal(result.targetCount, 132);
+	assert.equal('priceTargetCount' in result, false);
 	assert.deepEqual(calls, { start: 1, verified: 1, failed: 0, preparationFailed: 0, noOp: 0, published: 1 });
 });
 
@@ -88,4 +90,43 @@ test('reconciliation fails closed before publication when baseline shape changes
 	await assert.rejects(runTildaStockReconciliation('scheduled', deps), /audited baseline/u);
 	assert.equal(calls.preparationFailed, 1);
 	assert.equal(calls.published, 0);
+});
+
+test('price opt-in publishes reversible Standard Selling differences while preserving stock targets', async () => {
+	const data = fixture(false);
+	let currentRows = data.rows.map((row) => ({ ...row, price: 100 }));
+	const calls = { published: 0, verified: 0 };
+	const deps: TildaStockReconciliationDependencies = {
+		readMappings: async () => data.mappings,
+		fetchStocks: async () => data.stocks,
+		fetchPrices: async () => new Map(data.offers.map((offer, index) => [offer.productId, index === 2 ? 90 : 100])),
+		readPublicCatalog: async () => ({
+			parentCount: 131,
+			rows: currentRows,
+			contentHash: 'd'.repeat(64),
+			protectedContentHash: HASH,
+		}),
+		publishProjection: async (_catalogXml, offersXml) => {
+			calls.published += 1;
+			assert.match(offersXml, /<ЦенаЗаЕдиницу>90\.00<\/ЦенаЗаЕдиницу>/u);
+			currentRows = currentRows.map((row) => row.tildaUid === 'uid-2' ? { ...row, price: 90 } : row);
+			return { catalog: { fileName: 'import.xml', importResponses: ['success'] }, offers: { fileName: 'offers.xml', importResponses: ['success'] } };
+		},
+		publishRollback: async () => ({ catalog: { fileName: 'import.xml', importResponses: ['success'] }, offers: { fileName: 'offers.xml', importResponses: ['success'] } }),
+		audit: {
+			async recordPreparationFailure() {},
+			async recordNoopIfChanged() { return true; },
+			async start() { return 'run-uuid'; },
+			async finishVerified() { calls.verified += 1; },
+			async finishFailed() {},
+		},
+		wait: async () => {},
+		now: () => new Date('2026-08-31T00:00:00.000Z'),
+	};
+	const result = await runTildaStockReconciliation('manual', deps);
+	assert.equal(result.status, 'verified');
+	assert.equal(result.changedCount, 1);
+	assert.equal(result.priceChangedCount, 1);
+	assert.equal(result.priceTargetCount, 132);
+	assert.deepEqual(calls, { published: 1, verified: 1 });
 });

@@ -1,6 +1,6 @@
 import type { TildaStockOffer } from './stock-projection.js';
 
-type TildaCommerceMlOffer = Pick<TildaStockOffer, 'productId' | 'externalId' | 'quantity'>;
+type TildaCommerceMlOffer = Pick<TildaStockOffer, 'productId' | 'externalId' | 'quantity' | 'price'>;
 
 interface TildaCommerceMlCatalogProduct {
 	externalId: string;
@@ -8,6 +8,7 @@ interface TildaCommerceMlCatalogProduct {
 }
 
 const CATALOG_ID = 'b24-app-stock';
+export const TILDA_RETAIL_PRICE_TYPE_ID = 'b24-app-standard-selling';
 const COMMERCE_ML_ROOT_ATTRIBUTES = 'xmlns="urn:1C.ru:commerceml_2" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
 
 function xmlText(value: unknown): string {
@@ -24,6 +25,10 @@ function commerceMlDate(value: Date): string {
 	return value.toISOString().slice(0, 19);
 }
 
+function commerceMlPrice(value: number): string {
+	return value.toFixed(2);
+}
+
 export function buildTildaOffersXml(offers: TildaCommerceMlOffer[], generatedAt = new Date()): string {
 	const externalIds = new Set<string>();
 	for (const offer of offers) {
@@ -31,6 +36,9 @@ export function buildTildaOffersXml(offers: TildaCommerceMlOffer[], generatedAt 
 		if (externalIds.has(offer.externalId)) throw new Error(`duplicate CommerceML offer id: ${offer.externalId}`);
 		if (!Number.isInteger(offer.quantity) || offer.quantity < 0) {
 			throw new Error(`invalid Tilda quantity for #${offer.productId}: ${offer.quantity}`);
+		}
+		if (offer.price !== undefined && (!Number.isFinite(offer.price) || offer.price <= 0 || Math.round(offer.price * 100) / 100 !== offer.price)) {
+			throw new Error(`invalid Tilda price for #${offer.productId}: ${String(offer.price)}`);
 		}
 		externalIds.add(offer.externalId);
 	}
@@ -40,11 +48,24 @@ export function buildTildaOffersXml(offers: TildaCommerceMlOffer[], generatedAt 
 		.map((offer) => [
 			'      <Предложение>',
 			`        <Ид>${xmlText(offer.externalId)}</Ид>`,
+			...(offer.price === undefined ? [] : [
+				'        <Цены>',
+				'          <Цена>',
+				`            <Представление>${commerceMlPrice(offer.price)} RUB за шт</Представление>`,
+				`            <ИдТипаЦены>${TILDA_RETAIL_PRICE_TYPE_ID}</ИдТипаЦены>`,
+				`            <ЦенаЗаЕдиницу>${commerceMlPrice(offer.price)}</ЦенаЗаЕдиницу>`,
+				'            <Валюта>RUB</Валюта>',
+				'            <Единица>шт</Единица>',
+				'            <Коэффициент>1</Коэффициент>',
+				'          </Цена>',
+				'        </Цены>',
+			]),
 			`        <Количество>${offer.quantity}</Количество>`,
 			'      </Предложение>',
 		].join('\n'))
 		.join('\n');
 
+	const hasPrices = offers.some((offer) => offer.price !== undefined);
 	return [
 		'<?xml version="1.0" encoding="UTF-8"?>',
 		`<КоммерческаяИнформация ${COMMERCE_ML_ROOT_ATTRIBUTES} ВерсияСхемы="2.07" ДатаФормирования="${commerceMlDate(generatedAt)}">`,
@@ -52,6 +73,15 @@ export function buildTildaOffersXml(offers: TildaCommerceMlOffer[], generatedAt 
 		`    <Ид>${CATALOG_ID}</Ид>`,
 		'    <Наименование>b24-app stock only</Наименование>',
 		`    <ИдКаталога>${CATALOG_ID}</ИдКаталога>`,
+		...(hasPrices ? [
+			'    <ТипыЦен>',
+			'      <ТипЦены>',
+			`        <Ид>${TILDA_RETAIL_PRICE_TYPE_ID}</Ид>`,
+			'        <Наименование>Standard Selling</Наименование>',
+			'        <Валюта>RUB</Валюта>',
+			'      </ТипЦены>',
+			'    </ТипыЦен>',
+		] : []),
 		'    <Предложения>',
 		rows,
 		'    </Предложения>',

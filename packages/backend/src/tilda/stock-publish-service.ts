@@ -6,11 +6,16 @@ import type { TildaPreparedStockReport } from './stock-canary-service.js';
 
 export interface TildaPublicationReport extends TildaPreparedStockReport {
 	fullProjectionHash: string;
+	priceSyncEnabled?: boolean;
 	counts: {
 		differences: number;
 		publicParents: number;
 		publicStockRows: number;
 		reversibleProjectionOffers: number;
+		priceTargets?: number;
+		priceDifferences?: number;
+		blockedMissingPrices?: number;
+		missingErpPrices?: number;
 	};
 }
 
@@ -19,10 +24,21 @@ export function selectTildaPublicationReport(report: TildaPublicationReport, onl
 	const projection = report.projectionOffers.find((offer) => offer.tildaUid === onlyUid);
 	const rollback = report.rollbackOffers.find((offer) => offer.tildaUid === onlyUid);
 	if (!projection || !rollback) throw new Error('selected Tilda publication UID is absent from the reversible snapshot');
-	if (projection.quantity === rollback.quantity) throw new Error('selected Tilda publication UID is not a real stock change');
+	if (projection.quantity === rollback.quantity && projection.price === rollback.price) {
+		throw new Error('selected Tilda publication UID is not a real storefront change');
+	}
+	const selectedDifferences = Number(projection.quantity !== rollback.quantity) + Number(projection.price !== rollback.price);
 	return {
 		...report,
-		counts: { ...report.counts, differences: 1, reversibleProjectionOffers: 1 },
+		counts: {
+			...report.counts,
+			differences: selectedDifferences,
+			reversibleProjectionOffers: 1,
+			...(projection.price === undefined ? {} : {
+				priceTargets: 1,
+				priceDifferences: Number(projection.price !== rollback.price),
+			}),
+		},
 		projectionOffers: [projection],
 		rollbackOffers: [rollback],
 	};
@@ -32,12 +48,15 @@ interface PublicCatalogState {
 	parentCount: number;
 	rows: TildaPublicStockRow[];
 	contentHash: string;
+	protectedContentHash?: string;
 }
 
 export interface TildaStockPublicationResult {
 	status: 'verified';
 	targetCount: number;
 	changedCount: number;
+	priceTargetCount?: number;
+	priceChangedCount?: number;
 	contentHashBefore: string;
 	contentHashAfter: string;
 	projectionHash: string;
@@ -59,13 +78,20 @@ function quantityMap(rows: TildaPublicStockRow[]): Map<string, TildaPublicStockR
 	return new Map(rows.map((row) => [row.tildaUid, row]));
 }
 
+function safetyContentHash(state: PublicCatalogState, priceSyncEnabled: boolean): string {
+	if (!priceSyncEnabled) return state.contentHash;
+	if (!state.protectedContentHash) throw new Error('Tilda public catalog has no price-safe protected content hash');
+	return state.protectedContentHash;
+}
+
 function catalogMismatch(
 	current: PublicCatalogState,
 	baseline: PublicCatalogState,
-	expectedTargets: Map<string, { sku: string; quantity: number }>,
+	expectedTargets: Map<string, { sku: string; quantity: number; price?: number }>,
+	priceSyncEnabled: boolean,
 ): string | null {
 	if (current.parentCount !== baseline.parentCount || current.rows.length !== baseline.rows.length) return 'public catalog counts changed';
-	if (current.contentHash !== baseline.contentHash) return 'public card content hash changed';
+	if (safetyContentHash(current, priceSyncEnabled) !== safetyContentHash(baseline, priceSyncEnabled)) return 'public protected card content hash changed';
 	const currentByUid = quantityMap(current.rows);
 	for (const baselineRow of baseline.rows) {
 		const currentRow = currentByUid.get(baselineRow.tildaUid);
@@ -74,6 +100,8 @@ function catalogMismatch(
 		const expectedQuantity = target?.quantity ?? baselineRow.quantity;
 		if (target && target.sku !== currentRow.sku) return `projected SKU changed for UID ${baselineRow.tildaUid}`;
 		if (currentRow.quantity !== expectedQuantity) return `quantity mismatch for UID ${baselineRow.tildaUid}`;
+		const expectedPrice = target?.price ?? baselineRow.price ?? null;
+		if ((currentRow.price ?? null) !== expectedPrice) return `price mismatch for UID ${baselineRow.tildaUid}`;
 	}
 	return null;
 }
@@ -82,14 +110,15 @@ async function waitForCatalog(
 	readPublicCatalog: () => Promise<PublicCatalogState>,
 	wait: () => Promise<void>,
 	baseline: PublicCatalogState,
-	expectedTargets: Map<string, { sku: string; quantity: number }>,
+	expectedTargets: Map<string, { sku: string; quantity: number; price?: number }>,
+	priceSyncEnabled: boolean,
 ): Promise<PublicCatalogState> {
 	let lastMismatch = 'catalog was not checked';
 	let consecutiveMatches = 0;
 	for (let attempt = 0; attempt < 12; attempt += 1) {
 		if (attempt > 0) await wait();
 		const current = await readPublicCatalog();
-		const mismatch = catalogMismatch(current, baseline, expectedTargets);
+		const mismatch = catalogMismatch(current, baseline, expectedTargets, priceSyncEnabled);
 		if (!mismatch) {
 			consecutiveMatches += 1;
 			if (consecutiveMatches === 3) return current;
@@ -123,6 +152,8 @@ export async function runTildaStockPublication(
 	const seenUids = new Set<string>();
 	const seenExternalIds = new Set<string>();
 	let changedCount = 0;
+	let priceTargetCount = 0;
+	let priceChangedCount = 0;
 	for (const projection of report.projectionOffers) {
 		const rollback = rollbackByUid.get(projection.tildaUid);
 		if (!rollback || rollback.externalId !== projection.externalId || rollback.sku !== projection.sku || rollback.title !== projection.title) {
@@ -132,18 +163,31 @@ export async function runTildaStockPublication(
 		seenUids.add(projection.tildaUid);
 		seenExternalIds.add(projection.externalId);
 		if (projection.quantity !== rollback.quantity) changedCount += 1;
+		if (projection.price !== undefined) {
+			priceTargetCount += 1;
+			if (projection.price !== rollback.price) {
+				priceChangedCount += 1;
+				changedCount += 1;
+			}
+		}
 	}
 	if (changedCount !== report.counts.differences) throw new Error('Tilda publication difference count is inconsistent');
 	if (input.confirmation !== expectedConfirmation(report, changedCount)) throw new Error('Tilda publication confirmation does not match the fresh snapshot');
 
 	const before = await dependencies.readPublicCatalog();
-	if (before.parentCount !== report.counts.publicParents || before.rows.length !== report.counts.publicStockRows || before.contentHash !== report.publicCatalogContentHash) {
+	if (
+		before.parentCount !== report.counts.publicParents || before.rows.length !== report.counts.publicStockRows
+		|| safetyContentHash(before, Boolean(report.priceSyncEnabled)) !== report.publicCatalogContentHash
+	) {
 		throw new Error('Tilda public catalog changed after publication preparation');
 	}
 	const beforeByUid = quantityMap(before.rows);
 	for (const rollback of report.rollbackOffers) {
 		const current = beforeByUid.get(rollback.tildaUid);
-		if (!current || current.sku !== rollback.sku || current.quantity !== rollback.quantity) {
+		if (
+			!current || current.sku !== rollback.sku || current.quantity !== rollback.quantity
+			|| (rollback.price !== undefined && current.price !== rollback.price)
+		) {
 			throw new Error(`Tilda rollback snapshot is stale for UID ${rollback.tildaUid}`);
 		}
 	}
@@ -151,21 +195,26 @@ export async function runTildaStockPublication(
 	const catalogXml = buildTildaCatalogProductsXml(report.projectionOffers);
 	const projectionXml = buildTildaOffersXml(report.projectionOffers);
 	const rollbackXml = buildTildaOffersXml(report.rollbackOffers);
-	const projectedTargets = new Map(report.projectionOffers.map((offer) => [offer.tildaUid, { sku: offer.sku, quantity: offer.quantity }]));
-	const rollbackTargets = new Map(report.rollbackOffers.map((offer) => [offer.tildaUid, { sku: offer.sku, quantity: offer.quantity }]));
+	const projectedTargets = new Map(report.projectionOffers.map((offer) => [offer.tildaUid, {
+		sku: offer.sku, quantity: offer.quantity, ...(offer.price === undefined ? {} : { price: offer.price }),
+	}]));
+	const rollbackTargets = new Map(report.rollbackOffers.map((offer) => [offer.tildaUid, {
+		sku: offer.sku, quantity: offer.quantity, ...(offer.price === undefined ? {} : { price: offer.price }),
+	}]));
 	const wait = dependencies.wait ?? (() => new Promise((resolve) => setTimeout(resolve, 5_000)));
 
 	let protocol: TildaCommerceMlExchangeResult;
 	try {
 		protocol = await dependencies.publishProjection(catalogXml, projectionXml);
-		const after = await waitForCatalog(dependencies.readPublicCatalog, wait, before, projectedTargets);
+		const after = await waitForCatalog(dependencies.readPublicCatalog, wait, before, projectedTargets, Boolean(report.priceSyncEnabled));
 		const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 		return {
 			status: 'verified',
 			targetCount: report.projectionOffers.length,
 			changedCount,
-			contentHashBefore: before.contentHash,
-			contentHashAfter: after.contentHash,
+			...(report.priceSyncEnabled ? { priceTargetCount, priceChangedCount } : {}),
+			contentHashBefore: safetyContentHash(before, Boolean(report.priceSyncEnabled)),
+			contentHashAfter: safetyContentHash(after, Boolean(report.priceSyncEnabled)),
 			projectionHash: report.fullProjectionHash,
 			catalogXmlSha256: sha256(catalogXml),
 			projectionXmlSha256: sha256(projectionXml),
@@ -175,7 +224,7 @@ export async function runTildaStockPublication(
 	} catch (publicationError) {
 		try {
 			await dependencies.publishRollback(catalogXml, rollbackXml);
-			await waitForCatalog(dependencies.readPublicCatalog, wait, before, rollbackTargets);
+			await waitForCatalog(dependencies.readPublicCatalog, wait, before, rollbackTargets, Boolean(report.priceSyncEnabled));
 		} catch (rollbackError) {
 			throw new Error(`Tilda publication failed (${errorMessage(publicationError)}); rollback failed (${errorMessage(rollbackError)})`);
 		}

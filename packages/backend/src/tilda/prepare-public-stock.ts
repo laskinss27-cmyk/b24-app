@@ -5,6 +5,7 @@ import { loadDatabaseConfig } from '../database/config.js';
 import { createDatabasePool } from '../database/runtime.js';
 import { ErpClient } from '../erp/client.js';
 import { buildTildaOffersXml } from './commerce-ml.js';
+import { fetchCompleteTildaErpPrices } from './erp-price-reader.js';
 import { fetchCompleteTildaErpStocks } from './erp-stock-reader.js';
 import { readTildaProductMappings } from './product-mapping-reader.js';
 import { readTildaPublicStockRows } from './public-catalog.js';
@@ -19,6 +20,9 @@ const publicUrl = String(process.env['TILDA_PUBLIC_CATALOG_URL'] ?? '').trim();
 const outputDirectory = String(process.env['TILDA_PREPARE_OUTPUT_DIR'] ?? '').trim();
 const runId = String(process.env['TILDA_PREPARE_RUN_ID'] ?? '').trim();
 if (!publicUrl || !outputDirectory || !/^\d{8}_\d{6}$/u.test(runId)) throw new Error('Tilda preparation output configuration is incomplete');
+const priceSyncMode = String(process.env['TILDA_PRICE_SYNC'] ?? 'off').trim().toLowerCase();
+if (priceSyncMode !== 'on' && priceSyncMode !== 'off') throw new Error('TILDA_PRICE_SYNC must be on or off');
+const priceSyncEnabled = priceSyncMode === 'on';
 
 const pool = createDatabasePool(config);
 const temporaryPaths: string[] = [];
@@ -27,6 +31,7 @@ try {
 	const preview = await prepareTildaStockPreview({
 		readMappings: async () => mappings,
 		fetchStocks: (productIds) => fetchCompleteTildaErpStocks(erp, productIds),
+		...(priceSyncEnabled ? { fetchPrices: (productIds: number[]) => fetchCompleteTildaErpPrices(erp, productIds) } : {}),
 	});
 	const publicCatalog = await readTildaPublicStockRows(publicUrl);
 	if (mappings.length !== 150 || preview.offers.length !== 134 || preview.skippedCount !== 16 || publicCatalog.parentCount !== 131 || publicCatalog.rows.length !== 150) {
@@ -47,9 +52,15 @@ try {
 			sku: offer.sku,
 			title: offer.title,
 			quantity: offer.quantity,
+			...(offer.price === undefined ? {} : { price: offer.price }),
 		});
+	const priceTargets = comparison.projectionOffers.filter((offer) => offer.price !== undefined).length;
+	const differenceCount = comparison.differences.length + comparison.priceDifferences.length;
+	const publicCatalogContentHash = priceSyncEnabled ? publicCatalog.protectedContentHash : publicCatalog.contentHash;
+	if (!publicCatalogContentHash) throw new Error('Tilda public catalog has no price-safe protected content hash');
 	const report = JSON.stringify({
 		generatedAt: generatedAt.toISOString(),
+		...(priceSyncEnabled ? { priceSyncEnabled: true } : {}),
 		counts: {
 			mappings: mappings.length,
 			fullProjectedOffers: preview.offers.length,
@@ -58,17 +69,25 @@ try {
 			blockedUnlimited: comparison.blockedUnlimited.length,
 			publicParents: publicCatalog.parentCount,
 			publicStockRows: publicCatalog.rows.length,
-			differences: comparison.differences.length,
+			differences: differenceCount,
+			...(priceSyncEnabled ? {
+				priceTargets,
+				priceDifferences: comparison.priceDifferences.length,
+				blockedMissingPrices: comparison.blockedMissingPrice.length,
+				missingErpPrices: preview.missingPriceCount,
+			} : {}),
 		},
-		publicCatalogContentHash: publicCatalog.contentHash,
+		publicCatalogContentHash,
 		sourceStore: preview.sourceStore,
 		fullProjectionHash: preview.projectionHash,
 		safeProjectionXmlSha256: sha256(projectionXml),
 		rollbackXmlSha256: sha256(rollbackXml),
 		blockedUnlimited: comparison.blockedUnlimited,
+		...(priceSyncEnabled ? { blockedMissingPrice: comparison.blockedMissingPrice } : {}),
 		projectionOffers: comparison.projectionOffers.map(auditOffer),
 		rollbackOffers: comparison.rollbackOffers.map(auditOffer),
 		differences: comparison.differences,
+		...(priceSyncEnabled ? { priceDifferences: comparison.priceDifferences } : {}),
 	}, null, 2) + '\n';
 	const outputs = [
 		{ name: `${runId}-tilda-stock-projection.xml`, content: projectionXml },
