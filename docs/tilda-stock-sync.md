@@ -360,6 +360,43 @@ catalog-only `SyntaxError: Unexpected token '<'` reproduced on both the old page
 without this snippet and the freshly published page; it is recorded as unrelated
 and was not changed in this gate.
 
+### Native availability filter migration foundation
+
+The rendered status and Tilda's native characteristic filter are separate data
+paths. The DOM snippet above follows numeric quantity, while the native catalog
+buttons filter the stored `Наличие` characteristic. A read-only public audit on
+2026-08-31 found 28 stale values among the 112 parent cards that have complete
+confirmed ERP mappings: six must become `В наличии` and 22 must become
+`Под заказ` according to the current Shelly quantities.
+
+The versioned foundation keeps `Наличие` as a technical native-filter index. A
+direct product is `В наличии` when its Shelly quantity is positive. A parent
+with variants is `В наличии` when at least one confirmed child variant is
+positive; otherwise it is `Под заказ`. Fourteen parent groups containing only
+ignored stock mappings and five parents without a stock-bearing SKU remain
+untouched. A missing ERP result, a mixed mapping-status group or changed public
+variant topology fails closed and is never converted to zero.
+
+Availability publication is intentionally a separate manual command at this
+stage. It is not called by the normal backend or the scheduled stock/price
+worker. Preparation requires an explicit `TILDA_AVAILABILITY_PROPERTY_ID` and
+produces a deterministic projection, the exact previous characteristic values,
+a no-op numeric offers anchor and hashes. Publication requires a fresh
+confirmation string plus `TILDA_AVAILABILITY_SYNC=manual`, verifies all 131
+parent identities and all 150 stock rows,
+protects every public card field except current quantity, current price and the
+single exact `Наличие` characteristic, and attempts the complete characteristic
+rollback on failure.
+
+Production rollout remains gated: first enable only Tilda's characteristic
+update option, run one already-equal no-op parent canary to prove that the
+existing characteristic is updated rather than duplicated, then run one real
+reversible mismatch. Only after both checks preserve card content and native
+filter identity may the 112-parent projection be published and the scheduler
+integration be considered. The old catalog button interception script must not
+be removed until native-filter parity is proven and all catalog pages have been
+republished separately.
+
 ## Retail price projection foundation
 
 The price source is the official ERPNext `Item Price` API for price list

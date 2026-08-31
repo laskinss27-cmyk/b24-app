@@ -1,4 +1,4 @@
-import type { TildaProductMapping, TildaMappingStatus } from './stock-projection.js';
+import type { TildaProductMapping, TildaMappingStatus, TildaRowKind } from './stock-projection.js';
 
 type QueryRow = Record<string, unknown>;
 
@@ -7,7 +7,8 @@ export interface TildaMappingReadPool {
 }
 
 const MAPPINGS_QUERY = `
-	SELECT tilda_uid, tilda_external_id, tilda_sku, tilda_title, erp_item_code, mapping_status
+	SELECT tilda_uid, tilda_external_id, tilda_sku, tilda_title, row_kind, parent_tilda_uid,
+		erp_item_code, mapping_status
 	FROM tilda_product_mappings
 	WHERE tilda_sku IS NOT NULL
 	ORDER BY tilda_external_id
@@ -25,10 +26,22 @@ function status(row: QueryRow): TildaMappingStatus {
 	return value as TildaMappingStatus;
 }
 
+function rowKind(row: QueryRow): TildaRowKind {
+	const value = requiredString(row, 'row_kind');
+	if (!['parent', 'variant'].includes(value)) throw new Error(`Invalid SQL Tilda mapping row kind: ${value}`);
+	return value as TildaRowKind;
+}
+
 export async function readTildaProductMappings(pool: TildaMappingReadPool): Promise<TildaProductMapping[]> {
 	const rows = await pool.query<QueryRow[]>(MAPPINGS_QUERY);
 	return rows.map((row) => {
 		const mappingStatus = status(row);
+		const mappingRowKind = rowKind(row);
+		const parentTildaUid = row['parent_tilda_uid'] === null || row['parent_tilda_uid'] === undefined
+			? null
+			: String(row['parent_tilda_uid']).trim();
+		if (mappingRowKind === 'parent' && parentTildaUid) throw new Error('SQL Tilda parent mapping has parent_tilda_uid');
+		if (mappingRowKind === 'variant' && !parentTildaUid) throw new Error('SQL Tilda variant mapping has no parent_tilda_uid');
 		const itemCode = row['erp_item_code'] === null || row['erp_item_code'] === undefined
 			? ''
 			: String(row['erp_item_code']).trim();
@@ -43,6 +56,8 @@ export async function readTildaProductMappings(pool: TildaMappingReadPool): Prom
 			sku: requiredString(row, 'tilda_sku'),
 			title: requiredString(row, 'tilda_title'),
 			status: mappingStatus,
+			rowKind: mappingRowKind,
+			parentTildaUid,
 		};
 	});
 }

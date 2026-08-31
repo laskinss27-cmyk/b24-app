@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildTildaCatalogCanaryXml, buildTildaCatalogProductsXml, buildTildaOffersXml } from './commerce-ml.js';
+import { buildTildaAvailabilityCatalogXml, buildTildaCatalogCanaryXml, buildTildaCatalogProductsXml, buildTildaOffersXml } from './commerce-ml.js';
 import { buildTildaStockPreview, type TildaProductMapping } from './stock-projection.js';
 
 const confirmed = (patch: Partial<TildaProductMapping> = {}): TildaProductMapping => ({
@@ -135,4 +135,17 @@ test('CommerceML publication catalog lists every target without card-content fie
 	assert.doesNotMatch(xml, /Артикул|Описание|Цена|Картинк|Групп|Характеристик|URL|SEO/iu);
 	assert.throws(() => buildTildaCatalogProductsXml([]), /no products/u);
 	assert.throws(() => buildTildaCatalogProductsXml([{ externalId: 'same', title: 'One' }, { externalId: 'same', title: 'Two' }]), /duplicate/u);
+});
+
+test('availability CommerceML contains one explicit string property and no unrelated card fields', () => {
+	const xml = buildTildaAvailabilityCatalogXml([
+		{ externalId: 'parent-external', title: 'Shelly 1', availability: 'В наличии' },
+	], '10171262', new Date('2026-08-31T12:00:00.000Z'));
+	assert.match(xml, /<Классификатор>[\s\S]*<Ид>10171262<\/Ид>[\s\S]*<Наименование>Наличие<\/Наименование>[\s\S]*<ТипЗначений>Строка<\/ТипЗначений>/u);
+	assert.match(xml, /<ИдКлассификатора>b24-app-stock<\/ИдКлассификатора>/u);
+	assert.match(xml, /<ЗначенияСвойств>[\s\S]*<Ид>10171262<\/Ид>[\s\S]*<Значение>В наличии<\/Значение>/u);
+	assert.doesNotMatch(xml, /Артикул|Описание|Цена|Картинк|Групп|URL|SEO/iu);
+	assert.throws(() => buildTildaAvailabilityCatalogXml([
+		{ externalId: 'parent-external', title: 'Shelly 1', availability: 'В наличии' },
+	], ''), /property ID is required/u);
 });

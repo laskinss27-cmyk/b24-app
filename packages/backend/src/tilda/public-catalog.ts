@@ -7,6 +7,17 @@ export interface TildaPublicStockRow {
 	price?: number | null;
 }
 
+export const TILDA_AVAILABILITY_CHARACTERISTIC = 'Наличие';
+export type TildaAvailability = 'В наличии' | 'Под заказ';
+
+export interface TildaPublicAvailabilityRow {
+	tildaUid: string;
+	externalId: string;
+	title: string;
+	availability: TildaAvailability | null;
+	editionUids: string[];
+}
+
 function withoutMutableFields(value: unknown, excludedFields: ReadonlySet<string>): unknown {
 	if (Array.isArray(value)) return value.map((child) => withoutMutableFields(child, excludedFields));
 	if (!value || typeof value !== 'object') return value;
@@ -33,6 +44,20 @@ function publicContentHash(products: Record<string, unknown>[], excludedFields: 
 		})
 		.sort((left, right) => cardIdentity(left).localeCompare(cardIdentity(right)));
 	return createHash('sha256').update(JSON.stringify(withoutMutableFields(normalized, excludedFields))).digest('hex');
+}
+
+function withoutAvailabilityCharacteristic(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(withoutAvailabilityCharacteristic);
+	if (!value || typeof value !== 'object') return value;
+	return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => {
+		if (key === 'characteristics' && Array.isArray(child)) {
+			return [key, child
+				.filter((item) => !item || typeof item !== 'object'
+					|| String((item as Record<string, unknown>)['title'] ?? '').trim() !== TILDA_AVAILABILITY_CHARACTERISTIC)
+				.map(withoutAvailabilityCharacteristic)];
+		}
+		return [key, withoutAvailabilityCharacteristic(child)];
+	}));
 }
 
 interface PublicCatalogPage {
@@ -64,13 +89,35 @@ function numericPrice(value: unknown, uid: string): number | null {
 	return price;
 }
 
+function productAvailability(value: unknown, uid: string): TildaAvailability | null {
+	if (value === undefined || value === null) return null;
+	if (!Array.isArray(value)) throw new Error(`Tilda public product ${uid} has invalid characteristics`);
+	const matches = value.filter((item) => item && typeof item === 'object'
+		&& String((item as Record<string, unknown>)['title'] ?? '').trim() === TILDA_AVAILABILITY_CHARACTERISTIC);
+	if (matches.length > 1) throw new Error(`Tilda public product ${uid} has duplicate availability characteristics`);
+	if (matches.length === 0) return null;
+	const availability = String((matches[0] as Record<string, unknown>)['value'] ?? '').trim();
+	if (availability !== 'В наличии' && availability !== 'Под заказ') {
+		throw new Error(`Tilda public product ${uid} has invalid availability value`);
+	}
+	return availability;
+}
+
 export async function readTildaPublicStockRows(
 	initialUrl: string,
 	fetchPage: typeof fetch = fetch,
-): Promise<{ parentCount: number; rows: TildaPublicStockRow[]; contentHash: string; protectedContentHash: string }> {
+): Promise<{
+	parentCount: number;
+	rows: TildaPublicStockRow[];
+	availabilityRows: TildaPublicAvailabilityRow[];
+	contentHash: string;
+	protectedContentHash: string;
+	availabilityProtectedContentHash: string;
+}> {
 	let url: URL | null = publicCatalogUrl(initialUrl);
 	const seenSlices = new Set<number>();
 	const rows: TildaPublicStockRow[] = [];
+	const availabilityRows: TildaPublicAvailabilityRow[] = [];
 	const contentProducts: Record<string, unknown>[] = [];
 	let expectedParents: number | null = null;
 	let parentCount = 0;
@@ -92,7 +139,12 @@ export async function readTildaPublicStockRows(
 			if (!rawProduct || typeof rawProduct !== 'object') throw new Error('Tilda public catalog product is invalid');
 			const product = rawProduct as Record<string, unknown>;
 			contentProducts.push(product);
+			const parentTildaUid = String(product['uid'] ?? '').trim();
+			const externalId = String(product['externalid'] ?? '').trim();
+			const title = String(product['title'] ?? '').trim();
+			if (!parentTildaUid || !externalId || !title) throw new Error('Tilda public catalog parent identity is incomplete');
 			if (!Array.isArray(product['editions'])) throw new Error(`Tilda public product ${String(product['uid'] ?? '')} has no editions`);
+			const editionUids: string[] = [];
 			for (const rawEdition of product['editions']) {
 				if (!rawEdition || typeof rawEdition !== 'object') throw new Error('Tilda public catalog edition is invalid');
 				const edition = rawEdition as Record<string, unknown>;
@@ -100,6 +152,7 @@ export async function readTildaPublicStockRows(
 				const sku = String(edition['sku'] ?? product['sku'] ?? '').trim();
 				if (!sku) continue;
 				if (!tildaUid) throw new Error(`Tilda public stock row ${sku} has no UID`);
+				editionUids.push(tildaUid);
 				rows.push({
 					tildaUid,
 					sku,
@@ -107,6 +160,13 @@ export async function readTildaPublicStockRows(
 					price: numericPrice(edition['price'] ?? product['price'], tildaUid),
 				});
 			}
+			availabilityRows.push({
+				tildaUid: parentTildaUid,
+				externalId,
+				title,
+				availability: productAvailability(product['characteristics'], parentTildaUid),
+				editionUids: editionUids.sort((left, right) => left.localeCompare(right)),
+			});
 		}
 		const nextSlice = page.nextslice === undefined || page.nextslice === null ? null : Number(page.nextslice);
 		if (nextSlice === null) {
@@ -122,10 +182,18 @@ export async function readTildaPublicStockRows(
 	if (parentCount !== expectedParents) throw new Error(`Tilda public catalog is incomplete: ${parentCount}/${expectedParents}`);
 	if (new Set(rows.map((row) => row.tildaUid)).size !== rows.length) throw new Error('Tilda public catalog has duplicate stock UIDs');
 	if (new Set(rows.map((row) => row.sku)).size !== rows.length) throw new Error('Tilda public catalog has duplicate stock SKUs');
+	if (new Set(availabilityRows.map((row) => row.tildaUid)).size !== availabilityRows.length) {
+		throw new Error('Tilda public catalog has duplicate parent UIDs');
+	}
 	return {
 		parentCount,
 		rows,
+		availabilityRows,
 		contentHash: publicContentHash(contentProducts, new Set(['quantity'])),
 		protectedContentHash: publicContentHash(contentProducts, new Set(['quantity', 'price'])),
+		availabilityProtectedContentHash: publicContentHash(
+			contentProducts.map((product) => withoutAvailabilityCharacteristic(product) as Record<string, unknown>),
+			new Set(['quantity', 'price']),
+		),
 	};
 }

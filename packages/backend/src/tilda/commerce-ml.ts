@@ -1,10 +1,15 @@
 import type { TildaStockOffer } from './stock-projection.js';
+import type { TildaAvailability } from './public-catalog.js';
 
 type TildaCommerceMlOffer = Pick<TildaStockOffer, 'productId' | 'externalId' | 'quantity' | 'price'>;
 
 interface TildaCommerceMlCatalogProduct {
 	externalId: string;
 	title: string;
+}
+
+export interface TildaCommerceMlAvailabilityProduct extends TildaCommerceMlCatalogProduct {
+	availability: TildaAvailability;
 }
 
 const CATALOG_ID = 'b24-app-stock';
@@ -128,4 +133,72 @@ export function buildTildaCatalogProductsXml(products: TildaCommerceMlCatalogPro
 
 export function buildTildaCatalogCanaryXml(product: TildaCommerceMlCatalogProduct, generatedAt = new Date()): string {
 	return buildTildaCatalogProductsXml([product], generatedAt);
+}
+
+export function buildTildaAvailabilityCatalogXml(
+	products: TildaCommerceMlAvailabilityProduct[],
+	propertyId: string,
+	generatedAt = new Date(),
+): string {
+	const availabilityPropertyId = propertyId.trim();
+	if (!availabilityPropertyId) throw new Error('Tilda availability CommerceML property ID is required');
+	if (products.length === 0) throw new Error('Tilda availability catalog has no products');
+	const seenExternalIds = new Set<string>();
+	const rows = products.map((product) => {
+		const externalId = String(product.externalId ?? '').trim();
+		const title = String(product.title ?? '').trim();
+		if (!externalId) throw new Error('Tilda availability product has no external id');
+		if (!title) throw new Error('Tilda availability product has no title');
+		if (product.availability !== 'В наличии' && product.availability !== 'Под заказ') {
+			throw new Error(`invalid Tilda availability value: ${String(product.availability)}`);
+		}
+		if (seenExternalIds.has(externalId)) throw new Error(`duplicate Tilda availability product id: ${externalId}`);
+		seenExternalIds.add(externalId);
+		return [
+			'      <Товар>',
+			`        <Ид>${xmlText(externalId)}</Ид>`,
+			`        <Наименование>${xmlText(title)}</Наименование>`,
+			'        <БазоваяЕдиница Код="796" НаименованиеПолное="Штука" МеждународноеСокращение="PCE">шт</БазоваяЕдиница>',
+			'        <ЗначенияСвойств>',
+			'          <ЗначенияСвойства>',
+			`            <Ид>${xmlText(availabilityPropertyId)}</Ид>`,
+			'            <Наименование>Наличие</Наименование>',
+			`            <Значение>${xmlText(product.availability)}</Значение>`,
+			'          </ЗначенияСвойства>',
+			'        </ЗначенияСвойств>',
+			'      </Товар>',
+		].join('\n');
+	}).sort((left, right) => left.localeCompare(right)).join('\n');
+	return [
+		'<?xml version="1.0" encoding="UTF-8"?>',
+		`<КоммерческаяИнформация ${COMMERCE_ML_ROOT_ATTRIBUTES} ВерсияСхемы="2.07" ДатаФормирования="${commerceMlDate(generatedAt)}">`,
+		'  <Классификатор>',
+		`    <Ид>${CATALOG_ID}</Ид>`,
+		'    <Наименование>b24-app availability</Наименование>',
+		'    <Владелец>',
+		'      <Ид>b24-app</Ид>',
+		'      <Наименование>b24-app</Наименование>',
+		'    </Владелец>',
+		'    <Свойства>',
+		'      <Свойство>',
+		`        <Ид>${xmlText(availabilityPropertyId)}</Ид>`,
+		'        <Наименование>Наличие</Наименование>',
+		'        <ТипЗначений>Строка</ТипЗначений>',
+		'      </Свойство>',
+		'    </Свойства>',
+		'  </Классификатор>',
+		'  <Каталог СодержитТолькоИзменения="true">',
+		`    <Ид>${CATALOG_ID}</Ид>`,
+		`    <ИдКлассификатора>${CATALOG_ID}</ИдКлассификатора>`,
+		'    <Наименование>b24-app availability</Наименование>',
+		'    <Владелец>',
+		'      <Ид>b24-app</Ид>',
+		'      <Наименование>b24-app</Наименование>',
+		'    </Владелец>',
+		'    <Товары>',
+		rows,
+		'    </Товары>',
+		'  </Каталог>',
+		'</КоммерческаяИнформация>',
+	].join('\n');
 }

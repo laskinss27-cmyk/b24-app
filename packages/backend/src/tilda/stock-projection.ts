@@ -1,4 +1,5 @@
 export type TildaMappingStatus = 'confirmed' | 'unresolved' | 'ignored';
+export type TildaRowKind = 'parent' | 'variant';
 
 export interface TildaProductMapping {
 	productId: number;
@@ -7,6 +8,8 @@ export interface TildaProductMapping {
 	sku: string;
 	title: string;
 	status: TildaMappingStatus;
+	rowKind?: TildaRowKind;
+	parentTildaUid?: string | null;
 }
 
 export interface TildaStockOffer {
