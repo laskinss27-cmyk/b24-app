@@ -139,6 +139,19 @@ test('SQL schemas preserve workflow links and Tilda external identity', async ()
 	assert.doesNotMatch(tildaRuns!, /\bJSON\b/i);
 });
 
+test('migration checksums are stable across LF and CRLF checkouts', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'b24-app-migrations-'));
+	try {
+		await writeFile(join(directory, '0001_lf.sql'), 'SELECT 1;\nSELECT 2;\n');
+		await writeFile(join(directory, '0002_crlf.sql'), 'SELECT 1;\r\nSELECT 2;\r\n');
+		const migrations = await readMigrationFiles(directory);
+		assert.equal(migrations[0]!.checksum, migrations[1]!.checksum);
+		assert.equal(migrations[1]!.sql, 'SELECT 1;\nSELECT 2;\n');
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 test('reservation schema preserves soft monotonic promises and append-only evidence', async () => {
 	const migrations = await readMigrationFiles(projectMigrationsDirectory);
 	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));

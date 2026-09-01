@@ -21,7 +21,10 @@ export async function readMigrationFiles(directory: string): Promise<MigrationFi
 	for (const filename of filenames) {
 		const match = MIGRATION_NAME.exec(filename);
 		if (!match) throw new Error(`Invalid migration filename: ${filename}`);
-		const sql = await readFile(join(directory, filename), 'utf8');
+		// Git checkouts and Docker build contexts may materialize the same migration
+		// with different line endings. Normalize before hashing so an immutable SQL
+		// migration has one checksum on Windows and Linux.
+		const sql = (await readFile(join(directory, filename), 'utf8')).replace(/\r\n?/g, '\n');
 		if (!sql.trim()) throw new Error(`Empty migration: ${filename}`);
 		migrations.push({
 			version: match[1]!,
