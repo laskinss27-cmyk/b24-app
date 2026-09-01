@@ -10,6 +10,7 @@ import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import type { DealProductRowEdit } from './deal-product-row-values.js';
 import { stageLabel } from './deal-display-formatters.js';
 import { requestB24FitWindow } from './deal-products-placement-sizing.js';
+import type { DealRowReservationMark } from './deal-reservation-ui.js';
 
 export function createDealGoodsRowRenderer({
 	data,
@@ -44,6 +45,7 @@ export function createDealGoodsRowRenderer({
 	setBatchQty,
 	setExpandedStocks,
 	setRowStore,
+	reservationForRow,
 }: {
 	data: TableData;
 	remaining: (row: EnrichedRow) => number;
@@ -77,6 +79,7 @@ export function createDealGoodsRowRenderer({
 	setBatchQty: Dispatch<SetStateAction<Record<string, string>>>;
 	setExpandedStocks: Dispatch<SetStateAction<Record<string, boolean>>>;
 	setRowStore: Dispatch<SetStateAction<Record<string, number>>>;
+	reservationForRow: (row: EnrichedRow) => DealRowReservationMark | null;
 }): (row: EnrichedRow) => JSX.Element[] {
 	return (r: EnrichedRow): JSX.Element[] => {
 		const parts = dealProductRealizationParts(r, data.coreReals);
@@ -104,6 +107,7 @@ export function createDealGoodsRowRenderer({
 					workingMode={workingMode}
 					hasParts={parts.length > 0}
 					orderedTitle={activeSupply ? `${activeSupply.title} · ${stageLabel(activeSupply.stageId)}` : null}
+					reservation={reservationForRow(r)}
 					saving={savingRow === r.id}
 					controlsDisabled={busy || supplyBusy || removing != null || hasPendingDrafts}
 					selectionDisabled={hasPendingDrafts || busy || supplyBusy}

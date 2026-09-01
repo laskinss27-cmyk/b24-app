@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { defaultReservationQuantities, parseReservationQuantities } from './deal-reservation-ui.js';
 
 export interface DealReservationDialogLine {
 	id: string;
@@ -6,6 +7,8 @@ export interface DealReservationDialogLine {
 	measure: string;
 	storeTitle: string;
 	quantity: number;
+	maxQuantity: number;
+	availableQuantity: number;
 }
 
 function defaultExpiry(): string {
@@ -20,11 +23,18 @@ export function DealReservationDialog({ visible, lines, busy, error, onClose, on
 	busy: boolean;
 	error: string | null;
 	onClose: () => void;
-	onSubmit: (expiresAt: string) => void;
+	onSubmit: (expiresAt: string, quantities: Record<string, number>) => void;
 }): JSX.Element | null {
 	const [expiresAt, setExpiresAt] = useState(defaultExpiry);
-	useEffect(() => { if (visible) setExpiresAt(defaultExpiry()); }, [visible]);
+	const [quantities, setQuantities] = useState<Record<string, string>>({});
+	useEffect(() => {
+		if (visible) {
+			setExpiresAt(defaultExpiry());
+			setQuantities(defaultReservationQuantities(lines));
+		}
+	}, [visible]);
 	if (!visible) return null;
+	const parsed = parseReservationQuantities(lines, quantities);
 	return <div className="deal-supply-order-overlay" onClick={() => !busy && onClose()}>
 		<section className="deal-supply-order-modal" role="dialog" aria-modal="true" aria-label="Запрос резерва" onClick={(event) => event.stopPropagation()}>
 			<header><div><h2>Запросить резерв</h2><span>Снабжение проверит остаток и срок целиком</span></div><button type="button" disabled={busy} onClick={onClose}>×</button></header>
@@ -34,10 +44,16 @@ export function DealReservationDialog({ visible, lines, busy, error, onClose, on
 			{error && <div className="deal-supply-order-error">{error}</div>}
 			<div className="deal-supply-order-lines">
 				{lines.map((line) => <div key={line.id} className="deal-reservation-line">
-					<span><b>{line.name}</b><small>{line.storeTitle}</small></span><strong>{line.quantity} {line.measure}</strong>
+					<span><b>{line.name}</b><small>{line.storeTitle} · в сделке осталось {line.maxQuantity} · доступно {line.availableQuantity}</small></span>
+					<label className="deal-reservation-quantity"><input
+						type="number" min={0} max={Math.min(line.maxQuantity, line.availableQuantity)} step="any"
+						value={quantities[line.id] ?? ''} disabled={busy}
+						onChange={(event) => setQuantities((current) => ({ ...current, [line.id]: event.target.value }))}
+					/><span>{line.measure}</span></label>
 				</div>)}
 			</div>
-			<footer><button type="button" disabled={busy} onClick={onClose}>Отмена</button><button className="primary" type="button" disabled={busy || !expiresAt || !lines.length} onClick={() => onSubmit(new Date(expiresAt).toISOString())}>{busy ? 'Отправляю…' : 'Отправить снабжению'}</button></footer>
+			{parsed.error && <div className="deal-reservation-validation">{parsed.error}</div>}
+			<footer><button type="button" disabled={busy} onClick={onClose}>Отмена</button><button className="primary" type="button" disabled={busy || !expiresAt || Boolean(parsed.error)} onClick={() => onSubmit(new Date(expiresAt).toISOString(), parsed.quantities)}>{busy ? 'Отправляю…' : 'Отправить снабжению'}</button></footer>
 		</section>
 	</div>;
 }

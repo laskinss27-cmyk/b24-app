@@ -324,6 +324,9 @@
 .deal-reservation-line > span { display: grid; gap: 4px; }
 .deal-reservation-line small { color: #66758a; }
 .deal-reservation-line strong { white-space: nowrap; }
+.deal-reservation-quantity { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.deal-reservation-quantity input { width: 88px; box-sizing: border-box; border: 1px solid #aeb9c8; border-radius: 6px; padding: 7px 8px; background: #fff; color: #172033; font: inherit; text-align: right; }
+.deal-reservation-validation { margin: 8px 0 0; color: #b42318; font-size: 12px; }
 .supply-order-common-note {
 	margin: 0;
 	padding: 9px 12px;

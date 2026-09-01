@@ -8,6 +8,7 @@ import { DealSupplyOrderDialog } from './DealSupplyOrderDialog.js';
 import { DealReservationDialog } from './DealReservationDialog.js';
 import { useDealReservations } from './useDealReservations.js';
 import { newReservationKey } from './reservation-api.js';
+import { dealRowReservationMark } from './deal-reservation-ui.js';
 import { DealActionsBar } from './DealActionsBar.js';
 import { DealProductsPlanningTable } from './DealProductsPlanningTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
@@ -316,6 +317,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		setBatchQty,
 		setExpandedStocks,
 		setRowStore,
+		reservationForRow: (row) => dealRowReservationMark(dealReservations.open, row),
 	});
 	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
 	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
@@ -333,7 +335,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
 	const supplyGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
-	const reserveGoods = visibleGoods.filter((row) => isSel(row) && remaining(row) > 0 && Boolean(storeName(storeOf(row))));
+	const reserveGoods = visibleGoods.filter((row) => isSel(row) && remaining(row) > 0 && amountAt(row, storeOf(row)) > 0 && Boolean(storeName(storeOf(row))));
 	const reservationStatus = dealReservations.current?.status === 'pending'
 		? `Резерв: заявка ожидает снабжение до ${new Date(dealReservations.current.requestedExpiresAt).toLocaleString('ru-RU')}`
 		: dealReservations.current?.status === 'approved' && dealReservations.current.reservationStatus
@@ -530,23 +532,34 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 			<DealReservationDialog
 				visible={workingMode && showReservation}
-				lines={reserveGoods.map((row) => ({ id: row.id, name: row.name, measure: row.measure, storeTitle: storeName(storeOf(row)), quantity: qtyOf(row) }))}
+				lines={reserveGoods.map((row) => ({
+					id: row.id,
+					name: row.name,
+					measure: row.measure,
+					storeTitle: storeName(storeOf(row)),
+					quantity: qtyOf(row),
+					maxQuantity: remaining(row),
+					availableQuantity: amountAt(row, storeOf(row)),
+				}))}
 				busy={dealReservations.busy}
 				error={dealReservations.error}
 				onClose={() => setShowReservation(false)}
-				onSubmit={(requestedExpiresAt) => {
+				onSubmit={(requestedExpiresAt, quantities) => {
 					if (!dealId) return;
 					void dealReservations.create({
 						dealId,
 						requestedExpiresAt,
 						requestKey: newReservationKey(),
-						lines: reserveGoods.map((row) => ({
-							sourceLineKey: row.planLineKey ?? data.plan.find((line) => line.productId === row.productId)?.lineKey ?? String(row.productId),
-							productId: row.productId,
-							itemName: row.name,
-							storeTitle: storeName(storeOf(row)),
-							quantity: qtyOf(row),
-						})),
+						lines: reserveGoods.flatMap((row) => {
+							const quantity = quantities[row.id] ?? 0;
+							return quantity > 0 ? [{
+								sourceLineKey: row.planLineKey ?? data.plan.find((line) => line.productId === row.productId)?.lineKey ?? String(row.productId),
+								productId: row.productId,
+								itemName: row.name,
+								storeTitle: storeName(storeOf(row)),
+								quantity,
+							}] : [];
+						}),
 					}).then(() => {
 						setShowReservation(false);
 						setSelected({});
