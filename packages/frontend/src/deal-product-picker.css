@@ -313,6 +313,17 @@
 	background: #1769c2;
 	color: #fff;
 }
+.deal-reservation-line {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 12px 4px;
+	border-bottom: 1px solid #edf0f4;
+}
+.deal-reservation-line > span { display: grid; gap: 4px; }
+.deal-reservation-line small { color: #66758a; }
+.deal-reservation-line strong { white-space: nowrap; }
 .supply-order-common-note {
 	margin: 0;
 	padding: 9px 12px;

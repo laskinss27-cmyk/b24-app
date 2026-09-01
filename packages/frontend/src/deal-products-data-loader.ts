@@ -47,6 +47,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 	// реализации (чекбоксы/склад/статусы/партии/«Реализовать») работал на них без изменений.
 	const planRowsFromCore: EnrichedRow[] = plan.map((p) => ({
 		id: `plan-${p.productId}`,
+		...(p.lineKey ? { planLineKey: p.lineKey } : {}),
 		productId: p.productId,
 		name: p.itemName || `#${p.productId}`,
 		type: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? 7 : 1,

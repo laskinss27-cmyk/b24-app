@@ -1,7 +1,7 @@
 import { type StockMovementKind } from './StockLedger.js';
 import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 
-export type SupplyViewKey = 'orders' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'report-builder' | 'inventory';
+export type SupplyViewKey = 'orders' | 'reservations' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'report-builder' | 'inventory';
 
 export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMarketplaces, canOpenReportBuilder, currentUserId, mock, onViewChange, onToggleReports }: {
 	view: SupplyViewKey;
@@ -21,6 +21,7 @@ export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMa
 			{!marketplaceOnly && <>
 				<div className="supply-proto-nav-group">
 					<button className={view === 'orders' ? 'active' : ''} type="button" onClick={() => onViewChange('orders')}>Обеспечение и заказы</button>
+					<button className={view === 'reservations' ? 'active' : ''} type="button" onClick={() => onViewChange('reservations')}>Резервы</button>
 					<button className={view === 'incoming' ? 'active' : ''} type="button" onClick={() => onViewChange('incoming')}>Входящие заявки ТТ</button>
 					<button className={view === 'purchase' ? 'active' : ''} type="button" onClick={() => onViewChange('purchase')}>Закупки</button>
 					<button className={view === 'logistics' ? 'active' : ''} type="button" onClick={() => onViewChange('logistics')}>Логистика</button>

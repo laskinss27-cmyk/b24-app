@@ -18,6 +18,7 @@ import {
 } from '../erp/operations.js';
 import { parseTransferItem } from '../transfers/model.js';
 import { recordRealizationEvent } from '../operation-log/realization-events.js';
+import { ReservationService } from '../reservations/service.js';
 
 interface AuthBody {
 	domain?: string;
@@ -51,6 +52,7 @@ export function registerDealCoreRealizationRoute(
 		const logDealId = Number(b.dealId);
 		const loggedDocuments: string[] = [];
 		try {
+			const reservationService = app.reservationRuntime ? new ReservationService(app.reservationRuntime) : null;
 			if (action === 'list') {
 				// Что уже реализовано по сделке — из ЯДРА (Delivery Note по b24_deal_id), а не из
 				// битриксовых отгрузок. Возвращает и черновики (docstatus 0), и проведённые (1).
@@ -111,10 +113,17 @@ export function registerDealCoreRealizationRoute(
 					}
 				}
 				const productIds = parsedGroups.flatMap((group) => group.lines.filter((line) => !line.isService).map((line) => line.productId));
-				const stocks = await fetchErpStocksFor(erp, productIds);
+				const [stocks, sqlAvailability] = await Promise.all([
+					fetchErpStocksFor(erp, productIds),
+					reservationService?.availabilityForDeal(erp, dealId, parsedGroups.flatMap((group) =>
+						group.lines.filter((line) => !line.isService).map((line) => ({ productId: line.productId, storeTitle: group.storeTitle })),
+					)) ?? [],
+				]);
+				const sqlByKey = new Map(sqlAvailability.map((line) => [`${line.productId}:${line.storeTitle}`, line]));
 				for (const group of parsedGroups) for (const line of group.lines) {
 					if (line.isService) continue;
-					const available = Math.max(Number(stocks.get(line.productId)?.[group.storeTitle] ?? 0) - (reserved.get(`${line.productId}:${group.storeTitle}`) ?? 0), 0);
+					const sqlReserved = app.reservationRuntime?.canWrite ? (sqlByKey.get(`${line.productId}:${group.storeTitle}`)?.reservedByOthers ?? 0) : 0;
+					const available = Math.max(Number(stocks.get(line.productId)?.[group.storeTitle] ?? 0) - (reserved.get(`${line.productId}:${group.storeTitle}`) ?? 0) - sqlReserved, 0);
 					if (line.qty > available + 0.000001) throw new Error(`на складе «${group.storeTitle}» для товара #${line.productId} свободно ${available}, к реализации выбрано ${line.qty}`);
 				}
 				const drafts: Array<{ name: string; storeTitle: string }> = [];
@@ -164,11 +173,33 @@ export function registerDealCoreRealizationRoute(
 				const allowedDrafts = new Set(dealDocuments.filter((document) => !document.submitted).map((document) => document.name));
 				if (names.some((name) => !allowedDrafts.has(name))) throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
 				const submitted: string[] = [];
-				for (const name of names) { await submitRealization(erp, name); submitted.push(name); loggedDocuments.push(name); }
+				const reservationWarnings: string[] = [];
+				const me = reservationService?.canWrite
+					? await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current', {})
+					: null;
+				for (const name of names) {
+					await submitRealization(erp, name);
+					submitted.push(name);
+					loggedDocuments.push(name);
+					const document = dealDocuments.find((candidate) => candidate.name === name);
+					if (reservationService?.canWrite && me && document) {
+						try {
+							await reservationService.consumeDealRealization(erp, {
+								id: String(me.ID ?? ''), name: `${String(me.LAST_NAME ?? '').trim()} ${String(me.NAME ?? '').trim()}`.trim(),
+							}, dealId, name, document.items
+								.filter((item) => item.storeTitle && item.qty > 0)
+								.map((item) => ({ productId: item.productId, storeTitle: item.storeTitle, quantity: item.qty })));
+						} catch (reservationError) {
+							const warning = `резерв по ${name} требует сверки: ${errInfo(reservationError)}`;
+							reservationWarnings.push(warning);
+							app.log.error({ dealId, name }, `[reservations] ${warning}`);
+						}
+					}
+				}
 				await syncDealTechnicalFields(client, erp, dealId);
 				app.log.info({ dealId, submitted: submitted.length }, '[api/deal/realize-core] submitted');
 				await recordRealizationEvent(app, req, { operation: 'submit', dealId, documents: loggedDocuments });
-				return { ok: true, submitted };
+				return { ok: true, submitted, reservationWarnings };
 			}
 			return reply.code(400).send({ ok: false, error: 'bad action' });
 		} catch (err) {

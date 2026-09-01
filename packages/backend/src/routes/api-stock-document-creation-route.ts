@@ -8,7 +8,6 @@ import {
 } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
 import { canManageStock } from './api-stock-access.js';
-import { validateFreeStock } from './api-stock-availability.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody, StockIssueLine, StockReceiptLine } from './api-stock-types.js';
 
@@ -60,7 +59,6 @@ export function registerStockDocumentCreationRoute(app: FastifyInstance): void {
 				.map((l) => ({ productId: Number(l['productId']), qty: Number(l['qty']) }))
 				.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 			if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
-			await validateFreeStock(client, erp, lines.map((line) => ({ ...line, fromStore })));
 			const { name } = await createWriteOffDraft(erp, {
 				...(reason ? { reason } : {}),
 				...(note ? { note } : {}),

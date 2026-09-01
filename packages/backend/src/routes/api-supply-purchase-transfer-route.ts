@@ -112,7 +112,7 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 			// Приход по заказу показывает, сколько когда-то поступило, но не гарантирует,
 			// что товар до сих пор лежит на складе прихода. Перед созданием документа
 			// перепроверяем живой остаток и активные резервы всех перемещений.
-			await validateTransferReservation(erp, client, 0, fromStore, transferLines);
+			await validateTransferReservation(erp, client, 0, fromStore, transferLines, app.reservationRuntime);
 			let baseData = newTransferData({
 				supplyRequest: requestName,
 				supplyRequestKey: request.requestKey,

@@ -23,6 +23,7 @@ import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-h
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
+import { ReservationService } from '../reservations/service.js';
 
 function draftRecord(name: string, lines: number, savedAt: string): InventoryDocumentRecord {
 	return { name, status: 'draft', lines, savedAt };
@@ -172,6 +173,8 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
+			const pointBeforeSubmit = await loadInventoryPoint(client, body.inventoryId, Number(body.storeId));
+			const storeTitle = String(pointBeforeSubmit.pt['storeName'] ?? pointBeforeSubmit.pt['store'] ?? '').trim();
 			const completed = await withInventoryUpdateLock(body.inventoryId, async () => {
 				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
 				const legacy = legacyInventoryDocument(loaded.pt);
@@ -199,6 +202,10 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 				await updateInventoryItem(client, loaded);
 				return { docs: documents, legacyDoc: null, inventoryStatus };
 			});
+			if (storeTitle && app.reservationRuntime?.canWrite) {
+				await new ReservationService(app.reservationRuntime).reconcileStore(erp, storeTitle)
+					.catch((error) => app.log.error({ inventoryId: body.inventoryId, storeId: body.storeId }, `[reservations] inventory submitted; reconcile required — ${inventoryErrorInfo(error)}`));
+			}
 			app.log.info({ storeId: body.storeId, documents: inventoryDocumentCount(completed.docs), inventoryStatus: completed.inventoryStatus }, '[api/inventory/erp-doc-submit] ok');
 			return { ok: true, ...completed, doc: completed.legacyDoc };
 		} catch (error) {

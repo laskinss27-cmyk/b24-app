@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import type { DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
 import { DealQuoteVariantTabs } from './DealQuoteVariantTabs.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
 import { DealSupplyOrderDialog } from './DealSupplyOrderDialog.js';
+import { DealReservationDialog } from './DealReservationDialog.js';
+import { useDealReservations } from './useDealReservations.js';
+import { newReservationKey } from './reservation-api.js';
 import { DealActionsBar } from './DealActionsBar.js';
 import { DealProductsPlanningTable } from './DealProductsPlanningTable.js';
 import { buildDealProductsTableView } from './deal-products-table-view.js';
@@ -172,6 +176,8 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	const { showContract, setShowContract } = useDealContractModalState();
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const { dealTransfers, refreshDealTransfers } = useDealTransfers(dealId);
+	const dealReservations = useDealReservations(dealId, dev);
+	const [showReservation, setShowReservation] = useState(false);
 	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
 	const {
 		availableVariantName,
@@ -327,6 +333,14 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
 	const supplyGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
+	const reserveGoods = visibleGoods.filter((row) => isSel(row) && remaining(row) > 0 && Boolean(storeName(storeOf(row))));
+	const reservationStatus = dealReservations.current?.status === 'pending'
+		? `Резерв: заявка ожидает снабжение до ${new Date(dealReservations.current.requestedExpiresAt).toLocaleString('ru-RU')}`
+		: dealReservations.current?.status === 'approved' && dealReservations.current.reservationStatus
+			? `Резерв: ${dealReservations.current.reservationStatus === 'shortfall' ? 'уменьшен по фактическому остатку' : 'активен'} до ${new Date(dealReservations.current.approvedExpiresAt ?? dealReservations.current.requestedExpiresAt).toLocaleString('ru-RU')}`
+			: dealReservations.current?.status === 'rejected'
+				? `Резерв отклонён${dealReservations.current.rejectionReason ? `: ${dealReservations.current.rejectionReason}` : ''}`
+				: null;
 	const { openSupplyOrder, doCreateSupply } = createDealSupplyOrderActions({
 		dealId,
 		supplyGoods,
@@ -402,9 +416,23 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				busy={busy}
 				supplyBusy={supplyBusy}
 				supplyGoodsCount={supplyGoods.length}
+				reserveGoodsCount={reserveGoods.length}
+				reservationBusy={dealReservations.busy}
+				reservationStatus={reservationStatus}
+				canRequestReservation={dealReservations.enabled && dealReservations.canWrite && !dealReservations.open}
+				canRequestRelease={dealReservations.canWrite && Boolean(dealReservations.open?.reservationId) && dealReservations.open?.releaseRequestStatus !== 'pending'}
 				notice={notice}
 				onRealize={() => void (hasPendingDrafts ? doSubmit() : doDraft())}
 				onOrderSupply={openSupplyOrder}
+				onReserve={() => setShowReservation(true)}
+				onReleaseReservation={() => {
+					const reservationId = dealReservations.open?.reservationId;
+					if (!reservationId) return;
+					const reason = window.prompt('Причина досрочного снятия резерва (необязательно):', '') ?? '';
+					void dealReservations.release(reservationId, reason)
+						.then(() => setNotice({ kind: 'ok', text: 'Запрос на снятие отправлен снабжению.' }))
+						.catch(() => undefined);
+				}}
 			/>}
 
 			{data.quoteVariants.enabled && <DealQuoteVariantTabs quoteVariants={data.quoteVariants} activeVariantId={activeVariantId} onActiveVariant={onActiveVariant} />}
@@ -497,7 +525,34 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onOrderNoteChange={setSupplyOrderNote}
 				onQuantityChange={(rowId, value) => { setSupplyQty((quantities) => ({ ...quantities, [rowId]: value })); setSupplyFormError(null); }}
 				onNoteChange={(rowId, value) => setSupplyNotes((notes) => ({ ...notes, [rowId]: value }))}
-				onSubmit={() => void doCreateSupply()}
+				 onSubmit={() => void doCreateSupply()}
+			/>
+
+			<DealReservationDialog
+				visible={workingMode && showReservation}
+				lines={reserveGoods.map((row) => ({ id: row.id, name: row.name, measure: row.measure, storeTitle: storeName(storeOf(row)), quantity: qtyOf(row) }))}
+				busy={dealReservations.busy}
+				error={dealReservations.error}
+				onClose={() => setShowReservation(false)}
+				onSubmit={(requestedExpiresAt) => {
+					if (!dealId) return;
+					void dealReservations.create({
+						dealId,
+						requestedExpiresAt,
+						requestKey: newReservationKey(),
+						lines: reserveGoods.map((row) => ({
+							sourceLineKey: row.planLineKey ?? data.plan.find((line) => line.productId === row.productId)?.lineKey ?? String(row.productId),
+							productId: row.productId,
+							itemName: row.name,
+							storeTitle: storeName(storeOf(row)),
+							quantity: qtyOf(row),
+						})),
+					}).then(() => {
+						setShowReservation(false);
+						setSelected({});
+						setNotice({ kind: 'ok', text: 'Заявка на резерв отправлена снабжению.' });
+					}).catch(() => undefined);
+				}}
 			/>
 
 			<DealOperationalDialogs

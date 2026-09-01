@@ -40,6 +40,9 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/deal/supply-request': ['deals.create_supply_request'],
 	'/api/deal/realize': ['realizations.create', 'realizations.post'],
 	'/api/deal/add-product': ['deals.add_products'],
+	'/api/reservations/deal': ['deals.view'],
+	'/api/reservations/request': ['deals.reserve'],
+	'/api/reservations/release-request': ['deals.reserve'],
 
 	'/api/realizations/list': ['realizations.view'],
 	'/api/quicksale/create': ['realizations.create'],
@@ -96,6 +99,9 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/supply/purchase-stage': ['supply.change_purchase_stage'],
 	'/api/supply/purchase-receive': ['supply.receive_purchase'],
 	'/api/supply/purchase-transfer': ['supply.receive_purchase', 'transfers.create'],
+	'/api/reservations/supply/list': ['supply.view'],
+	'/api/reservations/supply/review': ['supply.manage_requests'],
+	'/api/reservations/supply/release-review': ['supply.manage_requests'],
 
 	'/api/repairs/list': ['repairs.view'],
 	'/api/repairs/create': ['repairs.create'],

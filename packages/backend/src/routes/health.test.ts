@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import test from 'node:test';
 import type { Config } from '../config.js';
 import type { DatabaseRuntime } from '../database/runtime.js';
+import type { ReservationRuntime } from '../reservations/runtime.js';
 import { registerHealthRoute, registerReadinessRoute } from './health.js';
 
 test('process health keeps its existing response contract', async () => {
@@ -56,5 +57,21 @@ test('readiness fails explicitly when an enabled database is down', async () => 
 	const response = await app.inject({ method: 'GET', url: '/ready' });
 	assert.equal(response.statusCode, 503);
 	assert.deepEqual(response.json(), { ok: false, checks: { database: { status: 'down' } } });
+	await app.close();
+});
+
+test('readiness probes the separately credentialed reservation runtime', async () => {
+	const reservations: ReservationRuntime = {
+		mode: 'active', enabled: true, canWrite: true,
+		async query() { throw new Error('unused'); },
+		async transaction() { throw new Error('unused'); },
+		async ping() { throw new Error('secret connection details'); },
+		async close() {},
+	};
+	const app = Fastify();
+	registerReadinessRoute(app, undefined, reservations);
+	const response = await app.inject({ method: 'GET', url: '/ready' });
+	assert.equal(response.statusCode, 503);
+	assert.deepEqual(response.json(), { ok: false, checks: { database: { status: 'disabled' }, reservations: { status: 'down' } } });
 	await app.close();
 });

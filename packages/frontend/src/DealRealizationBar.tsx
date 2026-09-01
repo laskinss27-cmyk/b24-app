@@ -24,9 +24,16 @@ export function DealRealizationBar({
 	busy,
 	supplyBusy,
 	supplyGoodsCount,
+	reserveGoodsCount,
+	reservationBusy,
+	reservationStatus,
+	canRequestReservation,
+	canRequestRelease,
 	notice,
 	onRealize,
 	onOrderSupply,
+	onReserve,
+	onReleaseReservation,
 }: {
 	hasPendingDrafts: boolean;
 	pendingDraftCount: number;
@@ -40,12 +47,20 @@ export function DealRealizationBar({
 	busy: boolean;
 	supplyBusy: boolean;
 	supplyGoodsCount: number;
+	reserveGoodsCount: number;
+	reservationBusy: boolean;
+	reservationStatus: string | null;
+	canRequestReservation: boolean;
+	canRequestRelease: boolean;
 	notice: { kind: 'ok' | 'err'; text: string } | null;
 	onRealize: () => void;
 	onOrderSupply: () => void;
+	onReserve: () => void;
+	onReleaseReservation: () => void;
 }): JSX.Element {
 	return (
 		<div className="realize-bar">
+			{reservationStatus && <div className="deal-reservation-status">{reservationStatus}</div>}
 			{hasPendingDrafts ? (
 				<div className="realize-plan">
 					<b>Черновики в ядре: {pendingDraftCount} — проверь партии ниже и проведи.</b>
@@ -77,6 +92,10 @@ export function DealRealizationBar({
 				{!hasPendingDrafts && supplyGoodsCount > 0 && (
 					<button className="btn-order-supply" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={onOrderSupply}>{supplyBusy ? '…' : `Заказать (${supplyGoodsCount})`}</button>
 				)}
+				{!hasPendingDrafts && reserveGoodsCount > 0 && canRequestReservation && (
+					<button className="btn-reservation" disabled={dev || busy || supplyBusy || reservationBusy} onClick={onReserve}>{reservationBusy ? '…' : `В резерв (${reserveGoodsCount})`}</button>
+				)}
+				{canRequestRelease && <button className="btn-reservation-release" disabled={reservationBusy} onClick={onReleaseReservation}>Запросить снятие</button>}
 			</div>
 			{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 		</div>

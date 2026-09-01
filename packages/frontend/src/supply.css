@@ -1423,6 +1423,27 @@
 	background: #fff;
 }
 
+.supply-reservations { display: grid; gap: 14px; }
+.supply-reservation-card { padding: 18px; }
+.supply-reservation-card > header,
+.supply-reservation-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.supply-reservation-card > header { padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+.supply-reservation-card h2 { margin: 0 0 4px; font-size: 18px; }
+.supply-reservation-card header span { color: #64748b; font-size: 12px; }
+.supply-reservation-card header > b { color: #0f766e; }
+.supply-reservation-lines > div { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 2px; border-bottom: 1px solid #edf0f4; }
+.supply-reservation-lines span { display: grid; gap: 3px; }
+.supply-reservation-lines small { color: #64748b; }
+.supply-reservation-card > footer { justify-content: flex-end; padding-top: 14px; }
+.supply-reservation-card footer label { display: grid; gap: 4px; margin-right: auto; color: #64748b; font-size: 11px; }
+.supply-reservation-card input,
+.supply-reservation-card button { min-height: 36px; padding: 7px 11px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #1f2937; font: inherit; }
+.supply-reservation-card button { cursor: pointer; }
+.supply-reservation-card button.primary { border-color: #0f766e; background: #0f766e; color: #fff; font-weight: 700; }
+.supply-reservation-card button.primary.danger { border-color: #be123c; background: #be123c; }
+.supply-reservation-card button:disabled { cursor: default; opacity: .55; }
+.supply-reservation-release-note { margin-right: auto; color: #9f1239; font-weight: 700; }
+
 .supply-proto-bar {
 	display: flex;
 	justify-content: space-between;

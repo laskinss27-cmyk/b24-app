@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { DatabaseRuntime } from '../database/runtime.js';
+import type { ReservationRuntime } from '../reservations/runtime.js';
 
 /**
  * GET /health — проверка, что приложение поднялось и прочитало конфигурацию.
@@ -20,16 +21,19 @@ export function registerHealthRoute(app: FastifyInstance): void {
  * Optional dependency readiness. The existing /health contract is unchanged;
  * SQL is not a runtime dependency while its mode is off.
  */
-export function registerReadinessRoute(app: FastifyInstance, database?: DatabaseRuntime): void {
+export function registerReadinessRoute(app: FastifyInstance, database?: DatabaseRuntime, reservations?: ReservationRuntime): void {
 	app.get('/ready', async (_request, reply) => {
-		if (!database || database.mode === 'off') {
-			return { ok: true, checks: { database: { status: 'disabled' } } };
+		const checks: Record<string, { status: 'disabled' | 'up' | 'down' }> = {
+			database: { status: !database || database.mode === 'off' ? 'disabled' : 'up' },
+		};
+		if (reservations) checks['reservations'] = { status: reservations.enabled ? 'up' : 'disabled' };
+		let ok = true;
+		if (database && database.mode !== 'off') {
+			try { await database.ping(); } catch { checks['database'] = { status: 'down' }; ok = false; }
 		}
-		try {
-			await database.ping();
-			return { ok: true, checks: { database: { status: 'up' } } };
-		} catch {
-			return reply.code(503).send({ ok: false, checks: { database: { status: 'down' } } });
+		if (reservations?.enabled) {
+			try { await reservations.ping(); } catch { checks['reservations'] = { status: 'down' }; ok = false; }
 		}
+		return ok ? { ok: true, checks } : reply.code(503).send({ ok: false, checks });
 	});
 }

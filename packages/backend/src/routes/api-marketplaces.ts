@@ -221,7 +221,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				productId: line.productId,
 				qty: line.qty,
 				fromStore: resolvedStore,
-			})));
+			})), app.reservationRuntime);
 			const result = await createMarketplaceSale(erp, {
 				marketplace,
 				storeTitle: resolvedStore,
@@ -330,7 +330,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			const sourceItemName = source.name;
 			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
 			const sourceQty = unitsPerBundle * bundleQty;
-			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }]);
+			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }], app.reservationRuntime);
 			const bundleProductId = await ensureBundleProduct(client, bundleItemName);
 			const result = await createMarketplaceBundle(erp, {
 				sourceProductId,

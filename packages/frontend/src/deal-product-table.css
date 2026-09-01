@@ -135,6 +135,20 @@
 .realize-bar .btn-order-supply:hover:not([disabled]) {
 	background: #9a3412;
 }
+.realize-bar .btn-reservation { background: #0f766e; color: #fff; font-weight: 700; }
+.realize-bar .btn-reservation:hover:not([disabled]) { background: #115e59; }
+.realize-bar .btn-reservation-release { border-color: #d6a8a8; background: #fff; color: #9f1239; }
+.deal-reservation-status {
+	flex: 1 0 100%;
+	margin-bottom: 8px;
+	padding: 8px 10px;
+	border: 1px solid #99d5cc;
+	border-radius: 6px;
+	background: #ecfdf8;
+	color: #115e59;
+	font-size: 12px;
+	font-weight: 700;
+}
 .realize-cell {
 	white-space: normal;
 }

@@ -10,6 +10,8 @@ import type {
 } from './b24.js';
 
 export interface EnrichedRow extends DealProductRow {
+	/** Stable line identity from the ERP deal plan, used by reservation requests. */
+	planLineKey?: string;
 	stocks: Array<{ storeId: number; storeName: string; amount: number }>;
 	purchasingPrice: number | null;
 	/** В режиме по этапам одна агрегированная строка плана раскладывается на отдельные партии. */

@@ -42,9 +42,18 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0006_create_tilda_product_mappings.sql',
 		'0007_create_tilda_stock_sync_runs.sql',
 		'0008_make_line_ordinal_identity_conditional.sql',
+		'0009_create_stock_availability_keys.sql',
+		'0010_create_stock_reservation_requests.sql',
+		'0011_create_stock_reservation_request_lines.sql',
+		'0012_create_stock_reservations.sql',
+		'0013_create_stock_reservation_lines.sql',
+		'0014_create_stock_reservation_release_requests.sql',
+		'0015_create_stock_reservation_commands.sql',
+		'0016_create_stock_reservation_events.sql',
+		'0017_create_stock_reservation_backfill_checkpoints.sql',
 	]);
-	for (const migration of migrations.slice(0, 7)) {
-		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_)[a-z_]+ \(/);
+	for (const migration of migrations.filter((_, index) => index !== 7)) {
+		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
 		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
@@ -120,4 +129,48 @@ test('SQL schemas preserve workflow links and Tilda external identity', async ()
 	assert.match(tildaRuns!, /trigger_source IN \('scheduled', 'manual'\)/);
 	assert.match(tildaRuns!, /error_message VARCHAR\(500\) NULL/);
 	assert.doesNotMatch(tildaRuns!, /\bJSON\b/i);
+});
+
+test('reservation schema preserves soft monotonic promises and append-only evidence', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const keys = byName.get('0009_create_stock_availability_keys.sql')!;
+	const requests = byName.get('0010_create_stock_reservation_requests.sql')!;
+	const requestLines = byName.get('0011_create_stock_reservation_request_lines.sql')!;
+	const reservations = byName.get('0012_create_stock_reservations.sql')!;
+	const lines = byName.get('0013_create_stock_reservation_lines.sql')!;
+	const releaseRequests = byName.get('0014_create_stock_reservation_release_requests.sql')!;
+	const commands = byName.get('0015_create_stock_reservation_commands.sql')!;
+	const events = byName.get('0016_create_stock_reservation_events.sql')!;
+	const backfillCheckpoints = byName.get('0017_create_stock_reservation_backfill_checkpoints.sql')!;
+
+	assert.match(keys, /PRIMARY KEY \(erp_warehouse_name, item_code\)/);
+	assert.match(requests, /status IN \('pending', 'approved', 'rejected', 'withdrawn'\)/);
+	assert.match(requests, /UNIQUE KEY uq_stock_reservation_requests_source \(source_system, source_type, source_id, source_revision_key\)/);
+	assert.match(requestLines, /requested_qty DECIMAL\(21, 9\) NOT NULL/);
+	assert.match(requestLines, /requested_qty > 0/);
+
+	assert.match(reservations, /UNIQUE KEY uq_stock_reservations_approved_request \(approved_request_id\)/);
+	assert.match(reservations, /source_type = 'deal' AND expires_at IS NOT NULL AND expires_at > approved_at/);
+	assert.match(reservations, /source_type <> 'deal' AND expires_at IS NULL/);
+	assert.match(reservations, /status IN \('active', 'consumed', 'released', 'cancelled', 'expired', 'shortfall', 'closed', 'pending_reconcile', 'superseded'\)/);
+
+	assert.match(lines, /active_qty DECIMAL\(21, 9\) GENERATED ALWAYS AS \(reserved_qty - consumed_qty - released_qty - shortfall_qty\) STORED/);
+	assert.match(lines, /consumed_qty \+ released_qty \+ shortfall_qty <= reserved_qty/);
+	assert.match(lines, /FOREIGN KEY \(erp_warehouse_name, item_code\) REFERENCES stock_availability_keys/);
+	assert.match(releaseRequests, /CASE WHEN status = 'pending' THEN reservation_id ELSE NULL END/);
+	assert.match(releaseRequests, /UNIQUE KEY uq_stock_reservation_release_requests_pending \(pending_reservation_id\)/);
+
+	assert.match(commands, /UNIQUE KEY uq_stock_reservation_commands_idempotency \(idempotency_key\)/);
+	assert.match(commands, /request_hash BINARY\(32\) NOT NULL/);
+	assert.match(commands, /status IN \('started', 'applied', 'failed', 'pending_reconcile'\)/);
+	assert.match(events, /UNIQUE KEY uq_stock_reservation_events_command_order \(command_id, event_index\)/);
+	assert.match(events, /event_type IN \('created', 'consumed', 'released', 'expired', 'cancelled', 'shortfall', 'status_changed', 'pending_reconcile', 'superseded'\)/);
+	assert.match(events, /FOREIGN KEY \(reservation_line_id, reservation_id\) REFERENCES stock_reservation_lines \(id, reservation_id\)/);
+	assert.match(backfillCheckpoints, /UNIQUE KEY uq_stock_reservation_backfill_checkpoints_hash \(plan_hash\)/);
+	assert.match(backfillCheckpoints, /bitrix_basket_reservation_records INT UNSIGNED NOT NULL/);
+	assert.doesNotMatch(
+		[keys, requests, requestLines, reservations, lines, releaseRequests, commands, events, backfillCheckpoints].join('\n'),
+		/^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im,
+	);
 });

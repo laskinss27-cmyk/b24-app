@@ -3,7 +3,7 @@ import { ErpClient } from '../erp/client.js';
 import { listActiveStoreTitles, submitDoc } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
 import { canManageStock } from './api-stock-access.js';
-import { validateFreeStock } from './api-stock-availability.js';
+import { ReservationService } from '../reservations/service.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody } from './api-stock-types.js';
 
@@ -24,19 +24,19 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 			if (!appPermission(req, 'stock.post_documents', await canManageStock(client))) {
 				return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
 			}
+			let issueLines: Array<{ productId: number; qty: number; fromStore: string }> = [];
 			if (b.kind === 'issue') {
 				const doc = await erp.get<Record<string, unknown>>('Stock Entry', name);
 				const stores = await listActiveStoreTitles(erp);
 				const rawLines = Array.isArray(doc?.['items']) ? doc?.['items'] as Array<Record<string, unknown>> : [];
-				const lines = rawLines
+				issueLines = rawLines
 					.map((line) => {
 						const warehouse = String(line['s_warehouse'] ?? '');
 						const fromStore = stores.find((store) => warehouse === store || warehouse.startsWith(`${store} - `)) ?? '';
 						return { productId: Number(line['item_code']), qty: Number(line['qty']), fromStore };
 					})
 					.filter((line) => Number.isInteger(line.productId) && line.productId > 0 && line.qty > 0 && line.fromStore);
-				if (lines.length !== rawLines.length) throw new Error('не удалось проверить склад строк списания');
-				await validateFreeStock(client, erp, lines);
+				if (issueLines.length !== rawLines.length) throw new Error('не удалось определить склад строк списания');
 			}
 			if (b.kind === 'receipt' && doctype === 'Stock Entry') {
 				const document = await erp.get<Record<string, unknown>>('Stock Entry', name);
@@ -45,6 +45,10 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 				}
 			}
 			await submitDoc(erp, doctype, name);
+			if (issueLines.length && app.reservationRuntime?.canWrite) {
+				await new ReservationService(app.reservationRuntime).reconcilePhysicalFor(erp, issueLines.map((line) => ({ productId: line.productId, storeTitle: line.fromStore })))
+					.catch((error) => app.log.error({ name }, `[reservations] write-off submitted; reconcile required — ${stockErrorInfo(error)}`));
+			}
 			app.log.info({ name, doctype }, '[api/stock/submit] ok');
 			return { ok: true, name };
 		} catch (e) {

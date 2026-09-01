@@ -4,11 +4,14 @@ import type { ErpClient } from '../erp/client.js';
 import { fetchErpStocksFor } from '../erp/operations.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
+import { ReservationService } from '../reservations/service.js';
+import type { ReservationRuntime } from '../reservations/runtime.js';
 
 export async function validateFreeStock(
 	client: B24Client,
 	erp: ErpClient,
 	lines: Array<{ productId: number; qty: number; fromStore: string }>,
+	reservationRuntime?: ReservationRuntime | null,
 ): Promise<void> {
 	if (!lines.length) return;
 	await ensureTransfersEntity(client);
@@ -31,11 +34,18 @@ export async function validateFreeStock(
 		const current = requested.get(key);
 		requested.set(key, { ...line, qty: (current?.qty ?? 0) + line.qty });
 	}
+	const sqlReserved = new Map<string, number>();
+	if (reservationRuntime?.canWrite) {
+		const availability = await new ReservationService(reservationRuntime).availabilityForDeal(
+			erp, 0, [...requested.values()].map((line) => ({ productId: line.productId, storeTitle: line.fromStore })),
+		);
+		for (const line of availability) sqlReserved.set(`${line.storeTitle}\u0000${line.productId}`, line.reservedByOthers);
+	}
 	for (const [key, line] of requested) {
 		const actual = Number(stocks.get(line.productId)?.[line.fromStore] ?? 0);
-		const available = Math.max(actual - (reserved.get(key) ?? 0), 0);
+		const available = Math.max(actual - (reserved.get(key) ?? 0) - (sqlReserved.get(key) ?? 0), 0);
 		if (line.qty > available + 0.000001) {
-			throw new Error(`на складе «${line.fromStore}» для #${line.productId} свободно ${available}, указано ${line.qty}; остальное зарезервировано перемещениями`);
+			throw new Error(`на складе «${line.fromStore}» для #${line.productId} свободно ${available}, указано ${line.qty}; остальное удерживается активными резервами`);
 		}
 	}
 }

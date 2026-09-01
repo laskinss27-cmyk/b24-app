@@ -31,6 +31,25 @@ the mapping table plus `SELECT/INSERT/UPDATE` on this journal. Applying `0007`,
 creating that account and installing cron remain three separate production
 operations.
 
+`0008` makes the workflow line ordinal a fallback identity only when an external
+line key is absent.
+
+`0009`-`0017` are the disabled SQL foundation for soft stock reservations:
+availability lock keys, approval requests and immutable request lines,
+reservation projections and lines, early-release requests, idempotent commands,
+append-only events, and a deterministic manual-backfill checkpoint. They contain
+DDL only and do not add runtime SQL access,
+backfill rows, startup work, routes, or a source switch. `active_qty` is a stored
+generated value that can only decrease through consumed, released, or shortfall
+quantities. All nine files passed a clean and repeated MariaDB 11.8 rehearsal on
+2026-09-01: 9 reservation tables, 32 CHECK constraints and 11 foreign keys.
+They were applied to production on 2026-09-01 by a separately authorized,
+least-privilege one-shot DDL identity. The temporary identity was removed and
+the permanent migrator password was not changed. A post-DDL dump was restored
+into an isolated database and the structure/history hashes matched. All
+reservation tables remain empty and `B24_APP_RESERVATIONS=off`; DDL application
+did not activate a reader, writer, backfill, route behavior, or source switch.
+
 Future files must use `NNNN_short_name.sql`, be append-only after application,
 and contain one idempotent MariaDB statement per file. A changed checksum stops
 the runner. The first production run independently verified columns, indexes,

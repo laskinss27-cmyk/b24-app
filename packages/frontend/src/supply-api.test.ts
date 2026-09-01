@@ -36,6 +36,7 @@ const {
 	updateSupplyPurchaseStage,
 	updateSupplyRequestLine,
 } = await import('./b24.js');
+const { createDealReservation, fetchDealReservations, reviewReservationRequest } = await import('./reservation-api.js');
 
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
@@ -198,4 +199,23 @@ test('supply purchase lifecycle rejects supplier errors and preserves endpoint o
 		'/api/supply/purchase-transfer',
 	]);
 	assert.equal(requests[6]?.body['expectedAt'], '2026-08-20');
+});
+
+test('reservation API preserves deal lines, expiry and supply decision payloads', async () => {
+	const requests = captureResponses([
+		{ ok: true, enabled: true, canWrite: true, requests: [] },
+		{ ok: true, request: { id: '1', requestKey: 'request-1', lines: [] } },
+		{ ok: true },
+	]);
+	await fetchDealReservations(91);
+	await createDealReservation({
+		dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', requestKey: 'request-1',
+		lines: [{ sourceLineKey: 'line-1', productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 2 }],
+	});
+	await reviewReservationRequest({ requestId: '1', decision: 'approve', approvedExpiresAt: '2026-09-07T12:00:00.000Z', idempotencyKey: 'decision-1' });
+	assert.deepEqual(requests, [
+		{ url: '/api/reservations/deal', body: { domain: 'mobile.example', accessToken: 'supply-token', dealId: 91 } },
+		{ url: '/api/reservations/request', body: { domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', requestKey: 'request-1', lines: [{ sourceLineKey: 'line-1', productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 2 }] } },
+		{ url: '/api/reservations/supply/review', body: { domain: 'mobile.example', accessToken: 'supply-token', requestId: '1', decision: 'approve', approvedExpiresAt: '2026-09-07T12:00:00.000Z', idempotencyKey: 'decision-1' } },
+	]);
 });

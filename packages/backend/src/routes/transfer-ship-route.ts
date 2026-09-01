@@ -51,7 +51,7 @@ export function registerTransferShipRoute(
 			}
 			// Даём понятную ошибку до создания Stock Entry и одновременно защищаем
 			// старые документы, созданные до проверки живого остатка.
-			await validateTransferReservation(erp, client, id, doc.fromStore, doc.collectedLines);
+			await validateTransferReservation(erp, client, id, doc.fromStore, doc.collectedLines, app.reservationRuntime);
 			const did = Number(doc.dealId) || 0;
 			const { name: entryName } = await shipTransferToTransit(erp, {
 				transferId: id,
