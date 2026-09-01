@@ -8,6 +8,7 @@ export const MATRIX_CATEGORY_FIELD = 'b24_matrix_category';
 export const MATRIX_SEGMENT_FIELD = 'b24_matrix_segment';
 export const MATRIX_ORDER_QTY_FIELD = 'b24_matrix_order_qty';
 export const MATRIX_COMMENT_FIELD = 'b24_matrix_comment';
+export const ASSORTMENT_MATRIX_QUERY_BATCH_SIZE = 75;
 
 export type MatrixSalesScope = 'selected' | 'all';
 
@@ -95,6 +96,28 @@ interface MatrixItemRecord extends AssortmentMatrixItemInput {
 	article: string;
 	model: string;
 	brand: string;
+}
+
+export function assortmentMatrixItemCodeBatches(itemCodes: readonly string[]): string[][] {
+	const batches: string[][] = [];
+	for (let index = 0; index < itemCodes.length; index += ASSORTMENT_MATRIX_QUERY_BATCH_SIZE) {
+		batches.push(itemCodes.slice(index, index + ASSORTMENT_MATRIX_QUERY_BATCH_SIZE));
+	}
+	return batches;
+}
+
+async function listMatrixRowsByItemCodes(
+	erp: ErpClient,
+	doctype: string,
+	fields: string[],
+	itemCodes: readonly string[],
+	extraFilters: unknown[],
+): Promise<Record<string, unknown>[]> {
+	const rows: Record<string, unknown>[] = [];
+	for (const batch of assortmentMatrixItemCodeBatches(itemCodes)) {
+		rows.push(...await erp.list(doctype, fields, [['item_code', 'in', batch], ...extraFilters]));
+	}
+	return rows;
 }
 
 async function listSelectedMatrixItems(erp: ErpClient, selected: AssortmentMatrixItemInput[]): Promise<MatrixItemRecord[]> {
@@ -203,11 +226,11 @@ export async function buildAssortmentMatrixReport(erp: ErpClient, input: {
 	const salesStores = input.salesScope === 'all' ? stores : selectedStores;
 	const salesWarehouses = salesStores.map((store) => erpWarehouse(ctx, store));
 	const [bins, ledger, ordered] = await Promise.all([
-		erp.list('Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty'], [
-			['item_code', 'in', itemCodes], ['warehouse', 'in', stockWarehouses],
+		listMatrixRowsByItemCodes(erp, 'Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty'], itemCodes, [
+			['warehouse', 'in', stockWarehouses],
 		]),
-		erp.list('Stock Ledger Entry', ['item_code', 'warehouse', 'actual_qty'], [
-			['item_code', 'in', itemCodes], ['warehouse', 'in', salesWarehouses],
+		listMatrixRowsByItemCodes(erp, 'Stock Ledger Entry', ['item_code', 'warehouse', 'actual_qty'], itemCodes, [
+			['warehouse', 'in', salesWarehouses],
 			['posting_date', '>=', input.from], ['posting_date', '<=', input.to],
 			['voucher_type', '=', 'Delivery Note'], ['is_cancelled', '=', 0],
 		]),
