@@ -56,7 +56,7 @@ export function useSupplyAccessState({
 	const [marketplaceOnly, setMarketplaceOnly] = useState(false);
 	const [canOpenMarketplaces, setCanOpenMarketplaces] = useState(mock);
 	const [stockForm, setStockForm] = useState<SupplyStockForm | null>(mock
-		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: defaultSuppliers, canCreate: true, isSupply: true }
+		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: defaultSuppliers, canCreate: true, canCancel: true, isSupply: true }
 		: null);
 
 	useEffect(() => {

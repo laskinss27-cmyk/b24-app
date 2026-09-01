@@ -34,7 +34,7 @@ operations.
 `0008` makes the workflow line ordinal a fallback identity only when an external
 line key is absent.
 
-`0009`-`0017` are the disabled SQL foundation for soft stock reservations:
+`0009`-`0017` are the SQL foundation for soft stock reservations:
 availability lock keys, approval requests and immutable request lines,
 reservation projections and lines, early-release requests, idempotent commands,
 append-only events, and a deterministic manual-backfill checkpoint. They contain
@@ -49,6 +49,13 @@ the permanent migrator password was not changed. A post-DDL dump was restored
 into an isolated database and the structure/history hashes matched. All
 reservation tables remain empty and `B24_APP_RESERVATIONS=off`; DDL application
 did not activate a reader, writer, backfill, route behavior, or source switch.
+
+`0018`-`0020` extend that model for supply-created reservations and a mutable,
+audited optional deal link. They add no rows and perform no backfill: existing
+deal reservations remain readable through their immutable source identity until
+they are naturally closed, while all newly approved reservations persist the
+explicit `deal_id`. Applying these files and deploying code are separate,
+explicitly authorized production operations.
 
 Future files must use `NNNN_short_name.sql`, be append-only after application,
 and contain one idempotent MariaDB statement per file. A changed checksum stops

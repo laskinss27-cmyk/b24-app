@@ -14,6 +14,9 @@ export const isWorkRow = (type: number): boolean => type === ROW_TYPE_WORK;
 export interface StockAtStore {
 	storeId: number;
 	amount: number;
+	physicalAmount?: number;
+	reservedByOthers?: number;
+	reservedByOwnDeal?: number;
 }
 
 export interface ProductEnrichment {
@@ -97,14 +100,16 @@ export async function fetchStockPreferCore(productIds: number[], dealId?: number
 			}),
 			signal: AbortSignal.timeout(15000),
 		});
-		const j = (await res.json()) as { ok?: boolean; byProduct?: Record<string, { stocks: Record<string, number>; purchasing: number }> };
+		const j = (await res.json()) as { ok?: boolean; byProduct?: Record<string, { stocks: Record<string, number>; purchasing: number; reservations?: Record<string, { physical: number; reservedByOthers: number; reservedByOwnDeal: number; available: number }> }> };
 		if (j?.ok && j.byProduct) {
 			const t2id = await storeTitleToId();
 			const out: Record<number, ProductEnrichment> = {};
 			for (const [pid, v] of Object.entries(j.byProduct)) {
-				const stocks = Object.entries(v.stocks ?? {})
-					.map(([title, amount]) => ({ storeId: t2id.get(title) ?? 0, amount: Number(amount) }))
-					.filter((s) => s.storeId !== 0 && s.amount > 0);
+				const titles = [...new Set([...Object.keys(v.stocks ?? {}), ...Object.keys(v.reservations ?? {})])];
+				const stocks = titles.map((title) => {
+					const reserve = v.reservations?.[title];
+					return { storeId: t2id.get(title) ?? 0, amount: Number(v.stocks?.[title] ?? reserve?.available ?? 0), ...(reserve ? { physicalAmount: reserve.physical, reservedByOthers: reserve.reservedByOthers, reservedByOwnDeal: reserve.reservedByOwnDeal } : {}) };
+				}).filter((s) => s.storeId !== 0 && (s.amount > 0 || Number(s.reservedByOthers ?? 0) > 0 || Number(s.reservedByOwnDeal ?? 0) > 0));
 				out[Number(pid)] = { stocks, purchasingPrice: v.purchasing > 0 ? v.purchasing : null };
 			}
 			return out;

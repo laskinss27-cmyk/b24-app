@@ -42,7 +42,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		? await withTimeout(fetchStockPreferCore(allIds, dealId), 15000, 'остатки и закупочные цены из ядра')
 		: {};
 	const mkStocks = (pid: number): EnrichedRow['stocks'] =>
-		(enrich[pid]?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));
+		(enrich[pid]?.stocks ?? []).map((s) => ({ ...s, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));
 	// Товары сделки = строки ПЛАНА (ядро), приведённые к формату строки таблицы — чтобы весь движок
 	// реализации (чекбоксы/склад/статусы/партии/«Реализовать») работал на них без изменений.
 	const planRowsFromCore: EnrichedRow[] = plan.map((p) => ({

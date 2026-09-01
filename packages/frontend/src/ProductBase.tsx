@@ -74,11 +74,13 @@ export interface ProductPicker {
 
 export function ProductBase({
 	picker,
+	reservationDealId,
 	readOnly = false,
 	allowCreateProduct = false,
 	marketplaceMode = false,
 }: {
 	picker?: ProductPicker;
+	reservationDealId?: number;
 	readOnly?: boolean;
 	allowCreateProduct?: boolean;
 	marketplaceMode?: boolean;
@@ -157,7 +159,7 @@ export function ProductBase({
 				setGate('ready');
 				setUid(uid);
 				const [base, appAccess] = await Promise.all([
-					withTimeout(fetchProductBase(forceInitialRefresh, marketplaceMode), 90000, 'catalog/browse'),
+					withTimeout(fetchProductBase(forceInitialRefresh, marketplaceMode, reservationDealId), 90000, 'catalog/browse'),
 					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
 				]);
 				setRows(base.rows);
@@ -216,7 +218,7 @@ export function ProductBase({
 		}
 		setRefreshing(true);
 		try {
-			const base = await withTimeout(fetchProductBase(true, marketplaceMode), 90000, 'catalog/browse');
+			const base = await withTimeout(fetchProductBase(true, marketplaceMode, reservationDealId), 90000, 'catalog/browse');
 			setRows(base.rows);
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });

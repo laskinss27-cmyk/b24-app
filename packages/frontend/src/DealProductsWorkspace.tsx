@@ -259,7 +259,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
 
-	const { realizationDocuments, returnDocuments, dealDocumentCount } = buildDealDocumentsView(data, dealTransfers.length);
+	const { realizationDocuments, returnDocuments, dealDocumentCount } = buildDealDocumentsView(data, dealTransfers.length, dealReservations.requests.length);
 	const renderWorkRow = createDealWorkRowRenderer({
 		remaining,
 		editOf,
@@ -484,6 +484,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				returns={returnDocuments}
 				supply={data.supply}
 				transfers={dealTransfers}
+				reservations={dealReservations.requests}
 				documentCount={dealDocumentCount}
 				documentPreview={documentPreview}
 				contractPreview={contractPreview}

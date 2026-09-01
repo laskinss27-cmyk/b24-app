@@ -32,6 +32,7 @@ export function DealProductsPicker({
 
 	return (
 		<ProductBase
+			reservationDealId={dealId}
 			picker={{
 				title: replacing
 					? `Заменить «${replacing.name}»`

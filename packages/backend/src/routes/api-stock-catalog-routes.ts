@@ -6,6 +6,7 @@ import { canManageStock, stockAccess } from './api-stock-access.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import { fetchSupplierCompanies } from './api-stock-suppliers.js';
 import type { StockAuthBody } from './api-stock-types.js';
+import { ReservationService } from '../reservations/service.js';
 
 export function registerStockCatalogRoutes(app: FastifyInstance): void {
 	app.post('/api/stock/form-data', async (req, reply) => {
@@ -20,8 +21,9 @@ export function registerStockCatalogRoutes(app: FastifyInstance): void {
 			]);
 			const canCreate = appPermission(req, 'stock.create_receipt', access.canManage)
 				|| appPermission(req, 'stock.create_issue', access.canManage);
+			const canCancel = appPermission(req, 'stock.post_documents', access.canManage);
 			const isSupply = appPermission(req, 'supply.view', access.isSupply);
-			return { ok: true, stores, suppliers, canCreate, isSupply };
+			return { ok: true, stores, suppliers, canCreate, canCancel, isSupply };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${stockErrorInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: stockErrorInfo(e) });
@@ -37,10 +39,19 @@ export function registerStockCatalogRoutes(app: FastifyInstance): void {
 		try {
 			const items = await searchErpItems(erp, String(b.q ?? ''));
 			const stockMap = await fetchErpStocksFor(erp, items.map((i) => i.productId));
+			const availability = app.reservationRuntime?.canWrite
+				? await new ReservationService(app.reservationRuntime).availabilityForDeal(erp, 0, [...stockMap].flatMap(([productId, stocks]) => Object.keys(stocks).map((storeTitle) => ({ productId, storeTitle }))))
+				: [];
+			const availabilityByKey = new Map(availability.map((line) => [`${line.productId}\u0000${line.storeTitle}`, line]));
 			const enriched = items.map((i) => {
-				const stocks = stockMap.get(i.productId) ?? {};
+				const physical = stockMap.get(i.productId) ?? {};
+				const stocks = Object.fromEntries(Object.entries(physical).map(([storeTitle, amount]) => [storeTitle, availabilityByKey.get(`${i.productId}\u0000${storeTitle}`)?.availableForDeal ?? amount]));
+				const reserved = Object.fromEntries(Object.keys(physical).flatMap((storeTitle) => {
+					const line = availabilityByKey.get(`${i.productId}\u0000${storeTitle}`);
+					return line && line.reservedByOthers > 0 ? [[storeTitle, line.reservedByOthers]] : [];
+				}));
 				const total = Object.values(stocks).reduce((a, b) => a + b, 0);
-				return { ...i, stocks, total };
+				return { ...i, stocks, reserved, total };
 			});
 			return { ok: true, items: enriched };
 		} catch (e) {

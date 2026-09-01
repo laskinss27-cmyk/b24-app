@@ -20,6 +20,7 @@ import {
 	appendDealStageItems,
 	assertDealQuoteVariantSelected,
 	calculateDealPlanTotal,
+	cancelSubmittedStockDoc,
 	cancelDealQuoteVariantSelection,
 	createDealQuoteVariant,
 	deleteDealQuoteVariant,
@@ -2178,6 +2179,41 @@ test('stock document helpers keep empty-writeoff rejection and submit arguments'
 		{ doctype: 'Stock Entry', name: 'STE-1' },
 		{ doctype: 'Purchase Receipt', name: 'PR-1' },
 	]);
+});
+
+test('stock document cancellation validates status and movement type before calling ERPNext', async () => {
+	const cancelled: Array<{ doctype: string; name: string }> = [];
+	const documents: Record<string, Record<string, unknown>> = {
+		'STE-ISSUE': { name: 'STE-ISSUE', docstatus: 1, stock_entry_type: 'Material Issue', items: [] },
+		'STE-RECEIPT': { name: 'STE-RECEIPT', docstatus: 1, stock_entry_type: 'Material Receipt', items: [] },
+		'PR-1': { name: 'PR-1', docstatus: 1, items: [] },
+		'DN-1': { name: 'DN-1', docstatus: 1, is_return: 0, items: [] },
+		'DN-RETURN': { name: 'DN-RETURN', docstatus: 1, is_return: 1, items: [] },
+		'DRAFT-1': { name: 'DRAFT-1', docstatus: 0, stock_entry_type: 'Material Issue', items: [] },
+	};
+	const client = {
+		get: async (_doctype: string, name: string) => structuredClone(documents[name] ?? null),
+		cancel: async (doctype: string, name: string) => { cancelled.push({ doctype, name }); },
+	} as unknown as ErpClient;
+
+	assert.equal((await cancelSubmittedStockDoc(client, 'issue', 'Stock Entry', 'STE-ISSUE'))['name'], 'STE-ISSUE');
+	assert.equal((await cancelSubmittedStockDoc(client, 'receipt', 'Stock Entry', 'STE-RECEIPT'))['name'], 'STE-RECEIPT');
+	assert.equal((await cancelSubmittedStockDoc(client, 'receipt', 'Purchase Receipt', 'PR-1'))['name'], 'PR-1');
+	assert.equal((await cancelSubmittedStockDoc(client, 'delivery', 'Delivery Note', 'DN-1'))['name'], 'DN-1');
+	assert.equal((await cancelSubmittedStockDoc(client, 'return', 'Delivery Note', 'DN-RETURN'))['name'], 'DN-RETURN');
+	assert.deepEqual(cancelled, [
+		{ doctype: 'Stock Entry', name: 'STE-ISSUE' },
+		{ doctype: 'Stock Entry', name: 'STE-RECEIPT' },
+		{ doctype: 'Purchase Receipt', name: 'PR-1' },
+		{ doctype: 'Delivery Note', name: 'DN-1' },
+		{ doctype: 'Delivery Note', name: 'DN-RETURN' },
+	]);
+
+	await assert.rejects(cancelSubmittedStockDoc(client, 'receipt', 'Delivery Note', 'DN-1'), /не соответствует разделу/);
+	await assert.rejects(cancelSubmittedStockDoc(client, 'receipt', 'Stock Entry', 'STE-ISSUE'), /Тип складской операции/);
+	await assert.rejects(cancelSubmittedStockDoc(client, 'return', 'Delivery Note', 'DN-1'), /Тип реализации/);
+	await assert.rejects(cancelSubmittedStockDoc(client, 'issue', 'Stock Entry', 'DRAFT-1'), /только у проведённого/);
+	assert.equal(cancelled.length, 5);
 });
 
 test('transfer completion plan keeps aggregation and route ordering', () => {

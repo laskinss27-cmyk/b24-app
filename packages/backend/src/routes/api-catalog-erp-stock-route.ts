@@ -49,22 +49,28 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 				fetchErpPurchasing(erp, ids),
 			]);
 			let stocks = physicalStocks;
+			let availability: ReservationAvailabilityLine[] = [];
 			if (dealId != null && app.reservationRuntime?.canWrite) {
 				const stockKeys = [...physicalStocks].flatMap(([productId, byStore]) =>
 					Object.keys(byStore).map((storeTitle) => ({ productId, storeTitle })),
 				);
-				const availability = await new ReservationService(app.reservationRuntime)
+				availability = await new ReservationService(app.reservationRuntime)
 					.availabilityForDeal(erp, dealId, stockKeys);
 				stocks = applyDealReservationAvailability(physicalStocks, availability);
 			}
 			// Возвращаем КАЖДЫЙ запрошенный товар (даже с нулём — чтобы не потерять закупку у бесстоковых).
-			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number }> = {};
+			const availabilityByKey = new Map(availability.map((line) => [`${line.productId}\u0000${line.storeTitle}`, line]));
+			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number; reservations: Record<string, { physical: number; reservedByOthers: number; reservedByOwnDeal: number; available: number }> }> = {};
 			const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 			for (const requestedId of requestedIds) {
 				const pid = canonicalProductId(requestedId);
 				byProduct[requestedId] = {
 					stocks: stocks.get(pid) ?? {},
 					purchasing: canViewPurchasePrices ? purchasing.get(pid) ?? 0 : 0,
+					reservations: Object.fromEntries(Object.keys(physicalStocks.get(pid) ?? {}).flatMap((storeTitle) => {
+						const line = availabilityByKey.get(`${pid}\u0000${storeTitle}`);
+						return line ? [[storeTitle, { physical: line.physicalQuantity, reservedByOthers: line.reservedByOthers, reservedByOwnDeal: line.reservedByOwnDeal, available: line.availableForDeal }]] : [];
+					})),
 				};
 			}
 			app.log.info({ products: Object.keys(byProduct).length }, '[api/catalog/erp-stocks] ok');

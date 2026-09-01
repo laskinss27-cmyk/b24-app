@@ -51,8 +51,11 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0015_create_stock_reservation_commands.sql',
 		'0016_create_stock_reservation_events.sql',
 		'0017_create_stock_reservation_backfill_checkpoints.sql',
+		'0018_add_reservation_deal_link.sql',
+		'0019_add_reservation_deal_link_events.sql',
+		'0020_add_reservation_manual_commands.sql',
 	]);
-	for (const migration of migrations.filter((_, index) => index !== 7)) {
+	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
@@ -71,6 +74,11 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	assert.match(lineIdentityMigration, /DROP INDEX uq_workflow_document_lines_ordinal/);
 	assert.match(lineIdentityMigration, /GENERATED ALWAYS AS \(CASE WHEN external_line_key IS NULL THEN line_ordinal ELSE NULL END\) STORED/);
 	assert.match(lineIdentityMigration, /UNIQUE KEY uq_workflow_document_lines_fallback_ordinal \(document_id, identity_line_ordinal\)/);
+	for (const migration of migrations.slice(17)) {
+		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.match(migration.sql, /^ALTER TABLE stock_/);
+		assert.doesNotMatch(migration.sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP\s+(?:TABLE|DATABASE|COLUMN))\b/i);
+	}
 });
 
 test('SQL schemas preserve workflow links and Tilda external identity', async () => {
@@ -143,6 +151,9 @@ test('reservation schema preserves soft monotonic promises and append-only evide
 	const commands = byName.get('0015_create_stock_reservation_commands.sql')!;
 	const events = byName.get('0016_create_stock_reservation_events.sql')!;
 	const backfillCheckpoints = byName.get('0017_create_stock_reservation_backfill_checkpoints.sql')!;
+	const dealLink = byName.get('0018_add_reservation_deal_link.sql')!;
+	const dealLinkEvents = byName.get('0019_add_reservation_deal_link_events.sql')!;
+	const manualCommands = byName.get('0020_add_reservation_manual_commands.sql')!;
 
 	assert.match(keys, /PRIMARY KEY \(erp_warehouse_name, item_code\)/);
 	assert.match(requests, /status IN \('pending', 'approved', 'rejected', 'withdrawn'\)/);
@@ -154,6 +165,11 @@ test('reservation schema preserves soft monotonic promises and append-only evide
 	assert.match(reservations, /source_type = 'deal' AND expires_at IS NOT NULL AND expires_at > approved_at/);
 	assert.match(reservations, /source_type <> 'deal' AND expires_at IS NULL/);
 	assert.match(reservations, /status IN \('active', 'consumed', 'released', 'cancelled', 'expired', 'shortfall', 'closed', 'pending_reconcile', 'superseded'\)/);
+	assert.match(dealLink, /ADD COLUMN deal_id BIGINT UNSIGNED NULL/);
+	assert.match(dealLink, /ADD COLUMN deal_link_explicit TINYINT\(1\) NOT NULL DEFAULT 0/);
+	assert.match(dealLink, /source_type IN \('deal', 'manual'/);
+	assert.match(dealLinkEvents, /'deal_linked', 'deal_unlinked', 'deal_relinked'/);
+	assert.match(manualCommands, /'create_manual_reserve', 'link_deal', 'unlink_deal', 'relink_deal'/);
 
 	assert.match(lines, /active_qty DECIMAL\(21, 9\) GENERATED ALWAYS AS \(reserved_qty - consumed_qty - released_qty - shortfall_qty\) STORED/);
 	assert.match(lines, /consumed_qty \+ released_qty \+ shortfall_qty <= reserved_qty/);

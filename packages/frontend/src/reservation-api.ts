@@ -13,7 +13,15 @@ export interface ReservationLineView {
 export interface ReservationRequestView {
 	id: string;
 	requestKey: string;
-	dealId: number;
+	sourceType?: string;
+	dealId: number | null;
+	purpose?: string | null;
+	dealTitle?: string | null;
+	dealManagerId?: string | null;
+	dealManagerName?: string | null;
+	requestedByName?: string;
+	reviewedByName?: string | null;
+	actorNames?: Record<string, string>;
 	status: 'pending' | 'approved' | 'rejected' | 'withdrawn';
 	requestedExpiresAt: string;
 	approvedExpiresAt: string | null;
@@ -26,6 +34,14 @@ export interface ReservationRequestView {
 	reservationStatus: string | null;
 	releaseRequestId: string | null;
 	releaseRequestStatus: string | null;
+	releaseRequests?: Array<{
+		id: string; status: string; requestedReason: string | null; requestedBy: string; requestedAt: string;
+		reviewedBy: string | null; reviewedAt: string | null; decisionReason: string | null;
+	}>;
+	events?: Array<{
+		id: string; eventType: string; quantity: string | null; actorId: string; occurredAt: string;
+		fromDealId: number | null; toDealId: number | null;
+	}>;
 	lines: ReservationLineView[];
 }
 
@@ -66,6 +82,28 @@ export async function reviewReservationRequest(input: { requestId: string; decis
 
 export async function reviewReservationRelease(input: { releaseRequestId: string; decision: 'approve' | 'reject'; reason?: string; idempotencyKey: string }): Promise<void> {
 	await post('/api/reservations/supply/release-review', input);
+}
+
+export async function lookupReservationDeal(dealId: number): Promise<{ id: number; title: string; managerId: string | null; managerName: string | null }> {
+	const response = await post<{ deal: { id: number; title: string; managerId: string | null; managerName: string | null } }>('/api/reservations/supply/deal-lookup', { dealId });
+	return response.deal;
+}
+
+export async function createSupplyReservation(input: {
+	dealId?: number | null; expiresAt: string; purpose?: string; requestKey: string;
+	lines: Array<{ productId: number; itemName: string; storeTitle: string; quantity: number }>;
+}): Promise<{ request: ReservationRequestView; warnings: string[] }> {
+	const response = await post<{ request: ReservationRequestView; warnings?: string[] }>('/api/reservations/supply/create', input);
+	return { request: response.request, warnings: response.warnings ?? [] };
+}
+
+export async function setSupplyReservationDeal(reservationId: string, dealId: number | null, idempotencyKey: string): Promise<string[]> {
+	const response = await post<{ warnings?: string[] }>('/api/reservations/supply/set-deal', { reservationId, dealId, idempotencyKey });
+	return response.warnings ?? [];
+}
+
+export async function releaseSupplyReservation(reservationId: string, reason: string, requestKey: string): Promise<void> {
+	await post('/api/reservations/supply/release', { reservationId, reason, requestKey });
 }
 
 export function newReservationKey(): string {

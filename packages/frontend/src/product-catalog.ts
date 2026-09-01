@@ -31,6 +31,8 @@ export interface BaseRow {
 	photoPath?: string | undefined;
 	total: number;
 	stockByStore: Record<number, number>;
+	reservedByStore?: Record<number, number>;
+	ownReservedByStore?: Record<number, number>;
 }
 
 export interface ProductBaseResult {
@@ -56,11 +58,11 @@ export interface ProductBaseResult {
  * виснет на catalog.product.list). Дальше фронт фильтрует/ищет/сортирует локально.
  * Бэкенд кэширует сборку (TTL ~5 мин); force=true — принудительная пересборка.
  */
-export async function fetchProductBase(force = false, marketplaceMode = false): Promise<ProductBaseResult> {
+export async function fetchProductBase(force = false, marketplaceMode = false, dealId?: number): Promise<ProductBaseResult> {
 	const res = await fetch('/api/catalog/browse', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode }),
+		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode, ...(Number.isInteger(dealId) && Number(dealId) > 0 ? { dealId } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canCreateProduct?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');

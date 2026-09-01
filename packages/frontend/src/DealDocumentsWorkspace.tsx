@@ -3,6 +3,7 @@ import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
 import type { TableData } from './deal-products-table-types.js';
+import type { ReservationRequestView } from './reservation-api.js';
 
 type ContractPreview = { document: StoredDealContractDocument; anchorY: number };
 
@@ -13,6 +14,7 @@ export function DealDocumentsWorkspace({
 	returns,
 	supply,
 	transfers,
+	reservations,
 	documentCount,
 	documentPreview,
 	contractPreview,
@@ -27,6 +29,7 @@ export function DealDocumentsWorkspace({
 	returns: TableData['coreReals'];
 	supply: TableData['supply'];
 	transfers: TransferDoc[];
+	reservations: ReservationRequestView[];
 	documentCount: number;
 	documentPreview: DealDocumentPreview | null;
 	contractPreview: ContractPreview | null;
@@ -43,6 +46,7 @@ export function DealDocumentsWorkspace({
 				returns={returns}
 				supply={supply}
 				transfers={transfers}
+				reservations={reservations}
 				documentCount={documentCount}
 				onOpenContract={(document, anchor) => onOpenContractPreview({ document, anchorY: documentPreviewAnchorY(anchor) })}
 				onOpenRealization={(document, anchor) => onOpenDocumentPreview({ kind: 'realization', document, anchorY: documentPreviewAnchorY(anchor) })}

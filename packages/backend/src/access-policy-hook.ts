@@ -144,6 +144,7 @@ function permissionsFor(route: string, body: Record<string, unknown>): readonly 
 		return body['kind'] === 'receipt' ? ['stock.create_receipt'] : ['stock.create_issue'];
 	}
 	if (route === '/api/stock/submit') return ['stock.post_documents'];
+	if (route === '/api/stock/cancel-submission') return ['stock.post_documents'];
 	return ROUTE_PERMISSIONS[route] ?? [];
 }
 

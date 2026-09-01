@@ -36,7 +36,10 @@ const {
 	updateSupplyPurchaseStage,
 	updateSupplyRequestLine,
 } = await import('./b24.js');
-const { createDealReservation, fetchDealReservations, reviewReservationRequest } = await import('./reservation-api.js');
+const {
+	createDealReservation, createSupplyReservation, fetchDealReservations, lookupReservationDeal,
+	releaseSupplyReservation, reviewReservationRequest, setSupplyReservationDeal,
+} = await import('./reservation-api.js');
 
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
@@ -218,4 +221,26 @@ test('reservation API preserves deal lines, expiry and supply decision payloads'
 		{ url: '/api/reservations/request', body: { domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', requestKey: 'request-1', lines: [{ sourceLineKey: 'line-1', productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 2 }] } },
 		{ url: '/api/reservations/supply/review', body: { domain: 'mobile.example', accessToken: 'supply-token', requestId: '1', decision: 'approve', approvedExpiresAt: '2026-09-07T12:00:00.000Z', idempotencyKey: 'decision-1' } },
 	]);
+});
+
+test('supply reservation API preserves optional deal linkage and later relinking', async () => {
+	const requests = captureResponses([
+		{ ok: true, deal: { id: 91, title: 'Сделка', managerId: '7', managerName: 'Менеджер' } },
+		{ ok: true, request: { id: '2', requestKey: 'manual-1', lines: [] }, warnings: ['У сделки уже есть резерв'] },
+		{ ok: true, warnings: [] },
+		{ ok: true },
+	]);
+	assert.equal((await lookupReservationDeal(91)).title, 'Сделка');
+	assert.deepEqual(await createSupplyReservation({
+		dealId: null, expiresAt: '2026-09-09T12:00:00.000Z', purpose: 'Витрина', requestKey: 'manual-1',
+		lines: [{ productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 1 }],
+	}), { request: { id: '2', requestKey: 'manual-1', lines: [] }, warnings: ['У сделки уже есть резерв'] });
+	assert.deepEqual(await setSupplyReservationDeal('5', 91, 'link-1'), []);
+	await releaseSupplyReservation('5', 'Больше не нужен', 'release-1');
+	assert.deepEqual(requests.map((request) => request.url), [
+		'/api/reservations/supply/deal-lookup', '/api/reservations/supply/create',
+		'/api/reservations/supply/set-deal', '/api/reservations/supply/release',
+	]);
+	assert.equal(requests[1]?.body['dealId'], null);
+	assert.equal(requests[2]?.body['dealId'], 91);
 });

@@ -103,7 +103,7 @@ export function CatalogProductTable({
 									<td className="num c-store"><span className={`stock${qty > 0 ? '' : ' zero'}`}>{isAll ? '' : qty}</span></td>
 									<td>
 										<div className="whs">
-											{others.length ? others.map((o) => <span className={`wh${o.id === sid ? ' sel' : ''}`} key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
+											{others.length ? others.map((o) => <span className={`wh${o.id === sid ? ' sel' : ''}`} key={o.id} title={`Свободно: ${o.qty}; резерв этой сделки: ${d.ownReservedByStore?.[o.id] ?? 0}; другие резервы: ${d.reservedByStore?.[o.id] ?? 0}`}>{storeName(o.id)}: <b>{o.qty}</b>{Number(d.ownReservedByStore?.[o.id] ?? 0) > 0 && <em style={{ color: '#185fa5', fontStyle: 'normal' }}> 🔒{d.ownReservedByStore![o.id]}</em>}{Number(d.reservedByStore?.[o.id] ?? 0) > 0 && <em style={{ color: '#c0392b', fontStyle: 'normal' }}> 🔒{d.reservedByStore![o.id]}</em>}</span>) : <span className="muted">—</span>}
 										</div>
 									</td>
 									{(canQuickSale || pickMode) && (

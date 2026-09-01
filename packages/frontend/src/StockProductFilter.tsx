@@ -8,10 +8,10 @@ const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' 
 export const stockEntries = (it: StockItem): Array<[string, number]> => Object.entries(it.stocks ?? {}).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]);
 /** Краткая строка наличия для строки результата поиска (всего + топ-склады). */
 export function StockHint({ it }: { it: StockItem }): JSX.Element {
-	const e = stockEntries(it);
+	const e = Object.entries(it.stocks ?? {}).filter(([store, qty]) => qty > 0 || Number(it.reserved?.[store] ?? 0) > 0).sort((a, b) => b[1] - a[1]);
 	if (!e.length) return <span style={{ color: '#c0392b', fontSize: 12 }}>нет на складах</span>;
 	const total = it.total ?? e.reduce((a, [, q]) => a + q, 0);
-	return <span style={{ color: '#1a7f37', fontSize: 12 }}>Σ {total} · {e.slice(0, 3).map(([s, q]) => `${s}: ${q}`).join(' · ')}{e.length > 3 ? ' …' : ''}</span>;
+	return <span style={{ color: '#1a7f37', fontSize: 12 }}>Σ {total} · {e.slice(0, 3).map(([s, q]) => `${s}: ${q}${Number(it.reserved?.[s] ?? 0) > 0 ? ` 🔒${it.reserved![s]}` : ''}`).join(' · ')}{e.length > 3 ? ' …' : ''}</span>;
 }
 
 /** Поиск+выбор товара (чип) — фильтр по позиции в журнале и выбор в отчёте. */

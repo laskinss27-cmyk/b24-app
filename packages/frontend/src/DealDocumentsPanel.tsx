@@ -1,6 +1,7 @@
 import type { CoreRealization, StoredDealContractDocument, SupplyCard, TransferDoc } from './b24.js';
 import { rub, stageLabel, transferDocStatusLabel } from './deal-display-formatters.js';
 import { transferNumberLabel } from './transfer-number.js';
+import type { ReservationRequestView } from './reservation-api.js';
 
 export function DealDocumentsPanel({
 	contracts,
@@ -8,6 +9,7 @@ export function DealDocumentsPanel({
 	returns,
 	supply,
 	transfers,
+	reservations,
 	documentCount,
 	onOpenContract,
 	onOpenRealization,
@@ -19,6 +21,7 @@ export function DealDocumentsPanel({
 	returns: CoreRealization[];
 	supply: SupplyCard[];
 	transfers: TransferDoc[];
+	reservations: ReservationRequestView[];
 	documentCount: number;
 	onOpenContract: (document: StoredDealContractDocument, anchor: HTMLButtonElement) => void;
 	onOpenRealization: (document: CoreRealization, anchor: HTMLButtonElement) => void;
@@ -80,6 +83,17 @@ export function DealDocumentsPanel({
 							<span><b>{document.name || 'Перемещение'}</b><small>Перемещение {transferNumberLabel(document)} · {document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
 							<span className="deal-document-status">{transferDocStatusLabel(document.status)}</span>
 						</button>
+					))}
+				</div>
+			)}
+			{reservations.length > 0 && (
+				<div className="deal-documents-group">
+					<h3>Резервы</h3>
+					{reservations.map((reservation) => (
+						<div className="deal-document-row" key={reservation.id}>
+							<span><b>Резерв {reservation.reservationId ? `#${reservation.reservationId}` : `— заявка #${reservation.id}`}</b><small>{reservation.lines.map((line) => `${line.itemName} ×${line.activeQuantity !== '0' ? line.activeQuantity : line.quantity}`).join(' · ')} · до {new Date(reservation.approvedExpiresAt ?? reservation.requestedExpiresAt).toLocaleString('ru-RU')}</small></span>
+							<span className="deal-document-status">{reservation.status === 'pending' ? 'согласование' : reservation.reservationStatus === 'shortfall' ? 'уменьшен' : reservation.reservationStatus ?? reservation.status}</span>
+						</div>
 					))}
 				</div>
 			)}

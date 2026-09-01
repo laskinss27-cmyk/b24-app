@@ -139,7 +139,8 @@ export {
 	updateMarketplaceOldId,
 } from './stock-catalog.js';
 export type { CoreCatalogItem, CoreCatalogPrices } from './stock-catalog.js';
-export { createReceiptDraft, createWriteOffDraft, submitDoc } from './stock-document-drafts.js';
+export { cancelSubmittedStockDoc, createReceiptDraft, createWriteOffDraft, submitDoc } from './stock-document-drafts.js';
+export type { CancellableStockDocumentKind, CancellableStockDocumentType } from './stock-document-drafts.js';
 export { fetchCoreDocDetail, itemStockLedger, listCoreMovements } from './stock-movements.js';
 export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement } from './stock-movements.js';
 export {

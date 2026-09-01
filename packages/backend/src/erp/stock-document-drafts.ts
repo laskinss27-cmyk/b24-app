@@ -55,3 +55,36 @@ export async function createReceiptDraft(
 export async function submitDoc(erp: ErpClient, doctype: 'Delivery Note' | 'Stock Entry' | 'Purchase Receipt', name: string): Promise<void> {
 	await erp.submit(doctype, name);
 }
+
+export type CancellableStockDocumentKind = 'issue' | 'receipt' | 'delivery' | 'return';
+export type CancellableStockDocumentType = 'Delivery Note' | 'Stock Entry' | 'Purchase Receipt';
+
+/**
+ * Отменяет только документ ожидаемого складского вида. Все проверки зависимых
+ * документов остаются за ERPNext: если последующее движение уже ссылается на
+ * этот документ, cancel завершится ошибкой и исходный документ останется проведённым.
+ */
+export async function cancelSubmittedStockDoc(
+	erp: ErpClient,
+	kind: CancellableStockDocumentKind,
+	doctype: CancellableStockDocumentType,
+	name: string,
+): Promise<Record<string, unknown>> {
+	const validDoctype = (kind === 'issue' && doctype === 'Stock Entry')
+		|| (kind === 'receipt' && (doctype === 'Stock Entry' || doctype === 'Purchase Receipt'))
+		|| ((kind === 'delivery' || kind === 'return') && doctype === 'Delivery Note');
+	if (!validDoctype) throw new Error('Тип документа не соответствует разделу');
+	const document = await erp.get<Record<string, unknown>>(doctype, name);
+	if (!document) throw new Error('Документ не найден');
+	if (Number(document['docstatus'] ?? 0) !== 1) throw new Error('Отменить проведение можно только у проведённого документа');
+	if (doctype === 'Stock Entry') {
+		const expectedType = kind === 'issue' ? 'Material Issue' : 'Material Receipt';
+		if (String(document['stock_entry_type'] ?? '') !== expectedType) throw new Error('Тип складской операции не соответствует разделу');
+	}
+	if (doctype === 'Delivery Note') {
+		const isReturn = Number(document['is_return'] ?? 0) === 1;
+		if (isReturn !== (kind === 'return')) throw new Error('Тип реализации не соответствует разделу');
+	}
+	await erp.cancel(doctype, name);
+	return document;
+}

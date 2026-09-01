@@ -8,6 +8,8 @@ import type { AuthBody } from './api-catalog-types.js';
 import { catalogAccess, catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
 import { baseCache, CACHE_TTL_MS } from './api-catalog-cache.js';
 import { buildCoreProductBase } from './api-catalog-core-base.js';
+import { ReservationService } from '../reservations/service.js';
+import { erpContext, erpWarehouse } from '../erp/warehouse-context.js';
 
 export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 	app.post('/api/catalog/stores', async (req, reply) => {
@@ -29,7 +31,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 	});
 
 	app.post('/api/catalog/browse', async (req, reply) => {
-		const body = (req.body ?? {}) as AuthBody;
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown };
 		const client = catalogClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
@@ -63,6 +65,31 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 				baseCache.set(cacheKey, { data: metadata, expires: now + CACHE_TTL_MS });
 			}
 			const { data, stores } = await buildCoreProductBase(erp, metadata);
+			const dealId = body.dealId == null ? 0 : Number(body.dealId);
+			if (!Number.isInteger(dealId) || dealId < 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+			if (app.reservationRuntime?.canWrite) {
+				const [totals, warehouseContext] = await Promise.all([
+					new ReservationService(app.reservationRuntime).reservationTotalsForDeal(dealId), erpContext(erp),
+				]);
+				const byKey = new Map(totals.map((line) => [`${line.erpWarehouseName}\u0000${line.itemCode}`, line]));
+				const titleById = new Map(stores.map((store) => [store.id, store.title]));
+				for (const row of data.rows) {
+					const reservedByStore: Record<number, number> = {};
+					const ownReservedByStore: Record<number, number> = {};
+					for (const [storeIdText, physical] of Object.entries(row.stockByStore)) {
+						const storeId = Number(storeIdText);
+						const storeTitle = titleById.get(storeId);
+						if (!storeTitle) continue;
+						const reserve = byKey.get(`${erpWarehouse(warehouseContext, storeTitle)}\u0000${row.id}`);
+						if (!reserve) continue;
+						row.stockByStore[storeId] = Math.max(Number(physical) - reserve.reservedByOthers, 0);
+						if (reserve.reservedByOthers > 0) reservedByStore[storeId] = reserve.reservedByOthers;
+						if (reserve.reservedByOwnDeal > 0) ownReservedByStore[storeId] = reserve.reservedByOwnDeal;
+					}
+					row.total = Object.values(row.stockByStore).reduce((sum, quantity) => sum + quantity, 0);
+					Object.assign(row, { reservedByStore, ownReservedByStore });
+				}
+			}
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source: 'core' }, '[api/catalog/browse] ok');
 			const pricedRows = canViewPurchasePrices
 				? data.rows

@@ -108,7 +108,7 @@ export type {
 	TurnoverReportRow,
 	TurnoverStatus,
 } from './stock-analytics.js';
-export { createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } from './stock-documents.js';
+export { cancelStockDoc, createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } from './stock-documents.js';
 export type { IssueDraftInput, ReceiptDraftInput, StockItem } from './stock-documents.js';
 export {
 	createDealSupplyRequest,

@@ -8,7 +8,7 @@ Object.defineProperty(globalThis, 'window', {
 	value: { __B24_CONTEXT__: { dealId: null, domain: 'mobile.example', memberId: null, accessToken: 'documents-token' } } as Window,
 });
 
-const { createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } = await import('./b24.js');
+const { cancelStockDoc, createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } = await import('./b24.js');
 
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
@@ -23,7 +23,7 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 
 test('stock form data preserves empty and boolean fallbacks', async () => {
 	const requests = captureResponses([{ ok: true, canCreate: 1 }]);
-	assert.deepEqual(await fetchStockFormData(), { stores: [], suppliers: [], canCreate: true, isSupply: false });
+	assert.deepEqual(await fetchStockFormData(), { stores: [], suppliers: [], canCreate: true, canCancel: false, isSupply: false });
 	assert.deepEqual(requests[0], {
 		url: '/api/stock/form-data',
 		body: { domain: 'mobile.example', accessToken: 'documents-token' },
@@ -42,8 +42,8 @@ test('stock product creation succeeds and search rejects backend errors', async 
 	assert.deepEqual(requests.map((item) => item.url), ['/api/stock/create-product', '/api/stock/search-items']);
 });
 
-test('receipt, issue, and submit operations preserve shared endpoints and kind fields', async () => {
-	const requests = captureResponses([{ ok: true, name: 'PR-1' }, { ok: true, name: 'SE-1' }, { ok: true }, { ok: true }]);
+test('receipt, issue, submit, and cancel operations preserve shared endpoints and kind fields', async () => {
+	const requests = captureResponses([{ ok: true, name: 'PR-1' }, { ok: true, name: 'SE-1' }, { ok: true }, { ok: true }, { ok: true, warning: null }]);
 	const receipt = { toStore: 'Основной', supplier: 'Vendor', lines: [{ productId: 17, qty: 2, purchase: 800, retail: 1200 }] };
 	const issue = { fromStore: 'Основной', reason: 'Порча', lines: [{ productId: 17, qty: 1 }] };
 
@@ -51,6 +51,7 @@ test('receipt, issue, and submit operations preserve shared endpoints and kind f
 	assert.equal(await createIssueDoc(issue), 'SE-1');
 	await submitStockDoc('receipt', 'PR-1');
 	await submitStockDoc('receipt', 'STE-RECEIPT', 'Stock Entry');
+	assert.equal(await cancelStockDoc('delivery', 'MAT-DN-1', 'Delivery Note'), null);
 	assert.deepEqual(requests, [
 		{
 			url: '/api/stock/create',
@@ -67,6 +68,10 @@ test('receipt, issue, and submit operations preserve shared endpoints and kind f
 		{
 			url: '/api/stock/submit',
 			body: { domain: 'mobile.example', accessToken: 'documents-token', kind: 'receipt', name: 'STE-RECEIPT', doctype: 'Stock Entry' },
+		},
+		{
+			url: '/api/stock/cancel-submission',
+			body: { domain: 'mobile.example', accessToken: 'documents-token', kind: 'delivery', name: 'MAT-DN-1', doctype: 'Delivery Note' },
 		},
 	]);
 });

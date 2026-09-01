@@ -3,6 +3,7 @@ import { registerStockAssortmentRoutes } from './api-stock-assortment-routes.js'
 import { registerStockCatalogRoutes } from './api-stock-catalog-routes.js';
 import { registerStockDocumentCreationRoute } from './api-stock-document-creation-route.js';
 import { registerStockDocumentSubmitRoute } from './api-stock-document-submit-route.js';
+import { registerStockDocumentCancelRoute } from './api-stock-document-cancel-route.js';
 import { registerStockMovementRoutes } from './api-stock-movement-routes.js';
 import { registerStockTurnoverRoutes } from './api-stock-turnover-routes.js';
 
@@ -26,4 +27,5 @@ export function registerApiStockRoute(app: FastifyInstance): void {
 	registerStockCatalogRoutes(app);
 	registerStockDocumentCreationRoute(app);
 	registerStockDocumentSubmitRoute(app);
+	registerStockDocumentCancelRoute(app);
 }

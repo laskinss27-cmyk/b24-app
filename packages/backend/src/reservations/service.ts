@@ -28,10 +28,47 @@ export interface CreateDealReservationRequestInput {
 	lines: DealReservationRequestLineInput[];
 }
 
+export interface CreateManualReservationInput {
+	dealId?: number | null;
+	expiresAt: string;
+	purpose?: string;
+	requestKey?: string;
+	lines: Array<{ productId: number; itemName: string; storeTitle: string; quantity: string | number }>;
+}
+
+export interface ReservationReleaseRequestView {
+	id: string;
+	status: string;
+	requestedReason: string | null;
+	requestedBy: string;
+	requestedAt: string;
+	reviewedBy: string | null;
+	reviewedAt: string | null;
+	decisionReason: string | null;
+}
+
+export interface ReservationEventView {
+	id: string;
+	eventType: string;
+	quantity: string | null;
+	actorId: string;
+	occurredAt: string;
+	fromDealId: number | null;
+	toDealId: number | null;
+}
+
 export interface ReservationListItem {
 	id: string;
 	requestKey: string;
-	dealId: number;
+	sourceType: string;
+	dealId: number | null;
+	purpose: string | null;
+	dealTitle?: string | null;
+	dealManagerId?: string | null;
+	dealManagerName?: string | null;
+	requestedByName?: string;
+	reviewedByName?: string | null;
+	actorNames?: Record<string, string>;
 	status: string;
 	requestedExpiresAt: string;
 	approvedExpiresAt: string | null;
@@ -44,6 +81,8 @@ export interface ReservationListItem {
 	reservationStatus: string | null;
 	releaseRequestId: string | null;
 	releaseRequestStatus: string | null;
+	releaseRequests: ReservationReleaseRequestView[];
+	events: ReservationEventView[];
 	lines: Array<{
 		id: string;
 		sourceLineKey: string;
@@ -64,10 +103,18 @@ export interface ReservationAvailabilityLine {
 	availableForDeal: number;
 }
 
+export interface ReservationTotalLine {
+	itemCode: string;
+	erpWarehouseName: string;
+	reservedByOthers: number;
+	reservedByOwnDeal: number;
+}
+
 interface RequestRow extends Record<string, unknown> {
 	id: bigint | number | string;
 	request_key: string;
 	source_id: string;
+	source_type: string;
 	status: string;
 	requested_expires_at: Date | string;
 	approved_expires_at: Date | string | null;
@@ -78,8 +125,33 @@ interface RequestRow extends Record<string, unknown> {
 	rejection_reason: string | null;
 	reservation_id: bigint | number | string | null;
 	reservation_status: string | null;
+	deal_id: bigint | number | string | null;
+	purpose: string | null;
 	release_request_id: bigint | number | string | null;
 	release_request_status: string | null;
+}
+
+interface ReleaseRequestRow extends Record<string, unknown> {
+	id: bigint | number | string;
+	reservation_id: bigint | number | string;
+	status: string;
+	requested_reason: string | null;
+	requested_by: string;
+	requested_at: Date | string;
+	reviewed_by: string | null;
+	reviewed_at: Date | string | null;
+	decision_reason: string | null;
+}
+
+interface EventRow extends Record<string, unknown> {
+	id: bigint | number | string;
+	reservation_id: bigint | number | string;
+	event_type: string;
+	quantity: string | number | null;
+	actor_id: string;
+	occurred_at: Date | string;
+	from_deal_id: bigint | number | string | null;
+	to_deal_id: bigint | number | string | null;
 }
 
 interface RequestLineRow extends Record<string, unknown> {
@@ -134,10 +206,12 @@ function itemName(sourceLineKey: string, itemCode: string, names: ReadonlyMap<st
 
 async function readRequestRows(connection: PoolConnection, where: string, values: unknown[]): Promise<RequestRow[]> {
 	return connection.query<RequestRow[]>(`
-		SELECT q.id, q.request_key, q.source_id, q.status, q.requested_expires_at,
+		SELECT q.id, q.request_key, q.source_type, q.source_id, q.status, q.requested_expires_at,
 			q.approved_expires_at, q.requested_by, q.requested_at, q.reviewed_by,
 			q.reviewed_at, q.rejection_reason, r.id AS reservation_id,
-			r.status AS reservation_status, rr.id AS release_request_id,
+			r.status AS reservation_status,
+			CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END AS deal_id,
+			r.purpose, rr.id AS release_request_id,
 			rr.status AS release_request_status
 		FROM stock_reservation_requests q
 		LEFT JOIN stock_reservations r ON r.approved_request_id = q.id
@@ -166,13 +240,45 @@ async function hydrateRequests(connection: PoolConnection, rows: RequestRow[]): 
 	`, requestIds);
 	const byRequest = new Map<string, RequestLineRow[]>();
 	for (const line of lines) byRequest.set(id(line.request_id), [...(byRequest.get(id(line.request_id)) ?? []), line]);
+	const reservationIds = rows.flatMap((row) => row.reservation_id == null ? [] : [row.reservation_id]);
+	const releases = reservationIds.length ? await connection.query<ReleaseRequestRow[]>(`
+		SELECT id, reservation_id, status, requested_reason, requested_by, requested_at,
+			reviewed_by, reviewed_at, decision_reason
+		FROM stock_reservation_release_requests
+		WHERE reservation_id IN (${reservationIds.map(() => '?').join(', ')})
+		ORDER BY requested_at DESC, id DESC
+	`, reservationIds) : [];
+	const events = reservationIds.length ? await connection.query<EventRow[]>(`
+		SELECT id, reservation_id, event_type, quantity, actor_id, occurred_at, from_deal_id, to_deal_id
+		FROM stock_reservation_events
+		WHERE reservation_id IN (${reservationIds.map(() => '?').join(', ')})
+		ORDER BY occurred_at DESC, id DESC
+	`, reservationIds) : [];
+	const releasesByReservation = new Map<string, ReleaseRequestRow[]>();
+	for (const release of releases) releasesByReservation.set(id(release.reservation_id), [...(releasesByReservation.get(id(release.reservation_id)) ?? []), release]);
+	const eventsByReservation = new Map<string, EventRow[]>();
+	for (const event of events) eventsByReservation.set(id(event.reservation_id), [...(eventsByReservation.get(id(event.reservation_id)) ?? []), event]);
 	return rows.map((row) => ({
-		id: id(row.id), requestKey: row.request_key, dealId: Number(row.source_id), status: row.status,
+		id: id(row.id), requestKey: row.request_key, sourceType: row.source_type,
+		dealId: row.deal_id == null ? (row.source_type === 'deal' ? Number(row.source_id) : null) : Number(row.deal_id),
+		purpose: row.purpose, status: row.status,
 		requestedExpiresAt: iso(row.requested_expires_at), approvedExpiresAt: nullableIso(row.approved_expires_at),
 		requestedBy: row.requested_by, requestedAt: iso(row.requested_at), reviewedBy: row.reviewed_by,
 		reviewedAt: nullableIso(row.reviewed_at), rejectionReason: row.rejection_reason,
 		reservationId: row.reservation_id == null ? null : id(row.reservation_id), reservationStatus: row.reservation_status,
 		releaseRequestId: row.release_request_id == null ? null : id(row.release_request_id), releaseRequestStatus: row.release_request_status,
+		releaseRequests: (releasesByReservation.get(id(row.reservation_id)) ?? []).map((release) => ({
+			id: id(release.id), status: release.status, requestedReason: release.requested_reason,
+			requestedBy: release.requested_by, requestedAt: iso(release.requested_at), reviewedBy: release.reviewed_by,
+			reviewedAt: nullableIso(release.reviewed_at), decisionReason: release.decision_reason,
+		})),
+		events: (eventsByReservation.get(id(row.reservation_id)) ?? []).map((event) => ({
+			id: id(event.id), eventType: event.event_type,
+			quantity: event.quantity == null ? null : nonNegativeQuantityText(String(event.quantity)),
+			actorId: event.actor_id, occurredAt: iso(event.occurred_at),
+			fromDealId: event.from_deal_id == null ? null : Number(event.from_deal_id),
+			toDealId: event.to_deal_id == null ? null : Number(event.to_deal_id),
+		})),
 		lines: (byRequest.get(id(row.id)) ?? []).map((line) => ({
 			id: id(line.id), sourceLineKey: line.source_line_key, itemCode: line.item_code,
 			itemName: `#${line.item_code}`, erpWarehouseName: line.erp_warehouse_name,
@@ -214,7 +320,7 @@ export class ReservationService {
 		await this.runtime.transaction(async (connection) => {
 			const due = await connection.query<Array<Record<string, unknown>>>(`
 				SELECT id, reservation_key, version FROM stock_reservations
-				WHERE source_type = 'deal' AND status IN ('active', 'shortfall') AND expires_at <= NOW(6)
+				WHERE status IN ('active', 'shortfall') AND expires_at IS NOT NULL AND expires_at <= NOW(6)
 				ORDER BY id FOR UPDATE
 			`);
 			for (const reservation of due) {
@@ -307,7 +413,8 @@ export class ReservationService {
 		const rows = await this.runtime.query(async (connection) => connection.query<Array<Record<string, unknown>>>(`
 			SELECT DISTINCT rl.erp_warehouse_name, rl.item_code
 			FROM stock_reservation_lines rl JOIN stock_reservations r ON r.id = rl.reservation_id
-			WHERE r.source_system = 'bitrix24' AND r.source_type = 'deal' AND r.source_id = ?
+			WHERE r.source_system = 'bitrix24'
+				AND (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ?
 				AND rl.active_qty > 0 AND r.status IN ('active', 'shortfall') AND r.expires_at > NOW(6)
 		`, [String(dealId)]));
 		await this.reconcileKeys(erp, rows.map((row) => ({
@@ -319,7 +426,7 @@ export class ReservationService {
 		if (!this.runtime.enabled) return [];
 		await this.expireDue();
 		return this.runtime.query(async (connection) => hydrateRequests(connection, await readRequestRows(
-			connection, "q.source_system = 'bitrix24' AND q.source_type = 'deal' AND q.source_id = ?", [String(dealId)],
+			connection, "q.source_system = 'bitrix24' AND ((q.source_type = 'deal' AND q.source_id = ?) OR (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ?)", [String(dealId), dealId],
 		)));
 	}
 
@@ -327,8 +434,37 @@ export class ReservationService {
 		if (!this.runtime.enabled) return [];
 		await this.expireDue();
 		return this.runtime.query(async (connection) => hydrateRequests(connection, await readRequestRows(
-			connection, "q.status = 'pending' OR rr.status = 'pending'", [],
+			connection, '1 = 1', [],
 		)));
+	}
+
+	async reservationTotalsForDeal(dealId: number): Promise<ReservationTotalLine[]> {
+		if (!this.runtime.enabled) return [];
+		await this.expireDue();
+		return this.runtime.query(async (connection) => {
+			const rows = await connection.query<Array<Record<string, unknown>>>(`
+				SELECT rl.erp_warehouse_name, rl.item_code,
+					COALESCE(SUM(CASE WHEN (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ? THEN rl.active_qty ELSE 0 END), 0) AS own_qty,
+					COALESCE(SUM(CASE WHEN (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ? THEN 0 ELSE rl.active_qty END), 0) AS other_qty
+				FROM stock_reservation_lines rl JOIN stock_reservations r ON r.id = rl.reservation_id
+				WHERE rl.active_qty > 0 AND r.status IN ('active', 'shortfall') AND (r.expires_at IS NULL OR r.expires_at > NOW(6))
+				GROUP BY rl.erp_warehouse_name, rl.item_code
+			`, [dealId, dealId]);
+			return rows.map((row) => ({
+				itemCode: String(row['item_code']), erpWarehouseName: String(row['erp_warehouse_name']),
+				reservedByOwnDeal: Number(row['own_qty'] ?? 0), reservedByOthers: Number(row['other_qty'] ?? 0),
+			}));
+		});
+	}
+
+	async activeDealWarnings(dealId: number): Promise<string[]> {
+		if (!this.runtime.enabled) return [];
+		const rows = await this.runtime.query(async (connection) => connection.query<Array<Record<string, unknown>>>(`
+			SELECT COUNT(*) AS qty FROM stock_reservations
+			WHERE status IN ('active', 'shortfall') AND expires_at > NOW(6)
+				AND (CASE WHEN deal_link_explicit = 1 THEN deal_id WHEN source_type = 'deal' THEN CAST(source_id AS UNSIGNED) END) = ?
+		`, [dealId]));
+		return Number(rows[0]?.['qty'] ?? 0) > 0 ? [`У сделки #${dealId} уже есть другой активный резерв`] : [];
 	}
 
 	/** Read-only overlay. Shadow mode may display it; callers must enforce it only in active mode. */
@@ -352,8 +488,8 @@ export class ReservationService {
 			for (const line of normalized) {
 				const rows = await connection.query<Array<Record<string, unknown>>>(`
 					SELECT
-						COALESCE(SUM(CASE WHEN r.source_type = 'deal' AND r.source_id = ? THEN rl.active_qty ELSE 0 END), 0) AS own_qty,
-						COALESCE(SUM(CASE WHEN NOT (r.source_type = 'deal' AND r.source_id = ?) THEN rl.active_qty ELSE 0 END), 0) AS other_qty
+						COALESCE(SUM(CASE WHEN (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ? THEN rl.active_qty ELSE 0 END), 0) AS own_qty,
+						COALESCE(SUM(CASE WHEN (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ? THEN 0 ELSE rl.active_qty END), 0) AS other_qty
 					FROM stock_reservation_lines rl
 					JOIN stock_reservations r ON r.id = rl.reservation_id
 					WHERE rl.erp_warehouse_name = ? AND rl.item_code = ? AND rl.active_qty > 0
@@ -400,7 +536,8 @@ export class ReservationService {
 					SELECT rl.id, rl.reservation_id, rl.active_qty, r.version
 					FROM stock_reservation_lines rl
 					JOIN stock_reservations r ON r.id = rl.reservation_id
-					WHERE r.source_system = 'bitrix24' AND r.source_type = 'deal' AND r.source_id = ?
+					WHERE r.source_system = 'bitrix24'
+						AND (CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END) = ?
 						AND r.status IN ('active', 'shortfall') AND r.expires_at > NOW(6)
 						AND rl.erp_warehouse_name = ? AND rl.item_code = ? AND rl.active_qty > 0
 					ORDER BY r.approved_at, r.id, rl.id
@@ -575,6 +712,7 @@ export class ReservationService {
 					status, approved_request_id, expires_at, approved_at, created_by
 				) VALUES (?, 'bitrix24', 'deal', ?, ?, 'active', ?, ?, NOW(6), ?)
 			`, [reservationKey, String(request['source_id']), String(request['source_revision_key']), args.requestId, approvedExpiresAt, actor.id]);
+			await connection.query('UPDATE stock_reservations SET deal_id = ?, deal_link_explicit = 1 WHERE id = ?', [Number(request['source_id']), inserted.insertId]);
 			const reservationId = inserted.insertId;
 			for (const line of lines) await connection.query(`
 				INSERT INTO stock_reservation_lines (
@@ -591,13 +729,166 @@ export class ReservationService {
 		});
 	}
 
+	async createManualReservation(erp: ErpClient, actor: ReservationActor, input: CreateManualReservationInput): Promise<ReservationListItem> {
+		this.requireWrite();
+		const dealId = input.dealId == null ? null : Number(input.dealId);
+		if (dealId != null && (!Number.isInteger(dealId) || dealId <= 0)) throw new Error('Некорректная сделка');
+		const expiresAt = safeFutureDate(input.expiresAt);
+		const purpose = String(input.purpose ?? '').trim().slice(0, 500) || null;
+		const ctx = await erpContext(erp);
+		const normalized = input.lines.map((line, index) => ({
+			sourceLineKey: `manual:${index + 1}`, productId: Number(line.productId), itemName: String(line.itemName ?? '').trim(),
+			erpWarehouseName: erpWarehouse(ctx, String(line.storeTitle ?? '').trim()), quantity: quantityText(line.quantity),
+		}));
+		if (!normalized.length) throw new Error('Выберите хотя бы одну позицию');
+		if (normalized.some((line) => !Number.isInteger(line.productId) || line.productId <= 0)) throw new Error('Некорректный товар');
+		const grouped = new Map<string, (typeof normalized)[number]>();
+		for (const line of normalized) {
+			const key = `${line.erpWarehouseName}\u0000${line.productId}`;
+			const previous = grouped.get(key);
+			grouped.set(key, previous ? { ...previous, quantity: formatReservationQuantity(parseReservationQuantity(previous.quantity) + parseReservationQuantity(line.quantity)) } : line);
+		}
+		const lines = [...grouped.values()];
+		const availabilityKeys = lines.map((line) => ({ erpWarehouseName: line.erpWarehouseName, itemCode: String(line.productId) }));
+		await this.reconcileKeys(erp, availabilityKeys);
+		const requestKey = input.requestKey?.trim() || randomUUID();
+		const sourceId = randomUUID();
+		await this.runtime.transaction(async (connection) => {
+			const command = await beginReservationCommand(connection, {
+				idempotencyKey: `create_manual_reserve:${requestKey}`, commandType: 'create_manual_reserve',
+				requestHash: requestHash({ dealId, expiresAt: expiresAt.toISOString(), purpose, lines }), actorId: actor.id,
+			});
+			if (command.disposition === 'replay') return;
+			if (command.disposition === 'in_progress') throw new Error('Этот резерв уже создаётся');
+			const keys = await lockAvailabilityKeys(connection, availabilityKeys);
+			const physical = await physicalByKey(erp, keys);
+			for (const key of keys) {
+				const activeRows = await connection.query<Array<Record<string, unknown>>>(`
+					SELECT COALESCE(SUM(rl.active_qty), 0) AS qty
+					FROM stock_reservation_lines rl JOIN stock_reservations r ON r.id = rl.reservation_id
+					WHERE rl.erp_warehouse_name = ? AND rl.item_code = ? AND rl.active_qty > 0
+						AND r.status IN ('active', 'shortfall') AND (r.expires_at IS NULL OR r.expires_at > NOW(6))
+				`, [key.erpWarehouseName, key.itemCode]);
+				const active = parseReservationQuantity(String(activeRows[0]?.['qty'] ?? '0'));
+				const requested = lines.filter((line) => line.erpWarehouseName === key.erpWarehouseName && String(line.productId) === key.itemCode)
+					.reduce((sum, line) => sum + parseReservationQuantity(line.quantity), 0n);
+				if ((physical.get(`${key.erpWarehouseName}\u0000${key.itemCode}`) ?? 0n) - active < requested) {
+					throw new Error(`Недостаточно свободного остатка: ${key.itemCode} на ${key.erpWarehouseName}`);
+				}
+			}
+			const request = await connection.query<{ insertId: bigint | number | string }>(`
+				INSERT INTO stock_reservation_requests (
+					request_key, source_system, source_type, source_id, source_revision_key, status,
+					requested_expires_at, approved_expires_at, requested_by, reviewed_by, reviewed_at
+				) VALUES (?, 'bitrix24', 'manual', ?, ?, 'approved', ?, ?, ?, ?, NOW(6))
+			`, [requestKey, sourceId, requestKey, expiresAt, expiresAt, actor.id, actor.id]);
+			for (const line of lines) await connection.query(`
+				INSERT INTO stock_reservation_request_lines (request_id, source_line_key, erp_warehouse_name, item_code, requested_qty)
+				VALUES (?, ?, ?, ?, ?)
+			`, [request.insertId, line.sourceLineKey, line.erpWarehouseName, String(line.productId), line.quantity]);
+			const reservation = await connection.query<{ insertId: bigint | number | string }>(`
+				INSERT INTO stock_reservations (
+					reservation_key, source_system, source_type, source_id, source_revision_key,
+					deal_id, deal_link_explicit, purpose, status, approved_request_id, expires_at, approved_at, created_by
+				) VALUES (?, 'bitrix24', 'manual', ?, ?, ?, 1, ?, 'active', ?, ?, NOW(6), ?)
+			`, [randomUUID(), sourceId, requestKey, dealId, purpose, request.insertId, expiresAt, actor.id]);
+			for (const line of lines) await connection.query(`
+				INSERT INTO stock_reservation_lines (reservation_id, source_line_key, erp_warehouse_name, item_code, reserved_qty)
+				VALUES (?, ?, ?, ?, ?)
+			`, [reservation.insertId, line.sourceLineKey, line.erpWarehouseName, String(line.productId), line.quantity]);
+			await connection.query('UPDATE stock_reservation_commands SET reservation_id = ?, reservation_request_id = ? WHERE id = ?', [reservation.insertId, request.insertId, command.command.id]);
+			await connection.query(`INSERT INTO stock_reservation_events (reservation_id, command_id, event_index, event_type, reservation_version, actor_id) VALUES (?, ?, 0, 'created', 1, ?)`, [reservation.insertId, command.command.id, actor.id]);
+			await finishReservationCommand(connection, command.command.id, 'applied');
+		});
+		const found = (await this.listSupply()).find((item) => item.requestKey === requestKey);
+		if (!found) throw new Error('Созданный резерв не найден');
+		const names = new Map(lines.map((line) => [`${line.sourceLineKey}\u0000${line.productId}`, line.itemName]));
+		return { ...found, lines: found.lines.map((line) => ({ ...line, itemName: itemName(line.sourceLineKey, line.itemCode, names) })) };
+	}
+
+	async setReservationDeal(actor: ReservationActor, reservationId: string, dealId: number | null, idempotencyKey?: string): Promise<{ warnings: string[] }> {
+		this.requireWrite();
+		if (dealId != null && (!Number.isInteger(dealId) || dealId <= 0)) throw new Error('Некорректная сделка');
+		const key = idempotencyKey?.trim() || randomUUID();
+		const warnings: string[] = [];
+		await this.runtime.transaction(async (connection) => {
+			const rows = await connection.query<Array<Record<string, unknown>>>(`
+				SELECT id, source_type, source_id, deal_id, deal_link_explicit, version FROM stock_reservations
+				WHERE id = ? AND status IN ('active', 'shortfall') AND expires_at > NOW(6) FOR UPDATE
+			`, [reservationId]);
+			const reservation = rows[0];
+			if (!reservation) throw new Error('Активный резерв не найден');
+			const currentDealId = Number(reservation['deal_link_explicit']) === 1
+				? (reservation['deal_id'] == null ? null : Number(reservation['deal_id']))
+				: (String(reservation['source_type']) === 'deal' ? Number(reservation['source_id']) : null);
+			if (currentDealId === dealId) return;
+			if (dealId != null) {
+				const other = await connection.query<Array<Record<string, unknown>>>(`
+					SELECT COUNT(*) AS qty FROM stock_reservations
+					WHERE id <> ? AND status IN ('active', 'shortfall') AND expires_at > NOW(6)
+						AND (CASE WHEN deal_link_explicit = 1 THEN deal_id WHEN source_type = 'deal' THEN CAST(source_id AS UNSIGNED) END) = ?
+				`, [reservationId, dealId]);
+				if (Number(other[0]?.['qty'] ?? 0) > 0) warnings.push(`У сделки #${dealId} уже есть другой активный резерв`);
+			}
+			const eventType = currentDealId == null ? 'deal_linked' : dealId == null ? 'deal_unlinked' : 'deal_relinked';
+			const command = await beginReservationCommand(connection, {
+				idempotencyKey: `${eventType}:${key}`, commandType: eventType === 'deal_linked' ? 'link_deal' : eventType === 'deal_unlinked' ? 'unlink_deal' : 'relink_deal',
+				requestHash: requestHash({ reservationId, currentDealId, dealId }), actorId: actor.id, reservationId,
+			});
+			if (command.disposition === 'replay') return;
+			if (command.disposition === 'in_progress') throw new Error('Связь со сделкой уже изменяется');
+			await connection.query('UPDATE stock_reservations SET deal_id = ?, deal_link_explicit = 1, version = version + 1 WHERE id = ?', [dealId, reservationId]);
+			await connection.query(`
+				INSERT INTO stock_reservation_events (
+					reservation_id, command_id, event_index, event_type, from_deal_id, to_deal_id, reservation_version, actor_id
+				) VALUES (?, ?, 0, ?, ?, ?, ?, ?)
+			`, [reservationId, command.command.id, eventType, currentDealId, dealId, Number(reservation['version']) + 1, actor.id]);
+			await finishReservationCommand(connection, command.command.id, 'applied');
+		});
+		return { warnings };
+	}
+
+	async releaseBySupply(actor: ReservationActor, reservationId: string, reason: string, requestKey?: string): Promise<void> {
+		this.requireWrite();
+		const key = requestKey?.trim() || randomUUID();
+		await this.runtime.transaction(async (connection) => {
+			const reservations = await connection.query<Array<Record<string, unknown>>>(`
+				SELECT id, version, status, expires_at FROM stock_reservations WHERE id = ? FOR UPDATE
+			`, [reservationId]);
+			const reservation = reservations[0];
+			if (!reservation) throw new Error('Резерв не найден');
+			const command = await beginReservationCommand(connection, {
+				idempotencyKey: `supply_release:${key}`, commandType: 'approve_release',
+				requestHash: requestHash({ reservationId, reason }), actorId: actor.id, reservationId,
+			});
+			if (command.disposition === 'replay') return;
+			if (command.disposition === 'in_progress') throw new Error('Снятие уже обрабатывается');
+			if (!['active', 'shortfall'].includes(String(reservation['status'])) || new Date(String(reservation['expires_at'])).getTime() <= Date.now()) throw new Error('Активный резерв не найден');
+			const release = await connection.query<{ insertId: bigint | number | string }>(`
+				INSERT INTO stock_reservation_release_requests (
+					request_key, reservation_id, status, requested_reason, requested_by, reviewed_by, reviewed_at, decision_reason
+				) VALUES (?, ?, 'approved', ?, ?, ?, NOW(6), 'Снято снабжением')
+			`, [key, reservationId, reason.trim() || null, actor.id, actor.id]);
+			await connection.query('UPDATE stock_reservation_commands SET release_request_id = ? WHERE id = ?', [release.insertId, command.command.id]);
+			const lines = await connection.query<Array<Record<string, unknown>>>(`SELECT id, active_qty FROM stock_reservation_lines WHERE reservation_id = ? AND active_qty > 0 FOR UPDATE`, [reservationId]);
+			let eventIndex = 0;
+			for (const line of lines) {
+				await connection.query('UPDATE stock_reservation_lines SET released_qty = released_qty + active_qty, version = version + 1 WHERE id = ?', [line['id']]);
+				await connection.query(`INSERT INTO stock_reservation_events (reservation_id, reservation_line_id, command_id, event_index, event_type, quantity, reservation_version, actor_id) VALUES (?, ?, ?, ?, 'released', ?, ?, ?)`, [reservationId, line['id'], command.command.id, eventIndex++, line['active_qty'], Number(reservation['version']) + 1, actor.id]);
+			}
+			await connection.query("UPDATE stock_reservations SET status = 'released', version = version + 1 WHERE id = ?", [reservationId]);
+			await finishReservationCommand(connection, command.command.id, 'applied');
+		});
+	}
+
 	async requestRelease(actor: ReservationActor, dealId: number, reservationId: string, reason: string, requestKey?: string): Promise<void> {
 		this.requireWrite();
 		const effectiveRequestKey = requestKey?.trim() || randomUUID();
 		await this.runtime.transaction(async (connection) => {
 			const reservations = await connection.query<Array<Record<string, unknown>>>(`
 				SELECT id FROM stock_reservations
-				WHERE id = ? AND source_system = 'bitrix24' AND source_type = 'deal' AND source_id = ?
+				WHERE id = ? AND source_system = 'bitrix24'
+					AND (CASE WHEN deal_link_explicit = 1 THEN deal_id WHEN source_type = 'deal' THEN CAST(source_id AS UNSIGNED) END) = ?
 					AND status IN ('active', 'shortfall') AND expires_at > NOW(6)
 				FOR UPDATE
 			`, [reservationId, String(dealId)]);

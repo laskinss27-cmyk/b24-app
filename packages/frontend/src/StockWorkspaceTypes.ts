@@ -4,4 +4,5 @@ export interface StockForm {
 	stores: string[];
 	suppliers: string[];
 	canCreate: boolean;
+	canCancel?: boolean;
 }

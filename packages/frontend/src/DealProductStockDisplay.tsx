@@ -42,7 +42,9 @@ export function DealProductStockDetailRow({
 			<td colSpan={10}>
 				<div className="stock-detail-list">
 					{stocks.map((stock) => (
-						<span key={stock.storeId} className={`stock-chip${stock.storeId === selectedStoreId ? ' sel' : ''}`}>{stock.storeName}: <b>{stock.amount}</b></span>
+						<span key={stock.storeId} className={`stock-chip${stock.storeId === selectedStoreId ? ' sel' : ''}`} title={`Физически: ${stock.physicalAmount ?? stock.amount}; резерв этой сделки: ${stock.reservedByOwnDeal ?? 0}; другие резервы: ${stock.reservedByOthers ?? 0}`}>
+							{stock.storeName}: <b>{stock.amount}</b>{Number(stock.reservedByOwnDeal ?? 0) > 0 && <em style={{ color: '#185fa5', fontStyle: 'normal' }}> 🔒{stock.reservedByOwnDeal}</em>}{Number(stock.reservedByOthers ?? 0) > 0 && <em style={{ color: '#c0392b', fontStyle: 'normal' }}> 🔒{stock.reservedByOthers}</em>}
+						</span>
 					))}
 				</div>
 			</td>

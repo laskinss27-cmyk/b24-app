@@ -51,7 +51,7 @@ export function StockLedger(): JSX.Element {
 	// Все сотрудники видят весь складской учёт. Опасные действия отдельно защищены правами API.
 	useEffect(() => {
 		if (ctx.__mock) {
-			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true });
+			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true, canCancel: true });
 			setPhase({ k: 'ready' });
 			return;
 		}

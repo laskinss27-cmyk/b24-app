@@ -20,13 +20,13 @@ export function indexCatalogRows(
 			!allowedStoreTitles.length
 			|| row.isService
 			|| Object.entries(row.stockByStore).some(([storeId, qty]) =>
-				visibleStoreIds.has(Number(storeId)) && qty > 0))
+				visibleStoreIds.has(Number(storeId)) && (qty > 0 || Number(row.reservedByStore?.[Number(storeId)] ?? 0) > 0 || Number(row.ownReservedByStore?.[Number(storeId)] ?? 0) > 0)))
 		.map((row) => ({
 			d: row,
 			search: `${row.id} ${marketplaceMode ? row.marketplaceOldId ?? '' : ''} ${row.name} ${row.article ?? ''} ${row.manufacturer ?? ''} ${row.model ?? ''} ${row.sectionName ?? ''} ${row.status ?? ''}`.toLowerCase(),
 			stockEntries: Object.entries(row.stockByStore)
 				.map(([storeId, quantity]) => ({ id: Number(storeId), qty: quantity }))
-				.filter((stock) => stock.qty > 0 && (!allowedStoreTitles.length || visibleStoreIds.has(stock.id)))
+				.filter((stock) => (stock.qty > 0 || Number(row.reservedByStore?.[stock.id] ?? 0) > 0 || Number(row.ownReservedByStore?.[stock.id] ?? 0) > 0) && (!allowedStoreTitles.length || visibleStoreIds.has(stock.id)))
 				.sort((a, b) => b.qty - a.qty),
 		}));
 }
@@ -76,7 +76,12 @@ export function buildCatalogView({
 			? visibleStores.reduce((sum, item) => sum + Number(row.stockByStore[item.id] ?? 0), 0)
 			: row.total;
 	if (onlyStock && kind !== 'services') {
-		list = list.filter((row) => (isAll ? allStoresQty(row.d) : (row.d.stockByStore[storeId as number] ?? 0)) > 0 || row.d.isService);
+		list = list.filter((row) => {
+			const visiblePhysical = isAll
+				? allStoresQty(row.d) + Object.values(row.d.reservedByStore ?? {}).reduce((sum, qty) => sum + qty, 0)
+				: Number(row.d.stockByStore[storeId as number] ?? 0) + Number(row.d.reservedByStore?.[storeId as number] ?? 0);
+			return visiblePhysical > 0 || row.d.isService;
+		});
 	}
 	const withQty = list.map((row) => ({
 		d: row.d,

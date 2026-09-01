@@ -1,16 +1,16 @@
 import { bx24Auth } from './bitrix-auth.js';
 
-export interface StockItem { productId: number; name: string; article: string; brand: string; stocks?: Record<string, number>; total?: number }
+export interface StockItem { productId: number; name: string; article: string; brand: string; stocks?: Record<string, number>; reserved?: Record<string, number>; total?: number }
 
 /** Справочники для форм и ролевое право на складские документы. */
-export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean; isSupply: boolean }> {
+export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean; canCancel: boolean; isSupply: boolean }> {
 	const res = await fetch('/api/stock/form-data', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean; isSupply?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean; canCancel?: boolean; isSupply?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить справочники');
-	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate), isSupply: Boolean(json.isSupply) };
+	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate), canCancel: Boolean(json.canCancel), isSupply: Boolean(json.isSupply) };
 }
 
 /** Создать НОВЫЙ товар (нет в каталоге): заводим в каталоге Б24 + ядре, возвращаем как StockItem для прихода. */
@@ -69,4 +69,14 @@ export async function submitStockDoc(kind: 'receipt' | 'issue', name: string, do
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось провести документ');
+}
+
+export async function cancelStockDoc(kind: 'issue' | 'receipt' | 'delivery' | 'return', name: string, doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'): Promise<string | null> {
+	const res = await fetch('/api/stock/cancel-submission', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), kind, doctype, name }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; warning?: string | null };
+	if (!json.ok) throw new Error(json.error ?? 'не удалось отменить проведение');
+	return json.warning ?? null;
 }

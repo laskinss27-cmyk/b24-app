@@ -12,7 +12,7 @@ import type {
 export interface EnrichedRow extends DealProductRow {
 	/** Stable line identity from the ERP deal plan, used by reservation requests. */
 	planLineKey?: string;
-	stocks: Array<{ storeId: number; storeName: string; amount: number }>;
+	stocks: Array<{ storeId: number; storeName: string; amount: number; physicalAmount?: number; reservedByOthers?: number; reservedByOwnDeal?: number }>;
 	purchasingPrice: number | null;
 	/** В режиме по этапам одна агрегированная строка плана раскладывается на отдельные партии. */
 	segmentKind?: 'base' | 'stage';
