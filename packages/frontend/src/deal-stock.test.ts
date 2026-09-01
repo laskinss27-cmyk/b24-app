@@ -101,6 +101,7 @@ test('core stock enrichment preserves id filtering, warehouse mapping, and purch
 			},
 		},
 		{ ok: true, stores: [{ id: 7, title: 'Main' }, { id: 8, title: 'Empty' }] },
+		{ ok: true, byProduct: { 42: { stocks: { Main: 2 }, purchasing: 800 } } },
 	]);
 
 	assert.deepEqual(await fetchStockAndPurchasing([42, -1, 43]), {
@@ -117,5 +118,12 @@ test('core stock enrichment preserves id filtering, warehouse mapping, and purch
 			body: { domain: 'stock.example', accessToken: 'stock-token' },
 		},
 	]);
+	assert.deepEqual(await fetchStockPreferCore([42], 501), {
+		42: { stocks: [{ storeId: 7, amount: 2 }], purchasingPrice: 800 },
+	});
+	assert.deepEqual(requests[2], {
+		url: '/api/catalog/erp-stocks',
+		body: { domain: 'stock.example', accessToken: 'stock-token', productIds: [42], dealId: 501 },
+	});
 	assert.deepEqual(await fetchStockPreferCore([]), {});
 });

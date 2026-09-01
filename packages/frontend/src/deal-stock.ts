@@ -82,7 +82,7 @@ async function storeTitleToId(): Promise<Map<string, number>> {
  * Остатки и закупка только из ЯДРА (ERPNext, /api/catalog/erp-stocks).
  * Склады ядра приходят по имени и маппятся в стабильный ID интерфейса.
  */
-export async function fetchStockPreferCore(productIds: number[]): Promise<Record<number, ProductEnrichment>> {
+export async function fetchStockPreferCore(productIds: number[], dealId?: number): Promise<Record<number, ProductEnrichment>> {
 	const ids = productIds.filter((id) => id > 0);
 	if (!ids.length) return {};
 	try {
@@ -90,7 +90,11 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
 		const res = await fetch('/api/catalog/erp-stocks', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ ...bx24Auth(), productIds: ids }),
+			body: JSON.stringify({
+				...bx24Auth(),
+				productIds: ids,
+				...(Number.isInteger(dealId) && Number(dealId) > 0 ? { dealId } : {}),
+			}),
 			signal: AbortSignal.timeout(15000),
 		});
 		const j = (await res.json()) as { ok?: boolean; byProduct?: Record<string, { stocks: Record<string, number>; purchasing: number }> };

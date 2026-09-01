@@ -39,7 +39,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 	const variantIds = quoteVariants.variants.flatMap((variant) => variant.items.map((item) => item.productId));
 	const allIds = [...new Set([...planIds, ...realizedIds, ...variantIds])];
 	const enrich: Record<number, ProductEnrichment> = allIds.length
-		? await withTimeout(fetchStockPreferCore(allIds), 15000, 'остатки и закупочные цены из ядра')
+		? await withTimeout(fetchStockPreferCore(allIds, dealId), 15000, 'остатки и закупочные цены из ядра')
 		: {};
 	const mkStocks = (pid: number): EnrichedRow['stocks'] =>
 		(enrich[pid]?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));

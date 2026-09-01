@@ -4,8 +4,23 @@ import { fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
 import { appPermission } from '../access-policy.js';
+import { ReservationService, type ReservationAvailabilityLine } from '../reservations/service.js';
 import type { AuthBody } from './api-catalog-types.js';
 import { errInfo } from './api-catalog-route-helpers.js';
+
+export function applyDealReservationAvailability(
+	stocks: Map<number, Record<string, number>>,
+	availability: ReservationAvailabilityLine[],
+): Map<number, Record<string, number>> {
+	const availableByKey = new Map(availability.map((line) => [`${line.productId}\u0000${line.storeTitle}`, line.availableForDeal]));
+	return new Map([...stocks].map(([productId, byStore]) => [
+		productId,
+		Object.fromEntries(Object.entries(byStore).map(([storeTitle, physical]) => [
+			storeTitle,
+			availableByKey.get(`${productId}\u0000${storeTitle}`) ?? physical,
+		])),
+	]));
+}
 
 export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 	// Остатки из ЯДРА (ERPNext) — payoff выноса склада: один запрос Bin вместо BX24 catalog.storeproduct.
@@ -13,7 +28,7 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 	// Гейт env ERPNEXT_URL: ядро не подключено → явная ошибка, без складского фолбэка Б24.
 	// Склады отдаём по имени и маппим в стабильные ID интерфейса из справочника ядра.
 	app.post('/api/catalog/erp-stocks', async (req, reply) => {
-		const body = (req.body ?? {}) as AuthBody & { productIds?: unknown };
+		const body = (req.body ?? {}) as AuthBody & { productIds?: unknown; dealId?: unknown };
 		if (!body.domain || normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) {
 			return reply.code(403).send({ ok: false, error: 'bad domain' });
 		}
@@ -21,14 +36,27 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 			.map(Number).filter((n) => Number.isInteger(n) && n > 0);
 		if (!requestedIds.length) return { ok: true, byProduct: {} };
 		const ids = [...new Set(requestedIds.map(canonicalProductId))];
+		const dealId = body.dealId == null ? null : Number(body.dealId);
+		if (dealId != null && (!Number.isInteger(dealId) || dealId <= 0)) {
+			return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, coreOff: true, error: 'ядро не подключено (ERPNEXT_URL)' });
 		try {
 			// Запрашиваем только нужные item_code: полный Bin избыточен и заметно замедляет ответ.
-			const [stocks, purchasing] = await Promise.all([
+			const [physicalStocks, purchasing] = await Promise.all([
 				fetchErpStocksFor(erp, ids),
 				fetchErpPurchasing(erp, ids),
 			]);
+			let stocks = physicalStocks;
+			if (dealId != null && app.reservationRuntime?.canWrite) {
+				const stockKeys = [...physicalStocks].flatMap(([productId, byStore]) =>
+					Object.keys(byStore).map((storeTitle) => ({ productId, storeTitle })),
+				);
+				const availability = await new ReservationService(app.reservationRuntime)
+					.availabilityForDeal(erp, dealId, stockKeys);
+				stocks = applyDealReservationAvailability(physicalStocks, availability);
+			}
 			// Возвращаем КАЖДЫЙ запрошенный товар (даже с нулём — чтобы не потерять закупку у бесстоковых).
 			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number }> = {};
 			const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
