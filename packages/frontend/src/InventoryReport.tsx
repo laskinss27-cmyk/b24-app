@@ -35,6 +35,8 @@ interface InventoryCountProps {
 	inventoryId: string;
 	storeId: number;
 	storeName: string;
+	/** Exact time of the immutable warehouse snapshot used for comparison. */
+	snapshotAt?: string | undefined;
 	me: { id: string; name: string };
 	/** Промежуточный подсчёт, если менеджер возвращается к черновику. */
 	initialDraft?: Record<number, number> | undefined;
@@ -73,7 +75,7 @@ const MOCK_STOCK: Record<number, InvLine[]> = {
 };
 
 export function InventoryCount(props: InventoryCountProps): JSX.Element {
-	const { inventoryId, storeId, storeName, me, initialDraft, initialComments, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
+	const { inventoryId, storeId, storeName, snapshotAt, me, initialDraft, initialComments, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
 	const draftMode = mode === 'act' ? 'act' : 'count';
 	const localDraftKey = inventoryDraftStorageKey(inventoryId, storeId, draftMode);
 	const restoredLocalRef = useRef<InventoryLocalDraft | null>(readInventoryLocalDraft(localDraftKey));
@@ -417,9 +419,18 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 					: lastSavedAt
 						? `Черновик сохранён на сервере в ${new Date(lastSavedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
 						: 'Автосохранение включено.';
+	const snapshotDate = snapshotAt && !Number.isNaN(new Date(snapshotAt).getTime())
+		? new Date(snapshotAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
+		: null;
 
 	return (
 		<div className="inv">
+			{mode !== 'act' && (
+				<div className="inventory-snapshot-reminder" role="note">
+					{snapshotDate ? `ОСТАТКИ ЗАФИКСИРОВАНЫ ${snapshotDate}. ` : 'ОСТАТКИ ЗАФИКСИРОВАНЫ НА МОМЕНТ ОТКРЫТИЯ ИНВЕНТАРИЗАЦИИ. '}
+					ЕСЛИ ТЫ ПРОДАЛ ИЛИ ПЕРЕМЕСТИЛ ТОВАР ДО ТОГО, КАК ПОСЧИТАЛ ПОЗИЦИЮ, — ВПИШИ ЭТО КОЛИЧЕСТВО ПЛЮСОМ К ТОМУ, ЧТО ФИЗИЧЕСКИ ОСТАЛОСЬ.
+				</div>
+			)}
 			<header>
 				<h1>{mode === 'act' ? 'Акт разногласий' : 'Инвентаризация'} — {storeName}</h1>
 				<p className="subtitle">

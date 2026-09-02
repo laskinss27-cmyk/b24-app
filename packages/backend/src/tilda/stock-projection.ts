@@ -42,7 +42,18 @@ function sourceStoreQuantity(stocks: Record<string, number>, sourceStore: string
 		const quantity = Number(rawQuantity);
 		return Number.isFinite(quantity) ? sum + quantity : sum;
 	}, 0);
-	return Math.max(0, Math.floor(total));
+	return total;
+}
+
+function availableSourceStoreQuantity(
+	stocks: Record<string, number>,
+	sourceStore: string,
+	reservedQuantity: number,
+): number {
+	if (!Number.isFinite(reservedQuantity) || reservedQuantity < 0) {
+		throw new Error(`invalid active reservation quantity: ${String(reservedQuantity)}`);
+	}
+	return Math.max(0, Math.floor(sourceStoreQuantity(stocks, sourceStore) - reservedQuantity));
 }
 
 export function buildTildaStockPreview(
@@ -50,6 +61,7 @@ export function buildTildaStockPreview(
 	stocksByProduct: Map<number, Record<string, number>>,
 	sourceStore = TILDA_STOCK_SOURCE_STORE,
 	pricesByProduct?: Map<number, number>,
+	reservedByProduct: ReadonlyMap<number, number> = new Map(),
 ): TildaStockPreview {
 	const seenExternalIds = new Set<string>();
 	const seenTildaUids = new Set<string>();
@@ -78,7 +90,11 @@ export function buildTildaStockPreview(
 			externalId,
 			sku: mapping.sku.trim(),
 			title: mapping.title.trim(),
-			quantity: sourceStoreQuantity(stocksByProduct.get(mapping.productId) ?? {}, sourceStore),
+			quantity: availableSourceStoreQuantity(
+				stocksByProduct.get(mapping.productId) ?? {},
+				sourceStore,
+				reservedByProduct.get(mapping.productId) ?? 0,
+			),
 		};
 		if (pricesByProduct) {
 			const rawPrice = pricesByProduct.get(mapping.productId);

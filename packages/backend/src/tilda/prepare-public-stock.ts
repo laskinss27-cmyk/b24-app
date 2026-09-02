@@ -9,6 +9,7 @@ import { fetchCompleteTildaErpPrices } from './erp-price-reader.js';
 import { fetchCompleteTildaErpStocks } from './erp-stock-reader.js';
 import { readTildaProductMappings } from './product-mapping-reader.js';
 import { readTildaPublicStockRows } from './public-catalog.js';
+import { fetchActiveTildaReservations } from './reservation-stock-reader.js';
 import { compareTildaPublicStock } from './public-stock-comparison.js';
 import { prepareTildaStockPreview } from './stock-preview-service.js';
 
@@ -31,6 +32,7 @@ try {
 	const preview = await prepareTildaStockPreview({
 		readMappings: async () => mappings,
 		fetchStocks: (productIds) => fetchCompleteTildaErpStocks(erp, productIds),
+		fetchReservations: (productIds, sourceStore) => fetchActiveTildaReservations(pool, erp, productIds, sourceStore),
 		...(priceSyncEnabled ? { fetchPrices: (productIds: number[]) => fetchCompleteTildaErpPrices(erp, productIds) } : {}),
 	});
 	const publicCatalog = await readTildaPublicStockRows(publicUrl);

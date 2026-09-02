@@ -36,6 +36,22 @@ test('Tilda stock preview floors fractional stock and never publishes a negative
 	assert.deepEqual(previews.map((preview) => preview.offers[0]?.quantity), [3, 0]);
 });
 
+test('Tilda stock preview subtracts active reservations from Shelly and clamps sellable stock to zero', () => {
+	const stocks = new Map([[18178, { Shelly: 3, 'Склад Прихода': 20 }]]);
+	const partiallyReserved = buildTildaStockPreview(
+		[confirmed()], stocks, undefined, undefined, new Map([[18178, 2]]),
+	);
+	const overReserved = buildTildaStockPreview(
+		[confirmed()], stocks, undefined, undefined, new Map([[18178, 4]]),
+	);
+
+	assert.equal(partiallyReserved.offers[0]?.quantity, 1);
+	assert.equal(overReserved.offers[0]?.quantity, 0);
+	assert.throws(() => buildTildaStockPreview(
+		[confirmed()], stocks, undefined, undefined, new Map([[18178, -1]]),
+	), /invalid active reservation quantity/u);
+});
+
 test('Tilda price projection uses only explicit positive ERP retail prices and leaves missing prices absent', () => {
 	const preview = buildTildaStockPreview(
 		[confirmed(), confirmed({ productId: 18124, tildaUid: 'other', externalId: 'other', sku: 'other' })],

@@ -16,6 +16,7 @@ interface PublicCatalogState {
 export interface TildaStockReconciliationDependencies {
 	readMappings(): Promise<TildaProductMapping[]>;
 	fetchStocks(productIds: number[]): Promise<Map<number, Record<string, number>>>;
+	fetchReservations(productIds: number[], sourceStore: string): Promise<Map<number, number>>;
 	fetchPrices?(productIds: number[]): Promise<Map<number, number>>;
 	readPublicCatalog(): Promise<PublicCatalogState>;
 	publishProjection(catalogXml: string, offersXml: string): Promise<TildaCommerceMlExchangeResult>;
@@ -66,6 +67,7 @@ export async function runTildaStockReconciliation(
 		const preview = await prepareTildaStockPreview({
 			readMappings: async () => mappings,
 			fetchStocks: dependencies.fetchStocks,
+			fetchReservations: dependencies.fetchReservations,
 			...(dependencies.fetchPrices ? { fetchPrices: dependencies.fetchPrices } : {}),
 		}, undefined, dependencies.now?.() ?? new Date());
 		const publicCatalog = await dependencies.readPublicCatalog();

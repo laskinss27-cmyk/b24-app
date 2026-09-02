@@ -9,17 +9,23 @@ test('Tilda stock preview service fetches only confirmed ERP items and returns a
 		{ productId: 0, tildaUid: 'uid-2', externalId: 'external-2', sku: 'old-2', title: 'Missing', status: 'ignored' },
 	];
 	const requested: number[][] = [];
+	const reservationRequests: number[][] = [];
 	const services = {
 		async readMappings() { return mappings; },
 		async fetchStocks(productIds: number[]) {
 			requested.push(productIds);
 			return new Map([[18178, { Shelly: 4, 'Склад Прихода': 10 }]]);
 		},
+		async fetchReservations(productIds: number[]) {
+			reservationRequests.push(productIds);
+			return new Map([[18178, 1]]);
+		},
 	};
 	const first = await prepareTildaStockPreview(services, undefined, new Date('2026-08-21T10:00:00.000Z'));
 	const second = await prepareTildaStockPreview(services, undefined, new Date('2026-08-21T11:00:00.000Z'));
 	assert.deepEqual(requested, [[18178], [18178]]);
-	assert.equal(first.offers[0]?.quantity, 4);
+	assert.deepEqual(reservationRequests, [[18178], [18178]]);
+	assert.equal(first.offers[0]?.quantity, 3);
 	assert.equal(first.skippedCount, 1);
 	assert.equal(first.priceSyncEnabled, false);
 	assert.equal(first.missingPriceCount, 0);
@@ -36,6 +42,7 @@ test('Tilda stock preview opt-in includes stable ERP retail prices without requi
 	const preview = await prepareTildaStockPreview({
 		async readMappings() { return mappings; },
 		async fetchStocks() { return new Map([[18178, { Shelly: 4 }], [18184, { Shelly: 2 }]]); },
+		async fetchReservations() { return new Map(); },
 		async fetchPrices() { return new Map([[18178, 2150]]); },
 	}, undefined, new Date('2026-08-31T00:00:00.000Z'));
 	assert.equal(preview.priceSyncEnabled, true);
@@ -56,6 +63,7 @@ test('Tilda stock preview service fails closed on an incomplete ERP response', a
 		async fetchStocks() {
 			return new Map([[18178, { Shelly: 4 }]]);
 		},
+		async fetchReservations() { return new Map(); },
 	};
 
 	await assert.rejects(

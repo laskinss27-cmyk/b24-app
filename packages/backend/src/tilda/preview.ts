@@ -3,6 +3,7 @@ import { createDatabasePool } from '../database/runtime.js';
 import { ErpClient } from '../erp/client.js';
 import { fetchCompleteTildaErpStocks } from './erp-stock-reader.js';
 import { readTildaProductMappings } from './product-mapping-reader.js';
+import { fetchActiveTildaReservations } from './reservation-stock-reader.js';
 import { prepareTildaStockPreview } from './stock-preview-service.js';
 
 const config = loadDatabaseConfig();
@@ -15,6 +16,7 @@ try {
 	const preview = await prepareTildaStockPreview({
 		readMappings: () => readTildaProductMappings(pool),
 		fetchStocks: (productIds) => fetchCompleteTildaErpStocks(erp, productIds),
+		fetchReservations: (productIds, sourceStore) => fetchActiveTildaReservations(pool, erp, productIds, sourceStore),
 	});
 	const zeroQuantity = preview.offers.filter((offer) => offer.quantity === 0);
 	console.log(JSON.stringify({

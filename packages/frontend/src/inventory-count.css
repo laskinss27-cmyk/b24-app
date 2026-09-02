@@ -1,4 +1,17 @@
 /* ── Экран подсчёта: строки товаров (mobile-first) ────────────────────────── */
+.inventory-snapshot-reminder {
+	margin: 0 0 12px;
+	padding: 10px 12px;
+	border: 1px solid #dc2626;
+	border-radius: 7px;
+	background: #fef2f2;
+	color: #b91c1c;
+	font-size: 13px;
+	font-weight: 800;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
 .photo-toggle {
 	display: flex;
 	align-items: center;

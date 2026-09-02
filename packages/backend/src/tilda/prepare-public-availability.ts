@@ -9,6 +9,7 @@ import { buildTildaAvailabilityCatalogXml } from './commerce-ml.js';
 import { fetchCompleteTildaErpStocks } from './erp-stock-reader.js';
 import { readTildaProductMappings } from './product-mapping-reader.js';
 import { readTildaPublicStockRows } from './public-catalog.js';
+import { fetchActiveTildaReservations } from './reservation-stock-reader.js';
 import { prepareTildaStockPreview } from './stock-preview-service.js';
 
 function required(name: string): string {
@@ -34,6 +35,7 @@ try {
 	const preview = await prepareTildaStockPreview({
 		readMappings: async () => mappings,
 		fetchStocks: (productIds) => fetchCompleteTildaErpStocks(erp, productIds),
+		fetchReservations: (productIds, sourceStore) => fetchActiveTildaReservations(pool, erp, productIds, sourceStore),
 	});
 	const publicCatalog = await readTildaPublicStockRows(publicUrl);
 	if (mappings.length !== 150 || preview.offers.length !== 134 || preview.skippedCount !== 16

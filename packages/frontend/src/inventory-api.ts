@@ -63,6 +63,8 @@ export interface InvPoint {
 	draft?: Record<number, number>;
 	/** Комментарии проверяющего по позициям (productId → текст). */
 	comments?: Record<number, string>;
+	/** Immutable ERP stock snapshot captured when the inventory was opened. */
+	stockSnapshot?: { version: 1; capturedAt: string; lines: Array<[number, number]> };
 	/** Последнее успешное серверное автосохранение черновика. */
 	draftUpdatedAt?: string;
 	draftUpdatedById?: string;

@@ -7,7 +7,6 @@ import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-h
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
-import { compensateInventoryResult } from '../inventory-result-compensation.js';
 
 export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/update', async (req, reply) => {
@@ -111,22 +110,11 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 						pt['startedAt'] = pt['startedAt'] ?? now;
 					}
 				} else if (b.action === 'submit') {
-					let submittedResult = b.result ?? null;
-					if (inventorySnapshotQuantities(pt)) {
-						const erp = ErpClient.fromEnv();
-						if (!erp) throw new Error('ядро склада не подключено — движения после открытия не учтены');
-						submittedResult = await compensateInventoryResult(
-							erp,
-							String(pt['storeName'] ?? ''),
-							b.result,
-							b.facts,
-							comments,
-						);
-						pt['resultBookAt'] = now;
-					}
 					pt['status'] = status === 'act' ? 'reconciled' : 'submitted';
 					pt['submittedAt'] = now;
-					pt['result'] = submittedResult;
+					// The result is intentionally compared with the immutable opening snapshot.
+					// Movements made after opening are entered manually as part of the fact count.
+					pt['result'] = b.result ?? null;
 					if (b.facts && typeof b.facts === 'object') pt['draft'] = b.facts;
 					if (comments) pt['comments'] = comments;
 					if (!pt['responsibleId']) {

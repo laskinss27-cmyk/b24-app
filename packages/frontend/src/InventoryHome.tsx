@@ -51,6 +51,7 @@ interface Counting {
 	inventoryId: string;
 	storeId: number;
 	storeName: string;
+	snapshotAt?: string | undefined;
 	draft?: Record<number, number> | undefined;
 	comments?: Record<number, string> | undefined;
 	/** Охват (#13): разделы инвентаризации — прокидываем в подсчёт. */
@@ -244,7 +245,7 @@ export function InventoryHome(): JSX.Element {
 				return;
 			}
 		}
-		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, draft: p.draft, comments: p.comments, sectionIds: inv.sectionIds });
+		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, snapshotAt: p.stockSnapshot?.capturedAt ?? inv.createdAt, draft: p.draft, comments: p.comments, sectionIds: inv.sectionIds });
 	}
 
 	function continuePoint(inv: Inventory, p: InvPoint, mode?: 'count' | 'act'): void {
@@ -253,6 +254,7 @@ export function InventoryHome(): JSX.Element {
 			inventoryId: inv.id,
 			storeId: p.storeId,
 			storeName: p.storeName,
+			snapshotAt: p.stockSnapshot?.capturedAt ?? inv.createdAt,
 			draft: p.draft,
 			comments: p.comments,
 			sectionIds: inv.sectionIds,
@@ -366,6 +368,7 @@ export function InventoryHome(): JSX.Element {
 				inventoryId={counting.inventoryId}
 				storeId={counting.storeId}
 				storeName={counting.storeName}
+				snapshotAt={counting.snapshotAt}
 				sectionIds={counting.sectionIds}
 				me={me}
 				initialDraft={counting.draft}

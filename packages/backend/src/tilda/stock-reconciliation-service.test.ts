@@ -52,6 +52,7 @@ function dependencies(difference = false) {
 	const deps: TildaStockReconciliationDependencies = {
 		readMappings: async () => data.mappings,
 		fetchStocks: async () => data.stocks,
+		fetchReservations: async () => new Map(),
 		readPublicCatalog: async () => ({ parentCount: 131, rows: currentRows, contentHash: HASH }),
 		publishProjection: async () => {
 			calls.published += 1;
@@ -99,6 +100,7 @@ test('price opt-in publishes reversible Standard Selling differences while prese
 	const deps: TildaStockReconciliationDependencies = {
 		readMappings: async () => data.mappings,
 		fetchStocks: async () => data.stocks,
+		fetchReservations: async () => new Map(),
 		fetchPrices: async () => new Map(data.offers.map((offer, index) => [offer.productId, index === 2 ? 90 : 100])),
 		readPublicCatalog: async () => ({
 			parentCount: 131,

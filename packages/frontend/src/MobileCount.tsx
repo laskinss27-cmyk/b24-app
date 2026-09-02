@@ -14,7 +14,7 @@ import { InventoryCount } from './InventoryReport.js';
 type Phase =
 	| { k: 'loading' }
 	| { k: 'error'; msg: string }
-	| { k: 'counting'; point: InvPoint; sectionIds?: number[] | undefined }
+	| { k: 'counting'; point: InvPoint; snapshotAt?: string | undefined; sectionIds?: number[] | undefined }
 	| { k: 'done' };
 
 export function MobileCount(): JSX.Element {
@@ -43,7 +43,7 @@ export function MobileCount(): JSX.Element {
 					setPhase({ k: 'error', msg: 'Точка не найдена в этой инвентаризации.' });
 					return;
 				}
-				setPhase({ k: 'counting', point, sectionIds: inv.sectionIds });
+				setPhase({ k: 'counting', point, snapshotAt: point.stockSnapshot?.capturedAt ?? inv.createdAt, sectionIds: inv.sectionIds });
 			} catch (e: unknown) {
 				if (alive) setPhase({ k: 'error', msg: String(e instanceof Error ? e.message : e) });
 			}
@@ -68,12 +68,13 @@ export function MobileCount(): JSX.Element {
 	}
 
 	const me = ctx.me ?? { id: '', name: '' };
-	const { point, sectionIds } = phase;
+	const { point, snapshotAt, sectionIds } = phase;
 	return (
 		<InventoryCount
 			inventoryId={ctx.inventoryId ?? ''}
 			storeId={point.storeId}
 			storeName={point.storeName}
+			snapshotAt={snapshotAt}
 			sectionIds={sectionIds}
 			me={me}
 			initialDraft={point.draft}

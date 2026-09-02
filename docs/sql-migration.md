@@ -99,7 +99,7 @@ Read-only аудит снаба сузил и локально зафиксир�
 - `b24_app_migrator`: отдельный секрет и DDL-права только на `b24_app`; отсутствует в постоянном env контейнера.
 - `b24_app_backup`: отдельный read-only секрет для dump.
 - `b24_app_backfill`: one-shot credential только с `SELECT/INSERT/UPDATE`, без DDL/`DELETE`; создан отдельно 21 августа, хранится root-only и отсутствует в постоянном env.
-- `b24_app_tilda_sync`: будущий scheduler credential только с `SELECT` mappings и `SELECT/INSERT/UPDATE` run journal; не получает workflow DML, DDL или `DELETE` и не хранится в backend env.
+- `b24_app_tilda_sync`: scheduler credential с `SELECT` на mappings и две таблицы резервирования, а также `SELECT/INSERT/UPDATE` run journal; не получает workflow DML, DDL или `DELETE` и не хранится в backend env. Доступ к резервам нужен только для проекции свободного остатка Tilda (`физический Shelly - активный резерв`).
 - имя хоста базы берётся из проверенной production-конфигурации; имя контейнера не считается стабильным DNS-контрактом.
 - backend по-прежнему запускается в `erpnext_frappe_network`, но никогда не пишет напрямую в ERPNext schema.
 

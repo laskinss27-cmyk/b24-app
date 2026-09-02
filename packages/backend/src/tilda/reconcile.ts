@@ -6,6 +6,7 @@ import { fetchCompleteTildaErpStocks } from './erp-stock-reader.js';
 import { fetchCompleteTildaErpPrices } from './erp-price-reader.js';
 import { readTildaProductMappings } from './product-mapping-reader.js';
 import { readTildaPublicStockRows } from './public-catalog.js';
+import { fetchActiveTildaReservations } from './reservation-stock-reader.js';
 import { runTildaStockReconciliation } from './stock-reconciliation-service.js';
 import { TildaStockSyncRunStore, withTildaSyncLock, type TildaSyncTrigger } from './stock-sync-run-store.js';
 
@@ -45,6 +46,7 @@ try {
 		return runTildaStockReconciliation(trigger, {
 			readMappings: () => readTildaProductMappings(connection),
 			fetchStocks: (productIds) => fetchCompleteTildaErpStocks(erp, productIds),
+			fetchReservations: (productIds, sourceStore) => fetchActiveTildaReservations(connection, erp, productIds, sourceStore),
 			...(priceSyncEnabled ? { fetchPrices: (productIds: number[]) => fetchCompleteTildaErpPrices(erp, productIds) } : {}),
 			readPublicCatalog: () => readTildaPublicStockRows(publicUrl),
 			publishProjection: exchange,

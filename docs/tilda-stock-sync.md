@@ -495,8 +495,11 @@ wrapper and one cron line; removing that line stops scheduling without changing
 backend or ERPNext behavior.
 
 Each cycle holds both a host `flock` and connection-scoped MariaDB `GET_LOCK`,
-then reads 150 SQL stock mappings, all 134 confirmed ERP Items through the
-official API and the complete public Tilda catalog. It requires the audited
+then reads 150 SQL stock mappings, active unexpired reservation totals for the
+ERP warehouse behind `Shelly`, all 134 confirmed ERP Items through the official
+API and the complete public Tilda catalog. The published quantity is
+`max(0, floor(physical Shelly stock - active reservations))`; reservations do
+not alter physical ERPNext stock. It requires the audited
 shape `150 mappings / 134 projected / 16 skipped / 131 parents / 150 stock
 rows / 132 reversible / 2 exact unlimited exclusions`. Any missing Item,
 changed UID/SKU, incomplete page, unresolved shape or read error fails closed.
@@ -516,8 +519,15 @@ migration, backfill and backup roles and receives only:
 
 ```sql
 GRANT SELECT ON b24_app.tilda_product_mappings TO 'b24_app_tilda_sync'@'<SYNC_HOST_PART>';
+GRANT SELECT ON b24_app.stock_reservations TO 'b24_app_tilda_sync'@'<SYNC_HOST_PART>';
+GRANT SELECT ON b24_app.stock_reservation_lines TO 'b24_app_tilda_sync'@'<SYNC_HOST_PART>';
 GRANT SELECT, INSERT, UPDATE ON b24_app.tilda_stock_sync_runs TO 'b24_app_tilda_sync'@'<SYNC_HOST_PART>';
 ```
+
+The reservation grants are read-only and must be applied before deploying a
+worker version that includes the reservation overlay. Verify the grants, run a
+manual preview, and only then allow the scheduled cycle to publish. Missing SQL
+access fails the cycle before any Tilda write.
 
 The two-minute cron was enabled only after: pre-DDL backup, manual `0007`
 migration, post-DDL backup/restore drill, grant verification, a version-pinned
