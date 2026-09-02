@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { coreStoreId, fetchErpStoreStockFull, listActiveStoreTitles } from '../erp/operations.js';
-import { captureInventoryPointSnapshots, inventorySnapshotQuantities } from '../inventory-stock-snapshot.js';
+import { captureInventoryPointSnapshots, inventorySnapshotQuantities, normalizeInventorySubmission } from '../inventory-stock-snapshot.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
@@ -110,12 +110,26 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 						pt['startedAt'] = pt['startedAt'] ?? now;
 					}
 				} else if (b.action === 'submit') {
+					const previousResult = pt['result'] && typeof pt['result'] === 'object'
+						? pt['result'] as Record<string, unknown>
+						: {};
+					const previousLines = Array.isArray(previousResult['lines']) ? previousResult['lines'].length : 0;
+					const previousCounted = Number(previousResult['counted']);
+					const actBaseline = status === 'act' && Number.isFinite(previousCounted)
+						? Math.max(0, previousCounted - previousLines)
+						: 0;
+					const submitted = normalizeInventorySubmission(
+						b.result,
+						b.facts,
+						inventorySnapshotQuantities(pt),
+						actBaseline,
+					);
 					pt['status'] = status === 'act' ? 'reconciled' : 'submitted';
 					pt['submittedAt'] = now;
-					// The result is intentionally compared with the immutable opening snapshot.
-					// Movements made after opening are entered manually as part of the fact count.
-					pt['result'] = b.result ?? null;
-					if (b.facts && typeof b.facts === 'object') pt['draft'] = b.facts;
+					// Only explicitly entered facts are compared with the immutable opening snapshot.
+					// Blank rows are uncounted and therefore never create warehouse movements.
+					pt['result'] = submitted.result;
+					pt['draft'] = submitted.facts;
 					if (comments) pt['comments'] = comments;
 					if (!pt['responsibleId']) {
 						pt['responsibleId'] = meId;

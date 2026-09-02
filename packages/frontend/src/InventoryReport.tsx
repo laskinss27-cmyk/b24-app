@@ -14,6 +14,7 @@ import {
 	clearInventoryLocalDraft,
 	commentsToDraft,
 	countsToDraft,
+	enteredInventoryDifferences,
 	inventoryLineNeedsAttention,
 	inventoryDraftStorageKey,
 	readInventoryLocalDraft,
@@ -35,8 +36,6 @@ interface InventoryCountProps {
 	inventoryId: string;
 	storeId: number;
 	storeName: string;
-	/** Exact time of the immutable warehouse snapshot used for comparison. */
-	snapshotAt?: string | undefined;
 	me: { id: string; name: string };
 	/** Промежуточный подсчёт, если менеджер возвращается к черновику. */
 	initialDraft?: Record<number, number> | undefined;
@@ -48,6 +47,8 @@ interface InventoryCountProps {
 	actLines?: InvResult['lines'] | undefined;
 	/** Режим акта: размер инвентаризации 1-го раунда (для слияния в финал). */
 	total1?: number | undefined;
+	/** Режим акта: сколько позиций было заполнено в 1-м раунде. */
+	counted1?: number | undefined;
 	/** Охват (#13): считаем только эти разделы каталога; пусто/нет — весь склад. */
 	sectionIds?: number[] | undefined;
 	/** dev-режим (?inv) — берём мок вместо реального склада. */
@@ -75,7 +76,7 @@ const MOCK_STOCK: Record<number, InvLine[]> = {
 };
 
 export function InventoryCount(props: InventoryCountProps): JSX.Element {
-	const { inventoryId, storeId, storeName, snapshotAt, me, initialDraft, initialComments, mode, actLines, total1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
+	const { inventoryId, storeId, storeName, me, initialDraft, initialComments, mode, actLines, total1, counted1, sectionIds, mock, mobile, onBack, onSubmitted } = props;
 	const draftMode = mode === 'act' ? 'act' : 'count';
 	const localDraftKey = inventoryDraftStorageKey(inventoryId, storeId, draftMode);
 	const restoredLocalRef = useRef<InventoryLocalDraft | null>(readInventoryLocalDraft(localDraftKey));
@@ -352,25 +353,13 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 
 	async function onSubmit(): Promise<void> {
 		setActionErr(null);
-		// пустое поле = 0; расхождение считаем по ВСЕМ позициям (непосчитанное с учётом>0 = недостача)
-		const factOf = (i: InvLine): number => {
-			const v = counts[i.productId];
-			return v === undefined || v === '' ? 0 : Number(v);
-		};
-		const lines: InvResult['lines'] = list
-			.filter((i) => factOf(i) !== i.book)
-			.map((i) => ({
-				productId: i.productId,
-				name: i.name,
-				book: i.book,
-				fact: factOf(i),
-				diff: factOf(i) - i.book,
-				...(comments[i.productId]?.trim() ? { comment: comments[i.productId]!.trim().slice(0, 500) } : {}),
-			}));
+		// Пустая строка означает «не считали» и не создаёт складского движения. Явный 0 — посчитанный ноль.
+		const lines: InvResult['lines'] = enteredInventoryDifferences(list, counts, comments);
 		// режим акта → слияние в финал: total и совпавшие берём из 1-го раунда, расхождения = оставшиеся после сверки
+		const actBaseline = Math.max(0, (counted1 ?? total1 ?? list.length) - list.length);
 		const result: InvResult =
 			mode === 'act'
-				? { total: total1 ?? list.length, counted: (total1 ?? list.length) - lines.length, discrepancies: lines.length, lines }
+				? { total: total1 ?? list.length, counted: actBaseline + counted, discrepancies: lines.length, lines }
 				: { counted, total: list.length, discrepancies: lines.length, lines };
 		const facts = draftObj(); // все факты раунда — чтобы предзаполнить 2-й раунд (акт)
 		const savedComments = commentsObj();
@@ -419,16 +408,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 					: lastSavedAt
 						? `Черновик сохранён на сервере в ${new Date(lastSavedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
 						: 'Автосохранение включено.';
-	const snapshotDate = snapshotAt && !Number.isNaN(new Date(snapshotAt).getTime())
-		? new Date(snapshotAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
-		: null;
-
 	return (
 		<div className="inv">
 			{mode !== 'act' && (
 				<div className="inventory-snapshot-reminder" role="note">
-					{snapshotDate ? `ОСТАТКИ ЗАФИКСИРОВАНЫ ${snapshotDate}. ` : 'ОСТАТКИ ЗАФИКСИРОВАНЫ НА МОМЕНТ ОТКРЫТИЯ ИНВЕНТАРИЗАЦИИ. '}
-					ЕСЛИ ТЫ ПРОДАЛ ИЛИ ПЕРЕМЕСТИЛ ТОВАР ДО ТОГО, КАК ПОСЧИТАЛ ПОЗИЦИЮ, — ВПИШИ ЭТО КОЛИЧЕСТВО ПЛЮСОМ К ТОМУ, ЧТО ФИЗИЧЕСКИ ОСТАЛОСЬ.
+					Если товар был продан или перемещён после запуска инвентаризации, не отражайте эту позицию как расхождение.
 				</div>
 			)}
 			<header>

@@ -94,6 +94,46 @@ export function countsToDraft(counts: Record<number, string>): Record<number, nu
 	return out;
 }
 
+export interface InventoryCountSourceLine {
+	productId: number;
+	name: string;
+	book: number;
+}
+
+export interface EnteredInventoryDifference {
+	productId: number;
+	name: string;
+	book: number;
+	fact: number;
+	diff: number;
+	comment?: string;
+}
+
+/** Blank means "not counted": only explicitly entered quantities can become discrepancies. */
+export function enteredInventoryDifferences(
+	lines: InventoryCountSourceLine[],
+	counts: Record<number, string>,
+	comments: Record<number, string>,
+): EnteredInventoryDifference[] {
+	const differences: EnteredInventoryDifference[] = [];
+	for (const line of lines) {
+		const rawFact = counts[line.productId];
+		if (rawFact === undefined || rawFact === '') continue;
+		const fact = Number(rawFact);
+		if (!Number.isFinite(fact) || fact < 0 || fact === line.book) continue;
+		const comment = comments[line.productId]?.trim().slice(0, 500);
+		differences.push({
+			productId: line.productId,
+			name: line.name,
+			book: line.book,
+			fact,
+			diff: fact - line.book,
+			...(comment ? { comment } : {}),
+		});
+	}
+	return differences;
+}
+
 export function inventoryLineNeedsAttention(book: number, entered: string | undefined): boolean {
 	return entered === undefined || entered === '' || Number(entered) !== book;
 }

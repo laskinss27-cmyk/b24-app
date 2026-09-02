@@ -51,7 +51,6 @@ interface Counting {
 	inventoryId: string;
 	storeId: number;
 	storeName: string;
-	snapshotAt?: string | undefined;
 	draft?: Record<number, number> | undefined;
 	comments?: Record<number, string> | undefined;
 	/** Охват (#13): разделы инвентаризации — прокидываем в подсчёт. */
@@ -61,6 +60,7 @@ interface Counting {
 	/** Режим акта: расхождения 1-го раунда (что показываем) + размер инвентаризации (для слияния). */
 	actLines?: InvResult['lines'] | undefined;
 	total1?: number | undefined;
+	counted1?: number | undefined;
 }
 
 const MOCK_STORES: StoreInfo[] = [
@@ -245,7 +245,7 @@ export function InventoryHome(): JSX.Element {
 				return;
 			}
 		}
-		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, snapshotAt: p.stockSnapshot?.capturedAt ?? inv.createdAt, draft: p.draft, comments: p.comments, sectionIds: inv.sectionIds });
+		setCounting({ inventoryId: inv.id, storeId: p.storeId, storeName: p.storeName, draft: p.draft, comments: p.comments, sectionIds: inv.sectionIds });
 	}
 
 	function continuePoint(inv: Inventory, p: InvPoint, mode?: 'count' | 'act'): void {
@@ -254,13 +254,13 @@ export function InventoryHome(): JSX.Element {
 			inventoryId: inv.id,
 			storeId: p.storeId,
 			storeName: p.storeName,
-			snapshotAt: p.stockSnapshot?.capturedAt ?? inv.createdAt,
 			draft: p.draft,
 			comments: p.comments,
 			sectionIds: inv.sectionIds,
 			mode,
 			actLines: mode === 'act' ? p.result?.lines : undefined,
 			total1: mode === 'act' ? p.result?.total : undefined,
+			counted1: mode === 'act' ? p.result?.counted : undefined,
 		});
 	}
 
@@ -368,7 +368,6 @@ export function InventoryHome(): JSX.Element {
 				inventoryId={counting.inventoryId}
 				storeId={counting.storeId}
 				storeName={counting.storeName}
-				snapshotAt={counting.snapshotAt}
 				sectionIds={counting.sectionIds}
 				me={me}
 				initialDraft={counting.draft}
@@ -376,6 +375,7 @@ export function InventoryHome(): JSX.Element {
 				mode={counting.mode}
 				actLines={counting.actLines}
 				total1={counting.total1}
+				counted1={counting.counted1}
 				mock={ctx.__mock}
 				onBack={() => {
 					setCounting(null);

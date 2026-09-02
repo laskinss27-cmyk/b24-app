@@ -15,6 +15,18 @@ export interface FrozenInventoryDifference {
 	diff: number;
 }
 
+export interface SubmittedInventoryResult {
+	total: number;
+	counted: number;
+	discrepancies: number;
+	lines: Array<FrozenInventoryDifference & { comment?: string }>;
+}
+
+export interface NormalizedInventorySubmission {
+	facts: Record<number, number>;
+	result: SubmittedInventoryResult;
+}
+
 export async function captureInventoryPointSnapshots(
 	rawPoints: unknown[],
 	capturedAt: string,
@@ -68,6 +80,64 @@ export function inventorySnapshotQuantities(point: Record<string, unknown>): Map
 		quantities.set(productId, qty);
 	}
 	return quantities;
+}
+
+/**
+ * Builds the submitted discrepancy set from explicitly entered facts.
+ * This keeps a cached client from turning blank rows into zero-quantity write-offs.
+ */
+export function normalizeInventorySubmission(
+	rawResult: unknown,
+	rawFacts: unknown,
+	snapshot: Map<number, number> | null,
+	previouslyCounted = 0,
+): NormalizedInventorySubmission {
+	const resultRecord = rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
+		? rawResult as Record<string, unknown>
+		: {};
+	const rawLines = Array.isArray(resultRecord['lines']) ? resultRecord['lines'] : [];
+	const metadata = new Map<number, Record<string, unknown>>();
+	for (const rawLine of rawLines) {
+		if (!rawLine || typeof rawLine !== 'object' || Array.isArray(rawLine)) continue;
+		const line = rawLine as Record<string, unknown>;
+		const productId = Number(line['productId']);
+		if (Number.isInteger(productId) && productId > 0) metadata.set(productId, line);
+	}
+
+	const facts: Record<number, number> = {};
+	if (rawFacts && typeof rawFacts === 'object' && !Array.isArray(rawFacts)) {
+		const entries = Object.entries(rawFacts as Record<string, unknown>);
+		if (entries.length > 50_000) throw new Error('слишком много фактов инвентаризации');
+		for (const [rawProductId, rawFact] of entries) {
+			const productId = Number(rawProductId);
+			const fact = Number(rawFact);
+			if (!/^\d+$/.test(rawProductId) || !Number.isInteger(productId) || productId <= 0 || !Number.isFinite(fact) || fact < 0) {
+				throw new Error(`некорректный факт инвентаризации для товара ${rawProductId}`);
+			}
+			facts[productId] = fact;
+		}
+	}
+
+	const lines: SubmittedInventoryResult['lines'] = [];
+	for (const [rawProductId, fact] of Object.entries(facts)) {
+		const productId = Number(rawProductId);
+		const source = metadata.get(productId);
+		const submittedBook = Number(source?.['book']);
+		const book = snapshot ? (snapshot.get(productId) ?? 0) : (Number.isFinite(submittedBook) ? submittedBook : 0);
+		const diff = fact - book;
+		if (Math.abs(diff) < 1e-9) continue;
+		const name = String(source?.['name'] ?? `Товар #${productId}`).trim().slice(0, 500);
+		const comment = typeof source?.['comment'] === 'string' ? source['comment'].trim().slice(0, 500) : '';
+		lines.push({ productId, name, book, fact, diff, ...(comment ? { comment } : {}) });
+	}
+
+	const submittedTotal = Number(resultRecord['total']);
+	const total = Math.max(
+		Object.keys(facts).length + previouslyCounted,
+		Number.isInteger(submittedTotal) && submittedTotal >= 0 ? submittedTotal : 0,
+	);
+	const counted = Math.min(total, Math.max(0, previouslyCounted) + Object.keys(facts).length);
+	return { facts, result: { total, counted, discrepancies: lines.length, lines } };
 }
 
 /** Submitted result lines are the immutable discrepancy set for snapshot-based inventories. */

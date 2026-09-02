@@ -4,6 +4,7 @@ import {
 	clearInventoryLocalDraft,
 	commentsToDraft,
 	countsToDraft,
+	enteredInventoryDifferences,
 	inventoryLineNeedsAttention,
 	inventoryDraftStorageKey,
 	readInventoryLocalDraft,
@@ -62,4 +63,26 @@ test('attention filter keeps discrepancies and unfilled rows but treats zero as 
 	assert.equal(inventoryLineNeedsAttention(3, '2'), true);
 	assert.equal(inventoryLineNeedsAttention(3, '3'), false);
 	assert.equal(inventoryLineNeedsAttention(0, '0'), false);
+});
+
+test('blank inventory rows create no movement while an explicit zero remains a discrepancy', () => {
+	assert.deepEqual(enteredInventoryDifferences([
+		{ productId: 1, name: 'Не считали', book: 4 },
+		{ productId: 2, name: 'Посчитали ноль', book: 3 },
+		{ productId: 3, name: 'Совпало', book: 2 },
+	], {
+		1: '',
+		2: '0',
+		3: '2',
+	}, {
+		1: 'не должен попасть',
+		2: '  полка пустая  ',
+	}), [{
+		productId: 2,
+		name: 'Посчитали ноль',
+		book: 3,
+		fact: 0,
+		diff: -3,
+		comment: 'полка пустая',
+	}]);
 });

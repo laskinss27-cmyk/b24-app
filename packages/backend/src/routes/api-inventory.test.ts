@@ -16,6 +16,7 @@ import {
 	captureInventoryPointSnapshots,
 	frozenInventoryDifferences,
 	inventorySnapshotQuantities,
+	normalizeInventorySubmission,
 } from '../inventory-stock-snapshot.js';
 
 const mobileConfig: Config = {
@@ -190,6 +191,48 @@ test('inventory snapshot and submitted differences stay frozen after later stock
 	}]);
 	// A later sale may move live ERP stock from 10 to 6; neither frozen value changes.
 	assert.equal(inventorySnapshotQuantities(point)?.get(101), 10);
+});
+
+test('inventory submission ignores blank rows omitted from facts but preserves an explicit zero', () => {
+	const submitted = normalizeInventorySubmission({
+		total: 3,
+		counted: 3,
+		discrepancies: 2,
+		lines: [
+			{ productId: 101, name: 'Blank in a cached client', book: 4, fact: 0, diff: -4 },
+			{ productId: 102, name: 'Explicit zero', book: 3, fact: 0, diff: -3, comment: '  shelf empty  ' },
+		],
+	}, { 102: 0, 103: 2 }, new Map([[101, 4], [102, 3], [103, 2]]));
+
+	assert.deepEqual(submitted, {
+		facts: { 102: 0, 103: 2 },
+		result: {
+			total: 3,
+			counted: 2,
+			discrepancies: 1,
+			lines: [{
+				productId: 102,
+				name: 'Explicit zero',
+				book: 3,
+				fact: 0,
+				diff: -3,
+				comment: 'shelf empty',
+			}],
+		},
+	});
+});
+
+test('act submission keeps earlier completed rows counted and ignores untouched act rows', () => {
+	const submitted = normalizeInventorySubmission({
+		total: 100,
+		lines: [
+			{ productId: 202, name: 'Still short', book: 8, fact: 7, diff: -1 },
+		],
+	}, { 201: 5, 202: 7 }, new Map([[201, 5], [202, 8], [203, 4]]), 85);
+
+	assert.equal(submitted.result.counted, 87);
+	assert.equal(submitted.result.discrepancies, 1);
+	assert.deepEqual(submitted.result.lines.map((line) => line.productId), [202]);
 });
 
 test('inventory creation captures every point before the document is stored', async () => {
