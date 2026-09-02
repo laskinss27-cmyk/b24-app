@@ -324,6 +324,22 @@ Commit `ef4fecb` с opt-in rotating owner OAuth vault развёрнут без 
 
 После отдельного разрешения one-shot DML-only runner применил точный plan `22ad…f831` одной транзакцией; повтор того же in-memory plan был no-op. SQL теперь `552|1064|563|753|2|5`, latest sources `425|119|5`, warnings `22`, orphan counts `0|0|0`, lock свободен. Два ранних runner-прохода безопасно остановились до writer на несовместимых диагностических запросах (`current_user` alias и отсутствующая `ROUTINE_PRIVILEGES`); counts/hash оставались прежними. Успешный runner вывел полный success JSON, а внешний shell code `1` возник только из-за проверки env до `EXIT trap`; env и `--rm` container независимо подтверждены отсутствующими, apply не повторялся. Post-apply dump `20260821_125943-b24_app-database.sql.gz` (`173731` bytes) прошёл checksum/gzip и Disk read-back, IDs `103952/103950`. Restore `b24_app_restore_20260821_125943` совпал с source по структуре, counts/latest hash и checksums всех таблиц и сохранён до cleanup. Повторный shadow compare дал точный `match`, `0` differences/errors; root-only audit `/root/b24-app-audits/20260821-130225-supply-shadow-report-match.json`, SHA-256 `8755697d248189ebb4242307c0dd8fcaa4ee6200a73647faf2411427b2f01381`. Before/after focused tests `56/56`; production `ef4fecb`, restart `0`, network/mount/port, internal/public health, readiness и ERP read зелёные, shadow flag `off`, source switch не выполнялся.
 
+2 сентября после отдельного разрешения commit `ecc37d4` развёрнут как
+`b24-app:ecc37d4`; rollback `b24-backend-prev-before-ecc37d4` сохранён.
+Migration `0022` добавила полные canonical transfer payloads и повторно прошла
+как no-op. Свежий owner plan
+`e306a97fcc490e3c28d34690e502d5a30ad1506e27f5386d56a6e63fb1dc10a6`
+применён one-shot DML-only user: sources `665|182|14`, latest rows
+`862|1582|890|1188|182`, `0` errors, `22` warnings, orphan counts `0|0|0|0`.
+Runtime full compare и request shadow resolver дали `match`; рабочий ответ всё
+ещё `legacy`, так как `B24_APP_SUPPLY_SQL_READ=shadow`. Pre/post backups
+`20260902_130703` и `20260902_131829` прошли checksum, внешний read-back и
+полный restore hash parity; retention не запускался, backup/rollback сохранены.
+Финально подтверждены internal/public health, readiness database/reservations,
+официальный ERP read, `/srv/b24-state`, `127.0.0.1:3000`, `unless-stopped`,
+restart `0`, runtime `SELECT` only и `erpnext_frappe_network`. Подробный журнал и
+следующий gate: [`sql-supply-verified-read-foundation-2026-09-02.md`](sql-supply-verified-read-foundation-2026-09-02.md).
+
 ### Автоматическая проекция остатков Tilda — включена 2026-08-21
 
 Локальный кандидат запускает ровно один reconciliation cycle и не встроен в
