@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseRuntime } from '../database/runtime.js';
+import { supplyMirrorSourceHash } from '../database/supply-backfill-plan.js';
 import type { StoredSupplyMirrorSnapshot } from '../database/supply-mirror-reader.js';
 import type { StoredTransfer } from '../transfers/model.js';
 
-export type SupplySqlReadMode = 'off' | 'shadow';
+export type SupplySqlReadMode = 'off' | 'shadow' | 'verified';
 export type SupplySqlReadShadowStatus = 'disabled' | 'match' | 'mismatch' | 'no_snapshot' | 'unavailable' | 'error';
 
 export interface SupplyLegacyTransferEvidence {
@@ -13,7 +14,8 @@ export interface SupplyLegacyTransferEvidence {
 
 export interface SupplySqlReadShadowReport {
 	status: SupplySqlReadShadowStatus;
-	legacyResponsePreserved: true;
+	legacyResponsePreserved: boolean;
+	responseSource: 'legacy' | 'sql';
 	storedPlanHash: string | null;
 	checkpointObservedAt: string | null;
 	legacyTransferCount: number;
@@ -35,7 +37,13 @@ interface TransferProjection {
 			toStore: string | null;
 		}>;
 	}>;
+	payloads: Array<{ externalId: string; sourceHash: string }>;
 	relations: string[];
+}
+
+export interface SupplySqlTransferResolution {
+	report: SupplySqlReadShadowReport;
+	transfers: StoredTransfer[];
 }
 
 function numericDealId(value: unknown): number | null {
@@ -67,6 +75,10 @@ function legacyProjection(transfers: StoredTransfer[]): TransferProjection {
 			toStore: transfer.toStore || null,
 		})),
 	})).sort((left, right) => left.externalId.localeCompare(right.externalId, 'en'));
+	const payloads = transfers.map((transfer) => {
+		const { id, name, ...data } = transfer;
+		return { externalId: String(id), sourceHash: supplyMirrorSourceHash({ name, data }) };
+	}).sort((left, right) => left.externalId.localeCompare(right.externalId, 'en'));
 	const relations: string[] = [];
 	for (const transfer of transfers) {
 		const source = transferIdentity(transfer.id);
@@ -79,7 +91,7 @@ function legacyProjection(transfers: StoredTransfer[]): TransferProjection {
 		}
 		if (transfer.correctionOf) relations.push(`${source}:corrects_transfer:${transferIdentity(transfer.correctionOf)}`);
 	}
-	return { documents, relations: relations.sort((left, right) => left.localeCompare(right, 'en')) };
+	return { documents, payloads, relations: relations.sort((left, right) => left.localeCompare(right, 'en')) };
 }
 
 function sqlProjection(snapshot: StoredSupplyMirrorSnapshot): TransferProjection {
@@ -105,6 +117,9 @@ function sqlProjection(snapshot: StoredSupplyMirrorSnapshot): TransferProjection
 		}))
 		.sort((left, right) => left.externalId.localeCompare(right.externalId, 'en'));
 	const liveTransferIdentities = new Set(documents.map((document) => transferIdentity(document.externalId)));
+	const payloads = snapshot.transferPayloads
+		.map((payload) => ({ externalId: String(payload.externalId), sourceHash: payload.sourceHash }))
+		.sort((left, right) => left.externalId.localeCompare(right.externalId, 'en'));
 	const relations = snapshot.links
 		.filter((link) => liveTransferIdentities.has(link.fromDocumentIdentity)
 			&& (link.relationType === 'transfers_for_request'
@@ -112,7 +127,7 @@ function sqlProjection(snapshot: StoredSupplyMirrorSnapshot): TransferProjection
 				|| link.relationType === 'corrects_transfer'))
 		.map((link) => `${link.fromDocumentIdentity}:${link.relationType}:${link.toDocumentIdentity}`)
 		.sort((left, right) => left.localeCompare(right, 'en'));
-	return { documents, relations };
+	return { documents, payloads, relations };
 }
 
 function projectionHash(value: TransferProjection): string {
@@ -131,41 +146,81 @@ function loadedCountDifferences(snapshot: StoredSupplyMirrorSnapshot): string[] 
 		.map((key) => `checkpoint_${key}`);
 }
 
-export async function observeSupplySqlReadShadow(
+async function compareSupplySqlRead(
 	mode: SupplySqlReadMode,
 	database: DatabaseRuntime | undefined,
 	legacy: SupplyLegacyTransferEvidence,
-): Promise<SupplySqlReadShadowReport> {
+): Promise<{ report: SupplySqlReadShadowReport; snapshot: StoredSupplyMirrorSnapshot | null }> {
 	const base = {
-		legacyResponsePreserved: true as const,
+		legacyResponsePreserved: true,
+		responseSource: 'legacy' as const,
 		storedPlanHash: null,
 		checkpointObservedAt: null,
 		legacyTransferCount: legacy.transfers.length,
 		storedTransferCount: null,
 		differences: [] as string[],
 	};
-	if (mode === 'off') return { ...base, status: 'disabled' };
-	if (!database || database.mode !== 'readiness') return { ...base, status: 'unavailable' };
+	if (mode === 'off') return { report: { ...base, status: 'disabled' }, snapshot: null };
+	if (!database || database.mode !== 'readiness') return { report: { ...base, status: 'unavailable' }, snapshot: null };
 	try {
 		const snapshot = await database.readLatestSupplyMirrorSnapshot();
-		if (!snapshot) return { ...base, status: 'no_snapshot' };
+		if (!snapshot) return { report: { ...base, status: 'no_snapshot' }, snapshot: null };
 		const legacyView = legacyProjection(legacy.transfers);
 		const storedView = sqlProjection(snapshot);
 		const differences = loadedCountDifferences(snapshot);
 		if (legacy.rawRecordCount !== legacy.transfers.length) differences.push('legacy_invalid_transfer_records');
 		if (snapshot.checkpoint.sourceRecords.bitrixTransfers !== legacy.rawRecordCount) differences.push('source_record_count');
 		if (storedView.documents.length !== legacy.transfers.length) differences.push('stored_transfer_count');
-		if (projectionHash(storedView) !== projectionHash(legacyView)) differences.push('transfer_projection');
+		if (storedView.payloads.length !== legacy.transfers.length) differences.push('stored_transfer_payload_count');
+		if (projectionHash({ ...storedView, payloads: [] }) !== projectionHash({ ...legacyView, payloads: [] })) differences.push('transfer_projection');
+		if (projectionHash({ documents: [], relations: [], payloads: storedView.payloads })
+			!== projectionHash({ documents: [], relations: [], payloads: legacyView.payloads })) differences.push('transfer_payload');
+		const matches = differences.length === 0;
 		return {
-			status: differences.length ? 'mismatch' : 'match',
-			legacyResponsePreserved: true,
-			storedPlanHash: snapshot.checkpoint.planHash,
-			checkpointObservedAt: snapshot.checkpoint.observedAt,
-			legacyTransferCount: legacy.transfers.length,
-			storedTransferCount: storedView.documents.length,
-			differences,
+			report: {
+				status: matches ? 'match' : 'mismatch',
+				legacyResponsePreserved: mode !== 'verified' || !matches,
+				responseSource: mode === 'verified' && matches ? 'sql' : 'legacy',
+				storedPlanHash: snapshot.checkpoint.planHash,
+				checkpointObservedAt: snapshot.checkpoint.observedAt,
+				legacyTransferCount: legacy.transfers.length,
+				storedTransferCount: storedView.documents.length,
+				differences,
+			},
+			snapshot,
 		};
 	} catch {
-		return { ...base, status: 'error' };
+		return { report: { ...base, status: 'error' }, snapshot: null };
 	}
+}
+
+function transfersFromSnapshot(snapshot: StoredSupplyMirrorSnapshot, legacyOrder: StoredTransfer[]): StoredTransfer[] {
+	const byId = new Map(snapshot.transferPayloads.map((payload) => [payload.externalId, {
+		id: payload.externalId,
+		name: payload.name,
+		...payload.data,
+	}]));
+	return legacyOrder.map((transfer) => byId.get(transfer.id)!).filter(Boolean);
+}
+
+export async function resolveSupplySqlTransfers(
+	mode: SupplySqlReadMode,
+	database: DatabaseRuntime | undefined,
+	legacy: SupplyLegacyTransferEvidence,
+): Promise<SupplySqlTransferResolution> {
+	const compared = await compareSupplySqlRead(mode, database, legacy);
+	return {
+		report: compared.report,
+		transfers: compared.report.responseSource === 'sql' && compared.snapshot
+			? transfersFromSnapshot(compared.snapshot, legacy.transfers)
+			: legacy.transfers,
+	};
+}
+
+export async function observeSupplySqlReadShadow(
+	mode: SupplySqlReadMode,
+	database: DatabaseRuntime | undefined,
+	legacy: SupplyLegacyTransferEvidence,
+): Promise<SupplySqlReadShadowReport> {
+	return (await compareSupplySqlRead(mode, database, legacy)).report;
 }

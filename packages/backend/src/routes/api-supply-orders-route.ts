@@ -6,7 +6,7 @@ import { ErpClient } from '../erp/client.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { listSupplyRequests, type SupplyRequest } from '../erp/operations.js';
 import { calculateRequestProgress, coverageBeyondBaseline, directReceiptFulfillment } from '../supply/progress.js';
-import { observeSupplySqlReadShadow } from '../supply/sql-read-shadow.js';
+import { resolveSupplySqlTransfers, type SupplySqlReadShadowReport } from '../supply/sql-read-shadow.js';
 import {
 	addCovered,
 	listPurchaseChildren,
@@ -31,6 +31,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance, database?: Datab
 			const reqs = await listSupplyRequests(erp);
 			let rawTransferRecordCount = 0;
 			let parsedTransfers: TransferProgress[] = [];
+			let sqlReadReport: SupplySqlReadShadowReport | null = null;
 			const standaloneToStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
 			const standaloneRequest: SupplyRequest = { name: STANDALONE_SUPPLY_REQUEST, requestKey: '', createdAt: '', dealId: '', date: '', deadline: '', status: '', toStore: standaloneToStore, note: '', items: [] };
 			// Название сделки — из Б24 (одним батч-вызовом по списку dealId). Статус «обеспечено» — из самой заявки.
@@ -55,6 +56,14 @@ export function registerSupplyOrdersRoute(app: FastifyInstance, database?: Datab
 				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
 				rawTransferRecordCount = transferItems?.length ?? 0;
 				parsedTransfers = (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null);
+				if (app.config.supplySqlRead !== 'off') {
+					const resolved = await resolveSupplySqlTransfers(app.config.supplySqlRead, database, {
+						rawRecordCount: rawTransferRecordCount,
+						transfers: parsedTransfers,
+					});
+					parsedTransfers = resolved.transfers;
+					sqlReadReport = resolved.report;
+				}
 				for (const t of parsedTransfers) {
 					if (t.status === 'draft' || t.status === 'collected' || t.status === 'requested') {
 						for (const line of t.lines) {
@@ -181,20 +190,17 @@ export function registerSupplyOrdersRoute(app: FastifyInstance, database?: Datab
 					closed: true,
 					standalone: true,
 				}] : enriched;
-			if (app.config.supplySqlRead === 'shadow') {
-				const sqlShadow = await observeSupplySqlReadShadow('shadow', database, {
-					rawRecordCount: rawTransferRecordCount,
-					transfers: parsedTransfers,
-				});
+			if (sqlReadReport) {
 				const shadowLog = {
-					status: sqlShadow.status,
-					storedPlanHash: sqlShadow.storedPlanHash,
-					checkpointObservedAt: sqlShadow.checkpointObservedAt,
-					legacyTransferCount: sqlShadow.legacyTransferCount,
-					storedTransferCount: sqlShadow.storedTransferCount,
-					differences: sqlShadow.differences,
+					status: sqlReadReport.status,
+					responseSource: sqlReadReport.responseSource,
+					storedPlanHash: sqlReadReport.storedPlanHash,
+					checkpointObservedAt: sqlReadReport.checkpointObservedAt,
+					legacyTransferCount: sqlReadReport.legacyTransferCount,
+					storedTransferCount: sqlReadReport.storedTransferCount,
+					differences: sqlReadReport.differences,
 				};
-				if (sqlShadow.status === 'match') app.log.info(shadowLog, '[api/supply/orders] SQL shadow');
+				if (sqlReadReport.status === 'match') app.log.info(shadowLog, '[api/supply/orders] SQL shadow');
 				else app.log.warn(shadowLog, '[api/supply/orders] SQL shadow fallback');
 			}
 			app.log.info({ reqs: enriched.length, standalonePurchases: standalonePurchases.length, standaloneTransfers: standaloneTransfers.length }, '[api/supply/orders] ok');

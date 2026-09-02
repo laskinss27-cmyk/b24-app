@@ -9,26 +9,27 @@ import type {
 	SupplyMirrorPlan,
 	SupplyMirrorPlanIssue,
 	SupplyMirrorSnapshot,
+	SupplyMirrorTransferPayloadRow,
 } from './supply-backfill-types.js';
 
-function canonicalJson(value: unknown): string {
+export function supplyMirrorCanonicalJson(value: unknown): string {
 	if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
 	if (typeof value === 'number') {
 		if (!Number.isFinite(value)) throw new Error('source payload contains a non-finite number');
 		return JSON.stringify(value);
 	}
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	if (Array.isArray(value)) return `[${value.map(supplyMirrorCanonicalJson).join(',')}]`;
 	if (typeof value === 'object') {
 		const entries = Object.entries(value as Record<string, unknown>)
 			.filter(([, nested]) => nested !== undefined)
 			.sort(([left], [right]) => left.localeCompare(right, 'en'));
-		return `{${entries.map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`).join(',')}}`;
+		return `{${entries.map(([key, nested]) => `${JSON.stringify(key)}:${supplyMirrorCanonicalJson(nested)}`).join(',')}}`;
 	}
 	throw new Error(`source payload contains unsupported ${typeof value}`);
 }
 
 export function supplyMirrorSourceHash(value: unknown): string {
-	return createHash('sha256').update(canonicalJson(value)).digest('hex');
+	return createHash('sha256').update(supplyMirrorCanonicalJson(value)).digest('hex');
 }
 
 export function supplyMirrorDocumentIdentity(ref: MirrorDocumentRef): string {
@@ -169,6 +170,83 @@ export function buildSupplyMirrorPlan(snapshot: SupplyMirrorSnapshot): SupplyMir
 	}
 	const documents = new Set(documentRows.map((row) => row.identity));
 	const lines = new Set(lineRows.map((row) => row.identity));
+	const transferPayloadRows: SupplyMirrorTransferPayloadRow[] = [];
+	for (const transfer of snapshot.transferPayloads) {
+		const documentIdentity = supplyMirrorDocumentIdentity(transfer.document);
+		const identity = documentIdentity;
+		if (!documents.has(documentIdentity)) {
+			addIssue(issues, 'missing_transfer_payload_document', identity, 'transfer payload references a document outside the complete snapshot');
+			continue;
+		}
+		if (transfer.document.externalSystem !== 'bitrix' || transfer.document.documentType !== 'transfer') {
+			addIssue(issues, 'invalid_transfer_payload_document', identity, 'transfer payload must reference a Bitrix transfer document');
+			continue;
+		}
+		if (!Number.isSafeInteger(transfer.externalId) || transfer.externalId <= 0 || String(transfer.externalId) !== transfer.document.externalId.trim()) {
+			addIssue(issues, 'invalid_transfer_payload_id', identity, 'transfer payload id does not match its document');
+			continue;
+		}
+		if (!transfer.name.length || transfer.name.length > 255) {
+			addIssue(issues, 'invalid_transfer_payload_name', identity, 'transfer payload name must contain 1 to 255 characters');
+			continue;
+		}
+		let sourceHash: string;
+		try { sourceHash = supplyMirrorSourceHash({ name: transfer.name, data: transfer.data }); }
+		catch (error) {
+			addIssue(issues, 'invalid_transfer_payload', identity, error instanceof Error ? error.message : String(error));
+			continue;
+		}
+		transferPayloadRows.push({
+			identity,
+			documentIdentity,
+			externalId: transfer.externalId,
+			name: transfer.name,
+			data: transfer.data,
+			observedAt: transfer.observedAt,
+			sourceHash,
+		});
+	}
+	for (const duplicate of duplicateIdentities(transferPayloadRows.map((row) => row.identity))) {
+		addIssue(issues, 'duplicate_transfer_payload', duplicate, 'transfer payload identity is duplicated');
+	}
+	const transferPayloadIdentities = new Set(transferPayloadRows.map((row) => row.documentIdentity));
+	const liveTransferDocuments = documentRows.filter((row) => row.externalSystem === 'bitrix'
+		&& row.documentType === 'transfer'
+		&& !String(row.externalStatus ?? '').startsWith('source_missing'));
+	for (const document of liveTransferDocuments) {
+		if (!transferPayloadIdentities.has(document.identity)) {
+			addIssue(issues, 'missing_transfer_payload', document.identity, 'live Bitrix transfer document has no complete payload');
+		}
+	}
+	if (transferPayloadRows.length !== snapshot.sources.bitrixTransfers.records) {
+		addIssue(
+			issues,
+			'transfer_payload_count_mismatch',
+			'bitrixTransfers',
+			`complete payloads ${transferPayloadRows.length} do not match source records ${snapshot.sources.bitrixTransfers.records}`,
+		);
+	}
+	for (const payload of transferPayloadRows) {
+		const document = documentRows.find((row) => row.identity === payload.documentIdentity);
+		const payloadDealId = Number(payload.data.dealId);
+		const normalizedPayloadDealId = Number.isSafeInteger(payloadDealId) && payloadDealId > 0 ? payloadDealId : null;
+		if (document && (document.externalStatus !== payload.data.status || document.bitrixDealId !== normalizedPayloadDealId)) {
+			addIssue(issues, 'transfer_payload_header_mismatch', payload.identity, 'transfer payload status or deal does not match its normalized document');
+		}
+		const payloadLines = payload.data.lines;
+		const normalizedLines = lineRows
+			.filter((line) => line.documentIdentity === payload.documentIdentity)
+			.sort((left, right) => left.lineOrdinal - right.lineOrdinal);
+		const linesMatch = normalizedLines.length === payloadLines.length && payloadLines.every((line, index) => {
+			const normalized = normalizedLines[index];
+			return normalized?.lineOrdinal === index + 1
+				&& normalized.erpItemCode === String(line.productId)
+				&& normalized.plannedQty === line.qty
+				&& normalized.sourceWarehouse === (payload.data.fromStore || null)
+				&& normalized.targetWarehouse === (payload.data.toStore || null);
+		});
+		if (!linesMatch) addIssue(issues, 'transfer_payload_lines_mismatch', payload.identity, 'transfer payload lines do not match normalized document lines');
+	}
 
 	const linkRows: SupplyMirrorLinkRow[] = [];
 	for (const link of snapshot.links) {
@@ -254,6 +332,7 @@ export function buildSupplyMirrorPlan(snapshot: SupplyMirrorSnapshot): SupplyMir
 		observedAt: snapshot.observedAt,
 		sourceStatus: snapshot.sources,
 		documents: documentRows.sort((left, right) => left.identity.localeCompare(right.identity, 'en')),
+		transferPayloads: transferPayloadRows.sort((left, right) => left.identity.localeCompare(right.identity, 'en')),
 		lines: lineRows.sort((left, right) => left.identity.localeCompare(right.identity, 'en')),
 		links: linkRows.sort((left, right) => left.identity.localeCompare(right.identity, 'en')),
 		allocations: allocationRows.sort((left, right) => left.identity.localeCompare(right.identity, 'en')),

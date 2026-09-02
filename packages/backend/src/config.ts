@@ -27,7 +27,7 @@ const ConfigSchema = z.object({
 	/** Ручное owner-only сравнение актуального supply graph с SQL mirror. */
 	supplyShadowCompare: z.enum(['off', 'on']).default('off'),
 	/** Per-request SQL graph observation; never replaces the legacy response. */
-	supplySqlRead: z.enum(['off', 'shadow']).default('off'),
+	supplySqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 

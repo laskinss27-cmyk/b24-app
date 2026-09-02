@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { newTransferData } from '../transfers/model.js';
 import { supplyMirrorSourceHash } from './supply-backfill-plan.js';
 import type { SupplyMirrorPlan } from './supply-backfill-types.js';
 import {
@@ -53,6 +54,7 @@ function readyPlan(): SupplyMirrorPlan {
 				sourceHash: supplyMirrorSourceHash({ name: 'PO-1' }),
 			},
 		],
+		transferPayloads: [],
 		lines: [
 			{
 				identity: requestLineIdentity,
@@ -128,6 +130,7 @@ class FakeConnection implements SupplyMirrorWriterConnection {
 			return [
 				{ id: 10, external_system: 'erpnext', document_type: 'supply_request', external_id: 'MR-1' },
 				{ id: 20, external_system: 'erpnext', document_type: 'purchase_order', external_id: 'PO-1' },
+				{ id: 30, external_system: 'bitrix', document_type: 'transfer', external_id: '7' },
 			] as T;
 		}
 		if (sql.includes('FROM workflow_document_lines l')) {
@@ -173,6 +176,51 @@ test('atomic supply mirror writer upserts the graph and records one checkpoint',
 	assert.equal(connection.batches[0]!.values[0]![7], '2026-08-21 07:00:00.123456');
 	assert.equal(connection.batches[0]!.values[0]![9], '2026-08-21 07:30:00.000000');
 	assert.ok(Buffer.isBuffer(connection.batches[0]!.values[0]![10]));
+});
+
+test('writer stores the canonical complete transfer payload in the same transaction', async () => {
+	const connection = new FakeConnection();
+	const plan = readyPlan();
+	const data = newTransferData({
+		fromStore: 'Склад А',
+		toStore: 'Склад Б',
+		lines: [{ productId: 100, name: 'Товар', qty: 2 }],
+		createdAt: '2026-08-21T07:00:00.000Z',
+		createdById: '1858',
+		createdByName: 'Владелец',
+	});
+	plan.sourceStatus.bitrixTransfers.records = 1;
+	plan.documents.push({
+		identity: 'bitrix:transfer:7',
+		externalSystem: 'bitrix',
+		documentType: 'transfer',
+		externalId: '7',
+		externalRevisionKey: null,
+		externalStatus: 'draft',
+		externalDocstatus: 0,
+		bitrixDealId: null,
+		sourceCreatedAt: data.createdAt,
+		sourceModifiedAt: null,
+		observedAt,
+		sourceHash: supplyMirrorSourceHash({ ID: 7 }),
+	});
+	plan.transferPayloads.push({
+		identity: 'bitrix:transfer:7',
+		documentIdentity: 'bitrix:transfer:7',
+		externalId: 7,
+		name: 'Перемещение #7',
+		data,
+		observedAt,
+		sourceHash: supplyMirrorSourceHash({ name: 'Перемещение #7', data }),
+	});
+
+	await applySupplyMirrorPlan(fakePool(connection), plan);
+	const payloadBatch = connection.batches.find((batch) => batch.sql.includes('supply_transfer_payloads'));
+	assert.ok(payloadBatch);
+	assert.equal(payloadBatch.values.length, 1);
+	assert.equal(payloadBatch.values[0]?.[0], 30);
+	assert.deepEqual(JSON.parse(String(payloadBatch.values[0]?.[3])), data);
+	assert.equal(connection.commitCount, 1);
 });
 
 test('reapplying the same plan is a checkpointed no-op', async () => {

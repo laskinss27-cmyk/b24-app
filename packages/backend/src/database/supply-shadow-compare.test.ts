@@ -31,6 +31,7 @@ function plan(): SupplyMirrorPlan {
 				observedAt: CURRENT_OBSERVED_AT, sourceHash: 'b'.repeat(64),
 			},
 		],
+		transferPayloads: [],
 		lines: [
 			{
 				identity: 'erpnext:purchase_order:PO-1:key:po-line', documentIdentity: 'erpnext:purchase_order:PO-1',
@@ -92,6 +93,7 @@ function stored(current: SupplyMirrorPlan): StoredSupplyMirrorSnapshot {
 			sourceModifiedAt: sqlTimestamp(row.sourceModifiedAt),
 			observedAt: STORED_OBSERVED_AT,
 		})),
+		transferPayloads: current.transferPayloads.map((row) => ({ ...row, observedAt: STORED_OBSERVED_AT })),
 		lines: current.lines.map((row) => ({ ...row, sourceModifiedAt: sqlTimestamp(row.sourceModifiedAt), observedAt: STORED_OBSERVED_AT })),
 		links: current.links.map((row) => ({ ...row, observedAt: STORED_OBSERVED_AT })),
 		allocations: current.allocations.map((row) => ({ ...row, observedAt: STORED_OBSERVED_AT })),

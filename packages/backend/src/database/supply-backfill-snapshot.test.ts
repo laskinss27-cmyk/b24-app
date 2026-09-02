@@ -41,6 +41,13 @@ test('read-only supply snapshot builds the explicit ERP and Bitrix document grap
 	assert.equal(plan.readyToApply, true);
 	assert.deepEqual(plan.issues, []);
 	assert.equal(plan.documents.length, 5);
+	assert.equal(plan.transferPayloads.length, 1);
+	assert.deepEqual({
+		id: plan.transferPayloads[0]?.externalId,
+		name: plan.transferPayloads[0]?.name,
+		status: plan.transferPayloads[0]?.data.status,
+		history: plan.transferPayloads[0]?.data.history,
+	}, { id: 10, name: 'Transfer 10', status: 'posted', history: [] });
 	assert.equal(plan.lines.length, 5);
 	assert.equal(plan.links.length, 6);
 	assert.equal(plan.allocations.length, 4);

@@ -1,7 +1,9 @@
 import {
+	supplyMirrorSourceHash,
 	supplyMirrorDocumentIdentity,
 	supplyMirrorLineIdentity,
 } from './supply-backfill-plan.js';
+import { parseTransferItem, type TransferData } from '../transfers/model.js';
 import type {
 	MirrorAllocationType,
 	MirrorDocumentType,
@@ -12,6 +14,7 @@ import type {
 	SupplyMirrorDocumentRow,
 	SupplyMirrorLineRow,
 	SupplyMirrorLinkRow,
+	SupplyMirrorTransferPayloadRow,
 } from './supply-backfill-types.js';
 
 type QueryRow = Record<string, unknown>;
@@ -41,6 +44,7 @@ export interface StoredSupplyMirrorCheckpoint {
 export interface StoredSupplyMirrorSnapshot {
 	checkpoint: StoredSupplyMirrorCheckpoint;
 	documents: SupplyMirrorDocumentRow[];
+	transferPayloads: SupplyMirrorTransferPayloadRow[];
 	lines: SupplyMirrorLineRow[];
 	links: SupplyMirrorLinkRow[];
 	allocations: SupplyMirrorAllocationRow[];
@@ -95,6 +99,16 @@ const LINES_QUERY = `
 	FROM workflow_document_lines l
 	JOIN workflow_documents d ON d.id = l.document_id
 	WHERE l.observed_at = ?
+`;
+
+const TRANSFER_PAYLOADS_QUERY = `
+	SELECT d.external_id, p.display_name, p.payload,
+		DATE_FORMAT(p.observed_at, '%Y-%m-%d %H:%i:%s.%f') AS observed_at,
+		LOWER(HEX(p.source_hash)) AS source_hash
+	FROM supply_transfer_payloads p
+	JOIN workflow_documents d ON d.id = p.document_id
+	WHERE p.observed_at = ? AND d.observed_at = ?
+		AND d.external_system = 'bitrix' AND d.document_type = 'transfer'
 `;
 
 const LINKS_QUERY = `
@@ -238,6 +252,37 @@ function lineRow(row: QueryRow): SupplyMirrorLineRow {
 	};
 }
 
+function transferPayloadRow(row: QueryRow): SupplyMirrorTransferPayloadRow {
+	const externalId = requiredNumber(row, 'external_id', true);
+	const name = requiredString(row, 'display_name');
+	const rawPayload = requiredString(row, 'payload');
+	let payload: unknown;
+	try { payload = JSON.parse(rawPayload); }
+	catch { throw new Error(`Invalid SQL supply transfer payload JSON for ${externalId}`); }
+	const parsed = parseTransferItem({ ID: externalId, NAME: name, DETAIL_TEXT: JSON.stringify(payload) });
+	if (!parsed) throw new Error(`Invalid SQL supply transfer payload for ${externalId}`);
+	const { id, name: parsedName, ...data } = parsed;
+	if (id !== externalId || parsedName !== name) throw new Error(`SQL supply transfer payload identity mismatch for ${externalId}`);
+	const sourceHash = hash(row, 'source_hash');
+	if (supplyMirrorSourceHash({ name, data }) !== sourceHash) {
+		throw new Error(`SQL supply transfer payload hash mismatch for ${externalId}`);
+	}
+	const documentIdentity = supplyMirrorDocumentIdentity({
+		externalSystem: 'bitrix',
+		documentType: 'transfer',
+		externalId: String(externalId),
+	});
+	return {
+		identity: documentIdentity,
+		documentIdentity,
+		externalId,
+		name,
+		data: data as TransferData,
+		observedAt: requiredString(row, 'observed_at'),
+		sourceHash,
+	};
+}
+
 function linkRow(row: QueryRow): SupplyMirrorLinkRow {
 	const from = {
 		externalSystem: externalSystem(row, 'from_external_system'),
@@ -309,8 +354,9 @@ export async function readLatestSupplyMirrorSnapshot(pool: SupplyMirrorReadPool)
 	if (checkpoints.length !== 1) throw new Error('Latest SQL supply mirror checkpoint query returned more than one row');
 	const latest = checkpoint(checkpoints[0]!);
 	const observedAt = [latest.observedAt];
-	const [documents, lines, links, allocations] = await Promise.all([
+	const [documents, transferPayloads, lines, links, allocations] = await Promise.all([
 		pool.query<QueryRow[]>(DOCUMENTS_QUERY, observedAt),
+		pool.query<QueryRow[]>(TRANSFER_PAYLOADS_QUERY, [latest.observedAt, latest.observedAt]),
 		pool.query<QueryRow[]>(LINES_QUERY, observedAt),
 		pool.query<QueryRow[]>(LINKS_QUERY, observedAt),
 		pool.query<QueryRow[]>(ALLOCATIONS_QUERY, observedAt),
@@ -318,6 +364,7 @@ export async function readLatestSupplyMirrorSnapshot(pool: SupplyMirrorReadPool)
 	return {
 		checkpoint: latest,
 		documents: byIdentity(documents.map(documentRow)),
+		transferPayloads: byIdentity(transferPayloads.map(transferPayloadRow)),
 		lines: byIdentity(lines.map(lineRow)),
 		links: byIdentity(links.map(linkRow)),
 		allocations: byIdentity(allocations.map(allocationRow)),

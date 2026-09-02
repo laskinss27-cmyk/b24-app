@@ -34,6 +34,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 [Read foundation](sql-supply-read-foundation-2026-08-31.md) добавляет только opt-in `off|shadow` проверку покрытой transfer-проекции. 2 сентября production переключён на `B24_APP_SUPPLY_SQL_READ=shadow` без смены image; первый реальный `/api/supply/orders` сохранил legacy HTTP-ответ и дал SQL `match` для `182/182` transfers с `0` differences. Полный режим `sql` намеренно отсутствует, потому что текущая mirror schema ещё не хранит UI-поля карточки, историю и action facts. Bitrix/ERPNext fallback остаётся источником пользовательского ответа.
 
+Следующий [локально подготовленный full-payload gate](sql-supply-verified-read-foundation-2026-09-02.md) добавляет migration `0022` и переходный режим `verified`. Специализированная `supply_transfer_payloads` хранит каноническое полное состояние Bitrix transfer, привязанное к graph document и точному observation последнего checkpoint. Planner сверяет cardinality/header/lines, writer пишет payload и graph одной транзакцией, reader повторно проверяет JSON identity и hash. `verified` использует восстановленный SQL-объект только после полного сравнения с живым Bitrix реестром; любой stale/mismatch/error оставляет ответ на legacy. Change set прошёл `57/57` focused, `351/351` backend, `129/129` frontend, typecheck/build и одноразовую MariaDB 11.8 репетицию. На production migration/backfill/deploy ещё не выполнялись, flag остаётся `shadow`.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |

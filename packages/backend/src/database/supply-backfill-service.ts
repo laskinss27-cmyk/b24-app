@@ -42,6 +42,7 @@ export function summarizeSupplyMirrorPlan(plan: SupplyMirrorPlan): SupplyBackfil
 		sources: plan.sourceStatus,
 		documents: plan.documents.map(({ identity, sourceHash }) => ({ identity, sourceHash })),
 		lines: plan.lines.map(({ identity, sourceHash }) => ({ identity, sourceHash })),
+		transferPayloads: plan.transferPayloads.map(({ identity, sourceHash }) => ({ identity, sourceHash })),
 		links: plan.links.map(({ identity, sourceHash }) => ({ identity, sourceHash })),
 		allocations: plan.allocations.map(({ identity, sourceHash }) => ({ identity, sourceHash })),
 		issues: plan.issues,

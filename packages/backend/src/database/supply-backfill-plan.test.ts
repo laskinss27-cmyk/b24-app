@@ -37,6 +37,7 @@ function completeSnapshot(): SupplyMirrorSnapshot {
 				lines: [{ externalLineKey: 'POI-1', lineOrdinal: 1, erpItemCode: '100', plannedQty: 3, requestQty: 2, sourcePayload: { name: 'POI-1', qty: 3, requestQty: 2 } }],
 			},
 		],
+		transferPayloads: [],
 		links: [{
 			from: purchase,
 			to: request,

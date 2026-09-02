@@ -3,8 +3,9 @@ import test from 'node:test';
 import { loadConfig } from '../config.js';
 import type { DatabaseRuntime } from '../database/runtime.js';
 import type { StoredSupplyMirrorSnapshot } from '../database/supply-mirror-reader.js';
+import { supplyMirrorSourceHash } from '../database/supply-backfill-plan.js';
 import { newTransferData, type StoredTransfer } from '../transfers/model.js';
-import { observeSupplySqlReadShadow } from './sql-read-shadow.js';
+import { observeSupplySqlReadShadow, resolveSupplySqlTransfers } from './sql-read-shadow.js';
 
 const PLAN_HASH = 'a'.repeat(64);
 const OBSERVED_AT = '2026-08-31 15:13:13.384000';
@@ -29,6 +30,8 @@ function transfer(): StoredTransfer {
 }
 
 function snapshot(): StoredSupplyMirrorSnapshot {
+	const storedTransfer = transfer();
+	const { id, name, ...data } = storedTransfer;
 	return {
 		checkpoint: {
 			planHash: PLAN_HASH,
@@ -50,6 +53,15 @@ function snapshot(): StoredSupplyMirrorSnapshot {
 			sourceModifiedAt: null,
 			observedAt: OBSERVED_AT,
 			sourceHash: 'b'.repeat(64),
+		}],
+		transferPayloads: [{
+			identity: 'bitrix:transfer:7',
+			documentIdentity: 'bitrix:transfer:7',
+			externalId: id,
+			name,
+			data,
+			observedAt: OBSERVED_AT,
+			sourceHash: supplyMirrorSourceHash({ name, data }),
 		}],
 		lines: [{
 			identity: 'bitrix:transfer:7:ordinal:1',
@@ -107,9 +119,10 @@ class FakeDatabase implements DatabaseRuntime {
 
 const legacy = () => ({ rawRecordCount: 1, transfers: [transfer()] });
 
-test('supply SQL read gate defaults off and accepts only shadow opt-in', (t) => {
+test('supply SQL read gate defaults off and accepts explicit shadow or verified modes', (t) => {
 	assert.equal(loadConfig({}).supplySqlRead, 'off');
 	assert.equal(loadConfig({ B24_APP_SUPPLY_SQL_READ: 'shadow' }).supplySqlRead, 'shadow');
+	assert.equal(loadConfig({ B24_APP_SUPPLY_SQL_READ: 'verified' }).supplySqlRead, 'verified');
 	t.mock.method(console, 'error', () => {});
 	assert.throws(() => loadConfig({ B24_APP_SUPPLY_SQL_READ: 'sql' }), /Bad config/);
 });
@@ -129,7 +142,25 @@ test('shadow mode matches the covered transfer projection', async () => {
 	assert.equal(report.storedPlanHash, PLAN_HASH);
 	assert.equal(report.legacyTransferCount, 1);
 	assert.equal(report.storedTransferCount, 1);
+	assert.equal(report.responseSource, 'legacy');
 	assert.deepEqual(report.differences, []);
+});
+
+test('verified mode serves the SQL reconstruction only after exact live parity', async () => {
+	const legacyEvidence = legacy();
+	const resolution = await resolveSupplySqlTransfers('verified', new FakeDatabase(snapshot()), legacyEvidence);
+	assert.equal(resolution.report.status, 'match');
+	assert.equal(resolution.report.responseSource, 'sql');
+	assert.equal(resolution.report.legacyResponsePreserved, false);
+	assert.deepEqual(resolution.transfers, legacyEvidence.transfers);
+	assert.notEqual(resolution.transfers[0], legacyEvidence.transfers[0]);
+
+	const stale = snapshot();
+	stale.documents[0]!.externalStatus = 'posted';
+	const fallback = await resolveSupplySqlTransfers('verified', new FakeDatabase(stale), legacyEvidence);
+	assert.equal(fallback.report.status, 'mismatch');
+	assert.equal(fallback.report.responseSource, 'legacy');
+	assert.equal(fallback.transfers, legacyEvidence.transfers);
 });
 
 test('shadow mismatch preserves the legacy response', async () => {
@@ -139,6 +170,18 @@ test('shadow mismatch preserves the legacy response', async () => {
 	assert.equal(report.status, 'mismatch');
 	assert.equal(report.legacyResponsePreserved, true);
 	assert.deepEqual(report.differences, ['transfer_projection']);
+});
+
+test('shadow detects a full transfer payload mismatch outside the graph projection', async () => {
+	const stored = snapshot();
+	stored.transferPayloads[0]!.data.note = 'Изменённый комментарий';
+	stored.transferPayloads[0]!.sourceHash = supplyMirrorSourceHash({
+		name: stored.transferPayloads[0]!.name,
+		data: stored.transferPayloads[0]!.data,
+	});
+	const report = await observeSupplySqlReadShadow('shadow', new FakeDatabase(stored), legacy());
+	assert.equal(report.status, 'mismatch');
+	assert.deepEqual(report.differences, ['transfer_payload']);
 });
 
 test('missing, unavailable and failed SQL all fall back without throwing', async () => {

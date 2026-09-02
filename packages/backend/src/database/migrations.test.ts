@@ -55,6 +55,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0019_add_reservation_deal_link_events.sql',
 		'0020_add_reservation_manual_commands.sql',
 		'0021_add_reservation_request_comment.sql',
+		'0022_create_supply_transfer_payloads.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -75,11 +76,18 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	assert.match(lineIdentityMigration, /DROP INDEX uq_workflow_document_lines_ordinal/);
 	assert.match(lineIdentityMigration, /GENERATED ALWAYS AS \(CASE WHEN external_line_key IS NULL THEN line_ordinal ELSE NULL END\) STORED/);
 	assert.match(lineIdentityMigration, /UNIQUE KEY uq_workflow_document_lines_fallback_ordinal \(document_id, identity_line_ordinal\)/);
-	for (const migration of migrations.slice(17)) {
+	for (const migration of migrations.slice(17, 21)) {
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.match(migration.sql, /^ALTER TABLE stock_/);
 		assert.doesNotMatch(migration.sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP\s+(?:TABLE|DATABASE|COLUMN))\b/i);
 	}
+	const transferPayloads = migrations[21]!.sql;
+	assert.match(transferPayloads, /^CREATE TABLE IF NOT EXISTS supply_transfer_payloads \(/);
+	assert.equal(transferPayloads.split(';').filter((statement) => statement.trim()).length, 1);
+	assert.doesNotMatch(transferPayloads, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
+	assert.match(transferPayloads, /FOREIGN KEY \(document_id\) REFERENCES workflow_documents \(id\).*ON DELETE RESTRICT/);
+	assert.match(transferPayloads, /JSON_VALID\(payload\).*JSON_TYPE\(payload\) = 'OBJECT'/);
+	assert.match(transferPayloads, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
 });
 
 test('SQL schemas preserve workflow links and Tilda external identity', async () => {

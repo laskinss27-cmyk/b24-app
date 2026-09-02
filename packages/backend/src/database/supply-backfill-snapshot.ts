@@ -21,6 +21,7 @@ import type {
 	SupplyMirrorSourceAllocation,
 	SupplyMirrorSourceDocument,
 	SupplyMirrorSourceLink,
+	SupplyMirrorSourceTransferPayload,
 } from './supply-backfill-types.js';
 
 const BITRIX_ENTITY_ITEM_ID = /^[1-9]\d*$/;
@@ -336,6 +337,7 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 		documents.push(transferRequestDocument(item, parsed, observedAt));
 	}
 	const transfers = new Map<number, StoredTransfer>();
+	const transferPayloads: SupplyMirrorSourceTransferPayload[] = [];
 	let invalidTransfers = 0;
 	for (const item of raw.transferItems) {
 		const parsed = parseTransferItem(item);
@@ -356,6 +358,14 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 			issues.push(issue('empty_transfer_lines', String(parsed.id), 'transfer has no valid primary lines'));
 		}
 		transfers.set(parsed.id, parsed);
+		const { id, name, ...data } = parsed;
+		transferPayloads.push({
+			document: docRef('transfer', id, 'bitrix'),
+			externalId: id,
+			name,
+			data,
+			observedAt,
+		});
 		documents.push(transferDocument(item, parsed, observedAt));
 	}
 	const observedTransferIds = new Set(raw.transferItems
@@ -532,6 +542,7 @@ export function buildSupplyMirrorSnapshot(raw: SupplyBackfillRawSources, observe
 				: { complete: true, records: raw.transferRequestItems.length },
 		},
 		documents,
+		transferPayloads,
 		links,
 		allocations,
 		discoveryIssues: issues,

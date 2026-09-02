@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { newTransferData } from '../transfers/model.js';
+import { supplyMirrorCanonicalJson, supplyMirrorSourceHash } from './supply-backfill-plan.js';
 import { readLatestSupplyMirrorSnapshot, type SupplyMirrorReadPool } from './supply-mirror-reader.js';
 
 const OBSERVED_AT = '2026-08-21 09:03:35.037000';
@@ -20,6 +22,7 @@ class FakePool implements SupplyMirrorReadPool {
 		allocation_count: 1,
 		warning_count: 0,
 	}];
+	transferPayloadRows: Record<string, unknown>[] = [];
 
 	async query<T>(sql: string, values?: unknown[]): Promise<T> {
 		this.calls.push({ sql, ...(values ? { values } : {}) });
@@ -38,6 +41,7 @@ class FakePool implements SupplyMirrorReadPool {
 				source_modified_at: '2026-08-21 08:30:00.000000', observed_at: OBSERVED_AT, source_hash: 'b'.repeat(64),
 			},
 		] as T;
+		if (sql.includes('FROM supply_transfer_payloads')) return this.transferPayloadRows as T;
 		if (sql.includes('FROM workflow_document_lines')) return [
 			{
 				external_system: 'erpnext', document_type: 'purchase_order', external_id: 'PO-1',
@@ -89,8 +93,10 @@ test('read-only mirror reader loads only rows from the latest checkpoint observa
 	assert.equal(snapshot.lines[0]?.plannedQty, 2);
 	assert.equal(snapshot.links[0]?.identity, 'erpnext:purchase_order:PO-1->erpnext:purchase_receipt:PR-1:received_against_order');
 	assert.equal(snapshot.allocations[0]?.identity, 'erpnext:purchase_order:PO-1:key:po-line->erpnext:purchase_receipt:PR-1:key:pr-line:received');
-	assert.equal(pool.calls.length, 5);
-	for (const call of pool.calls.slice(1)) assert.deepEqual(call.values, [OBSERVED_AT]);
+	assert.equal(pool.calls.length, 6);
+	for (const call of pool.calls.slice(1)) {
+		assert.deepEqual(call.values, call.sql.includes('FROM supply_transfer_payloads') ? [OBSERVED_AT, OBSERVED_AT] : [OBSERVED_AT]);
+	}
 });
 
 test('read-only mirror reader returns null without querying graph tables when no checkpoint exists', async () => {
@@ -105,4 +111,37 @@ test('read-only mirror reader fails closed for a malformed stored hash', async (
 	pool.checkpointRows[0]!['plan_hash'] = 'not-a-hash';
 	await assert.rejects(() => readLatestSupplyMirrorSnapshot(pool), /Invalid SQL supply mirror hash plan_hash/);
 	assert.equal(pool.calls.length, 1);
+});
+
+test('read-only mirror reader reconstructs and verifies a complete transfer payload', async () => {
+	const pool = new FakePool();
+	const data = newTransferData({
+		fromStore: 'Склад А',
+		toStore: 'Склад Б',
+		lines: [{ productId: 100, name: 'Товар', qty: 2 }],
+		note: 'Комментарий',
+		createdAt: '2026-08-21T08:00:00.000Z',
+		createdById: '1858',
+		createdByName: 'Владелец',
+	});
+	pool.transferPayloadRows = [{
+		external_id: '7',
+		display_name: 'Перемещение #7',
+		payload: supplyMirrorCanonicalJson(data),
+		observed_at: OBSERVED_AT,
+		source_hash: supplyMirrorSourceHash({ name: 'Перемещение #7', data }),
+	}];
+	const snapshot = await readLatestSupplyMirrorSnapshot(pool);
+	assert.deepEqual(snapshot?.transferPayloads[0], {
+		identity: 'bitrix:transfer:7',
+		documentIdentity: 'bitrix:transfer:7',
+		externalId: 7,
+		name: 'Перемещение #7',
+		data,
+		observedAt: OBSERVED_AT,
+		sourceHash: supplyMirrorSourceHash({ name: 'Перемещение #7', data }),
+	});
+
+	pool.transferPayloadRows[0]!['payload'] = supplyMirrorCanonicalJson({ ...data, note: 'Подмена' });
+	await assert.rejects(() => readLatestSupplyMirrorSnapshot(pool), /payload hash mismatch/);
 });

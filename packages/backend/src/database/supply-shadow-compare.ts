@@ -5,11 +5,12 @@ import type {
 	SupplyMirrorLineRow,
 	SupplyMirrorLinkRow,
 	SupplyMirrorPlan,
+	SupplyMirrorTransferPayloadRow,
 } from './supply-backfill-types.js';
 import type { StoredSupplyMirrorSnapshot } from './supply-mirror-reader.js';
 
 export type SupplyShadowComparisonStatus = 'match' | 'mismatch' | 'plan_blocked' | 'no_snapshot';
-export type SupplyShadowCollection = 'checkpoint' | 'documents' | 'lines' | 'links' | 'allocations';
+export type SupplyShadowCollection = 'checkpoint' | 'documents' | 'transferPayloads' | 'lines' | 'links' | 'allocations';
 export type SupplyShadowDifferenceKind = 'field_mismatch' | 'missing_in_sql' | 'unexpected_in_sql';
 type ComparableValue = string | number | boolean | null;
 
@@ -113,6 +114,18 @@ function allocation(row: SupplyMirrorAllocationRow): ComparableRow {
 			quantity: row.quantity,
 			evidenceKind: row.evidenceKind,
 			evidenceSource: row.evidenceSource,
+			sourceHash: row.sourceHash,
+		},
+	};
+}
+
+function transferPayload(row: SupplyMirrorTransferPayloadRow): ComparableRow {
+	return {
+		identity: row.identity,
+		fields: {
+			documentIdentity: row.documentIdentity,
+			externalId: row.externalId,
+			name: row.name,
 			sourceHash: row.sourceHash,
 		},
 	};
@@ -226,6 +239,7 @@ export function compareSupplyMirrorShadow(
 	};
 
 	compareRows('documents', normalizedRows(plan.documents, document), normalizedRows(stored.documents, document));
+	compareRows('transferPayloads', normalizedRows(plan.transferPayloads, transferPayload), normalizedRows(stored.transferPayloads, transferPayload));
 	compareRows('lines', normalizedRows(plan.lines, line), normalizedRows(stored.lines, line));
 	compareRows('links', normalizedRows(plan.links, link), normalizedRows(stored.links, link));
 	compareRows('allocations', normalizedRows(plan.allocations, allocation), normalizedRows(stored.allocations, allocation));

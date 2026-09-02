@@ -77,6 +77,14 @@ export interface SupplyMirrorSourceStatus {
 	error?: string;
 }
 
+export interface SupplyMirrorSourceTransferPayload {
+	document: MirrorDocumentRef;
+	externalId: number;
+	name: string;
+	data: import('../transfers/model.js').TransferData;
+	observedAt: string;
+}
+
 export interface SupplyMirrorSnapshot {
 	observedAt: string;
 	sources: {
@@ -85,9 +93,20 @@ export interface SupplyMirrorSnapshot {
 		bitrixTransferRequests: SupplyMirrorSourceStatus;
 	};
 	documents: SupplyMirrorSourceDocument[];
+	transferPayloads: SupplyMirrorSourceTransferPayload[];
 	links: SupplyMirrorSourceLink[];
 	allocations: SupplyMirrorSourceAllocation[];
 	discoveryIssues?: SupplyMirrorPlanIssue[];
+}
+
+export interface SupplyMirrorTransferPayloadRow {
+	identity: string;
+	documentIdentity: string;
+	externalId: number;
+	name: string;
+	data: import('../transfers/model.js').TransferData;
+	observedAt: string;
+	sourceHash: string;
 }
 
 export interface SupplyMirrorDocumentRow extends MirrorDocumentRef {
@@ -153,6 +172,7 @@ export interface SupplyMirrorPlan {
 	observedAt: string;
 	sourceStatus: SupplyMirrorSnapshot['sources'];
 	documents: SupplyMirrorDocumentRow[];
+	transferPayloads: SupplyMirrorTransferPayloadRow[];
 	lines: SupplyMirrorLineRow[];
 	links: SupplyMirrorLinkRow[];
 	allocations: SupplyMirrorAllocationRow[];

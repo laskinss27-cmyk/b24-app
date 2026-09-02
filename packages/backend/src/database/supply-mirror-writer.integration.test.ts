@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import mariadb, { type Pool } from 'mariadb';
+import { newTransferData } from '../transfers/model.js';
 import { applyMigrations } from './migrations.js';
 import { buildSupplyMirrorPlan } from './supply-backfill-plan.js';
 import type { SupplyMirrorSnapshot } from './supply-backfill-types.js';
@@ -21,11 +22,21 @@ const migrationsDirectory = fileURLToPath(new URL('../../migrations/', import.me
 function snapshot(status = 'ordered', observedAt = '2026-08-21T08:00:00.000Z'): SupplyMirrorSnapshot {
 	const request = { externalSystem: 'erpnext' as const, documentType: 'supply_request' as const, externalId: 'MR-1' };
 	const purchase = { externalSystem: 'erpnext' as const, documentType: 'purchase_order' as const, externalId: 'PO-1' };
+	const transfer = { externalSystem: 'bitrix' as const, documentType: 'transfer' as const, externalId: '7' };
+	const transferData = newTransferData({
+		fromStore: 'Incoming',
+		toStore: 'Target',
+		lines: [{ productId: 100, name: 'Item', qty: 2 }],
+		note: 'MariaDB payload rehearsal',
+		createdAt: '2026-08-21T07:00:00.000Z',
+		createdById: '1858',
+		createdByName: 'Owner',
+	});
 	return {
 		observedAt,
 		sources: {
 			erpnext: { complete: true, records: 2 },
-			bitrixTransfers: { complete: true, records: 0 },
+			bitrixTransfers: { complete: true, records: 1 },
 			bitrixTransferRequests: { complete: true, records: 0 },
 		},
 		documents: [
@@ -49,7 +60,16 @@ function snapshot(status = 'ordered', observedAt = '2026-08-21T08:00:00.000Z'): 
 				sourcePayload: { name: 'PO-1', status },
 				lines: [{ externalLineKey: 'POI-1', lineOrdinal: 1, erpItemCode: '100', plannedQty: 2, requestQty: 2, sourcePayload: { name: 'POI-1', qty: 2 } }],
 			},
+			{
+				...transfer,
+				externalStatus: 'draft',
+				externalDocstatus: 0,
+				observedAt,
+				sourcePayload: { ID: '7', NAME: 'Transfer 7', DETAIL_TEXT: JSON.stringify(transferData) },
+				lines: [{ lineOrdinal: 1, erpItemCode: '100', plannedQty: 2, sourceWarehouse: 'Incoming', targetWarehouse: 'Target', sourcePayload: transferData.lines[0] }],
+			},
 		],
+		transferPayloads: [{ document: transfer, externalId: 7, name: 'Transfer 7', data: transferData, observedAt }],
 		links: [{
 			from: purchase,
 			to: request,
@@ -111,6 +131,7 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 			'0005_create_supply_mirror_checkpoints.sql',
 			'0006_create_tilda_product_mappings.sql',
 			'0007_create_tilda_stock_sync_runs.sql',
+			'0022_create_supply_transfer_payloads.sql',
 		];
 		for (const filename of migrationFilenames) {
 			await copyFile(join(migrationsDirectory, filename), join(rehearsalMigrationsDirectory, filename));
@@ -119,7 +140,7 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 		await root.query(`DROP USER IF EXISTS '${backfillUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 7);
+		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 8);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalMigrationsDirectory), []);
 
 		await root.query(`CREATE USER '${backfillUser}'@'%' IDENTIFIED BY '${backfillPassword}'`);
@@ -136,10 +157,12 @@ test('real MariaDB writer is atomic, idempotent and DML-only', { skip: !enabled 
 			scalar(schemaPool, 'workflow_document_lines'),
 			scalar(schemaPool, 'workflow_document_links'),
 			scalar(schemaPool, 'workflow_line_allocations'),
+			scalar(schemaPool, 'supply_transfer_payloads'),
 			scalar(schemaPool, 'supply_mirror_checkpoints'),
-		]), [2, 2, 1, 1, 1]);
+		]), [3, 3, 1, 1, 1, 1]);
 		const initialStored = await readLatestSupplyMirrorSnapshot(writerPool as unknown as SupplyMirrorReadPool);
 		assert.equal(compareSupplyMirrorShadow(initialPlan, initialStored).status, 'match');
+		assert.equal(initialStored?.transferPayloads[0]?.data.note, 'MariaDB payload rehearsal');
 
 		const changedPlan = buildSupplyMirrorPlan(snapshot('cancelled', '2026-08-21T08:05:00.000Z'));
 		const changed = await applySupplyMirrorPlan(writerPool as unknown as SupplyMirrorWriterPool, changedPlan);

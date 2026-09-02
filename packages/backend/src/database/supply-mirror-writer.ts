@@ -1,5 +1,5 @@
 import type { SupplyMirrorPlan } from './supply-backfill-types.js';
-import { supplyMirrorDocumentIdentity, supplyMirrorLineIdentity } from './supply-backfill-plan.js';
+import { supplyMirrorCanonicalJson, supplyMirrorDocumentIdentity, supplyMirrorLineIdentity } from './supply-backfill-plan.js';
 import { summarizeSupplyMirrorPlan } from './supply-backfill-service.js';
 
 const WRITER_LOCK = 'b24_app_supply_mirror_writer';
@@ -63,6 +63,18 @@ const LINE_UPSERT = `
 		source_warehouse = VALUES(source_warehouse),
 		target_warehouse = VALUES(target_warehouse),
 		source_modified_at = VALUES(source_modified_at),
+		observed_at = VALUES(observed_at),
+		source_hash = VALUES(source_hash)
+`;
+
+const TRANSFER_PAYLOAD_UPSERT = `
+	INSERT INTO supply_transfer_payloads (
+		document_id, external_id, display_name, payload, observed_at, source_hash
+	) VALUES (?, ?, ?, ?, ?, ?)
+	ON DUPLICATE KEY UPDATE
+		external_id = VALUES(external_id),
+		display_name = VALUES(display_name),
+		payload = VALUES(payload),
 		observed_at = VALUES(observed_at),
 		source_hash = VALUES(source_hash)
 `;
@@ -134,6 +146,10 @@ function validatePlan(plan: SupplyMirrorPlan): void {
 		hashBuffer(row.sourceHash, `line ${row.identity} sourceHash`);
 		sqlDateTime(row.observedAt, `line ${row.identity} observedAt`);
 		sqlDateTime(row.sourceModifiedAt, `line ${row.identity} sourceModifiedAt`);
+	}
+	for (const row of plan.transferPayloads) {
+		hashBuffer(row.sourceHash, `transfer payload ${row.identity} sourceHash`);
+		sqlDateTime(row.observedAt, `transfer payload ${row.identity} observedAt`);
 	}
 	for (const row of [...plan.links, ...plan.allocations]) {
 		hashBuffer(row.sourceHash, `${row.identity} sourceHash`);
@@ -215,6 +231,15 @@ export async function applySupplyMirrorPlan(pool: SupplyMirrorWriterPool, plan: 
 		]));
 		const documentIds = await readDocumentIds(connection);
 		for (const row of plan.documents) requiredId(documentIds, row.identity);
+
+		await runBatches(connection, TRANSFER_PAYLOAD_UPSERT, plan.transferPayloads.map((row) => [
+			requiredId(documentIds, row.documentIdentity),
+			row.externalId,
+			row.name,
+			supplyMirrorCanonicalJson(row.data),
+			sqlDateTime(row.observedAt, `${row.identity} observedAt`),
+			hashBuffer(row.sourceHash, `${row.identity} sourceHash`),
+		]));
 
 		await runBatches(connection, LINE_UPSERT, plan.lines.map((row) => [
 			requiredId(documentIds, row.documentIdentity),
