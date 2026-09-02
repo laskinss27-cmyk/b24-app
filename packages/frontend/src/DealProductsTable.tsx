@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { isWorkRow, type DealStage } from './b24.js';
 import { dealProductLine } from './deal-product-row-values.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
@@ -6,6 +6,10 @@ import { DealProductGroupBand, DealStageSectionBand } from './DealProductsTableB
 
 export function DealProductsTable({
 	workingMode,
+	allRowsSelected,
+	someRowsSelected,
+	selectionDisabled,
+	onToggleAllRows,
 	summaryView,
 	goods,
 	works,
@@ -20,6 +24,10 @@ export function DealProductsTable({
 	onRenameStage,
 }: {
 	workingMode: boolean;
+	allRowsSelected: boolean;
+	someRowsSelected: boolean;
+	selectionDisabled: boolean;
+	onToggleAllRows: () => void;
 	summaryView: boolean;
 	goods: EnrichedRow[];
 	works: EnrichedRow[];
@@ -38,7 +46,9 @@ export function DealProductsTable({
 			<table className="products-table">
 				<thead>
 					<tr>
-						<th className="check-col" title={workingMode ? 'Выбор строк для действий' : undefined}></th>
+						<th className="check-col" title={workingMode ? 'Выбрать все строки для действий' : undefined}>
+							{workingMode && <DealSelectAllCheckbox checked={allRowsSelected} mixed={someRowsSelected && !allRowsSelected} disabled={selectionDisabled} onChange={onToggleAllRows} />}
+						</th>
 						<th>Товар / работа</th>
 						<th className="num">Цена</th>
 						<th className="num">Скидка</th>
@@ -88,4 +98,20 @@ export function DealProductsTable({
 			</table>
 		</div>
 	);
+}
+
+function DealSelectAllCheckbox({ checked, mixed, disabled, onChange }: { checked: boolean; mixed: boolean; disabled: boolean; onChange: () => void }): JSX.Element {
+	const inputRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		if (inputRef.current) inputRef.current.indeterminate = mixed;
+	}, [mixed]);
+	return <input
+		ref={inputRef}
+		type="checkbox"
+		className="row-check select-all-check"
+		checked={checked}
+		disabled={disabled}
+		onChange={onChange}
+		aria-label="Выбрать все позиции"
+	/>;
 }

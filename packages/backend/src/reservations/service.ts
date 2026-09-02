@@ -24,6 +24,7 @@ export interface DealReservationRequestLineInput {
 export interface CreateDealReservationRequestInput {
 	dealId: number;
 	requestedExpiresAt: string;
+	comment?: string;
 	requestKey?: string;
 	lines: DealReservationRequestLineInput[];
 }
@@ -32,6 +33,7 @@ export interface CreateManualReservationInput {
 	dealId?: number | null;
 	expiresAt: string;
 	purpose?: string;
+	comment?: string;
 	requestKey?: string;
 	lines: Array<{ productId: number; itemName: string; storeTitle: string; quantity: string | number }>;
 }
@@ -63,6 +65,7 @@ export interface ReservationListItem {
 	sourceType: string;
 	dealId: number | null;
 	purpose: string | null;
+	comment: string | null;
 	dealTitle?: string | null;
 	dealManagerId?: string | null;
 	dealManagerName?: string | null;
@@ -127,6 +130,7 @@ interface RequestRow extends Record<string, unknown> {
 	reservation_status: string | null;
 	deal_id: bigint | number | string | null;
 	purpose: string | null;
+	request_comment: string | null;
 	release_request_id: bigint | number | string | null;
 	release_request_status: string | null;
 }
@@ -208,7 +212,7 @@ async function readRequestRows(connection: PoolConnection, where: string, values
 	return connection.query<RequestRow[]>(`
 		SELECT q.id, q.request_key, q.source_type, q.source_id, q.status, q.requested_expires_at,
 			q.approved_expires_at, q.requested_by, q.requested_at, q.reviewed_by,
-			q.reviewed_at, q.rejection_reason, r.id AS reservation_id,
+			q.reviewed_at, q.rejection_reason, q.request_comment, r.id AS reservation_id,
 			r.status AS reservation_status,
 			CASE WHEN r.deal_link_explicit = 1 THEN r.deal_id WHEN r.source_type = 'deal' THEN CAST(r.source_id AS UNSIGNED) END AS deal_id,
 			r.purpose, rr.id AS release_request_id,
@@ -261,7 +265,7 @@ async function hydrateRequests(connection: PoolConnection, rows: RequestRow[]): 
 	return rows.map((row) => ({
 		id: id(row.id), requestKey: row.request_key, sourceType: row.source_type,
 		dealId: row.deal_id == null ? (row.source_type === 'deal' ? Number(row.source_id) : null) : Number(row.deal_id),
-		purpose: row.purpose, status: row.status,
+		purpose: row.purpose, comment: row.request_comment, status: row.status,
 		requestedExpiresAt: iso(row.requested_expires_at), approvedExpiresAt: nullableIso(row.approved_expires_at),
 		requestedBy: row.requested_by, requestedAt: iso(row.requested_at), reviewedBy: row.reviewed_by,
 		reviewedAt: nullableIso(row.reviewed_at), rejectionReason: row.rejection_reason,
@@ -581,6 +585,7 @@ export class ReservationService {
 		this.requireWrite();
 		if (!Number.isInteger(input.dealId) || input.dealId <= 0) throw new Error('Некорректная сделка');
 		const requestedExpiresAt = safeFutureDate(input.requestedExpiresAt);
+		const comment = String(input.comment ?? '').trim().slice(0, 1000) || null;
 		const ctx = await erpContext(erp);
 		const plan = await listDealPlan(erp, input.dealId);
 		const byLine = new Map(plan.filter((line) => !line.isService).map((line) => [line.lineKey, line]));
@@ -610,7 +615,7 @@ export class ReservationService {
 		}
 		const requestKey = input.requestKey?.trim() || randomUUID();
 		const sourceRevisionKey = requestKey;
-		const payload = { dealId: input.dealId, requestedExpiresAt: requestedExpiresAt.toISOString(), lines: normalized };
+		const payload = { dealId: input.dealId, requestedExpiresAt: requestedExpiresAt.toISOString(), comment, lines: normalized };
 		await this.runtime.transaction(async (connection) => {
 			const command = await beginReservationCommand(connection, {
 				idempotencyKey: `request_reserve:${requestKey}`, commandType: 'request_reserve',
@@ -627,9 +632,9 @@ export class ReservationService {
 			const inserted = await connection.query<{ insertId: bigint | number | string }>(`
 				INSERT INTO stock_reservation_requests (
 					request_key, source_system, source_type, source_id, source_revision_key,
-					status, requested_expires_at, requested_by
-				) VALUES (?, 'bitrix24', 'deal', ?, ?, 'pending', ?, ?)
-			`, [requestKey, String(input.dealId), sourceRevisionKey, requestedExpiresAt, actor.id]);
+					status, requested_expires_at, request_comment, requested_by
+				) VALUES (?, 'bitrix24', 'deal', ?, ?, 'pending', ?, ?, ?)
+			`, [requestKey, String(input.dealId), sourceRevisionKey, requestedExpiresAt, comment, actor.id]);
 			const requestId = inserted.insertId;
 			for (const line of normalized) await connection.query(`
 				INSERT INTO stock_reservation_request_lines (
@@ -735,6 +740,7 @@ export class ReservationService {
 		if (dealId != null && (!Number.isInteger(dealId) || dealId <= 0)) throw new Error('Некорректная сделка');
 		const expiresAt = safeFutureDate(input.expiresAt);
 		const purpose = String(input.purpose ?? '').trim().slice(0, 500) || null;
+		const comment = String(input.comment ?? '').trim().slice(0, 1000) || null;
 		const ctx = await erpContext(erp);
 		const normalized = input.lines.map((line, index) => ({
 			sourceLineKey: `manual:${index + 1}`, productId: Number(line.productId), itemName: String(line.itemName ?? '').trim(),
@@ -756,7 +762,7 @@ export class ReservationService {
 		await this.runtime.transaction(async (connection) => {
 			const command = await beginReservationCommand(connection, {
 				idempotencyKey: `create_manual_reserve:${requestKey}`, commandType: 'create_manual_reserve',
-				requestHash: requestHash({ dealId, expiresAt: expiresAt.toISOString(), purpose, lines }), actorId: actor.id,
+				requestHash: requestHash({ dealId, expiresAt: expiresAt.toISOString(), purpose, comment, lines }), actorId: actor.id,
 			});
 			if (command.disposition === 'replay') return;
 			if (command.disposition === 'in_progress') throw new Error('Этот резерв уже создаётся');
@@ -779,9 +785,9 @@ export class ReservationService {
 			const request = await connection.query<{ insertId: bigint | number | string }>(`
 				INSERT INTO stock_reservation_requests (
 					request_key, source_system, source_type, source_id, source_revision_key, status,
-					requested_expires_at, approved_expires_at, requested_by, reviewed_by, reviewed_at
-				) VALUES (?, 'bitrix24', 'manual', ?, ?, 'approved', ?, ?, ?, ?, NOW(6))
-			`, [requestKey, sourceId, requestKey, expiresAt, expiresAt, actor.id, actor.id]);
+					requested_expires_at, approved_expires_at, request_comment, requested_by, reviewed_by, reviewed_at
+				) VALUES (?, 'bitrix24', 'manual', ?, ?, 'approved', ?, ?, ?, ?, ?, NOW(6))
+			`, [requestKey, sourceId, requestKey, expiresAt, expiresAt, comment, actor.id, actor.id]);
 			for (const line of lines) await connection.query(`
 				INSERT INTO stock_reservation_request_lines (request_id, source_line_key, erp_warehouse_name, item_code, requested_qty)
 				VALUES (?, ?, ?, ?, ?)

@@ -54,6 +54,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0018_add_reservation_deal_link.sql',
 		'0019_add_reservation_deal_link_events.sql',
 		'0020_add_reservation_manual_commands.sql',
+		'0021_add_reservation_request_comment.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -167,6 +168,7 @@ test('reservation schema preserves soft monotonic promises and append-only evide
 	const dealLink = byName.get('0018_add_reservation_deal_link.sql')!;
 	const dealLinkEvents = byName.get('0019_add_reservation_deal_link_events.sql')!;
 	const manualCommands = byName.get('0020_add_reservation_manual_commands.sql')!;
+	const requestComment = byName.get('0021_add_reservation_request_comment.sql')!;
 
 	assert.match(keys, /PRIMARY KEY \(erp_warehouse_name, item_code\)/);
 	assert.match(requests, /status IN \('pending', 'approved', 'rejected', 'withdrawn'\)/);
@@ -183,6 +185,7 @@ test('reservation schema preserves soft monotonic promises and append-only evide
 	assert.match(dealLink, /source_type IN \('deal', 'manual'/);
 	assert.match(dealLinkEvents, /'deal_linked', 'deal_unlinked', 'deal_relinked'/);
 	assert.match(manualCommands, /'create_manual_reserve', 'link_deal', 'unlink_deal', 'relink_deal'/);
+	assert.match(requestComment, /ADD COLUMN request_comment VARCHAR\(1000\) NULL/);
 
 	assert.match(lines, /active_qty DECIMAL\(21, 9\) GENERATED ALWAYS AS \(reserved_qty - consumed_qty - released_qty - shortfall_qty\) STORED/);
 	assert.match(lines, /consumed_qty \+ released_qty \+ shortfall_qty <= reserved_qty/);

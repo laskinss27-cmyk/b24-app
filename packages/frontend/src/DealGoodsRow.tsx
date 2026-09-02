@@ -28,7 +28,6 @@ export function DealGoodsRow({
 	totalStock,
 	statusCell,
 	onRemove,
-	onReplace,
 	onToggleSelected,
 	onEdit,
 	onBlur,
@@ -56,7 +55,6 @@ export function DealGoodsRow({
 	totalStock: number;
 	statusCell: ReactNode;
 	onRemove: () => void;
-	onReplace: () => void;
 	onToggleSelected: () => void;
 	onEdit: (patch: Partial<DealProductRowEdit>) => void;
 	onBlur: (event: FocusEvent<HTMLInputElement>) => void;
@@ -86,12 +84,6 @@ export function DealGoodsRow({
 						onClick={onRemove}
 						title={row.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
 					>{removingThisRow ? '…' : '✕'}</button>}
-					{workingMode && editable && row.segmentKind !== 'stage' && <button
-						className="row-del-x"
-						disabled={controlsDisabled}
-						onClick={onReplace}
-						title="Заменить товар только в сделке. Заявка снабжению не изменится"
-					>↔</button>}
 					{workingMode && <input
 						type="checkbox"
 						className="row-check"

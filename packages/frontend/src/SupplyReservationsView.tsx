@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchStockFormData, openDeal, type StockItem } from './b24.js';
 import { StockProductFilter } from './StockProductFilter.js';
 import {
-	createSupplyReservation, fetchSupplyReservations, lookupReservationDeal, newReservationKey,
+	createSupplyReservation, fetchReservationsRegistry, fetchSupplyReservations, lookupReservationDeal, newReservationKey,
 	releaseSupplyReservation, reviewReservationRelease, reviewReservationRequest, setSupplyReservationDeal,
 	type ReservationRequestView,
 } from './reservation-api.js';
@@ -41,7 +41,7 @@ function statusTone(request: ReservationRequestView): string {
 	return 'closed';
 }
 
-export function SupplyReservationsView(): JSX.Element {
+export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolean } = {}): JSX.Element {
 	const [requests, setRequests] = useState<ReservationRequestView[]>([]);
 	const [enabled, setEnabled] = useState(false);
 	const [canWrite, setCanWrite] = useState(false);
@@ -56,6 +56,7 @@ export function SupplyReservationsView(): JSX.Element {
 	const [dealInput, setDealInput] = useState('');
 	const [dealPreview, setDealPreview] = useState<{ id: number; title: string; managerName: string | null } | null>(null);
 	const [purpose, setPurpose] = useState('');
+	const [comment, setComment] = useState('');
 	const [createExpires, setCreateExpires] = useState(localDateTime(new Date(Date.now() + 7 * 86_400_000).toISOString()));
 	const [picked, setPicked] = useState<StockItem | null>(null);
 	const [pickedStore, setPickedStore] = useState('');
@@ -66,13 +67,16 @@ export function SupplyReservationsView(): JSX.Element {
 	const refresh = useCallback(async () => {
 		setLoading(true); setError(null);
 		try {
-			const result = await fetchSupplyReservations();
+			const result = readOnly ? await fetchReservationsRegistry() : await fetchSupplyReservations();
 			setEnabled(result.enabled); setCanWrite(result.canWrite); setRequests(result.requests);
 			setExpires(Object.fromEntries(result.requests.map((request) => [request.id, localDateTime(request.requestedExpiresAt)])));
 		} catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
 		finally { setLoading(false); }
-	}, []);
-	useEffect(() => { void refresh(); void fetchStockFormData().then((result) => setStores(result.stores)).catch(() => setStores([])); }, [refresh]);
+	}, [readOnly]);
+	useEffect(() => {
+		void refresh();
+		if (!readOnly) void fetchStockFormData().then((result) => setStores(result.stores)).catch(() => setStores([]));
+	}, [readOnly, refresh]);
 	const selected = useMemo(() => requests.find((request) => request.id === selectedId) ?? null, [requests, selectedId]);
 
 	const review = async (request: ReservationRequestView, decision: 'approve' | 'reject'): Promise<void> => {
@@ -121,9 +125,9 @@ export function SupplyReservationsView(): JSX.Element {
 		if (dealId == null && !window.confirm('Резерв без сделки заблокирует товар для всех продаж и не спишется автоматически. Создать?')) return;
 		setBusy('create'); setError(null);
 		try {
-			const result = await createSupplyReservation({ dealId, expiresAt: new Date(createExpires).toISOString(), purpose, requestKey: newReservationKey(), lines: draftLines });
+			const result = await createSupplyReservation({ dealId, expiresAt: new Date(createExpires).toISOString(), purpose, comment, requestKey: newReservationKey(), lines: draftLines });
 			if (result.warnings.length) setNotice(result.warnings.join('. '));
-			setShowCreate(false); setDealInput(''); setDealPreview(null); setPurpose(''); setDraftLines([]); await refresh();
+			setShowCreate(false); setDealInput(''); setDealPreview(null); setPurpose(''); setComment(''); setDraftLines([]); await refresh();
 		} catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
 		finally { setBusy(''); }
 	};
@@ -156,8 +160,8 @@ export function SupplyReservationsView(): JSX.Element {
 	return <div className="supply-reservations">
 		{error && <div className="supply-proto-notice"><span>{error}</span><button type="button" onClick={() => setError(null)}>Закрыть</button></div>}
 		{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
-		<div className="supply-reservation-toolbar"><div><b>Все резервы</b><span>{requests.length} записей, включая обработанные</span></div><div className="supply-proto-actions"><button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Закрыть создание' : 'Создать резерв'}</button></div></div>
-		{showCreate && <CreateReservationForm busy={busy} stores={stores} dealInput={dealInput} dealPreview={dealPreview} purpose={purpose} expires={createExpires} picked={picked} pickedStore={pickedStore} pickedQty={pickedQty} lines={draftLines} onDealInput={(value) => { setDealInput(value); setDealPreview(null); }} onLookup={() => void lookupDeal()} onPurpose={setPurpose} onExpires={setCreateExpires} onPicked={setPicked} onPickedStore={setPickedStore} onPickedQty={setPickedQty} onAdd={addLine} onRemove={(index) => setDraftLines((current) => current.filter((_line, lineIndex) => lineIndex !== index))} onCancel={() => setShowCreate(false)} onCreate={() => void create()} />}
+		<div className="supply-reservation-toolbar"><div><b>Все резервы</b><span>{requests.length} записей, включая обработанные</span></div>{!readOnly && <div className="supply-proto-actions"><button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Закрыть создание' : 'Создать резерв'}</button></div>}</div>
+		{!readOnly && showCreate && <CreateReservationForm busy={busy} stores={stores} dealInput={dealInput} dealPreview={dealPreview} purpose={purpose} comment={comment} expires={createExpires} picked={picked} pickedStore={pickedStore} pickedQty={pickedQty} lines={draftLines} onDealInput={(value) => { setDealInput(value); setDealPreview(null); }} onLookup={() => void lookupDeal()} onPurpose={setPurpose} onComment={setComment} onExpires={setCreateExpires} onPicked={setPicked} onPickedStore={setPickedStore} onPickedQty={setPickedQty} onAdd={addLine} onRemove={(index) => setDraftLines((current) => current.filter((_line, lineIndex) => lineIndex !== index))} onCancel={() => setShowCreate(false)} onCreate={() => void create()} />}
 		<section className="supply-proto-card supply-reservation-registry">
 			<div className="supply-reservation-registry-columns" aria-hidden="true"><span>Номер</span><span>Товар / количество</span><span>Сделка</span><span>Срок</span><span>Статус</span><span></span></div>
 			{!requests.length && <div className="empty">Резервов пока нет.</div>}
@@ -166,17 +170,18 @@ export function SupplyReservationsView(): JSX.Element {
 	</div>;
 }
 
-function CreateReservationForm(props: { busy: string; stores: string[]; dealInput: string; dealPreview: { id: number; title: string; managerName: string | null } | null; purpose: string; expires: string; picked: StockItem | null; pickedStore: string; pickedQty: number; lines: DraftLine[]; onDealInput: (v: string) => void; onLookup: () => void; onPurpose: (v: string) => void; onExpires: (v: string) => void; onPicked: (v: StockItem | null) => void; onPickedStore: (v: string) => void; onPickedQty: (v: number) => void; onAdd: () => void; onRemove: (index: number) => void; onCancel: () => void; onCreate: () => void }): JSX.Element {
+function CreateReservationForm(props: { busy: string; stores: string[]; dealInput: string; dealPreview: { id: number; title: string; managerName: string | null } | null; purpose: string; comment: string; expires: string; picked: StockItem | null; pickedStore: string; pickedQty: number; lines: DraftLine[]; onDealInput: (v: string) => void; onLookup: () => void; onPurpose: (v: string) => void; onComment: (v: string) => void; onExpires: (v: string) => void; onPicked: (v: StockItem | null) => void; onPickedStore: (v: string) => void; onPickedQty: (v: number) => void; onAdd: () => void; onRemove: (index: number) => void; onCancel: () => void; onCreate: () => void }): JSX.Element {
 	return <section className="supply-proto-card supply-reservation-create">
 		<header className="supply-reservation-create-head"><div><span className="supply-reservation-create-eyebrow">Новый документ</span><h2>Резерв товара</h2><p>Создаётся снабжением и сразу становится активным.</p></div><span className="supply-reservation-create-badge">Сделка необязательна</span></header>
 		<div className="supply-reservation-create-body">
 			<section className="supply-reservation-create-section">
-				<div className="supply-reservation-create-section-head"><div><b>Привязка и условия</b><span>Укажите сделку, срок и причину резерва</span></div><span>01</span></div>
+				<div className="supply-reservation-create-section-head"><div><b>Привязка и условия</b><span>Укажите сделку, срок и назначение резерва</span></div><span>01</span></div>
 				<div className="supply-reservation-create-fields">
 					<label className="wide"><span>Сделка</span><div className="supply-reservation-deal-control"><input placeholder="Номер или ссылка на сделку" value={props.dealInput} onChange={(event) => props.onDealInput(event.target.value)} onBlur={() => { if (parseDealId(props.dealInput) && !props.dealPreview) props.onLookup(); }} /><button type="button" disabled={props.busy === 'deal-lookup'} onClick={props.onLookup}>{props.busy === 'deal-lookup' ? 'Ищу…' : 'Подтянуть'}</button></div><small>Можно оставить пустым и привязать сделку позднее.</small></label>
 					{props.dealPreview && <div className="supply-reservation-deal-preview"><span>Сделка найдена</span><button type="button" className="supply-order-deal-link" onClick={() => openDeal(props.dealPreview!.id)}>{props.dealPreview.title} · №{props.dealPreview.id}</button>{props.dealPreview.managerName && <small>Менеджер: {props.dealPreview.managerName}</small>}</div>}
 					<label><span>Резерв до</span><input type="datetime-local" value={props.expires} onChange={(event) => props.onExpires(event.target.value)} /></label>
-					<label><span>Основание / комментарий</span><input value={props.purpose} onChange={(event) => props.onPurpose(event.target.value)} placeholder="Для чего резервируем товар" /></label>
+					<label><span>Основание</span><input maxLength={500} value={props.purpose} onChange={(event) => props.onPurpose(event.target.value)} placeholder="Для чего резервируем товар" /></label>
+					<label className="wide"><span>Комментарий</span><textarea maxLength={1000} rows={3} value={props.comment} onChange={(event) => props.onComment(event.target.value)} placeholder="Дополнительная информация по резерву" /></label>
 				</div>
 			</section>
 			<section className="supply-reservation-create-section">
@@ -211,12 +216,13 @@ function ReservationCard({ request, selected, canWrite, busy, expires, linkInput
 				{request.reviewedAt && <div><b>Обработан:</b> {new Date(request.reviewedAt).toLocaleString('ru-RU')} · {request.reviewedByName ?? (request.reviewedBy ? `#${request.reviewedBy}` : '—')}</div>}
 				{request.rejectionReason && <div><b>Причина отказа:</b> {request.rejectionReason}</div>}
 				{request.purpose && <div className="supply-reservation-meta-wide"><b>Основание:</b> {request.purpose}</div>}
+				{request.comment && <div className="supply-reservation-meta-wide"><b>Комментарий:</b> {request.comment}</div>}
 			</div>
 			{request.dealId && <div><button type="button" className="supply-order-deal-link" onClick={() => openDeal(request.dealId!)}>Открыть сделку №{request.dealId}</button></div>}
 			<div className="supply-reservation-lines">{request.lines.map((line) => <div key={line.id}><span><b>{line.itemName}</b><small>{line.erpWarehouseName}</small></span><strong>{line.activeQuantity !== '0' ? line.activeQuantity : line.quantity} шт.</strong></div>)}</div>
-			{request.status === 'pending' && <div className="supply-reservation-actions"><label><span>Срок резерва</span><input type="datetime-local" value={expires} disabled={!canWrite || Boolean(busy)} onChange={(event) => onExpires(event.target.value)} /></label><button type="button" disabled={!canWrite || Boolean(busy)} onClick={() => onReview('reject')}>Отклонить</button><button className="primary" type="button" disabled={!canWrite || Boolean(busy)} onClick={() => onReview('approve')}>Одобрить целиком</button></div>}
-			{request.releaseRequestStatus === 'pending' && <div className="supply-reservation-actions"><span className="supply-reservation-release-note">Запрошено досрочное снятие.</span><button type="button" disabled={!canWrite || Boolean(busy)} onClick={() => onReleaseDecision('reject')}>Оставить</button><button className="primary danger" type="button" disabled={!canWrite || Boolean(busy)} onClick={() => onReleaseDecision('approve')}>Снять</button></div>}
-			{request.reservationId && ['active', 'shortfall'].includes(request.reservationStatus ?? '') && <div className="supply-reservation-actions"><input placeholder="Новый № сделки / ссылка" value={linkInput} onChange={(event) => onLinkInput(event.target.value)} /><button type="button" disabled={!parseDealId(linkInput) || Boolean(busy)} onClick={() => onChangeDeal(parseDealId(linkInput))}>{request.dealId ? 'Заменить сделку' : 'Привязать сделку'}</button>{request.dealId && <button type="button" disabled={Boolean(busy)} onClick={() => onChangeDeal(null)}>Отвязать</button>}<button type="button" className="danger" disabled={Boolean(busy)} onClick={onRelease}>Снять резерв</button></div>}
+			{canWrite && request.status === 'pending' && <div className="supply-reservation-actions"><label><span>Срок резерва</span><input type="datetime-local" value={expires} disabled={Boolean(busy)} onChange={(event) => onExpires(event.target.value)} /></label><button type="button" disabled={Boolean(busy)} onClick={() => onReview('reject')}>Отклонить</button><button className="primary" type="button" disabled={Boolean(busy)} onClick={() => onReview('approve')}>Одобрить целиком</button></div>}
+			{canWrite && request.releaseRequestStatus === 'pending' && <div className="supply-reservation-actions"><span className="supply-reservation-release-note">Запрошено досрочное снятие.</span><button type="button" disabled={Boolean(busy)} onClick={() => onReleaseDecision('reject')}>Оставить</button><button className="primary danger" type="button" disabled={Boolean(busy)} onClick={() => onReleaseDecision('approve')}>Снять</button></div>}
+			{canWrite && request.reservationId && ['active', 'shortfall'].includes(request.reservationStatus ?? '') && <div className="supply-reservation-actions"><input placeholder="Новый № сделки / ссылка" value={linkInput} onChange={(event) => onLinkInput(event.target.value)} /><button type="button" disabled={!parseDealId(linkInput) || Boolean(busy)} onClick={() => onChangeDeal(parseDealId(linkInput))}>{request.dealId ? 'Заменить сделку' : 'Привязать сделку'}</button>{request.dealId && <button type="button" disabled={Boolean(busy)} onClick={() => onChangeDeal(null)}>Отвязать</button>}<button type="button" className="danger" disabled={Boolean(busy)} onClick={onRelease}>Снять резерв</button></div>}
 			{(request.releaseRequests ?? []).length > 0 && <div className="supply-reservation-history"><b>Запросы снятия</b>{request.releaseRequests!.map((release) => <div key={release.id}>{new Date(release.requestedAt).toLocaleString('ru-RU')} · {request.actorNames?.[release.requestedBy] ?? `#${release.requestedBy}`} · {release.status}{release.requestedReason ? ` · ${release.requestedReason}` : ''}{release.reviewedAt ? ` · обработан ${new Date(release.reviewedAt).toLocaleString('ru-RU')}` : ''}{release.decisionReason ? ` · ${release.decisionReason}` : ''}</div>)}</div>}
 			{(request.events ?? []).length > 0 && <div className="supply-reservation-history"><b>История</b>{request.events!.map((event) => <div key={event.id}>{new Date(event.occurredAt).toLocaleString('ru-RU')} · {event.eventType} · {request.actorNames?.[event.actorId] ?? `#${event.actorId}`}{event.quantity ? ` · ${event.quantity} шт.` : ''}{event.fromDealId || event.toDealId ? ` · ${event.fromDealId ? `№${event.fromDealId}` : 'без сделки'} → ${event.toDealId ? `№${event.toDealId}` : 'без сделки'}` : ''}</div>)}</div>}
 		</div>}

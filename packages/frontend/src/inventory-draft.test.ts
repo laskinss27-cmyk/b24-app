@@ -4,6 +4,7 @@ import {
 	clearInventoryLocalDraft,
 	commentsToDraft,
 	countsToDraft,
+	inventoryLineNeedsAttention,
 	inventoryDraftStorageKey,
 	readInventoryLocalDraft,
 	writeInventoryLocalDraft,
@@ -53,4 +54,12 @@ test('inventory draft survives a page reload until it is explicitly cleared', ()
 test('only valid entered quantities and non-empty comments enter a server snapshot', () => {
 	assert.deepEqual(countsToDraft({ 1: '0', 2: '12.5', 3: '', 4: '-1', 5: 'text' }), { 1: 0, 2: 12.5 });
 	assert.deepEqual(commentsToDraft({ 1: '  найден  ', 2: '   ', 3: 'повреждён' }), { 1: 'найден', 3: 'повреждён' });
+});
+
+test('attention filter keeps discrepancies and unfilled rows but treats zero as entered', () => {
+	assert.equal(inventoryLineNeedsAttention(3, undefined), true);
+	assert.equal(inventoryLineNeedsAttention(3, ''), true);
+	assert.equal(inventoryLineNeedsAttention(3, '2'), true);
+	assert.equal(inventoryLineNeedsAttention(3, '3'), false);
+	assert.equal(inventoryLineNeedsAttention(0, '0'), false);
 });

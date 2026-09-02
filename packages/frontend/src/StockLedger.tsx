@@ -5,6 +5,7 @@ import { StockItemHistoryTab } from './StockItemHistoryTab.js';
 import { StockMovementsTab } from './StockMovementsTab.js';
 import { TransferRequestsTab } from './StockTransferRequestsTab.js';
 import { StockTransfersTab } from './StockTransfersTab.js';
+import { SupplyReservationsView } from './SupplyReservationsView.js';
 import type { StockForm, StockMovementKind } from './StockWorkspaceTypes.js';
 import { fetchStockFormData, withTimeout } from './b24.js';
 
@@ -22,7 +23,7 @@ export { TransferRequestsTab };
 export { StockTransfersTab };
 export { TurnoverReportTab } from './StockTurnoverReportTab.js';
 
-type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory';
+type Tab = 'requests' | 'transfers' | StockMovementKind | 'ledger' | 'inventory' | 'reservations';
 const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'requests', label: 'Заявки ТТ' },
 	{ key: 'transfers', label: 'Перемещения' },
@@ -30,6 +31,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'receipt', label: 'Оприходования' },
 	{ key: 'delivery', label: 'Реализации' },
 	{ key: 'return', label: 'Возвраты' },
+	{ key: 'reservations', label: 'Резервы' },
 	{ key: 'ledger', label: 'Отчёт по движению товара' },
 	{ key: 'inventory', label: 'Инвентаризация' },
 ];
@@ -72,7 +74,7 @@ export function StockLedger(): JSX.Element {
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>Не удалось определить права доступа. Обновите страницу.</div>;
 	const tabs = TABS;
 	return (
-		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
+		<div style={{ maxWidth: tab === 'inventory' || tab === 'reservations' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
 			<div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e3e8ef', marginBottom: 14, flexWrap: 'wrap' }}>
 				{tabs.map((t) => (
@@ -80,6 +82,7 @@ export function StockLedger(): JSX.Element {
 				))}
 			</div>
 			{tab === 'inventory' ? <InventoryHome />
+				: tab === 'reservations' ? <SupplyReservationsView readOnly />
 				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
 				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
 				: tab === 'ledger' ? <StockItemHistoryTab />

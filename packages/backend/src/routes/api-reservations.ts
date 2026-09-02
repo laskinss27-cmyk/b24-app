@@ -109,8 +109,22 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 		} catch (error) { return errorReply(reply, error); }
 	});
 
+	app.post('/api/reservations/list', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody;
+		const client = accessClientFrom(app, body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		try {
+			await client.call('user.current', {});
+			if (!service?.enabled) return { ok: true, enabled: false, canWrite: false, requests: [] };
+			const erp = requireErp();
+			const requests = await service.listSupply();
+			const named = requests.length ? await enrichItemNames(erp, requests) : [];
+			return { ok: true, enabled: true, canWrite: false, requests: await enrichBitrixContext(client, named) };
+		} catch (error) { return errorReply(reply, error); }
+	});
+
 	app.post('/api/reservations/request', async (req, reply) => {
-		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestedExpiresAt?: unknown; requestKey?: unknown; lines?: unknown };
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestedExpiresAt?: unknown; comment?: unknown; requestKey?: unknown; lines?: unknown };
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		try {
@@ -118,7 +132,7 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 			await client.call('crm.deal.get', { id: dealId });
 			const requestKey = String(body.requestKey ?? '').trim();
 			const result = await service?.createDealRequest(requireErp(), await actorFrom(client), {
-				dealId, requestedExpiresAt: String(body.requestedExpiresAt ?? ''), ...(requestKey ? { requestKey } : {}),
+				dealId, requestedExpiresAt: String(body.requestedExpiresAt ?? ''), comment: String(body.comment ?? ''), ...(requestKey ? { requestKey } : {}),
 				lines: Array.isArray(body.lines) ? body.lines as never[] : [],
 			});
 			if (!result) throw new Error('Запись резервов пока не включена');
@@ -172,7 +186,7 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 	});
 
 	app.post('/api/reservations/supply/create', async (req, reply) => {
-		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; expiresAt?: unknown; purpose?: unknown; requestKey?: unknown; lines?: unknown };
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; expiresAt?: unknown; purpose?: unknown; comment?: unknown; requestKey?: unknown; lines?: unknown };
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		try {
@@ -182,7 +196,7 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 			if (dealId != null) await client.call('crm.deal.get', { id: dealId });
 			const warnings = dealId == null ? [] : await service.activeDealWarnings(dealId);
 			const request = await service.createManualReservation(requireErp(), await actorFrom(client), {
-				dealId, expiresAt: String(body.expiresAt ?? ''), purpose: String(body.purpose ?? ''),
+				dealId, expiresAt: String(body.expiresAt ?? ''), purpose: String(body.purpose ?? ''), comment: String(body.comment ?? ''),
 				...(String(body.requestKey ?? '').trim() ? { requestKey: String(body.requestKey).trim() } : {}),
 				lines: Array.isArray(body.lines) ? body.lines as never[] : [],
 			});

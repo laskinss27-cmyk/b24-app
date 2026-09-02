@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { EnrichedRow } from './deal-products-table-types.js';
 import type { ReservationRequestView } from './reservation-api.js';
 import { dealRowReservationMark, defaultReservationQuantities, parseReservationQuantities } from './deal-reservation-ui.js';
+import { selectionForRows } from './useDealProductSelection.js';
 
 const lines = [{ id: 'line-1', quantity: 3, maxQuantity: 3, availableQuantity: 2 }];
 
@@ -27,5 +28,14 @@ test('deal row marker follows the exact plan line and approved expiry', () => {
 	});
 	assert.deepEqual(dealRowReservationMark({ ...request, status: 'pending' }, row), {
 		state: 'pending', quantity: 2, expiresAt: '2026-09-08T12:00:00.000Z',
+	});
+});
+
+test('select all changes only the visible actionable deal rows', () => {
+	assert.deepEqual(selectionForRows({ hidden: true, first: false }, ['first', 'second'], true), {
+		hidden: true, first: true, second: true,
+	});
+	assert.deepEqual(selectionForRows({ hidden: true, first: true, second: true }, ['first', 'second'], false), {
+		hidden: true, first: false, second: false,
 	});
 });

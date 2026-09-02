@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { DealProductPickerRequest, DealProductReplacement } from './DealProductsPicker.js';
+import type { DealProductPickerRequest } from './DealProductsPicker.js';
 import {
 	PRODUCT_PICKER_MIN_HEIGHT,
 	dealContentHeight,
@@ -10,11 +10,9 @@ import {
 export function useDealProductsPlacementFrame({
 	mock,
 	adding,
-	replacing,
 }: {
 	mock: boolean | undefined;
 	adding: DealProductPickerRequest | null;
-	replacing: DealProductReplacement | null;
 }): void {
 	const initialFrameHeight = useRef(dealWorkspaceFrameHeight(
 		Math.max(document.documentElement.clientHeight, window.innerHeight),
@@ -63,7 +61,7 @@ export function useDealProductsPlacementFrame({
 			window.removeEventListener('resize', syncHeight);
 			if (timer != null) window.clearTimeout(timer);
 		};
-	}, [adding, replacing, mock]);
+	}, [adding, mock]);
 }
 
 export function useDealProductsLoadedPlacementFit({

@@ -94,6 +94,10 @@ export function countsToDraft(counts: Record<number, string>): Record<number, nu
 	return out;
 }
 
+export function inventoryLineNeedsAttention(book: number, entered: string | undefined): boolean {
+	return entered === undefined || entered === '' || Number(entered) !== book;
+}
+
 export function commentsToDraft(comments: Record<number, string>): Record<number, string> {
 	const out: Record<number, string> = {};
 	for (const [rawId, rawText] of Object.entries(comments)) {

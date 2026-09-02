@@ -12,6 +12,15 @@
 	padding: 8px 14px;
 	font-size: 13px;
 }
+.inventory-attention-toggle {
+	padding: 8px 14px;
+	font-size: 13px;
+	white-space: nowrap;
+}
+.inventory-attention-toggle.active {
+	background: #1a56db;
+	color: #fff;
+}
 
 .count-list {
 	margin-top: 4px;

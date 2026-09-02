@@ -91,7 +91,7 @@ export function DealDocumentsPanel({
 					<h3>Резервы</h3>
 					{reservations.map((reservation) => (
 						<div className="deal-document-row" key={reservation.id}>
-							<span><b>Резерв {reservation.reservationId ? `#${reservation.reservationId}` : `— заявка #${reservation.id}`}</b><small>{reservation.lines.map((line) => `${line.itemName} ×${line.activeQuantity !== '0' ? line.activeQuantity : line.quantity}`).join(' · ')} · до {new Date(reservation.approvedExpiresAt ?? reservation.requestedExpiresAt).toLocaleString('ru-RU')}</small></span>
+							<span><b>Резерв {reservation.reservationId ? `#${reservation.reservationId}` : `— заявка #${reservation.id}`}</b><small>{reservation.lines.map((line) => `${line.itemName} ×${line.activeQuantity !== '0' ? line.activeQuantity : line.quantity}`).join(' · ')} · до {new Date(reservation.approvedExpiresAt ?? reservation.requestedExpiresAt).toLocaleString('ru-RU')}{reservation.comment ? ` · ${reservation.comment}` : ''}</small></span>
 							<span className="deal-document-status">{reservation.status === 'pending' ? 'согласование' : reservation.reservationStatus === 'shortfall' ? 'уменьшен' : reservation.reservationStatus ?? reservation.status}</span>
 						</div>
 					))}

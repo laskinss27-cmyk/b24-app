@@ -1527,9 +1527,12 @@
 .supply-reservation-create-fields label.wide { grid-column: 1 / -1; }
 .supply-reservation-create-fields label > small { color: #8a96a6; font-size: 10px; font-weight: 400; }
 .supply-reservation-create input,
-.supply-reservation-create select { box-sizing: border-box; width: 100%; min-height: 38px; border: 1px solid #b9c5d4; border-radius: 6px; padding: 8px 10px; background: #fff; color: #172033; font: inherit; font-size: 13px; }
+.supply-reservation-create select,
+.supply-reservation-create textarea { box-sizing: border-box; width: 100%; min-height: 38px; border: 1px solid #b9c5d4; border-radius: 6px; padding: 8px 10px; background: #fff; color: #172033; font: inherit; font-size: 13px; }
 .supply-reservation-create input:focus,
-.supply-reservation-create select:focus { border-color: #2673c9; outline: 2px solid rgba(38, 115, 201, .13); }
+.supply-reservation-create select:focus,
+.supply-reservation-create textarea:focus { border-color: #2673c9; outline: 2px solid rgba(38, 115, 201, .13); }
+.supply-reservation-create textarea { min-height: 72px; resize: vertical; }
 .supply-reservation-create button { min-height: 36px; border: 1px solid #c8d2df; border-radius: 7px; padding: 7px 13px; background: #fff; color: #263548; font: inherit; font-size: 13px; cursor: pointer; }
 .supply-reservation-create button:hover:not(:disabled) { border-color: #9fb4cd; background: #f7f9fc; }
 .supply-reservation-create button:disabled { cursor: default; opacity: .5; }

@@ -15,7 +15,7 @@ import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
 import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
 import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
-import { useDealProductSelection } from './useDealProductSelection.js';
+import { selectionForRows, useDealProductSelection } from './useDealProductSelection.js';
 import { useDealDocumentsState } from './useDealDocumentsState.js';
 import { useDealNameDialogsState } from './useDealNameDialogsState.js';
 import { useDealProductRowMutationState } from './useDealProductRowMutationState.js';
@@ -71,14 +71,13 @@ export interface DealProductsWorkspaceProps {
 	workingVariantHasActivity: boolean;
 	onActiveVariant: (id: string | null) => void;
 	onAdd: () => void;
-	onReplace: (row: EnrichedRow) => void;
 	onStage: (stageName: string) => void;
 	onAddToStage: (stageId: string, stageName: string) => void;
 	onPrintDocument: (kind: DealPrintKind, variantId?: string) => void;
 	onReload: () => Promise<void>;
 }
 
-export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onReplace, onStage, onAddToStage, onPrintDocument, onReload }: DealProductsWorkspaceProps): JSX.Element {
+export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, activeVariantId, workingVariantHasActivity, onActiveVariant, onAdd, onStage, onAddToStage, onPrintDocument, onReload }: DealProductsWorkspaceProps): JSX.Element {
 	const {
 		activeVariant,
 		viewingSelected,
@@ -259,6 +258,14 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		profitability,
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
+	const selectableRows = [...visibleGoods, ...visibleWorks].filter((row) => remaining(row) > 0);
+	const allRowsSelected = selectableRows.length > 0 && selectableRows.every(isSel);
+	const someRowsSelected = selectableRows.some(isSel);
+	const selectionDisabled = hasPendingDrafts || busy || supplyBusy || selectableRows.length === 0;
+	const toggleAllRows = (): void => {
+		const nextValue = !allRowsSelected;
+		setSelected((current) => selectionForRows(current, selectableRows.map((row) => row.id), nextValue));
+	};
 
 	const { realizationDocuments, returnDocuments, dealDocumentCount } = buildDealDocumentsView(data, dealTransfers.length, dealReservations.requests.length);
 	const renderWorkRow = createDealWorkRowRenderer({
@@ -310,7 +317,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		amountAt,
 		refreshing,
 		onRemove: doRemove,
-		onReplace,
 		onToggleSelected: toggleSel,
 		onEdit: setEdit,
 		onRowBlur,
@@ -499,6 +505,10 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 			<DealProductsPlanningTable
 				workingMode={workingMode}
+				allRowsSelected={allRowsSelected}
+				someRowsSelected={someRowsSelected}
+				selectionDisabled={selectionDisabled}
+				onToggleAllRows={toggleAllRows}
 				summaryView={summaryView}
 				goods={goods}
 				works={realWorks}
@@ -548,11 +558,12 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				busy={dealReservations.busy}
 				error={dealReservations.error}
 				onClose={() => setShowReservation(false)}
-				onSubmit={(requestedExpiresAt, quantities) => {
+				onSubmit={(requestedExpiresAt, quantities, comment) => {
 					if (!dealId) return;
 					void dealReservations.create({
 						dealId,
 						requestedExpiresAt,
+						comment,
 						requestKey: newReservationKey(),
 						lines: reserveGoods.flatMap((row) => {
 							const quantity = quantities[row.id] ?? 0;

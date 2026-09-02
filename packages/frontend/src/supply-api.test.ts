@@ -37,7 +37,7 @@ const {
 	updateSupplyRequestLine,
 } = await import('./b24.js');
 const {
-	createDealReservation, createSupplyReservation, fetchDealReservations, lookupReservationDeal,
+	createDealReservation, createSupplyReservation, fetchDealReservations, fetchReservationsRegistry, lookupReservationDeal,
 	releaseSupplyReservation, reviewReservationRequest, setSupplyReservationDeal,
 } = await import('./reservation-api.js');
 
@@ -212,14 +212,22 @@ test('reservation API preserves deal lines, expiry and supply decision payloads'
 	]);
 	await fetchDealReservations(91);
 	await createDealReservation({
-		dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', requestKey: 'request-1',
+		dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', comment: 'Срочный объект', requestKey: 'request-1',
 		lines: [{ sourceLineKey: 'line-1', productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 2 }],
 	});
 	await reviewReservationRequest({ requestId: '1', decision: 'approve', approvedExpiresAt: '2026-09-07T12:00:00.000Z', idempotencyKey: 'decision-1' });
 	assert.deepEqual(requests, [
 		{ url: '/api/reservations/deal', body: { domain: 'mobile.example', accessToken: 'supply-token', dealId: 91 } },
-		{ url: '/api/reservations/request', body: { domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', requestKey: 'request-1', lines: [{ sourceLineKey: 'line-1', productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 2 }] } },
+		{ url: '/api/reservations/request', body: { domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, requestedExpiresAt: '2026-09-08T12:00:00.000Z', comment: 'Срочный объект', requestKey: 'request-1', lines: [{ sourceLineKey: 'line-1', productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 2 }] } },
 		{ url: '/api/reservations/supply/review', body: { domain: 'mobile.example', accessToken: 'supply-token', requestId: '1', decision: 'approve', approvedExpiresAt: '2026-09-07T12:00:00.000Z', idempotencyKey: 'decision-1' } },
+	]);
+});
+
+test('reservation registry uses the read-only employee endpoint', async () => {
+	const requests = captureResponses([{ ok: true, enabled: true, canWrite: false, requests: [] }]);
+	assert.deepEqual(await fetchReservationsRegistry(), { ok: true, enabled: true, canWrite: false, requests: [] });
+	assert.deepEqual(requests, [
+		{ url: '/api/reservations/list', body: { domain: 'mobile.example', accessToken: 'supply-token' } },
 	]);
 });
 
@@ -232,7 +240,7 @@ test('supply reservation API preserves optional deal linkage and later relinking
 	]);
 	assert.equal((await lookupReservationDeal(91)).title, 'Сделка');
 	assert.deepEqual(await createSupplyReservation({
-		dealId: null, expiresAt: '2026-09-09T12:00:00.000Z', purpose: 'Витрина', requestKey: 'manual-1',
+		dealId: null, expiresAt: '2026-09-09T12:00:00.000Z', purpose: 'Витрина', comment: 'До пятницы', requestKey: 'manual-1',
 		lines: [{ productId: 42, itemName: 'Камера', storeTitle: 'Склад', quantity: 1 }],
 	}), { request: { id: '2', requestKey: 'manual-1', lines: [] }, warnings: ['У сделки уже есть резерв'] });
 	assert.deepEqual(await setSupplyReservationDeal('5', 91, 'link-1'), []);
@@ -242,5 +250,6 @@ test('supply reservation API preserves optional deal linkage and later relinking
 		'/api/reservations/supply/set-deal', '/api/reservations/supply/release',
 	]);
 	assert.equal(requests[1]?.body['dealId'], null);
+	assert.equal(requests[1]?.body['comment'], 'До пятницы');
 	assert.equal(requests[2]?.body['dealId'], 91);
 });

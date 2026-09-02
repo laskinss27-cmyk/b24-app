@@ -14,6 +14,7 @@ import {
 	clearInventoryLocalDraft,
 	commentsToDraft,
 	countsToDraft,
+	inventoryLineNeedsAttention,
 	inventoryDraftStorageKey,
 	readInventoryLocalDraft,
 	writeInventoryLocalDraft,
@@ -85,6 +86,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 	const [loadErr, setLoadErr] = useState<string | null>(null);
 	const [search, setSearch] = useState('');
 	const [showPhotos, setShowPhotos] = useState(false);
+	const [showAttentionOnly, setShowAttentionOnly] = useState(false);
 	const [counts, setCounts] = useState<Record<number, string>>(() => {
 		const o: Record<number, string> = {};
 		if (restoredDraft) for (const [k, v] of Object.entries(restoredDraft)) o[Number(k)] = String(v);
@@ -291,13 +293,14 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();
-		if (!q) return list;
-		const words = q.split(/\s+/);
+		const words = q ? q.split(/\s+/) : [];
 		return list.filter((i) => {
 			const hay = `${i.name} ${i.article ?? ''} ${i.manufacturer ?? ''} ${i.model ?? ''} ${i.sectionName ?? ''}`.toLowerCase();
-			return words.every((w) => hay.includes(w));
+			if (!words.every((w) => hay.includes(w))) return false;
+			if (!showAttentionOnly) return true;
+			return inventoryLineNeedsAttention(i.book, counts[i.productId]);
 		});
-	}, [list, search]);
+	}, [counts, list, search, showAttentionOnly]);
 
 	// группировка по разделу (раздел заполнен ~100% — удобная навигация при обходе)
 	const groups = useMemo<Array<[string, InvLine[]]>>(() => {
@@ -450,6 +453,14 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				<label className="photo-toggle">
 					<input type="checkbox" checked={showPhotos} onChange={(e) => setShowPhotos(e.target.checked)} /> 🖼 Фото
 				</label>
+				<button
+					type="button"
+					className={`btn-secondary inventory-attention-toggle${showAttentionOnly ? ' active' : ''}`}
+					aria-pressed={showAttentionOnly}
+					onClick={() => setShowAttentionOnly((value) => !value)}
+				>
+					{showAttentionOnly ? 'Показать все позиции' : 'Только расхождения и незаполненные'}
+				</button>
 				<button className="btn-secondary print-btn" onClick={() => window.print()}>
 					🖨 Печать
 				</button>
@@ -523,7 +534,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 							})}
 						</div>
 					))}
-					{!filtered.length && <p className="empty">{list.length ? `Ничего не найдено по «${search}»` : 'На складе нет позиций'}</p>}
+					{!filtered.length && <p className="empty">{list.length
+						? showAttentionOnly
+							? (search ? `По запросу «${search}» нет расхождений или незаполненных позиций` : 'Все позиции заполнены без расхождений')
+							: `Ничего не найдено по «${search}»`
+						: 'На складе нет позиций'}</p>}
 				</div>
 			)}
 

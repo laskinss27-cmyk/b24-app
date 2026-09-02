@@ -37,7 +37,6 @@ export function createDealGoodsRowRenderer({
 	amountAt,
 	refreshing,
 	onRemove,
-	onReplace,
 	onToggleSelected,
 	onEdit,
 	onRowBlur,
@@ -71,7 +70,6 @@ export function createDealGoodsRowRenderer({
 	amountAt: (row: EnrichedRow, storeId: number) => number;
 	refreshing: boolean;
 	onRemove: (row: EnrichedRow) => Promise<void>;
-	onReplace: (row: EnrichedRow) => void;
 	onToggleSelected: (row: EnrichedRow) => void;
 	onEdit: (row: EnrichedRow, patch: Partial<DealProductRowEdit>) => void;
 	onRowBlur: (row: EnrichedRow, event: FocusEvent<HTMLInputElement>) => void;
@@ -117,7 +115,6 @@ export function createDealGoodsRowRenderer({
 					stockExpanded={isStockExpanded}
 					totalStock={totalStock(r)}
 					onRemove={() => void onRemove(r)}
-					onReplace={() => onReplace(r)}
 					onToggleSelected={() => onToggleSelected(r)}
 					onEdit={(patch) => onEdit(r, patch)}
 					onBlur={(event) => onRowBlur(r, event)}

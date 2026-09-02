@@ -23,14 +23,16 @@ export function DealReservationDialog({ visible, lines, busy, error, onClose, on
 	busy: boolean;
 	error: string | null;
 	onClose: () => void;
-	onSubmit: (expiresAt: string, quantities: Record<string, number>) => void;
+	onSubmit: (expiresAt: string, quantities: Record<string, number>, comment: string) => void;
 }): JSX.Element | null {
 	const [expiresAt, setExpiresAt] = useState(defaultExpiry);
 	const [quantities, setQuantities] = useState<Record<string, string>>({});
+	const [comment, setComment] = useState('');
 	useEffect(() => {
 		if (visible) {
 			setExpiresAt(defaultExpiry());
 			setQuantities(defaultReservationQuantities(lines));
+			setComment('');
 		}
 	}, [visible]);
 	if (!visible) return null;
@@ -40,6 +42,7 @@ export function DealReservationDialog({ visible, lines, busy, error, onClose, on
 			<header><div><h2>Запросить резерв</h2><span>Снабжение проверит остаток и срок целиком</span></div><button type="button" disabled={busy} onClick={onClose}>×</button></header>
 			<div className="deal-supply-order-fields">
 				<label><span>Желаемый срок резерва</span><input type="datetime-local" value={expiresAt} disabled={busy} onChange={(event) => setExpiresAt(event.target.value)} /></label>
+				<label className="wide"><span>Комментарий</span><textarea maxLength={1000} rows={3} value={comment} disabled={busy} onChange={(event) => setComment(event.target.value)} placeholder="Для снабжения: зачем нужен резерв или важные условия" /></label>
 			</div>
 			{error && <div className="deal-supply-order-error">{error}</div>}
 			<div className="deal-supply-order-lines">
@@ -53,7 +56,7 @@ export function DealReservationDialog({ visible, lines, busy, error, onClose, on
 				</div>)}
 			</div>
 			{parsed.error && <div className="deal-reservation-validation">{parsed.error}</div>}
-			<footer><button type="button" disabled={busy} onClick={onClose}>Отмена</button><button className="primary" type="button" disabled={busy || !expiresAt || Boolean(parsed.error)} onClick={() => onSubmit(new Date(expiresAt).toISOString(), parsed.quantities)}>{busy ? 'Отправляю…' : 'Отправить снабжению'}</button></footer>
+			<footer><button type="button" disabled={busy} onClick={onClose}>Отмена</button><button className="primary" type="button" disabled={busy || !expiresAt || Boolean(parsed.error)} onClick={() => onSubmit(new Date(expiresAt).toISOString(), parsed.quantities, comment.trim())}>{busy ? 'Отправляю…' : 'Отправить снабжению'}</button></footer>
 		</section>
 	</div>;
 }

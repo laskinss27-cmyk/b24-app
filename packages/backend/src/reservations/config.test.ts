@@ -63,3 +63,12 @@ test('reservation capability endpoint stays explicitly disabled in off mode', as
 	assert.deepEqual(response.json(), { ok: true, enabled: false, mode: 'off', canWrite: false });
 	await app.close();
 });
+
+test('read-only reservation registry still requires Bitrix authentication', async () => {
+	const app = Fastify();
+	registerApiReservationsRoute(app, createReservationRuntime({ mode: 'off' }));
+	const response = await app.inject({ method: 'POST', url: '/api/reservations/list', payload: {} });
+	assert.equal(response.statusCode, 403);
+	assert.deepEqual(response.json(), { ok: false, error: 'bad auth / domain' });
+	await app.close();
+});

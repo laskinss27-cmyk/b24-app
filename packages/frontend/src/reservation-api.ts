@@ -16,6 +16,7 @@ export interface ReservationRequestView {
 	sourceType?: string;
 	dealId: number | null;
 	purpose?: string | null;
+	comment: string | null;
 	dealTitle?: string | null;
 	dealManagerId?: string | null;
 	dealManagerName?: string | null;
@@ -61,6 +62,7 @@ export async function fetchDealReservations(dealId: number): Promise<{ enabled: 
 export async function createDealReservation(input: {
 	dealId: number;
 	requestedExpiresAt: string;
+	comment?: string;
 	requestKey: string;
 	lines: Array<{ sourceLineKey: string; productId: number; itemName: string; storeTitle: string; quantity: number }>;
 }): Promise<ReservationRequestView> {
@@ -74,6 +76,10 @@ export async function requestReservationRelease(dealId: number, reservationId: s
 
 export async function fetchSupplyReservations(): Promise<{ enabled: boolean; canWrite: boolean; requests: ReservationRequestView[] }> {
 	return post('/api/reservations/supply/list', {});
+}
+
+export async function fetchReservationsRegistry(): Promise<{ enabled: boolean; canWrite: false; requests: ReservationRequestView[] }> {
+	return post('/api/reservations/list', {});
 }
 
 export async function reviewReservationRequest(input: { requestId: string; decision: 'approve' | 'reject'; approvedExpiresAt?: string; reason?: string; idempotencyKey: string }): Promise<void> {
@@ -90,7 +96,7 @@ export async function lookupReservationDeal(dealId: number): Promise<{ id: numbe
 }
 
 export async function createSupplyReservation(input: {
-	dealId?: number | null; expiresAt: string; purpose?: string; requestKey: string;
+	dealId?: number | null; expiresAt: string; purpose?: string; comment?: string; requestKey: string;
 	lines: Array<{ productId: number; itemName: string; storeTitle: string; quantity: number }>;
 }): Promise<{ request: ReservationRequestView; warnings: string[] }> {
 	const response = await post<{ request: ReservationRequestView; warnings?: string[] }>('/api/reservations/supply/create', input);
