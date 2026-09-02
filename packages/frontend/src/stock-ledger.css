@@ -102,6 +102,28 @@
 	color: #1a2231;
 }
 
+.stock-movement-cancel {
+	min-height: 30px;
+	border: 1px solid #e1b8b8;
+	border-radius: 6px;
+	padding: 5px 10px;
+	background: #fff7f7;
+	color: #9f2f2f;
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.stock-movement-cancel:hover:not(:disabled) {
+	border-color: #c98282;
+	background: #ffeded;
+}
+
+.stock-movement-cancel:disabled {
+	cursor: default;
+	opacity: .5;
+}
+
 .transfer-request-row {
 	cursor: pointer;
 	transition: background-color 120ms ease;

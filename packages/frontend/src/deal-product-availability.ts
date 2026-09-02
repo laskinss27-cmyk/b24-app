@@ -49,7 +49,20 @@ export function dealProductTransferLabel(transfer: TransferDoc): string {
 
 export function dealProductActiveSupply(row: EnrichedRow, supply: SupplyCard[]): SupplyCard | null {
 	return supply.find((card) =>
-		card.source === 'core'
-		&& !/stopped|closed|completed|success|fail/i.test(card.stageId)
+		dealSupplyCardIsActive(card)
 		&& (card.productIds ?? []).includes(row.productId)) ?? null;
+}
+
+export function dealSupplyCardIsActive(card: SupplyCard): boolean {
+	return card.source === 'core'
+		&& !/stopped|closed|completed|success|fail/i.test(card.stageId);
+}
+
+export function dealProductActiveSupplyQuantity(productId: number, supply: SupplyCard[]): number {
+	return supply.reduce((total, card) => {
+		if (!dealSupplyCardIsActive(card)) return total;
+		return total + (card.items ?? [])
+			.filter((item) => item.productId === productId && Number.isFinite(item.qty) && item.qty > 0)
+			.reduce((sum, item) => sum + item.qty, 0);
+	}, 0);
 }

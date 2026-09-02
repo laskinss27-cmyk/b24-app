@@ -1423,17 +1423,28 @@
 	background: #fff;
 }
 
-.supply-reservations { display: grid; gap: 8px; }
-.supply-reservation-card { overflow: hidden; padding: 0; }
-.supply-reservation-card.is-open { border-color: #b9c9dd; box-shadow: 0 5px 18px rgba(31, 45, 61, .08); }
+.supply-reservations { display: block; }
+.supply-reservation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.supply-reservation-toolbar > div:first-child { display: grid; gap: 2px; }
+.supply-reservation-toolbar > div:first-child > b { color: #172033; font-size: 14px; }
+.supply-reservation-toolbar > div:first-child > span { color: #7a8699; font-size: 12px; }
+.supply-reservation-registry { margin-bottom: 0; }
+.supply-reservation-registry-columns,
 .supply-reservation-summary {
 	display: grid;
 	grid-template-columns: minmax(100px, .65fr) minmax(200px, 2fr) minmax(105px, .7fr) minmax(125px, .8fr) auto 16px;
 	align-items: center;
 	gap: 12px;
+}
+.supply-reservation-registry-columns { min-height: 32px; padding: 0 12px; border-bottom: 1px solid #dce3ec; background: #fbfcfe; color: #7a8699; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.supply-reservation-registry-columns span:nth-last-child(2) { text-align: right; }
+.supply-reservation-card { margin: 0; overflow: hidden; border-bottom: 1px solid #e7ebf0; background: #fff; }
+.supply-reservation-card:last-child { border-bottom: 0; }
+.supply-reservation-card.is-open { background: #fbfcfe; }
+.supply-reservation-summary {
 	width: 100%;
-	min-height: 48px;
-	padding: 8px 12px;
+	min-height: 44px;
+	padding: 7px 12px;
 	border: 0;
 	background: #fff;
 	color: #1f2937;
@@ -1441,7 +1452,7 @@
 	text-align: left;
 	cursor: pointer;
 }
-.supply-reservation-summary:hover { background: #f7f9fc; }
+.supply-reservation-summary:hover { background: #f4f8fd; }
 .supply-reservation-summary:focus-visible { outline: 2px solid #185fa5; outline-offset: -2px; }
 .supply-reservation-summary-id { font-size: 13px; font-weight: 800; white-space: nowrap; }
 .supply-reservation-summary-product {
@@ -1552,7 +1563,10 @@
 .supply-reservation-create-footer > div { display: flex; gap: 8px; }
 
 @media (max-width: 900px) {
+	.supply-reservation-registry-columns,
 	.supply-reservation-summary { grid-template-columns: minmax(100px, .7fr) minmax(180px, 2fr) auto 16px; }
+	.supply-reservation-registry-columns span:nth-child(3),
+	.supply-reservation-registry-columns span:nth-child(4),
 	.supply-reservation-summary-deal,
 	.supply-reservation-summary-term { display: none; }
 	.supply-reservation-create-fields { grid-template-columns: 1fr; }
@@ -1561,6 +1575,7 @@
 }
 
 @media (max-width: 620px) {
+	.supply-reservation-registry-columns { display: none; }
 	.supply-reservation-summary { grid-template-columns: minmax(0, 1fr) auto 16px; gap: 8px; }
 	.supply-reservation-summary-id { grid-column: 1; }
 	.supply-reservation-summary-product { grid-column: 1 / -1; grid-row: 2; }

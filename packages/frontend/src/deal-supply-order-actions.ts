@@ -78,6 +78,11 @@ export function createDealSupplyOrderActions({
 				setSupplyFormError(`Укажите количество для позиции «${row.name}».`);
 				return;
 			}
+			const available = remaining(row);
+			if (qty > available + 0.000001) {
+				setSupplyFormError(`Для позиции «${row.name}» осталось заказать не больше ${available}.`);
+				return;
+			}
 			quantities.set(row.id, qty);
 		}
 		setSupplyBusy(true);

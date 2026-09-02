@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildDealSupplySelection } from './deal-supply-selection.js';
+import type { EnrichedRow } from './deal-products-table-types.js';
 
 interface CapturedRequest {
 	url: string;
@@ -89,4 +91,58 @@ test('addProductsToDeal preserves stage options and the current zero fallback', 
 			variantId: 'variant-2',
 		},
 	});
+});
+
+function supplyRow(id: string, productId: number, quantity: number): EnrichedRow {
+	return {
+		id,
+		productId,
+		name: `Товар ${productId}`,
+		type: 1,
+		price: 1,
+		quantity,
+		discountSum: 0,
+		measure: 'шт',
+		stocks: [],
+		purchasingPrice: null,
+	};
+}
+
+test('supply selection orders only the deal quantity not covered by active requests', () => {
+	const base = supplyRow('base-18060', 18060, 3200);
+	const added = supplyRow('stage-equipment-18060', 18060, 1300);
+	const result = buildDealSupplySelection({
+		rows: [base, added],
+		supply: [{
+			id: 0,
+			title: 'MAT-MR-2026-00041',
+			stageId: 'CORE:Pending',
+			source: 'core',
+			productIds: [18060],
+			items: [{ productId: 18060, itemName: 'Труба', qty: 3200, note: '' }],
+		}],
+		isSelected: (row) => row.id === added.id,
+		remaining: (row) => row.quantity,
+	});
+
+	assert.deepEqual(result.rows.map((row) => row.id), [added.id]);
+	assert.equal(result.availableByRow.get(added.id), 1300);
+});
+
+test('supply selection ignores stopped requests and never duplicates an uncovered product quantity', () => {
+	const first = supplyRow('first', 77, 3);
+	const second = supplyRow('second', 77, 4);
+	const result = buildDealSupplySelection({
+		rows: [first, second],
+		supply: [
+			{ id: 0, title: 'active', stageId: 'CORE:Pending', source: 'core', productIds: [77], items: [{ productId: 77, itemName: 'Товар', qty: 5, note: '' }] },
+			{ id: 0, title: 'stopped', stageId: 'CORE:Stopped', source: 'core', productIds: [77], items: [{ productId: 77, itemName: 'Товар', qty: 100, note: '' }] },
+		],
+		isSelected: () => true,
+		remaining: (row) => row.quantity,
+	});
+
+	assert.deepEqual(result.rows.map((row) => row.id), [first.id]);
+	assert.equal(result.availableByRow.get(first.id), 2);
+	assert.equal(result.availableByRow.has(second.id), false);
 });

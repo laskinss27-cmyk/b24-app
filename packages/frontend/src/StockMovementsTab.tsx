@@ -102,7 +102,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 						{shown.map((m) => (
 							<tr key={m.name}>
 								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind] }); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
-								{(canPost || canCancel) && <td style={TD}>{!m.submitted && canPost && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}{m.submitted && canCancel && <button className="danger" disabled={busyDoc != null} onClick={() => void cancelSubmission(m)}>{busyDoc === m.name ? 'Отменяю…' : 'Отменить проведение'}</button>}</td>}
+								{(canPost || canCancel) && <td style={TD}>{!m.submitted && canPost && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}{m.submitted && canCancel && <button className="stock-movement-cancel" disabled={busyDoc != null} onClick={() => void cancelSubmission(m)}>{busyDoc === m.name ? 'Отменяю…' : 'Отменить проведение'}</button>}</td>}
 							</tr>
 						))}
 					</tbody>

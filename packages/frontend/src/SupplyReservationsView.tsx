@@ -156,10 +156,13 @@ export function SupplyReservationsView(): JSX.Element {
 	return <div className="supply-reservations">
 		{error && <div className="supply-proto-notice"><span>{error}</span><button type="button" onClick={() => setError(null)}>Закрыть</button></div>}
 		{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
-		<div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}><div><b>Все резервы</b><div style={{ color: '#7a8699', fontSize: 12 }}>{requests.length} записей, включая обработанные</div></div><button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>+ Создать резерв</button></div>
+		<div className="supply-reservation-toolbar"><div><b>Все резервы</b><span>{requests.length} записей, включая обработанные</span></div><div className="supply-proto-actions"><button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Закрыть создание' : 'Создать резерв'}</button></div></div>
 		{showCreate && <CreateReservationForm busy={busy} stores={stores} dealInput={dealInput} dealPreview={dealPreview} purpose={purpose} expires={createExpires} picked={picked} pickedStore={pickedStore} pickedQty={pickedQty} lines={draftLines} onDealInput={(value) => { setDealInput(value); setDealPreview(null); }} onLookup={() => void lookupDeal()} onPurpose={setPurpose} onExpires={setCreateExpires} onPicked={setPicked} onPickedStore={setPickedStore} onPickedQty={setPickedQty} onAdd={addLine} onRemove={(index) => setDraftLines((current) => current.filter((_line, lineIndex) => lineIndex !== index))} onCancel={() => setShowCreate(false)} onCreate={() => void create()} />}
-		{!requests.length && <div className="supply-proto-card empty">Резервов пока нет.</div>}
-		{requests.map((request) => <ReservationCard key={request.id} request={request} selected={selected?.id === request.id} canWrite={canWrite} busy={busy} expires={expires[request.id] ?? ''} linkInput={linkInput} onToggle={() => setSelectedId(selectedId === request.id ? null : request.id)} onExpires={(value) => setExpires((current) => ({ ...current, [request.id]: value }))} onReview={(decision) => void review(request, decision)} onReleaseDecision={(decision) => void decideRelease(request, decision)} onLinkInput={setLinkInput} onChangeDeal={(dealId) => void changeDeal(request, dealId)} onRelease={() => void directRelease(request)} />)}
+		<section className="supply-proto-card supply-reservation-registry">
+			<div className="supply-reservation-registry-columns" aria-hidden="true"><span>Номер</span><span>Товар / количество</span><span>Сделка</span><span>Срок</span><span>Статус</span><span></span></div>
+			{!requests.length && <div className="empty">Резервов пока нет.</div>}
+			{requests.map((request) => <ReservationCard key={request.id} request={request} selected={selected?.id === request.id} canWrite={canWrite} busy={busy} expires={expires[request.id] ?? ''} linkInput={linkInput} onToggle={() => setSelectedId(selectedId === request.id ? null : request.id)} onExpires={(value) => setExpires((current) => ({ ...current, [request.id]: value }))} onReview={(decision) => void review(request, decision)} onReleaseDecision={(decision) => void decideRelease(request, decision)} onLinkInput={setLinkInput} onChangeDeal={(dealId) => void changeDeal(request, dealId)} onRelease={() => void directRelease(request)} />)}
+		</section>
 	</div>;
 }
 
@@ -189,7 +192,7 @@ function CreateReservationForm(props: { busy: string; stores: string[]; dealInpu
 
 function ReservationCard({ request, selected, canWrite, busy, expires, linkInput, onToggle, onExpires, onReview, onReleaseDecision, onLinkInput, onChangeDeal, onRelease }: { request: ReservationRequestView; selected: boolean; canWrite: boolean; busy: string; expires: string; linkInput: string; onToggle: () => void; onExpires: (v: string) => void; onReview: (v: 'approve' | 'reject') => void; onReleaseDecision: (v: 'approve' | 'reject') => void; onLinkInput: (v: string) => void; onChangeDeal: (v: number | null) => void; onRelease: () => void }): JSX.Element {
 	const effectiveExpiresAt = request.approvedExpiresAt ?? request.requestedExpiresAt;
-	return <article className={`supply-proto-card supply-reservation-card${selected ? ' is-open' : ''}`}>
+	return <article className={`supply-reservation-card${selected ? ' is-open' : ''}`}>
 		<button type="button" className="supply-reservation-summary" aria-expanded={selected} onClick={onToggle}>
 			<span className="supply-reservation-summary-id">{reservationDisplayNumber(request)}</span>
 			<span className="supply-reservation-summary-product" title={reservationProductSummary(request)}>{reservationProductSummary(request)}</span>

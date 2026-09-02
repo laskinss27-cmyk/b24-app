@@ -47,6 +47,7 @@ import { createDealStageActions } from './deal-stage-actions.js';
 import { createDealProductRowEditActions } from './deal-product-row-edit-actions.js';
 import { createDealProductRowRemovalActions } from './deal-product-row-removal-actions.js';
 import { createDealSupplyOrderActions } from './deal-supply-order-actions.js';
+import { buildDealSupplySelection } from './deal-supply-selection.js';
 import { createDealRealizationActions } from './deal-realization-actions.js';
 import { buildDealRealizationSelection } from './deal-realization-selection.js';
 import { createDealWorkRowRenderer } from './deal-work-row-renderer.js';
@@ -334,7 +335,9 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
-	const supplyGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
+	const supplySelection = buildDealSupplySelection({ rows: visibleGoods, supply: data.supply, isSelected: isSel, remaining });
+	const supplyGoods = supplySelection.rows;
+	const supplyRemaining = (row: EnrichedRow): number => supplySelection.availableByRow.get(row.id) ?? 0;
 	const reserveGoods = visibleGoods.filter((row) => isSel(row) && remaining(row) > 0 && amountAt(row, storeOf(row)) > 0 && Boolean(storeName(storeOf(row))));
 	const reservationStatus = dealReservations.current?.status === 'pending'
 		? `Резерв: заявка ожидает снабжение до ${new Date(dealReservations.current.requestedExpiresAt).toLocaleString('ru-RU')}`
@@ -354,7 +357,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		supplyToStore,
 		supplyDeadline,
 		supplyOrderNote,
-		remaining,
+		remaining: supplyRemaining,
 		onReload,
 		setSupplyBusy,
 		setShowSupplyOrder,
