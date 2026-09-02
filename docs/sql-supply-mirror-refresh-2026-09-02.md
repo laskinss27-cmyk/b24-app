@@ -59,10 +59,22 @@ restore совпали по списку таблиц, row counts и детер�
 авторизованный ERPNext read и `erpnext_frappe_network` успешны; backend image
 `b24-app:24eb5ff`, restart count `0`.
 
-## Следующий gate
+## Production shadow
 
-SQL всё ещё не является источником ответа снабжения. Следующий отдельный шаг —
-явно разрешённая активация `B24_APP_SUPPLY_SQL_READ=shadow`: пользователь
-по-прежнему получает legacy-ответ, а покрытая transfer-проекция сравнивается с
-latest SQL checkpoint на реальных запросах. Значение `sql` намеренно отсутствует
-до расширения schema полями карточки, истории и action facts.
+После отдельного разрешения backend пересоздан с единственным изменением
+`B24_APP_SUPPLY_SQL_READ=shadow`; image остался `b24-app:24eb5ff`. Предыдущий
+контейнер с `off` сохранён как
+`b24-backend-prev-before-supply-shadow-20260902-1215`. Internal/public health,
+SQL и reservation readiness, ERPNext read, state mount и
+`erpnext_frappe_network` успешны; restart count `0`.
+
+Один owner-authorized рабочий `POST /api/supply/orders` вернул прежний успешный
+legacy-ответ: HTTP `200`, `98` карточек (`97` заявок и самостоятельный блок).
+Сопутствующий per-request SQL shadow дал `match`: legacy/stored transfers
+`182/182`, checkpoint hash `a2de30d…`, differences `0`. Токен использовался
+только в памяти временного процесса; временный runner и container удалены.
+
+SQL всё ещё не является источником ответа снабжения. Следующий gate — серия
+реальных `match` во времени, затем расширение schema полями карточки, истории и
+action facts. Значение режима `sql` намеренно отсутствует, а Bitrix/ERPNext
+fallback остаётся рабочим.
