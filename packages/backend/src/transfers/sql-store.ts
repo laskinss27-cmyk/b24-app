@@ -105,14 +105,17 @@ function normalizedHistory(value: TransferHistoryEvent): TransferHistoryEvent {
 	const action = value.action == null ? undefined : String(value.action) as TransferHistoryAction;
 	if (action && !ACTIONS.has(action)) throw new Error(`Invalid transfer history action: ${action}`);
 	const at = canonicalTimestamp(bounded(value.at, 64, 'transfer history timestamp'), 'transfer history timestamp');
+	const byName = value.byName == null ? '' : bounded(value.byName, 255, 'transfer history actor name');
+	const note = value.note == null ? '' : bounded(value.note, 10_000, 'transfer history note');
+	const changes = value.changes == null ? [] : value.changes.map(normalizedChange);
 	return {
 		at,
 		status,
 		byId: bounded(value.byId, 191, 'transfer history actor id'),
-		...(value.byName == null ? {} : { byName: bounded(value.byName, 255, 'transfer history actor name') }),
+		...(byName ? { byName } : {}),
 		...(action ? { action } : {}),
-		...(value.note == null ? {} : { note: bounded(value.note, 10_000, 'transfer history note') }),
-		...(value.changes == null ? {} : { changes: value.changes.map(normalizedChange) }),
+		...(note ? { note } : {}),
+		...(changes.length ? { changes } : {}),
 	};
 }
 

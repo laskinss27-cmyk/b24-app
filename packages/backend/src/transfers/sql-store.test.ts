@@ -149,9 +149,11 @@ test('transfer deletion is a tombstone update and never physical SQL deletion', 
 
 test('transfer timestamps are canonical before hashing and storage', () => {
 	const { id, name, ...data } = storedTransfer();
+	data.history.push({ at: '', status: 'draft', byId: '1', byName: '', note: '', changes: [] });
 	const normalized = normalizeTransferSqlState({ externalId: id, name, data, sourceKind: 'bitrix_backfill' });
 	assert.equal(normalized.createdAt, '2026-09-02T07:00:00.000Z');
 	assert.equal(normalized.history[1]?.at, '2026-09-02T08:00:00.000Z');
+	assert.deepEqual(normalized.history[2], { at: '', status: 'draft', byId: '1' });
 });
 
 test('Bitrix transfer create, update and delete feed the SQL shadow adapter in order', async () => {
