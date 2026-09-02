@@ -5,12 +5,14 @@ import { loadDatabaseConfig } from './database/config.js';
 import { createDatabaseRuntime } from './database/runtime.js';
 import { loadReservationConfig } from './reservations/config.js';
 import { createReservationRuntime } from './reservations/runtime.js';
+import { createTransferSqlWriteRuntime, loadTransferSqlWriteConfig } from './transfers/sql-runtime.js';
 
 const config = loadConfig();
 const database = createDatabaseRuntime(loadDatabaseConfig());
 const reservations = createReservationRuntime(loadReservationConfig());
+const transferSqlWriter = createTransferSqlWriteRuntime(loadTransferSqlWriteConfig());
 
-const app = await buildApp({ config, database, reservations });
+const app = await buildApp({ config, database, reservations, transferSqlWriter });
 
 try {
 	const address = await app.listen({ port: config.port, host: config.host });

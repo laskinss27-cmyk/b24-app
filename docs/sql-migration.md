@@ -47,7 +47,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 | складские проводки | ERPNext | `Delivery Note`, `Purchase Receipt`, `Stock Entry`, `Stock Reconciliation` | истинный остаток меняет только проведённый документ |
 | заявка снаба | ERPNext | `Material Request` и её строки; связь со сделкой в custom field | прогресс вычисляется повторным объединением нескольких реестров |
 | заказ поставщику и приёмка | ERPNext | `Purchase Order` и `Purchase Receipt`; custom fields заявки/ключа | связь частично выводится из полей и строк |
-| перемещения приложения | Битрикс24 + ERPNext | `ctv_transfers.DETAIL_TEXT` хранит workflow JSON и имена ERP `Stock Entry`; проводки — ERPNext | полное сканирование entity store, связь не нормализована |
+| перемещения приложения | Битрикс24 + ERPNext; SQL shadow подготовлен локально | `ctv_transfers.DETAIL_TEXT` пока authoritative; migrations `0023`–`0029` раскладывают полное состояние в append-only revisions/lines/history/corrections без SQL JSON; проводки — ERPNext | production shadow write ещё не активирован, Bitrix fallback обязателен |
 | ручные заявки на перемещение/снаб | Битрикс24 | `ctv_tr_requests.DETAIL_TEXT`, ссылки на transfer/task | JSON без локальных ограничений ссылочной целостности |
 | инвентаризация | Битрикс24 + ERPNext | `ctv_inv.DETAIL_TEXT`: документ, точки и замороженный snapshot; итоговые документы — ERPNext | вся инвентаризация обновляется одной JSON-записью |
 | ремонты | Битрикс24 + ERPNext | `ctv_repairs.DETAIL_TEXT`: workflow, история, deal/task/file refs и имена ERP-документов; физическое движение — ERPNext | JSON и повторные entity reads |

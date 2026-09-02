@@ -68,7 +68,7 @@ export function registerTransferShipRoute(
 				...doc, status: 'in_transit', shipEntry: entryName, shippedLines: doc.collectedLines,
 				history: [...doc.history, { at: now, status: 'in_transit', byId: me.id, byName: me.name, action: 'shipped', note: `Stock Entry ${entryName}` }],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			const notificationStore = receivingChatStore(doc.fromStore, doc.toStore);
 			const notification = await notifications.notifyStore(
 				client,
@@ -79,7 +79,7 @@ export function registerTransferShipRoute(
 			);
 			if (notification.event) {
 				data = { ...data, history: [...data.history, notification.event] };
-				await saveTransferData(client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/ship] notification history failed — ${errInfo(error)}`));
+				await saveTransferData(app, client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/ship] notification history failed — ${errInfo(error)}`));
 			}
 			app.log.info({ id, entryName }, '[api/transfers/ship] ok');
 			return { ok: true, transfer: { id, name: doc.name, ...data }, ...(notification.warning ? { warning: notification.warning } : {}) };

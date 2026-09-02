@@ -69,7 +69,7 @@ export function registerTransferEditRoutes(
 			const itemName = doc.dealId
 				? `Перемещение #${doc.dealId}: ${doc.fromStore} → ${toStore}`
 				: `Перемещение: ${doc.fromStore} → ${toStore}`;
-			await saveTransferData(client, id, itemName, data);
+			await saveTransferData(app, client, id, itemName, data);
 			if (doc.taskId) {
 				const listText = doc.lines.map((line) => `• ${line.name || '#' + line.productId} × ${line.qty}`).join('\n');
 				await client.call('tasks.task.update', {
@@ -151,7 +151,7 @@ export function registerTransferEditRoutes(
 				lines: nextLines,
 				history: [...doc.history, { at: now, status: doc.status, byId: me.id, byName: me.name, action: 'lines_changed', changes }],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			return { ok: true, transfer: { id, name: doc.name, ...data } };
 		} catch (err) {
 			app.log.error({ id }, `[api/transfers/update-lines] failed — ${errInfo(err)}`);

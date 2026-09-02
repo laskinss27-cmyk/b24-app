@@ -1,11 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { TRANSFERS_ENTITY } from '../b24/placement.js';
 import type { ErpClient } from '../erp/client.js';
 import { newTransferData, type TransferData, type TransferLine } from '../transfers/model.js';
 import type { TransferNotificationService } from './transfer-notification-service.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
-import { saveTransferData } from './transfer-storage.js';
+import { createTransferData, saveTransferData } from './transfer-storage.js';
 import { formatTransferLines } from './transfer-task-service.js';
 import type { CurrentUser } from './transfer-user-access.js';
 
@@ -48,11 +47,7 @@ export function createTransferDraftService(
 		});
 		data.taskId = args.taskId ?? null;
 		const itemName = `Перемещение: ${args.fromStore} → ${args.toStore}`;
-		const added = await args.client.call<number | { id?: number }>('entity.item.add', {
-			ENTITY: TRANSFERS_ENTITY, NAME: itemName, DETAIL_TEXT: JSON.stringify(data),
-		});
-		const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-		if (!id) throw new Error('entity.item.add не вернул id');
+		const id = await createTransferData(app, args.client, itemName, data);
 		const notification = await notifications.notifyStore(
 			args.client,
 			args.fromStore,
@@ -62,7 +57,7 @@ export function createTransferDraftService(
 		);
 		if (notification.event) {
 			data.history.push(notification.event);
-			await saveTransferData(args.client, id, itemName, data).catch((error) => app.log.warn({ id }, `[transfers] notification history failed — ${errInfo(error)}`));
+			await saveTransferData(app, args.client, id, itemName, data).catch((error) => app.log.warn({ id }, `[transfers] notification history failed — ${errInfo(error)}`));
 		}
 		return { id, name: itemName, ...data };
 	};

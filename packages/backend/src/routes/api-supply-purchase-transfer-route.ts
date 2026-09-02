@@ -11,6 +11,7 @@ import {
 } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData } from '../transfers/model.js';
+import { createTransferData } from './transfer-storage.js';
 import type { AuthBody, TransferProgress } from './api-supply-types.js';
 import { currentRequest, parseTransferProgress, transferBelongsToRequest } from './api-supply-request-progress.js';
 import { currentUser, errInfo, notifyTransferCreated, supplyClientFrom } from './api-supply-route-helpers.js';
@@ -127,13 +128,7 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 				historyNote: `создано после оприходования ${purchaseOrder}`,
 			});
 			const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
-			const added = await client.call<number | { id?: number }>('entity.item.add', {
-				ENTITY: TRANSFERS_ENTITY,
-				NAME: itemName,
-				DETAIL_TEXT: JSON.stringify(baseData),
-			});
-			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-			if (!id) throw new Error('entity.item.add не вернул id');
+			const id = await createTransferData(app, client, itemName, baseData);
 			baseData = await notifyTransferCreated(app, client, id, itemName, baseData, me);
 			app.log.info({ requestName, purchaseOrder, id }, '[api/supply/purchase-transfer] created');
 			return { ok: true, transfer: { id, name: itemName, ...baseData } };

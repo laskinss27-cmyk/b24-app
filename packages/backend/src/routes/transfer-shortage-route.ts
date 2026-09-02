@@ -59,7 +59,7 @@ export function registerTransferShortageRoute(
 				shortageLines: [],
 				history: [...doc.history, { at: now, status: 'received', byId: me.id, byName: me.name, note: `недовоз скорректирован: ${returnedText} возвращено ${doc.toStore ? 'из транзита' : ''} на ${doc.fromStore}; Stock Entry ${returnEntry}` }],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			app.log.info({ id, returnEntry }, '[api/transfers/resolve-shortage] ok');
 			return { ok: true, transfer: { id, name: doc.name, ...data } };
 		} catch (err) {

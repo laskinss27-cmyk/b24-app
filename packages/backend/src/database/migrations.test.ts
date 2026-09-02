@@ -56,6 +56,13 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0020_add_reservation_manual_commands.sql',
 		'0021_add_reservation_request_comment.sql',
 		'0022_create_supply_transfer_payloads.sql',
+		'0023_create_stock_transfer_records.sql',
+		'0024_create_stock_transfer_revisions.sql',
+		'0025_create_stock_transfer_revision_lines.sql',
+		'0026_create_stock_transfer_revision_history.sql',
+		'0027_create_stock_transfer_history_changes.sql',
+		'0028_create_stock_transfer_revision_corrections.sql',
+		'0029_create_stock_transfer_backfill_checkpoints.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -88,6 +95,16 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	assert.match(transferPayloads, /FOREIGN KEY \(document_id\) REFERENCES workflow_documents \(id\).*ON DELETE RESTRICT/);
 	assert.match(transferPayloads, /JSON_VALID\(payload\).*JSON_TYPE\(payload\) = 'OBJECT'/);
 	assert.match(transferPayloads, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+
+	for (const migration of migrations.slice(22)) {
+		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS stock_transfer_[a-z_]+ \(/);
+		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
+		assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
+		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
+	}
 });
 
 test('SQL schemas preserve workflow links and Tilda external identity', async () => {

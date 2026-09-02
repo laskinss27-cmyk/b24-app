@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, B24Client } from '../b24/client.js';
-import { TRANSFERS_ENTITY } from '../b24/placement.js';
 import { supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { normalizeDomain } from '../security.js';
 import { sendStoreChatMessage } from '../transfers/chats.js';
 import type { TransferData } from '../transfers/model.js';
 import type { AuthBody, CurrentUser } from './api-supply-types.js';
+import { saveTransferData } from './transfer-storage.js';
 
 export function errInfo(err: unknown): string {
 	return err instanceof B24ApiError
@@ -54,7 +54,7 @@ export async function notifyTransferCreated(
 		app.log.warn({ id, store: data.fromStore }, `[supply] transfer chat notification failed — ${errInfo(error)}`);
 	}
 	if (next !== data) {
-		await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(next) })
+		await saveTransferData(app, client, id, name, next)
 			.catch((error) => app.log.warn({ id }, `[supply] transfer notification history failed — ${errInfo(error)}`));
 	}
 	return next;

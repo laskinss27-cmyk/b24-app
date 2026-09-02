@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { TRANSFER_REQUESTS_ENTITY, TRANSFERS_ENTITY } from '../b24/placement.js';
+import { TRANSFER_REQUESTS_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { loadTransferRequest } from './transfer-request-storage.js';
-import { loadTransfers } from './transfer-storage.js';
+import { deleteTransferData, loadTransfers } from './transfer-storage.js';
 import { canDeleteTransferDocuments, currentUser } from './transfer-user-access.js';
 
 interface AuthBody {
@@ -61,7 +61,7 @@ export function registerTransferDeleteRoute(
 				else if (docstatus === 0) await erp.delete('Stock Entry', name);
 			}
 			for (const transfer of family) {
-				await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: transfer.id });
+				await deleteTransferData(app, client, transfer.id, transfer.name);
 			}
 			let deletedRequestId: number | null = null;
 			if (root.supplyRequestKey.startsWith('transfer-request:')) {

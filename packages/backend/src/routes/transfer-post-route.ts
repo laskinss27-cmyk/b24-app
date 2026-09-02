@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { TRANSFERS_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { completeTransferFromTransit } from '../erp/operations.js';
 import {
@@ -12,7 +11,7 @@ import {
 	type TransferLine,
 } from '../transfers/model.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
-import { loadTransfer, loadTransfers, saveTransferData } from './transfer-storage.js';
+import { createTransferData, loadTransfer, loadTransfers, saveTransferData } from './transfer-storage.js';
 import { currentUser } from './transfer-user-access.js';
 
 interface AuthBody {
@@ -112,11 +111,7 @@ export function registerTransferPostRoute(
 						}],
 					};
 					const itemName = `Корректировка #${id}: ${fromStore} → ${toStore}`;
-					const added = await client.call<number | { id?: number }>('entity.item.add', {
-						ENTITY: TRANSFERS_ENTITY, NAME: itemName, DETAIL_TEXT: JSON.stringify(correctionData),
-					});
-					const correctionId = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-					if (!correctionId) throw new Error('entity.item.add не вернул id корректировки');
+					const correctionId = await createTransferData(app, client, itemName, correctionData);
 					stored = { id: correctionId, name: itemName, ...correctionData };
 				}
 				correctionIds.push(stored.id);
@@ -142,7 +137,7 @@ export function registerTransferPostRoute(
 					note: `${completion.receiveEntry ? `Stock Entry ${completion.receiveEntry}` : 'Основное перемещение закрыто без принятого количества'}${correctionText ? `; корректировка: ${correctionText}` : ''}`,
 				}],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			app.log.info({ id, receiveEntry: completion.receiveEntry, correctionIds }, '[api/transfers/post] ok');
 			return { ok: true, transfer: { id, name: doc.name, ...data } };
 		} catch (err) {

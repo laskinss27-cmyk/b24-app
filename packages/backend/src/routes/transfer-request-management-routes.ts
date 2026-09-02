@@ -1,13 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { ensureTransferRequestsEntity, ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
+import { ensureTransferRequestsEntity, ensureTransfersEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { listActiveStoreTitles } from '../erp/operations.js';
 import { normalizeTransferLines } from '../transfers/model.js';
 import type { TransferDraftCreator } from './transfer-draft-service.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
 import { currentUser } from './transfer-user-access.js';
+import { deleteTransferData } from './transfer-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -119,7 +120,7 @@ export function registerTransferRequestManagementRoutes(
 			};
 			try { await saveTransferRequest(client, converted); }
 			catch (error) {
-				await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: transfer.id }).catch(() => undefined);
+				await deleteTransferData(app, client, transfer.id, transfer.name).catch(() => undefined);
 				throw error;
 			}
 			app.log.info({ requestId: request.id, transferId: transfer.id }, '[api/transfer-requests/convert] ok');

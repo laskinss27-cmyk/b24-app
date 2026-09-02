@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
+import { ensureTransfersEntity } from '../b24/placement.js';
 import { createSupplyTask, supplyTaskUrl, taskLink } from '../b24/supply-task.js';
 import { ErpClient } from '../erp/client.js';
 import { assertDealQuoteVariantSelected } from '../erp/operations.js';
@@ -9,7 +9,7 @@ import { newTransferData, type TransferData, type TransferLine } from '../transf
 import type { TransferDraftCreator } from './transfer-draft-service.js';
 import type { TransferNotificationService } from './transfer-notification-service.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
-import { saveTransferData } from './transfer-storage.js';
+import { createTransferData, saveTransferData } from './transfer-storage.js';
 import { formatTransferLines } from './transfer-task-service.js';
 import { currentUser } from './transfer-user-access.js';
 
@@ -64,11 +64,7 @@ export function registerTransferCreateRoutes(
 					createdAt: now, createdById: me.id, createdByName: me.name,
 				});
 				const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
-				const added = await client.call<number | { id?: number }>('entity.item.add', {
-					ENTITY: TRANSFERS_ENTITY, NAME: itemName, DETAIL_TEXT: JSON.stringify(data),
-				});
-				const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-				if (!id) throw new Error('entity.item.add не вернул id');
+				const id = await createTransferData(app, client, itemName, data);
 				const task = await createSupplyTask(client, {
 					title: `Перемещение #${id} по сделке #${dealId}`,
 					description: [
@@ -93,7 +89,7 @@ export function registerTransferCreateRoutes(
 					me,
 				);
 				if (notification.event) data.history.push(notification.event);
-				if (task.taskId || notification.event) await saveTransferData(client, id, itemName, data).catch((error) => app.log.warn({ id }, `[api/transfers/create] task/notification state save failed — ${errInfo(error)}`));
+				if (task.taskId || notification.event) await saveTransferData(app, client, id, itemName, data).catch((error) => app.log.warn({ id }, `[api/transfers/create] task/notification state save failed — ${errInfo(error)}`));
 
 				created.push({ id, name: itemName, ...data });
 			}

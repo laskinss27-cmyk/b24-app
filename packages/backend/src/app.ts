@@ -47,6 +47,7 @@ import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
 import { createOwnerOAuthVault, type OwnerOAuthVault } from './b24/owner-oauth-vault.js';
 import type { ReservationRuntime } from './reservations/runtime.js';
 import { registerApiReservationsRoute } from './routes/api-reservations.js';
+import type { TransferSqlWriteRuntime } from './transfers/sql-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,10 +62,11 @@ export interface AppOptions {
 	config: Config;
 	database?: DatabaseRuntime;
 	reservations?: ReservationRuntime;
+	transferSqlWriter?: TransferSqlWriteRuntime;
 	ownerOAuthVault?: OwnerOAuthVault | null;
 }
 
-export async function buildApp({ config, database, reservations, ownerOAuthVault = createOwnerOAuthVault(config) }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ config, database, reservations, transferSqlWriter, ownerOAuthVault = createOwnerOAuthVault(config) }: AppOptions): Promise<FastifyInstance> {
 	const app = Fastify({
 		// Фото ремонтов едут data-URL'ами в JSON (превью ужимается на клиенте), поэтому поднимаем
 		// лимит тела с дефолтных 1МБ. Документы (Word/Excel/PDF) грузятся на Диск Б24 ссылкой
@@ -111,6 +113,7 @@ export async function buildApp({ config, database, reservations, ownerOAuthVault
 
 	app.decorate('config', config);
 	app.decorate('reservationRuntime', reservations ?? null);
+	app.decorate('transferSqlWriter', transferSqlWriter ?? null);
 	app.decorate('ownerOAuthVault', ownerOAuthVault);
 	app.decorate('frontendDist', FRONTEND_DIST);
 	app.decorate('readFrontendIndex', async () => {
@@ -125,9 +128,10 @@ export async function buildApp({ config, database, reservations, ownerOAuthVault
 	registerOperationLog(app);
 
 	registerHealthRoute(app);
-	registerReadinessRoute(app, database, reservations);
+	registerReadinessRoute(app, database, reservations, transferSqlWriter?.enabled ? transferSqlWriter : undefined);
 	if (database) app.addHook('onClose', async () => database.close());
 	if (reservations) app.addHook('onClose', async () => reservations.close());
+	if (transferSqlWriter) app.addHook('onClose', async () => transferSqlWriter.close());
 	registerInstallRoute(app);
 	registerUninstallRoute(app);
 	registerPlacementDealTabRoute(app);
@@ -171,6 +175,7 @@ declare module 'fastify' {
 		config: Config;
 		ownerOAuthVault: OwnerOAuthVault | null;
 		reservationRuntime: ReservationRuntime | null;
+		transferSqlWriter: TransferSqlWriteRuntime | null;
 		frontendDist: string;
 		readFrontendIndex: () => Promise<string | null>;
 	}

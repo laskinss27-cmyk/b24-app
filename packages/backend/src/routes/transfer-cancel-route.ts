@@ -39,7 +39,7 @@ export function registerTransferCancelRoute(
 				status: 'canceled',
 				history: [...doc.history, { at: now, status: 'canceled', byId: me.id, byName: me.name, action: 'canceled', note: 'резерв освобождён' }],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			return { ok: true, transfer: { id, name: doc.name, ...data } };
 		} catch (err) {
 			app.log.error({ id }, `[api/transfers/cancel] failed — ${errInfo(err)}`);

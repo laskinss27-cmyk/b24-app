@@ -63,7 +63,7 @@ export function registerTransferCollectRoute(
 					note: mismatch ? 'собрано с расхождениями' : 'собрано полностью',
 				}],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			const notification = await notifications.notifyStore(
 				client,
 				doc.fromStore,
@@ -73,7 +73,7 @@ export function registerTransferCollectRoute(
 			);
 			if (notification.event) {
 				data = { ...data, history: [...data.history, notification.event] };
-				await saveTransferData(client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/collect] notification history failed — ${errInfo(error)}`));
+				await saveTransferData(app, client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/collect] notification history failed — ${errInfo(error)}`));
 			}
 			return { ok: true, transfer: { id, name: doc.name, ...data }, ...(notification.warning ? { warning: notification.warning } : {}) };
 		} catch (err) {

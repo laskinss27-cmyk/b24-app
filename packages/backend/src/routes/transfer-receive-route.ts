@@ -71,7 +71,7 @@ export function registerTransferReceiveRoute(
 					note: mismatch ? 'принято с расхождениями' : 'принято полностью',
 				}],
 			};
-			await saveTransferData(client, id, doc.name, data);
+			await saveTransferData(app, client, id, doc.name, data);
 			const notificationStore = receivingChatStore(doc.fromStore, doc.toStore);
 			const notification = await notifications.notifyStore(
 				client,
@@ -82,7 +82,7 @@ export function registerTransferReceiveRoute(
 			);
 			if (notification.event) {
 				data = { ...data, history: [...data.history, notification.event] };
-				await saveTransferData(client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/receive] notification history failed — ${errInfo(error)}`));
+				await saveTransferData(app, client, id, doc.name, data).catch((error) => app.log.warn({ id }, `[api/transfers/receive] notification history failed — ${errInfo(error)}`));
 			}
 			app.log.info({ id, mismatch }, '[api/transfers/receive] accepted');
 			return { ok: true, transfer: { id, name: doc.name, ...data }, ...(notification.warning ? { warning: notification.warning } : {}) };

@@ -5,6 +5,7 @@ import { ErpClient } from '../erp/client.js';
 import { createPurchaseOrderDraft, listSupplyRequests, updatePurchaseOrderDraft } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData } from '../transfers/model.js';
+import { createTransferData } from './transfer-storage.js';
 import type { AuthBody, SupplyDecisionLine, TransferProgress } from './api-supply-types.js';
 import { ensureB24SupplierCompany, supplierNorm } from './api-supply-suppliers.js';
 import {
@@ -181,13 +182,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 					historyNote: 'создано из дисплея снабжения',
 				});
 				const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
-				const added = await client.call<number | { id?: number }>('entity.item.add', {
-					ENTITY: TRANSFERS_ENTITY,
-					NAME: itemName,
-					DETAIL_TEXT: JSON.stringify(baseData),
-				});
-				const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-				if (!id) throw new Error('entity.item.add не вернул id');
+				const id = await createTransferData(app, client, itemName, baseData);
 				baseData = await notifyTransferCreated(app, client, id, itemName, baseData, me);
 				createdTransfers.push({ id, name: itemName, ...baseData });
 			}
