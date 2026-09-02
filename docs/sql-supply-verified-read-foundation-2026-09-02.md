@@ -2,16 +2,17 @@
 
 ## Граница change set
 
-Изменение подготовлено, проверено локально и 2 сентября развёрнуто в production
-до безопасной границы `shadow`: migration `0022`, полный payload mirror и новый
-backend применены, но источник рабочего ответа не переключался. Развёрнутый
-backend остаётся на `B24_APP_SUPPLY_SQL_READ=shadow` и продолжает возвращать
-данные Bitrix24.
+Изменение подготовлено, проверено локально и 2 сентября развёрнуто в production.
+После успешной стадии `shadow` backend переключён на
+`B24_APP_SUPPLY_SQL_READ=verified`: при точном совпадении с живым реестром
+карточки перемещений для расчёта `/api/supply/orders` восстанавливаются из SQL.
+При stale/mismatch/error режим автоматически сохраняет старый Bitrix response.
 
-Текущий graph mirror годится для сверки статусов, складов, количеств и связей,
-но не может восстановить пользовательскую карточку перемещения: в нём нет
-названия, комментария, автора, task/Stock Entry references, всех фаз строк и
-истории. Поэтому прямой режим `sql` по-прежнему запрещён.
+Нормализованный graph mirror сам по себе не содержит всей пользовательской
+карточки. Специализированный canonical payload закрывает эту переходную потерю
+и позволяет доказать эквивалентность ответа. Независимый прямой режим `sql`
+по-прежнему запрещён: текущий `verified` ещё читает живой Bitrix для сверки, а
+все рабочие write-paths пока не переведены на транзакционные SQL-записи.
 
 ## Подготовленная модель
 
@@ -123,17 +124,75 @@ drill. Source/restore hashes:
 (data). Временная restore schema удалена штатным guarded cleanup; backup и
 rollback сохранены.
 
-## Следующий production gate
+## Production switch на `verified`
 
-Следующий шаг требует отдельной явной команды пользователя:
+Первый pre-switch gate корректно остановил переключение: live plan успел
+измениться с `e306…10a6` на
+`8f8af8fe66fc6895137607ddbb9a2385421d987b7374b2226adb80a2a4a8fb56`,
+и comparator нашёл `42` differences при `0` source errors. До SQL write создан
+backup `20260902_133752-b24_app-database.sql.gz` (`18` tables), прошедший
+checksum/gzip, внешний read-back и полный restore parity; retention не
+запускался.
 
-1. непосредственно перед switch снова подтвердить свежий owner/runtime full
-   match; при изменившемся source сначала обновить mirror новым guarded apply;
-2. сохранить текущий `shadow` container отдельным rollback и сделать config-only
-   switch на `B24_APP_SUPPLY_SQL_READ=verified` с тем же image;
-3. проверить internal/public health, readiness, официальный ERP read, network,
-   port/state/restart и реальный `/api/supply/orders`;
-4. подтвердить в backend log `status=match`, `responseSource=sql`, отсутствие
-   fallback/error и эквивалентность пользовательского ответа;
-5. при любом mismatch оставить или вернуть `shadow`; независимый SQL source
-   switch и dual-write в этот этап не входят.
+Свежий owner plan с источниками `669 ERP / 183 transfers / 14 transfer requests`
+построил `867 documents / 1594 lines / 893 links / 1191 allocations`, `0`
+errors и `22` historical warnings. DML-only runner применил точный hash одной
+транзакцией, повтор стал no-op, payload cardinality `183`, post-apply match `0`
+differences. После этого реальный `/api/supply/orders` в `shadow` вернул HTTP
+`200`, `99` orders, а backend log подтвердил `responseSource=legacy`.
+
+Config-only switch изменил только `B24_APP_SUPPLY_SQL_READ=verified` в effective
+env того же image `b24-app:ecc37d4`. Перед switch прошёл canary с read-only
+state. Предыдущий shadow-контейнер сохранён как
+`b24-backend-prev-before-verified-20260902-1340`. Новый backend имеет restart
+`0`, policy `unless-stopped`, `/srv/b24-state:/app/state`, порт
+`127.0.0.1:3000` и обязательную сеть `erpnext_frappe_network`.
+
+Первый реальный verified request вернул HTTP `200`, те же `99` orders; log дал
+`status=match`, `responseSource=sql`. Сырые JSON hashes shadow/verified
+различались из-за порядка ключей. Поэтому сохранённый shadow был отдельно
+поднят как временный read-only canary, а оба endpoint вызваны одновременно с
+одним owner OAuth context. После рекурсивной сортировки object keys ответы
+получили одинаковый canonical SHA-256
+`1a0a57a59916e44f5a33aadd9ebac36302dfdf35c4e2dd5a2c43322000fdcd7f`;
+оба вернули `99` orders. Логи одновременно подтвердили `legacy` у shadow и
+`sql` у verified. Canary удалён.
+
+Post-switch backup `20260902_134425-b24_app-database.sql.gz` (`354939` bytes,
+`18` tables) прошёл checksum/gzip, внешний read-back и restore parity. Его
+schema/data hashes:
+`298f513e9ba8c0d2d77aa8d91c247443898af782482a2f9553a9f099914a0742` и
+`9e26992402022618144aee47bcc3070a88fefa5a28a44eb4636d22b5c59f96e9`.
+Temporary restore schema удалена, backup и оба rollback-контейнера сохранены.
+Финальная проверка: internal/public health, readiness database/reservations,
+официальный ERP read, runtime `SELECT` only, current checkpoint counts, network
+и restart зелёные; с момента switch `0` fallback и `0` application errors.
+
+Новые root-only audits mode `0600`:
+
+- refresh: `/root/b24-app-audits/20260902T133817Z-supply-refresh-before-verified.json`,
+  SHA-256 `79713bb44d7858d96bbdabade3c4927ae6bc750bb9d8a81095f332c6bbc45468`;
+- shadow request: `/root/b24-app-audits/20260902T133837Z-supply-shadow-real-request.json`,
+  SHA-256 `3da217ed4d025efc8cffac9ca61d125d645cc7036a65594b320202ed12076602`;
+- verified request: `/root/b24-app-audits/20260902T134105Z-supply-verified-real-request.json`,
+  SHA-256 `657c5059e1af4135424af74683542bb0e17699c01f18ced54b636a9116f1662e`;
+- canonical comparison:
+  `/root/b24-app-audits/20260902T134329Z-supply-shadow-vs-verified-response.json`,
+  SHA-256 `c27c10ec821824d8598f59a521b55cbb3af5ac6168fcbc1ea70ccbd5c537ae36`;
+- final check:
+  `/root/b24-app-audits/20260902T134603Z-supply-verified-final-check.txt`,
+  SHA-256 `6c8123d217db9944d032fcc61e3e7d6262f15f6eabacdc1594ccdba80f38267f`.
+
+## Следующая архитектурная граница
+
+Для фактического отказа от Bitrix JSON как источника требуется отдельный change
+set и отдельное разрешение:
+
+1. спроектировать нормализованные SQL tables для изменяемого состояния transfer,
+   его фаз, history/comment/task references и idempotency keys;
+2. перевести create/update/status paths на один транзакционный SQL writer с
+   контролируемой совместимостью или dual-write;
+3. доказать recovery после частичного отказа и обратимый rollback;
+4. только после длительной parity убрать обязательное live Bitrix read из
+   `verified`. Существующие JSON-записи не удалять: оставить архивом до отдельной
+   команды и подтверждённого срока хранения.

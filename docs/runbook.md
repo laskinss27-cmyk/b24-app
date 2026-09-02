@@ -340,6 +340,22 @@ Runtime full compare и request shadow resolver дали `match`; рабочий
 restart `0`, runtime `SELECT` only и `erpnext_frappe_network`. Подробный журнал и
 следующий gate: [`sql-supply-verified-read-foundation-2026-09-02.md`](sql-supply-verified-read-foundation-2026-09-02.md).
 
+Позже 2 сентября первый gate переключения на `verified` обнаружил `42` свежих
+differences и остановился без switch. После backup/restore mirror обновлён
+guarded plan `8f8af8fe66fc6895137607ddbb9a2385421d987b7374b2226adb80a2a4a8fb56`:
+sources `669|183|14`, latest rows `867|1594|893|1191|183`, `0` errors,
+`22` warnings. Config-only switch того же `b24-app:ecc37d4` сохранил shadow как
+`b24-backend-prev-before-verified-20260902-1340` и включил
+`B24_APP_SUPPLY_SQL_READ=verified`. Реальные shadow/verified
+`/api/supply/orders` вернули по `99` orders и одинаковый canonical hash
+`1a0a57a59916e44f5a33aadd9ebac36302dfdf35c4e2dd5a2c43322000fdcd7f`;
+логи подтвердили соответственно `responseSource=legacy` и `sql`. Финально
+restart `0`, internal/public health, readiness, ERP read, runtime `SELECT`,
+network/state/port зелёные, fallback/error `0`. Backups `20260902_133752` и
+`20260902_134425` прошли внешний read-back и restore parity без retention;
+rollback и backups сохранены. Независимый SQL source switch и write-path
+миграция ещё не выполнялись.
+
 ### Автоматическая проекция остатков Tilda — включена 2026-08-21
 
 Локальный кандидат запускает ровно один reconciliation cycle и не встроен в
