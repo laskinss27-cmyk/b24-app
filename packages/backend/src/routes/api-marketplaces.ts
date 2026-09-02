@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
+import { hasDirectMarketplaceAccess } from '@b24-app/shared';
 import { B24ApiError, B24Client } from '../b24/client.js';
+import { addCatalogProductWithAccessFallback } from '../catalog-product-writer.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	createMarketplaceBundle,
@@ -67,7 +69,11 @@ async function sourceProductIdentity(
 	return { name, model };
 }
 
-async function ensureBundleProduct(client: B24Client, title: string): Promise<number> {
+export async function ensureBundleProduct(
+	client: B24Client,
+	systemClient: B24Client | null,
+	title: string,
+): Promise<{ productId: number; delegated: boolean }> {
 	const listed = await client.call<{ products?: Array<Record<string, unknown>> }>('catalog.product.list', {
 		filter: { iblockId: 24, name: title },
 		select: ['id', 'iblockId', 'name'],
@@ -75,13 +81,15 @@ async function ensureBundleProduct(client: B24Client, title: string): Promise<nu
 	const exact = (listed?.products ?? []).find((product) =>
 		normalizeTitle(String(product['name'] ?? '')) === normalizeTitle(title));
 	const existingId = Number(exact?.['id'] ?? 0);
-	if (Number.isInteger(existingId) && existingId > 0) return existingId;
-	const created = await client.call<{ element?: { id?: number | string } }>('catalog.product.add', {
+	if (Number.isInteger(existingId) && existingId > 0) return { productId: existingId, delegated: false };
+	const written = await addCatalogProductWithAccessFallback<{ element?: { id?: number | string } }>({
+		userClient: client,
+		systemClient,
 		fields: { iblockId: 24, name: title, type: 1, measure: 9, active: 'Y' },
 	});
-	const productId = Number(created?.element?.id ?? 0);
+	const productId = Number(written.result?.element?.id ?? 0);
 	if (!Number.isInteger(productId) || productId <= 0) throw new Error('Битрикс24 не вернул ID позиции комплекта');
-	return productId;
+	return { productId, delegated: written.delegated };
 }
 
 export function registerApiMarketplacesRoute(app: FastifyInstance): void {
@@ -331,7 +339,11 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
 			const sourceQty = unitsPerBundle * bundleQty;
 			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }], app.reservationRuntime);
-			const bundleProductId = await ensureBundleProduct(client, bundleItemName);
+			const systemClient = hasDirectMarketplaceAccess(req.appAccess?.user.id) && app.config.catalogWriteWebhook
+				? new B24Client({ auth: { kind: 'webhook', url: app.config.catalogWriteWebhook } })
+				: null;
+			const bundleProduct = await ensureBundleProduct(client, systemClient, bundleItemName);
+			const bundleProductId = bundleProduct.productId;
 			const result = await createMarketplaceBundle(erp, {
 				sourceProductId,
 				sourceItemName,
@@ -349,6 +361,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				bundleProductId,
 				unitsPerBundle,
 				bundleQty,
+				delegatedProductCreation: bundleProduct.delegated,
 			}, '[api/marketplaces/bundle] submitted');
 			return { ok: true, ...result, bundleProductId, bundleItemName, bundleQty, storeTitle };
 		} catch (error) {
