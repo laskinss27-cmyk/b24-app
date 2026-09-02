@@ -63,6 +63,8 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0027_create_stock_transfer_history_changes.sql',
 		'0028_create_stock_transfer_revision_corrections.sql',
 		'0029_create_stock_transfer_backfill_checkpoints.sql',
+		'0030_add_stock_transfer_revision_format.sql',
+		'0031_add_stock_transfer_change_value_types.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -97,11 +99,13 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	assert.match(transferPayloads, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
 
 	for (const migration of migrations.slice(22)) {
-		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS stock_transfer_[a-z_]+ \(/);
+		assert.match(migration.sql, /^(?:CREATE TABLE IF NOT EXISTS|ALTER TABLE) stock_transfer_[a-z_]+/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
-		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|TRUNCATE|GRANT)\b/im);
 		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
-		assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+		if (migration.filename < '0030') {
+			assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+		}
 		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
 		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
 	}

@@ -5,7 +5,7 @@ type QueryRow = Record<string, unknown>;
 
 const LATEST_REVISIONS_QUERY = `
 	SELECT tr.bitrix_external_id, tr.display_name, tr.last_state_hash,
-		r.id AS revision_id, r.revision_no, r.state_hash, r.supply_request,
+		r.id AS revision_id, r.revision_no, r.state_hash, r.state_format_version, r.supply_request,
 		r.supply_request_key, r.purchase_order, r.deal_id, r.to_store,
 		r.from_store, r.status, r.note, r.task_id, r.ship_entry,
 		r.receive_entry, r.shortage_return_entry, r.correction_of_external_id,
@@ -84,7 +84,8 @@ export async function readCurrentSqlTransfers(pool: TransferSqlPool, externalId?
 			ORDER BY revision_id, event_ordinal
 		`, revisionIds),
 		pool.query<QueryRow[]>(`
-			SELECT revision_id, event_ordinal, change_ordinal, product_id, product_name, field_name, from_value, to_value
+			SELECT revision_id, event_ordinal, change_ordinal, product_id, product_name, field_name,
+				from_value, from_value_type, to_value, to_value_type
 			FROM stock_transfer_history_changes
 			WHERE revision_id IN (${inList})
 			ORDER BY revision_id, event_ordinal, change_ordinal
@@ -113,14 +114,22 @@ export async function readCurrentSqlTransfers(pool: TransferSqlPool, externalId?
 		const field = string(row, 'field_name') as TransferHistoryChange['field'];
 		const rawFrom = string(row, 'from_value');
 		const rawTo = string(row, 'to_value');
+		const fromType = string(row, 'from_value_type');
+		const toType = string(row, 'to_value_type');
+		if (!['number', 'string'].includes(fromType) || !['number', 'string'].includes(toType)) {
+			throw new Error('Invalid SQL transfer history value type');
+		}
 		const numberFrom = Number(rawFrom);
 		const numberTo = Number(rawTo);
+		if ((fromType === 'number' && !Number.isFinite(numberFrom)) || (toType === 'number' && !Number.isFinite(numberTo))) {
+			throw new Error('Invalid SQL transfer numeric history value');
+		}
 		changesByEvent.set(key, [...(changesByEvent.get(key) ?? []), {
 			productId: integer(row, 'product_id', true),
 			name: string(row, 'product_name'),
 			field,
-			from: field === 'destination' || !Number.isFinite(numberFrom) ? rawFrom : numberFrom,
-			to: field === 'destination' || !Number.isFinite(numberTo) ? rawTo : numberTo,
+			from: fromType === 'number' ? numberFrom : rawFrom,
+			to: toType === 'number' ? numberTo : rawTo,
 		}]);
 	}
 	const historyByRevision = new Map<string, TransferHistoryEvent[]>();
@@ -149,6 +158,9 @@ export async function readCurrentSqlTransfers(pool: TransferSqlPool, externalId?
 	}
 
 	return revisions.map((row) => {
+		if (integer(row, 'state_format_version') !== 2) {
+			throw new Error(`Unsupported SQL transfer state format for ${String(row['bitrix_external_id'])}`);
+		}
 		const revisionId = String(row['revision_id']);
 		const phase = (name: string): TransferLine[] => linesByRevisionPhase.get(`${revisionId}:${name}`) ?? [];
 		const transfer: StoredTransfer = {

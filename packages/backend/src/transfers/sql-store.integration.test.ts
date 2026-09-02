@@ -19,13 +19,18 @@ const writerPassword = 'transfer-rehearsal-only-password';
 const migrationsDirectory = fileURLToPath(new URL('../../migrations/', import.meta.url));
 
 function transfer(qty = 2): StoredTransfer {
+	const data = newTransferData({
+		fromStore: 'Склад А', toStore: 'Склад Б', lines: [{ productId: 100, name: 'Камера', qty }],
+		createdAt: '2026-09-02T07:00:00.000Z', createdById: '1', createdByName: 'Менеджер',
+	});
+	data.history.push({
+		at: '2026-09-02T07:01:00.000Z', status: 'draft', byId: '1', action: 'lines_changed',
+		changes: [{ productId: 100, name: 'Камера', field: 'planned', from: '', to: qty }],
+	});
 	return {
 		id: 7,
 		name: 'Перемещение #7',
-		...newTransferData({
-			fromStore: 'Склад А', toStore: 'Склад Б', lines: [{ productId: 100, name: 'Камера', qty }],
-			createdAt: '2026-09-02T07:00:00.000Z', createdById: '1', createdByName: 'Менеджер',
-		}),
+		...data,
 	};
 }
 
@@ -54,13 +59,15 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 			'0027_create_stock_transfer_history_changes.sql',
 			'0028_create_stock_transfer_revision_corrections.sql',
 			'0029_create_stock_transfer_backfill_checkpoints.sql',
+			'0030_add_stock_transfer_revision_format.sql',
+			'0031_add_stock_transfer_change_value_types.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalMigrationsDirectory, filename));
 
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 7);
+		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 9);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalMigrationsDirectory), []);
 
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);

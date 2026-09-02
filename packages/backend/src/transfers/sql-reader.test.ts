@@ -16,7 +16,10 @@ function fixture() {
 	data.correctionIds = [9];
 	data.history.push({
 		at: '2026-09-02T08:00:00.000Z', status: 'accepted', byId: '2', byName: 'Кладовщик', action: 'accepted', note: 'Недостача',
-		changes: [{ productId: 100, name: 'Камера', field: 'accepted', from: 2, to: 1 }],
+		changes: [
+			{ productId: 100, name: 'Камера', field: 'accepted', from: 2, to: 1 },
+			{ productId: 100, name: 'Камера', field: 'planned', from: '', to: 2 },
+		],
 	});
 	return normalizeTransferSqlState({ externalId: 7, name: 'Перемещение #7', data, sourceKind: 'bitrix_backfill' });
 }
@@ -28,7 +31,7 @@ function poolWithHash(hash: string): TransferSqlPool {
 		async query<T = unknown>(sql: string): Promise<T> {
 			if (sql.includes('FROM stock_transfer_records tr')) return [{
 				bitrix_external_id: 7, display_name: 'Перемещение #7', last_state_hash: binaryHash,
-				revision_id: 51, revision_no: 1, state_hash: binaryHash,
+				revision_id: 51, revision_no: 1, state_hash: binaryHash, state_format_version: 2,
 				supply_request: '', supply_request_key: '', purchase_order: '', deal_id: '',
 				to_store: 'Склад Б', from_store: 'Склад А', status: 'accepted', note: '', task_id: null,
 				ship_entry: null, receive_entry: null, shortage_return_entry: null,
@@ -45,10 +48,16 @@ function poolWithHash(hash: string): TransferSqlPool {
 				{ revision_id: 51, event_ordinal: 1, event_at: new Date('2026-09-02T07:00:00.000Z'), status: 'draft', actor_id: '1', actor_name: 'Менеджер', action_name: 'created', note: '' },
 				{ revision_id: 51, event_ordinal: 2, event_at: new Date('2026-09-02T08:00:00.000Z'), status: 'accepted', actor_id: '2', actor_name: 'Кладовщик', action_name: 'accepted', note: 'Недостача' },
 			] as T;
-			if (sql.includes('FROM stock_transfer_history_changes')) return [{
-				revision_id: 51, event_ordinal: 2, change_ordinal: 1, product_id: 100, product_name: 'Камера',
-				field_name: 'accepted', from_value: '2', to_value: '1',
-			}] as T;
+			if (sql.includes('FROM stock_transfer_history_changes')) return [
+				{
+					revision_id: 51, event_ordinal: 2, change_ordinal: 1, product_id: 100, product_name: 'Камера',
+					field_name: 'accepted', from_value: '2', from_value_type: 'number', to_value: '1', to_value_type: 'number',
+				},
+				{
+					revision_id: 51, event_ordinal: 2, change_ordinal: 2, product_id: 100, product_name: 'Камера',
+					field_name: 'planned', from_value: '', from_value_type: 'string', to_value: '2', to_value_type: 'number',
+				},
+			] as T;
 			if (sql.includes('FROM stock_transfer_revision_corrections')) return [{ revision_id: 51, correction_ordinal: 1, correction_external_id: 9 }] as T;
 			return [] as T;
 		},

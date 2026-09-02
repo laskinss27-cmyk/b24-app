@@ -14,6 +14,7 @@ const checksumPath = process.argv[3] ?? '';
 
 const folderName = 'b24_app_backups';
 const maxBackups = 14;
+const retentionMode = String(process.env['B24_APP_BACKUP_RETENTION'] ?? 'on').trim();
 const dumpNamePattern = /^\d{8}_\d{6}-b24_app-database\.sql\.gz$/;
 
 type DiskItem = {
@@ -151,6 +152,7 @@ async function applyRetention(folderId: number): Promise<void> {
 
 async function main(): Promise<void> {
   if (!webhook) fail('DEV_WEBHOOK is missing');
+  if (retentionMode !== 'on' && retentionMode !== 'off') fail('B24_APP_BACKUP_RETENTION must be on or off');
   const dumpName = basename(dumpPath);
   if (!dumpNamePattern.test(dumpName) || checksumPath !== `${dumpPath}.sha256`) {
     fail('expected one b24_app dump and its adjacent .sha256 file');
@@ -166,7 +168,8 @@ async function main(): Promise<void> {
 
   const checksum = await uploadAndVerify(folder, checksumPath);
   const dump = await uploadAndVerify(folder, dumpPath);
-  await applyRetention(folder);
+  if (retentionMode === 'on') await applyRetention(folder);
+  else console.log('disk retention skipped');
   console.log(`disk verified: dump_id=${dump.ID} checksum_id=${checksum.ID} name=${dumpName}`);
 }
 

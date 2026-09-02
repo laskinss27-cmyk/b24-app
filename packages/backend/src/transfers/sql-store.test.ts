@@ -30,7 +30,10 @@ function storedTransfer(): StoredTransfer {
 	data.correctionIds = [88];
 	data.history.push({
 		at: '2026-09-02T11:00:00+03:00', status: 'collected', byId: '9', byName: 'Кладовщик', action: 'collected',
-		changes: [{ productId: 100, name: 'Камера', field: 'collected', from: 0, to: 2 }],
+		changes: [
+			{ productId: 100, name: 'Камера', field: 'collected', from: 0, to: 2 },
+			{ productId: 100, name: 'Камера', field: 'planned', from: '', to: 2 },
+		],
 	});
 	return { id: 7, name: 'Перемещение #7', ...data };
 }
@@ -39,6 +42,7 @@ class FakeConnection implements TransferSqlConnection {
 	readonly queries: Array<{ sql: string; values?: unknown[] }> = [];
 	readonly batches: Array<{ sql: string; values: unknown[][] }> = [];
 	currentHash: Buffer | null = null;
+	currentFormatVersion = 2;
 	failBatch = false;
 	beginCount = 0;
 	commitCount = 0;
@@ -48,7 +52,7 @@ class FakeConnection implements TransferSqlConnection {
 	async query<T = unknown>(sql: string, values?: unknown[]): Promise<T> {
 		this.queries.push(values === undefined ? { sql } : { sql, values });
 		if (sql.includes('SELECT id, last_state_hash')) return [{ id: 41, last_state_hash: this.currentHash }] as T;
-		if (sql.includes('SELECT revision_no')) return (this.currentHash ? [{ revision_no: 3 }] : []) as T;
+		if (sql.includes('SELECT revision_no')) return (this.currentHash ? [{ revision_no: 3, state_format_version: this.currentFormatVersion }] : []) as T;
 		if (sql.includes('INSERT INTO stock_transfer_revisions')) return { insertId: 51 } as T;
 		if (sql.includes('UPDATE stock_transfer_records')) return { affectedRows: 1 } as T;
 		return {} as T;
@@ -85,7 +89,9 @@ test('transfer SQL writer creates one immutable revision and all normalized chil
 	assert.equal(connection.commitCount, 1);
 	assert.equal(connection.rollbackCount, 0);
 	assert.equal(connection.releaseCount, 1);
-	assert.deepEqual(connection.batches.map((batch) => batch.values.length), [5, 2, 1, 1]);
+	assert.deepEqual(connection.batches.map((batch) => batch.values.length), [5, 2, 2, 1]);
+	assert.deepEqual(connection.batches[2]?.values[0]?.slice(-4), ['0', 'number', '2', 'number']);
+	assert.deepEqual(connection.batches[2]?.values[1]?.slice(-4), ['', 'string', '2', 'number']);
 	assert.ok(connection.queries.some(({ sql }) => sql.includes('INSERT INTO stock_transfer_revisions')));
 	assert.ok(connection.queries.every(({ sql }) => !/\bDELETE\b/i.test(sql)));
 });
@@ -103,6 +109,21 @@ test('transfer SQL writer does not create a duplicate revision for the current h
 	assert.equal(result.revisionNo, 3);
 	assert.equal(connection.batches.length, 0);
 	assert.equal(connection.commitCount, 1);
+});
+
+test('transfer SQL writer upgrades a legacy untyped revision without deleting it', async () => {
+	const connection = new FakeConnection();
+	const transfer = normalizeTransferSqlState((() => {
+		const { id, name, ...data } = storedTransfer();
+		return { externalId: id, name, data, sourceKind: 'bitrix_backfill' as const };
+	})());
+	connection.currentHash = Buffer.from(transferSqlStateHash(transfer), 'hex');
+	connection.currentFormatVersion = 1;
+	const { id, name, ...data } = transfer;
+	const result = await writeTransferSqlRevision(pool(connection), { externalId: id, name, data, sourceKind: 'repair' });
+	assert.equal(result.alreadyCurrent, false);
+	assert.equal(result.revisionNo, 4);
+	assert.ok(connection.queries.some(({ sql }) => sql.includes('INSERT INTO stock_transfer_revisions')));
 });
 
 test('transfer SQL writer rolls back the whole revision when a child row fails', async () => {

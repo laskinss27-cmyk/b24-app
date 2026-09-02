@@ -13,6 +13,7 @@ import {
 
 export type TransferSqlSourceKind = 'bitrix_backfill' | 'bitrix_dual_write' | 'sql_native' | 'repair';
 export type TransferLinePhase = 'planned' | 'collected' | 'shipped' | 'accepted' | 'received' | 'shortage';
+export const TRANSFER_SQL_STATE_FORMAT_VERSION = 2;
 
 export interface TransferSqlConnection {
 	query<T = unknown>(sql: string, values?: unknown[]): Promise<T>;
@@ -203,7 +204,7 @@ export async function writeTransferSqlRevisionOnConnection(
 	const transferId = records[0]!['id'];
 	const currentHash = records[0]!['last_state_hash'];
 	const latest = await connection.query<QueryRow[]>(`
-		SELECT revision_no
+		SELECT revision_no, state_format_version
 		FROM stock_transfer_revisions
 		WHERE transfer_id = ?
 		ORDER BY revision_no DESC
@@ -211,20 +212,23 @@ export async function writeTransferSqlRevisionOnConnection(
 		FOR UPDATE
 	`, [transferId]);
 	const currentRevisionNo = latest.length ? Number(latest[0]!['revision_no']) : 0;
-	if (Buffer.isBuffer(currentHash) && currentHash.equals(hashBuffer(stateHash))) {
+	const currentFormatVersion = latest.length ? Number(latest[0]!['state_format_version']) : 0;
+	if (Buffer.isBuffer(currentHash)
+		&& currentHash.equals(hashBuffer(stateHash))
+		&& currentFormatVersion === TRANSFER_SQL_STATE_FORMAT_VERSION) {
 		return { externalId: transfer.id, revisionNo: currentRevisionNo, stateHash, alreadyCurrent: true };
 	}
 	const revisionNo = currentRevisionNo + 1;
 	const inserted = await connection.query<SqlResult>(`
 		INSERT INTO stock_transfer_revisions (
-			transfer_id, revision_no, state_hash, source_kind, supply_request,
+			transfer_id, revision_no, state_hash, source_kind, state_format_version, supply_request,
 			supply_request_key, purchase_order, deal_id, to_store, from_store,
 			status, note, task_id, ship_entry, receive_entry, shortage_return_entry,
 			correction_of_external_id, correction_kind, source_created_at,
 			created_by_id, created_by_name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, [
-		transferId, revisionNo, hashBuffer(stateHash), input.sourceKind,
+		transferId, revisionNo, hashBuffer(stateHash), input.sourceKind, TRANSFER_SQL_STATE_FORMAT_VERSION,
 		transfer.supplyRequest, transfer.supplyRequestKey, transfer.purchaseOrder,
 		transfer.dealId, transfer.toStore, transfer.fromStore, transfer.status,
 		transfer.note, transfer.taskId, transfer.shipEntry, transfer.receiveEntry,
@@ -259,13 +263,13 @@ export async function writeTransferSqlRevisionOnConnection(
 	`, history);
 	const changes = transfer.history.flatMap((event, eventIndex) => (event.changes ?? []).map((change, changeIndex) => [
 		revisionId, eventIndex + 1, changeIndex + 1, change.productId, change.name,
-		change.field, String(change.from), String(change.to),
+		change.field, String(change.from), typeof change.from, String(change.to), typeof change.to,
 	]));
 	if (changes.length) await connection.batch(`
 		INSERT INTO stock_transfer_history_changes (
 			revision_id, event_ordinal, change_ordinal, product_id, product_name,
-			field_name, from_value, to_value
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			field_name, from_value, from_value_type, to_value, to_value_type
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, changes);
 	if (transfer.correctionIds.length) await connection.batch(`
 		INSERT INTO stock_transfer_revision_corrections (

@@ -5,6 +5,7 @@ import {
 	normalizeTransferSqlState,
 	transferSqlStateHash,
 	writeTransferSqlRevisionOnConnection,
+	TRANSFER_SQL_STATE_FORMAT_VERSION,
 	type TransferSqlPool,
 } from './sql-store.js';
 
@@ -98,11 +99,14 @@ export function buildTransferSqlBackfillPlan(input: TransferSqlBackfillInput): T
 	}
 	normalized.sort((left, right) => left.id - right.id);
 	issues.sort((left, right) => `${left.code}:${left.identity}`.localeCompare(`${right.code}:${right.identity}`, 'en'));
-	const planHash = createHash('sha256').update(supplyMirrorCanonicalJson(normalized.map((transfer) => ({
-		externalId: transfer.id,
-		name: transfer.name,
-		stateHash: transferSqlStateHash(transfer),
-	})))).digest('hex');
+	const planHash = createHash('sha256').update(supplyMirrorCanonicalJson({
+		formatVersion: TRANSFER_SQL_STATE_FORMAT_VERSION,
+		transfers: normalized.map((transfer) => ({
+			externalId: transfer.id,
+			name: transfer.name,
+			stateHash: transferSqlStateHash(transfer),
+		})),
+	})).digest('hex');
 	return {
 		readyToApply: issues.length === 0,
 		observedAt: input.observedAt,

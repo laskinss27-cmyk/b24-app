@@ -12,7 +12,8 @@ ERPNext по-прежнему доступен только через офиц�
 
 ## Модель
 
-Миграции `0023`–`0029` создают семь таблиц без SQL `JSON`:
+Миграции `0023`–`0031` создают семь таблиц без SQL `JSON` и версионируют
+представление scalar history values:
 
 - `stock_transfer_records` — стабильная внешняя identity документа и tombstone;
 - `stock_transfer_revisions` — неизменяемые скалярные версии состояния;
@@ -22,6 +23,10 @@ ERPNext по-прежнему доступен только через офиц�
 - `stock_transfer_history_changes` — изменения внутри события;
 - `stock_transfer_revision_corrections` — связи с корректировками;
 - `stock_transfer_backfill_checkpoints` — детерминированные one-shot checkpoints.
+
+`state_format_version=2` и отдельные `from_value_type`/`to_value_type`
+сохраняют различие между числом `0` и строкой `""`. Версия 1 остаётся в
+append-only истории, но reader принимает только последнюю полную версию 2.
 
 Обновление документа не переписывает прежнюю версию. Оно блокирует identity,
 сравнивает SHA-256 полного канонического состояния и либо делает no-op, либо
@@ -74,19 +79,24 @@ stored hash каждой revision и требует точный canonical parit
 - полный backend suite: `364/364`;
 - focused transfer/migration suite: `20/20`;
 - отдельный reader suite: `2/2`;
-- MariaDB `11.8` rehearsal на временной базе: DDL `0023`–`0029`, initial
+- MariaDB `11.8` rehearsal на временной базе: DDL `0023`–`0031`, initial
   backfill, checkpoint no-op, append-only update, чтение/parity, tombstone и
   восстановление; DML-only user получил ожидаемый отказ на `DELETE` и DDL.
 
 Временный контейнер и тестовая schema/user после проверки удалены. Production
 на момент создания документа не изменён.
 
+Для ручных migration-gate backups uploader получил явный
+`B24_APP_BACKUP_RETENTION=off`: он всё так же загружает обе части пары, скачивает
+их обратно и сверяет SHA-256, но не удаляет старые внешние копии. Штатный cron
+без этой переменной сохраняет прежний retention `on`.
+
 ## Production-порядок
 
 1. Зафиксировать текущие container/image/env/state/network/public URL из
    работающего `b24-backend` и сохранить его как rollback container.
 2. Сделать отдельный backup `b24_app`, внешний read-back и restore drill.
-3. Одноразовым migrator применить только `0023`–`0029`; credential не оставлять
+3. Одноразовым migrator применить только `0023`–`0031`; credential не оставлять
    в backend env.
 4. Повторить backup/read-back/restore, включая новые таблицы и migration hashes.
 5. Одноразовым DML backfill user выполнить dry-run, записать hash, затем
