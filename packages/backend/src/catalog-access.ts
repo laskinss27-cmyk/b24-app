@@ -1,4 +1,4 @@
-import { SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
+import { hasDirectCatalogProductCreateAccess, SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
 
 export interface CatalogAccess {
 	canCreateProduct: boolean;
@@ -43,7 +43,9 @@ export function catalogAccessForUser(user: CatalogAccessUser | null): CatalogAcc
 	const isPortalAdmin = user?.ADMIN === true || String(user?.ADMIN ?? '').toUpperCase() === 'Y';
 	const canEditCard = canEditPrices || isPortalAdmin || CATALOG_ADMIN_USER_IDS.has(Number(user?.ID));
 	return {
-		canCreateProduct: canEditCard || CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID)),
+		canCreateProduct: canEditCard
+			|| CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID))
+			|| hasDirectCatalogProductCreateAccess(user?.ID),
 		canEditPrices,
 		canEditCard,
 	};
@@ -54,5 +56,6 @@ export function catalogAccessForUser(user: CatalogAccessUser | null): CatalogAcc
  * записей, которым разрешено создание. Совпадения имени недостаточно.
  */
 export function canDelegateCatalogProductCreation(user: CatalogAccessUser | null): boolean {
-	return CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID));
+	return CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID))
+		|| hasDirectCatalogProductCreateAccess(user?.ID);
 }

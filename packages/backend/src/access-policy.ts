@@ -3,6 +3,7 @@ import {
 	ACCESS_PERMISSIONS,
 	effectiveAccessDecision,
 	emptyAccessControlDraft,
+	hasDirectCatalogProductCreateAccess,
 	hasDirectMarketplaceAccess,
 	type AccessControlDraft,
 	type AccessPermissionId,
@@ -176,10 +177,13 @@ export async function resolveCurrentAccess(
 	]);
 	const departmentRules = user.departments.map((id) => policy.departments[String(id)]);
 	const directMarketplaceAccess = hasDirectMarketplaceAccess(user.id);
+	const directCatalogCreateAccess = hasDirectCatalogProductCreateAccess(user.id);
 	const decisions = Object.fromEntries(ACCESS_PERMISSIONS.map((permission) => [
 		permission.id,
 		directMarketplaceAccess && permission.id.startsWith('marketplaces.')
 			? 'allow'
+			: directCatalogCreateAccess && permission.id === 'catalog.create'
+				? 'allow'
 			: ACCESS_POLICY_ENFORCEMENT_ENABLED && policy.policyMode === 'active'
 			? effectiveAccessDecision(policy.employees[user.id], departmentRules, permission.id)
 			: 'inherit',

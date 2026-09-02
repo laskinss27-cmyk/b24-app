@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
 	effectiveAccessDecision,
 	effectiveDraftDecision,
+	hasDirectCatalogProductCreateAccess,
 	hasDirectMarketplaceAccess,
 	type AccessSubjectRule,
 } from '@b24-app/shared';
@@ -22,6 +23,13 @@ test('точечный доступ к маркетплейсам выдан т�
 	assert.equal(hasDirectMarketplaceAccess(3608), true);
 	assert.equal(hasDirectMarketplaceAccess('1858'), false);
 	assert.equal(hasDirectMarketplaceAccess(''), false);
+});
+
+test('точечное создание обычных карточек каталога выдано Савченко', () => {
+	assert.equal(hasDirectCatalogProductCreateAccess('760'), true);
+	assert.equal(hasDirectCatalogProductCreateAccess(3608), false);
+	assert.equal(hasDirectCatalogProductCreateAccess('1858'), false);
+	assert.equal(hasDirectCatalogProductCreateAccess(''), false);
 });
 
 test('сотрудник наследует разрешение отдела', () => {

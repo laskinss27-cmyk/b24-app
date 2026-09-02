@@ -149,6 +149,12 @@ test('catalog creation, card editing, and price access are independent', () => {
 		UF_DEPARTMENT: [5],
 	}), { canCreateProduct: true, canEditCard: false, canEditPrices: false });
 	assert.deepEqual(catalogAccessForUser({
+		ID: 760,
+		NAME: 'Николай',
+		LAST_NAME: 'Савченко',
+		UF_DEPARTMENT: [310],
+	}), { canCreateProduct: true, canEditCard: false, canEditPrices: false });
+	assert.deepEqual(catalogAccessForUser({
 		ID: 77,
 		NAME: 'Егор',
 		LAST_NAME: 'Кабардин',
@@ -165,6 +171,7 @@ test('catalog creation, card editing, and price access are independent', () => {
 test('delegated catalog creation is restricted to approved Bitrix IDs', () => {
 	assert.equal(canDelegateCatalogProductCreation({ ID: 1246 }), true);
 	assert.equal(canDelegateCatalogProductCreation({ ID: 22 }), true);
+	assert.equal(canDelegateCatalogProductCreation({ ID: 760 }), true);
 	assert.equal(canDelegateCatalogProductCreation({
 		ID: 77,
 		NAME: 'Константин',

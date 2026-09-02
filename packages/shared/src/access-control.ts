@@ -12,6 +12,8 @@ export type AccessDecision = 'inherit' | 'allow' | 'deny';
  * Это аварийно-простой слой до повторного включения редактора общей политики доступа.
  */
 export const DIRECT_MARKETPLACE_USER_IDS = ['760', '3608'] as const;
+/** Точечное право создавать обычные карточки каталога без доступа к их редактированию и ценам. */
+export const DIRECT_CATALOG_PRODUCT_CREATOR_USER_IDS = ['760'] as const;
 export const APP_OWNER_USER_ID = '1858';
 export const OPERATION_LOG_VIEWER_USER_ID = APP_OWNER_USER_ID;
 /** ID действующего отдела «Снабжение» в Bitrix24. */
@@ -19,6 +21,10 @@ export const SUPPLY_DEPARTMENT_ID = 10;
 
 export function hasDirectMarketplaceAccess(userId: unknown): boolean {
 	return (DIRECT_MARKETPLACE_USER_IDS as readonly string[]).includes(String(userId ?? '').trim());
+}
+
+export function hasDirectCatalogProductCreateAccess(userId: unknown): boolean {
+	return (DIRECT_CATALOG_PRODUCT_CREATOR_USER_IDS as readonly string[]).includes(String(userId ?? '').trim());
 }
 
 export interface AccessPermissionDefinition {
