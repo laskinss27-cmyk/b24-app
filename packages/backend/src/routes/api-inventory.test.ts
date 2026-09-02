@@ -17,6 +17,7 @@ import {
 	frozenInventoryDifferences,
 	inventorySnapshotQuantities,
 } from '../inventory-stock-snapshot.js';
+import { buildCompensatedInventoryResult } from '../inventory-result-compensation.js';
 
 const mobileConfig: Config = {
 	port: 3000,
@@ -190,6 +191,55 @@ test('inventory snapshot and submitted differences stay frozen after later stock
 	}]);
 	// A later sale may move live ERP stock from 10 to 6; neither frozen value changes.
 	assert.equal(inventorySnapshotQuantities(point)?.get(101), 10);
+});
+
+test('inventory submission compensates ERP movements made after the opening snapshot', () => {
+	const result = buildCompensatedInventoryResult({
+		result: {
+			counted: 1,
+			total: 1,
+			discrepancies: 1,
+			lines: [{ productId: 11962, name: 'Монтажная коробка', book: 4, fact: 2, diff: -2, comment: 'проверено' }],
+		},
+		facts: { 11962: 2 },
+		comments: { 11962: 'проверено' },
+		currentBook: new Map([[11962, 0]]),
+	});
+
+	assert.deepEqual(result, {
+		counted: 1,
+		total: 1,
+		discrepancies: 1,
+		lines: [{ productId: 11962, name: 'Монтажная коробка', book: 0, fact: 2, diff: 2, comment: 'проверено' }],
+	});
+});
+
+test('inventory submission adds a movement-created discrepancy even when the snapshot originally matched', () => {
+	const result = buildCompensatedInventoryResult({
+		result: { counted: 1, total: 1, discrepancies: 0, lines: [] },
+		facts: { 101: 4 },
+		currentBook: new Map([[101, 2]]),
+		names: new Map([[101, 'Relay']]),
+	});
+
+	assert.deepEqual(result.lines, [{ productId: 101, name: 'Relay', book: 2, fact: 4, diff: 2 }]);
+	assert.equal(result.discrepancies, 1);
+});
+
+test('inventory submission removes a snapshot discrepancy already resolved by a later movement', () => {
+	const result = buildCompensatedInventoryResult({
+		result: {
+			counted: 0,
+			total: 1,
+			discrepancies: 1,
+			lines: [{ productId: 101, name: 'Relay', book: 2, fact: 0, diff: -2 }],
+		},
+		facts: {},
+		currentBook: new Map([[101, 0]]),
+	});
+
+	assert.deepEqual(result.lines, []);
+	assert.equal(result.discrepancies, 0);
 });
 
 test('inventory creation captures every point before the document is stored', async () => {
