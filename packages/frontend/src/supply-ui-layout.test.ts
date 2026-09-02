@@ -12,6 +12,7 @@ import {
 } from './supply-ui-layout.js';
 import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 import { toggleOrderStatusFilter } from './supply-order-status-filter.js';
+import { reservationDisplayNumber, reservationProductSummary } from './supply-reservation-summary.js';
 
 function memoryStorage(initial?: string): Pick<Storage, 'getItem' | 'setItem'> & { value: string | undefined } {
 	return {
@@ -88,4 +89,20 @@ test('supply order status filter allows several statuses at once', () => {
 
 	assert.deepEqual(filter, ['needs_action', 'in_progress']);
 	assert.deepEqual(toggleOrderStatusFilter(filter, 'needs_action'), ['in_progress']);
+});
+
+test('reservation rows use the reservation number after approval and request number before it', () => {
+	assert.equal(reservationDisplayNumber({ id: '14', reservationId: null }), 'Заявка №14');
+	assert.equal(reservationDisplayNumber({ id: '14', reservationId: '9' }), 'Резерв №9');
+});
+
+test('reservation rows keep the product summary compact', () => {
+	assert.equal(reservationProductSummary({ lines: [] }), 'Без позиций');
+	assert.equal(reservationProductSummary({ lines: [{
+		id: '1', sourceLineKey: 'one', itemCode: '101', itemName: 'Монитор', erpWarehouseName: 'Дунайский', quantity: '3', activeQuantity: '2',
+	}] }), 'Монитор · 2 шт.');
+	assert.equal(reservationProductSummary({ lines: [
+		{ id: '1', sourceLineKey: 'one', itemCode: '101', itemName: 'Монитор', erpWarehouseName: 'Дунайский', quantity: '3', activeQuantity: '2' },
+		{ id: '2', sourceLineKey: 'two', itemCode: '102', itemName: 'Камера', erpWarehouseName: 'Дунайский', quantity: '1', activeQuantity: '1' },
+	] }), 'Монитор · 2 шт. · ещё 1');
 });

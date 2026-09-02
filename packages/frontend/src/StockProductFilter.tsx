@@ -15,7 +15,7 @@ export function StockHint({ it }: { it: StockItem }): JSX.Element {
 }
 
 /** Поиск+выбор товара (чип) — фильтр по позиции в журнале и выбор в отчёте. */
-export function StockProductFilter({ value, onChange, placeholder }: { value: StockItem | null; onChange: (v: StockItem | null) => void; placeholder?: string }): JSX.Element {
+export function StockProductFilter({ value, onChange, placeholder, resultsMode = 'dropdown' }: { value: StockItem | null; onChange: (v: StockItem | null) => void; placeholder?: string; resultsMode?: 'dropdown' | 'panel' }): JSX.Element {
 	const [q, setQ] = useState('');
 	const [res, setRes] = useState<StockItem[] | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -31,16 +31,16 @@ export function StockProductFilter({ value, onChange, placeholder }: { value: St
 		</span>
 	);
 	return (
-		<div style={{ position: 'relative', flex: '1 1 260px' }}>
+		<div className={`stock-product-filter stock-product-filter-${resultsMode}`} style={{ position: 'relative', flex: '1 1 260px', minWidth: 0, width: resultsMode === 'panel' ? '100%' : undefined }}>
 			<div style={{ display: 'flex', gap: 6 }}>
 				<input style={{ ...inp, flex: 1 }} placeholder={placeholder || '🔎 товар: id / название / артикул'} value={q}
 					onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void search(); } }} />
-				<button style={btnGhost} disabled={busy} onClick={() => void search()}>{busy ? '…' : 'Найти'}</button>
+				<button type="button" style={btnGhost} disabled={busy} onClick={() => void search()}>{busy ? '…' : 'Найти'}</button>
 			</div>
 			{res && (res.length ? (
-				<div style={{ position: 'absolute', zIndex: 5, left: 0, right: 0, background: '#fff', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: 200, overflow: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
+				<div className="stock-product-filter-results" style={{ position: resultsMode === 'panel' ? 'relative' : 'absolute', top: resultsMode === 'panel' ? undefined : 'calc(100% + 4px)', zIndex: 5, left: 0, right: 0, marginTop: resultsMode === 'panel' ? 7 : 0, background: '#fff', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: resultsMode === 'panel' ? 380 : 200, overflow: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
 					{res.map((it) => (
-						<div key={it.productId} onClick={() => { onChange(it); setRes(null); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
+						<div className="stock-product-filter-result" key={it.productId} onClick={() => { onChange(it); setRes(null); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
 							{it.name || ('#' + it.productId)} <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
 							<div><StockHint it={it} /></div>
 						</div>
