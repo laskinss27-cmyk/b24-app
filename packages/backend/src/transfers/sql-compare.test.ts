@@ -27,3 +27,12 @@ test('transfer parity compares canonical state by external id deterministically'
 test('transfer parity rejects duplicate identities in either source', () => {
 	assert.throws(() => compareTransferSqlParity([transfer(1), transfer(1)], []), /Duplicate transfer 1/);
 });
+
+test('transfer parity treats legacy empty optional history fields as canonical absence', () => {
+	const legacy = transfer(1);
+	legacy.history[0]!.changes = [];
+	const sql = transfer(1);
+	assert.deepEqual(compareTransferSqlParity([legacy], [sql]), {
+		matches: true, legacyCount: 1, sqlCount: 1, differences: [],
+	});
+});

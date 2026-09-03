@@ -172,8 +172,14 @@ function transferData(transfer: StoredTransfer): TransferData {
 }
 
 export function transferSqlStateHash(transfer: StoredTransfer): string {
+	const normalized = normalizeTransferSqlState({
+		externalId: transfer.id,
+		name: transfer.name,
+		data: transferData(transfer),
+		sourceKind: 'repair',
+	});
 	return createHash('sha256')
-		.update(supplyMirrorCanonicalJson({ name: transfer.name, data: transferData(transfer) }))
+		.update(supplyMirrorCanonicalJson({ name: normalized.name, data: transferData(normalized) }))
 		.digest('hex');
 }
 
