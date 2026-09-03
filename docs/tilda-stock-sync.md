@@ -486,6 +486,34 @@ pre-activation rollback snapshots are
 `/root/b24-app-ops/tilda-sync.env.before-price-20260831_113500` and
 `/root/b24-app-ops/crontab.before-tilda-price-20260831_113500`.
 
+## Twelve new Shelly products, 2026-09-03
+
+Twelve workbook-marked ERP Items were created in Tilda through the authorized
+CommerceML product-creation setting and assigned to the existing sensor,
+display, button and accessory sections. The complete public read-back returned
+`143 parents / 162 stock rows`; every new row had a unique Tilda UID, external
+ID `b24-app-erp-<Item code>` and SKU equal to the ERP Item code. The original
+150 stock identities remained present.
+
+Commit `a146a81` contains the separate audited seed
+`tilda-product-mappings-2026-09-03.csv` and one-shot DML entrypoint. The
+least-privilege `b24_app_backfill` account exposed only
+`SELECT/INSERT/UPDATE`; the guarded transaction added exactly 12 confirmed
+mappings and moved SQL from `177/134/43/0` to
+`189/146/43/0` total/confirmed/ignored/unresolved rows.
+
+The post-backfill preparation passed the new guarded shape: 162 mappings, 146
+offers, 16 skipped, 144 reversible numeric stock rows, the same two exact
+unlimited exclusions, 136 numeric price targets, five missing ERP prices and
+three non-reversible blank public prices. Four quantity differences and zero
+price differences were found. The manual reconciliation changed exactly those
+four quantities, preserved protected content hash
+`09d0228697f8491569e395ec56d0053ddf047cd8be56703ee49bdc0ca97251e2`
+and completed `verified`. Cron was then re-enabled as one `*/2` line pinned to
+`b24-app:a146a81`; its first scheduled cycle returned `no_op` with 144 stock
+targets and 136 price targets. The pre-enable crontab is preserved at
+`/root/b24-app-ops/crontab.before-enable-tilda-a146a81-20260903`.
+
 ## Guarded reconciliation worker
 
 The repository contains a one-cycle worker that remains disabled unless
@@ -495,17 +523,17 @@ wrapper and one cron line; removing that line stops scheduling without changing
 backend or ERPNext behavior.
 
 Each cycle holds both a host `flock` and connection-scoped MariaDB `GET_LOCK`,
-then reads 150 SQL stock mappings, active unexpired reservation totals for the
-ERP warehouse behind `Shelly`, all 134 confirmed ERP Items through the official
+then reads 162 SQL stock mappings, active unexpired reservation totals for the
+ERP warehouse behind `Shelly`, all 146 confirmed ERP Items through the official
 API and the complete public Tilda catalog. The published quantity is
 `max(0, floor(physical Shelly stock - active reservations))`; reservations do
 not alter physical ERPNext stock. It requires the audited
-shape `150 mappings / 134 projected / 16 skipped / 131 parents / 150 stock
-rows / 132 reversible / 2 exact unlimited exclusions`. Any missing Item,
+shape `162 mappings / 146 projected / 16 skipped / 143 parents / 162 stock
+rows / 144 reversible / 2 exact unlimited exclusions`. Any missing Item,
 changed UID/SKU, incomplete page, unresolved shape or read error fails closed.
 It never turns a failed read into zeros.
 
-If all 132 reversible quantities already match, the worker makes no Tilda
+If all 144 reversible quantities already match, the worker makes no Tilda
 request. Identical successful no-op states are deduplicated in SQL. If there is
 a difference, it records a `running` audit row, publishes the same minimal
 stock-only CommerceML documents used in the verified full run, and requires

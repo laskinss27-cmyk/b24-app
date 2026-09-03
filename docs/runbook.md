@@ -467,6 +467,38 @@ shell-файл и двух ошибок quoting в read-only postcheck. Посл
 
 Read-only аудит 2026-08-20 подтвердил bind mount `/srv/b24-state:/app/state`, но не нашёл его копирования в `core-backup.sh`, отдельном cron или backup timer. Это отдельный существующий риск: договоры, contract sequences, шаблоны и operation log нельзя считать восстановимыми из описанного выше ERPNext backup. Исправление state backup не смешивать с SQL provision; провести отдельный restore drill и только после него обновить этот статус.
 
+### Tilda: 12 новых товаров Shelly, 2026-09-03
+
+После разрешённого CommerceML-импорта и распределения по существующим разделам
+публичный каталог вырос с `131/150` до `143/162` parent/stock rows. Все 12
+новых карточек имеют уникальные UID, SKU равен ERP Item code, внешний ID имеет
+вид `b24-app-erp-<Item code>`. Commit `a146a81` добавил отдельный versioned
+mapping seed и one-shot backfill. Ограниченный `b24_app_backfill` с
+`SELECT/INSERT/UPDATE` одной транзакцией добавил 12 confirmed mappings; SQL
+counts стали `189 total / 146 confirmed / 43 ignored / 0 unresolved`.
+
+Safety backup
+`/root/core-backups/b24_app/20260903_085125-b24_app-database.sql.gz`
+(`516414` bytes, 25 table definitions) прошёл checksum, внешний Disk read-back
+и восстановление в сохранённую отдельную schema
+`b24_app_restore_20260903_085125`. При первом запуске старый production Disk
+uploader проигнорировал `B24_APP_BACKUP_RETENTION=off` и удалил три старейшие
+внешние пары `20260901_164520`, `20260901_163547`, `20260901_144157`. Все три
+локальные пары оставались целыми и прошли checksum; после установки актуального
+uploader они возвращены на Disk с `retention skipped` и повторным read-back.
+Standalone backup job также обновлён: при `retention=off` теперь не запускается
+ни локальная, ни внешняя ротация.
+
+Read-only preparation подтвердила новую форму `162 mappings / 146 offers / 16
+skipped / 143 parents / 162 stock rows / 144 reversible / 2 unlimited`; цены
+совпадали, отличались четыре количества. Ручной guarded cycle обновил ровно эти
+четыре количества и завершился `verified` с неизменным protected content hash
+`09d0228697f8491569e395ec56d0053ddf047cd8be56703ee49bdc0ca97251e2`.
+Cron восстановлен одной строкой `*/2` с image `b24-app:a146a81`; первый
+scheduled cycle вернул `no_op`, 144 stock targets и 136 price targets. Backup
+предыдущего crontab:
+`/root/b24-app-ops/crontab.before-enable-tilda-a146a81-20260903`.
+
 ## Восстановление ERPNext
 
 Восстановление перезаписывает рабочую БД. Перед началом:
