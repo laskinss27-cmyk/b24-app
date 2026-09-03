@@ -1033,21 +1033,21 @@ test('marketplace realization gets a human title, warehouse marker and is submit
 
 test('marketplace bundle repacks source units into finished bundle units on the same warehouse', async () => {
 	const erp = new FakeErp([], null, [
-		{ itemCode: 101, priceList: 'Standard Selling', rate: 100 },
+		{ itemCode: 101, priceList: 'Standard Buying', rate: 100 },
 	]);
 	const result = await createMarketplaceBundle(erp.asClient(), {
 		sourceProductId: 101,
 		sourceItemName: 'Датчик',
 		bundleProductId: 202,
 		bundleItemName: 'Комплект Датчик 3 шт',
-		sourceRetailPrice: 100,
+		sourcePurchasePrice: 100,
 		unitsPerBundle: 3,
 		bundleQty: 4,
 		storeTitle: 'Маркетплейс',
 		postingDate: '2026-07-23',
 	});
 	assert.equal(result.sourceQty, 12);
-	assert.equal(result.bundleRetailPrice, 300);
+	assert.equal(result.bundlePurchasePrice, 300);
 	assert.equal(result.title, '23.07.26_Комплект Датчик 3 шт');
 
 	const created = erp.active()[0];
@@ -1068,8 +1068,14 @@ test('marketplace bundle repacks source units into finished bundle units on the 
 	assert.equal(erp.itemPatch('202')[MARKETPLACE_BUNDLE_SOURCE_FIELD], '101');
 	assert.equal(erp.itemPatch('202')[MARKETPLACE_BUNDLE_UNITS_FIELD], 3);
 	assert.equal(
-		(await erp.list('Item Price')).find((price) => price['item_code'] === '202')?.['price_list_rate'],
+		(await erp.list('Item Price')).find((price) =>
+			price['item_code'] === '202' && price['price_list'] === 'Standard Buying')?.['price_list_rate'],
 		300,
+	);
+	assert.equal(
+		(await erp.list('Item Price')).some((price) =>
+			price['item_code'] === '202' && price['price_list'] === 'Standard Selling'),
+		false,
 	);
 
 	const journal = await listMarketplaceOperations(erp.asClient());

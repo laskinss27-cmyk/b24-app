@@ -12,6 +12,8 @@ export type AccessDecision = 'inherit' | 'allow' | 'deny';
  * Это аварийно-простой слой до повторного включения редактора общей политики доступа.
  */
 export const DIRECT_MARKETPLACE_USER_IDS = ['760', '3608'] as const;
+/** Действующий отдел «Маркетплейсы» в Bitrix24. */
+export const MARKETPLACE_DEPARTMENT_ID = 310;
 /** Точечное право создавать обычные карточки каталога без доступа к их редактированию и ценам. */
 export const DIRECT_CATALOG_PRODUCT_CREATOR_USER_IDS = ['760'] as const;
 export const APP_OWNER_USER_ID = '1858';
@@ -21,6 +23,11 @@ export const SUPPLY_DEPARTMENT_ID = 10;
 
 export function hasDirectMarketplaceAccess(userId: unknown): boolean {
 	return (DIRECT_MARKETPLACE_USER_IDS as readonly string[]).includes(String(userId ?? '').trim());
+}
+
+export function hasMarketplaceBundlePriceAccess(userId: unknown, departmentIds: readonly unknown[] = []): boolean {
+	return hasDirectMarketplaceAccess(userId)
+		|| departmentIds.map(Number).includes(MARKETPLACE_DEPARTMENT_ID);
 }
 
 export function hasDirectCatalogProductCreateAccess(userId: unknown): boolean {
@@ -125,6 +132,7 @@ export const ACCESS_PERMISSIONS = [
 	{ id: 'marketplaces.create_return', group: 'Маркетплейсы', label: 'Создавать возврат маркетплейса', dangerous: true },
 	{ id: 'marketplaces.post_return', group: 'Маркетплейсы', label: 'Проводить возврат маркетплейса', dangerous: true },
 	{ id: 'marketplaces.create_bundle', group: 'Маркетплейсы', label: 'Создавать комплект товара', dangerous: true },
+	{ id: 'marketplaces.edit_bundle_prices', group: 'Маркетплейсы', label: 'Изменять розничную и закупочную цены комплектов', dangerous: true },
 
 	{ id: 'reports.sales', group: 'Отчёты', label: 'Открывать отчёт по продажам' },
 	{ id: 'reports.profit', group: 'Отчёты', label: 'Видеть прибыль и маржу' },

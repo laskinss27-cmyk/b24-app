@@ -105,6 +105,7 @@ export function ProductBase({
 	const [canCreateProduct, setCanCreateProduct] = useState(false);
 	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
+	const [canEditMarketplaceBundlePrices, setCanEditMarketplaceBundlePrices] = useState(false);
 	const [canEditMarketplaceOldId, setCanEditMarketplaceOldId] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
 	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
@@ -141,6 +142,7 @@ export function ProductBase({
 			setMeta({ generatedAt: new Date().toISOString(), cached: false });
 			setCanEditCard(true);
 			setCanEditPrices(true);
+			setCanEditMarketplaceBundlePrices(marketplaceMode);
 			setCanEditMarketplaceOldId(marketplaceMode);
 			setMode('base');
 			return;
@@ -168,6 +170,7 @@ export function ProductBase({
 				setCanCreateProduct(base.canCreateProduct);
 				setCanEditCard(base.canEditCard);
 				setCanEditPrices(base.canEditPrices);
+				setCanEditMarketplaceBundlePrices(base.canEditMarketplaceBundlePrices);
 				setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 				setAppAccess(appAccess);
 				setMode('base');
@@ -225,6 +228,7 @@ export function ProductBase({
 			setCanCreateProduct(base.canCreateProduct);
 			setCanEditCard(base.canEditCard);
 			setCanEditPrices(base.canEditPrices);
+			setCanEditMarketplaceBundlePrices(base.canEditMarketplaceBundlePrices);
 			setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 		} catch {
 			/* пересборка не удалась — оставляем текущие данные */
@@ -348,7 +352,10 @@ export function ProductBase({
 
 	async function saveCatalogPrices(retail: number, purchase: number): Promise<void> {
 		if (!priceRow) return;
-		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase);
+		const canEditSelectedPrices = canEditPrices
+			|| (marketplaceMode && canEditMarketplaceBundlePrices && Boolean(priceRow.isMarketplaceBundle));
+		if (!canEditSelectedPrices) throw new Error('Нет права на изменение цен этой позиции.');
+		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase, marketplaceMode);
 		setRows((current) => current.map((row) => row.id === priceRow.id ? { ...row, ...saved } : row));
 		setPriceRow(null);
 	}
@@ -527,6 +534,7 @@ export function ProductBase({
 				canQuickSale={canQuickSale}
 				pickMode={pickMode}
 				canEditPrices={canEditPrices}
+				canEditMarketplaceBundlePrices={canEditMarketplaceBundlePrices}
 				priceTagMode={priceTagMode}
 				sid={sid}
 				cart={cart}
@@ -566,7 +574,7 @@ export function ProductBase({
 				stores={visibleStores}
 				sections={sections}
 				canEdit={canEditCard && !pickMode}
-				canEditPrices={canEditPrices}
+				canEditPrices={canEditPrices || (marketplaceMode && canEditMarketplaceBundlePrices && Boolean(cardRow.isMarketplaceBundle))}
 				showMarketplaceOldId={marketplaceMode}
 				canEditMarketplaceOldId={canEditMarketplaceOldId}
 				onSave={saveCatalogProduct}

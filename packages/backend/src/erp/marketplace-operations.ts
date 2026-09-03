@@ -396,22 +396,22 @@ export async function createMarketplaceBundle(
 		sourceItemName: string;
 		bundleProductId: number;
 		bundleItemName: string;
-		sourceRetailPrice: number;
+		sourcePurchasePrice: number;
 		unitsPerBundle: number;
 		bundleQty: number;
 		storeTitle: string;
 		postingDate: string;
 	},
-): Promise<{ name: string; title: string; sourceQty: number; bundleRetailPrice: number }> {
+): Promise<{ name: string; title: string; sourceQty: number; bundlePurchasePrice: number }> {
 	if (!Number.isInteger(args.sourceProductId) || args.sourceProductId <= 0) throw new Error('неверный исходный товар');
 	if (!Number.isInteger(args.bundleProductId) || args.bundleProductId <= 0) throw new Error('неверная позиция комплекта');
-	if (!Number.isFinite(args.sourceRetailPrice) || args.sourceRetailPrice <= 0) throw new Error('у исходного товара не указана розничная цена');
+	if (!Number.isFinite(args.sourcePurchasePrice) || args.sourcePurchasePrice <= 0) throw new Error('у исходного товара не указана закупочная цена');
 	if (!Number.isInteger(args.unitsPerBundle) || args.unitsPerBundle < 2) throw new Error('в комплекте должно быть не меньше двух штук');
 	if (!Number.isInteger(args.bundleQty) || args.bundleQty < 1) throw new Error('количество комплектов должно быть целым и больше нуля');
 	const storeTitle = args.storeTitle.trim();
 	if (!storeTitle) throw new Error('не выбран склад комплектации');
 	const sourceQty = args.unitsPerBundle * args.bundleQty;
-	const bundleRetailPrice = Math.round(args.sourceRetailPrice * args.unitsPerBundle * 100) / 100;
+	const bundlePurchasePrice = Math.round(args.sourcePurchasePrice * args.unitsPerBundle * 100) / 100;
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMarketplaceFields(erp);
@@ -429,7 +429,7 @@ export async function createMarketplaceBundle(
 	});
 	await updateCoreCatalogPrices(erp, {
 		productId: args.bundleProductId,
-		retail: bundleRetailPrice,
+		purchase: bundlePurchasePrice,
 	});
 
 	const stock = await fetchErpStoreStock(erp, storeTitle);
@@ -469,7 +469,7 @@ export async function createMarketplaceBundle(
 		await erp.delete('Stock Entry', name).catch(() => undefined);
 		throw error;
 	}
-	return { name, title, sourceQty, bundleRetailPrice };
+	return { name, title, sourceQty, bundlePurchasePrice };
 }
 
 /** All marketplace operations are tagged and therefore never mixed with ordinary deal documents. */

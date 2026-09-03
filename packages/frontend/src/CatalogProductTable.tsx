@@ -19,6 +19,7 @@ export function CatalogProductTable({
 	canQuickSale,
 	pickMode,
 	canEditPrices,
+	canEditMarketplaceBundlePrices,
 	priceTagMode,
 	sid,
 	cart,
@@ -38,6 +39,7 @@ export function CatalogProductTable({
 	canQuickSale: boolean;
 	pickMode: boolean;
 	canEditPrices: boolean;
+	canEditMarketplaceBundlePrices: boolean;
 	priceTagMode: boolean;
 	sid: number | null;
 	cart: ReadonlyMap<number, number>;
@@ -74,6 +76,8 @@ export function CatalogProductTable({
 					<tbody>
 						{view.length ? view.map(({ d, qty, others }) => {
 							const photo = d.photoPath ? photoFullUrl(d.photoPath) : null;
+							const canEditRowPrices = canEditPrices
+								|| (marketplaceMode && canEditMarketplaceBundlePrices && Boolean(d.isMarketplaceBundle));
 							return (
 								<tr key={d.id} onClick={() => d.id !== CORE_ENGINEER_VISIT_SERVICE_ID && setCardRow(d)} title={d.id === CORE_ENGINEER_VISIT_SERVICE_ID ? undefined : 'Открыть нашу карточку товара'}>
 									<td className="num idcol">{d.id}</td>
@@ -91,12 +95,12 @@ export function CatalogProductTable({
 									<td>{d.manufacturer ? <span className="brand">{d.manufacturer}</span> : <span className="muted">—</span>}</td>
 									<td className="muted">{d.sectionName ?? '—'}</td>
 									<td className="num money" onClick={(event) => event.stopPropagation()}>
-										{canEditPrices && !pickMode
+										{canEditRowPrices && !pickMode
 											? <button type="button" className="catalog-price-button" title="Изменить розничную и закупочную цены" onClick={() => setPriceRow(d)}><span>{fmt(d.retail)}</span><span aria-hidden="true">✎</span></button>
 											: fmt(d.retail)}
 									</td>
 									<td className="num money" onClick={(event) => event.stopPropagation()}>
-										{canEditPrices && !pickMode
+										{canEditRowPrices && !pickMode
 											? <button type="button" className="catalog-price-button" title="Изменить розничную и закупочную цены" onClick={() => setPriceRow(d)}><span>{d.purchase ? fmt(d.purchase) : '0'}</span><span aria-hidden="true">✎</span></button>
 											: d.purchase ? fmt(d.purchase) : <span className="muted">0</span>}
 									</td>

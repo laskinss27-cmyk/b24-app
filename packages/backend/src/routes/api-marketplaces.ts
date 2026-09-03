@@ -8,7 +8,7 @@ import {
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
 	fetchCoreCatalogItems,
-	fetchErpRetailPrices,
+	fetchErpPurchasing,
 	listActiveStoreTitles,
 	listMarketplaceOperations,
 	listMarketplaceReturnSales,
@@ -337,11 +337,11 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			}
 			const source = await sourceProductIdentity(client, erp, sourceProductId);
 			const sourceItemName = source.name;
-			const sourceRetailPrice = (await fetchErpRetailPrices(erp, [sourceProductId])).get(sourceProductId);
-			if (!Number.isFinite(sourceRetailPrice) || Number(sourceRetailPrice) <= 0) {
+			const sourcePurchasePrice = (await fetchErpPurchasing(erp, [sourceProductId])).get(sourceProductId);
+			if (!Number.isFinite(sourcePurchasePrice) || Number(sourcePurchasePrice) <= 0) {
 				return reply.code(400).send({
 					ok: false,
-					error: `у товара «${sourceItemName}» не указана розничная цена`,
+					error: `у товара «${sourceItemName}» не указана закупочная цена`,
 				});
 			}
 			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
@@ -357,7 +357,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				sourceItemName,
 				bundleProductId,
 				bundleItemName,
-				sourceRetailPrice: Number(sourceRetailPrice),
+				sourcePurchasePrice: Number(sourcePurchasePrice),
 				unitsPerBundle,
 				bundleQty,
 				storeTitle,

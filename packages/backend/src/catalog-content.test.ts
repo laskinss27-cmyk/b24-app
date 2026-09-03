@@ -116,56 +116,62 @@ test('catalog creation, card editing, and price access are independent', () => {
 		NAME: 'Сотрудник',
 		LAST_NAME: 'Снабжения',
 		UF_DEPARTMENT: [10],
-	}), { canCreateProduct: true, canEditCard: true, canEditPrices: true });
+	}), { canCreateProduct: true, canEditCard: true, canEditPrices: true, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1,
 		NAME: 'Администратор',
 		LAST_NAME: 'Приложения',
 		UF_DEPARTMENT: [5],
-	}), { canCreateProduct: true, canEditCard: true, canEditPrices: false });
+	}), { canCreateProduct: true, canEditCard: true, canEditPrices: false, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 77,
 		NAME: 'Администратор',
 		LAST_NAME: 'Портала',
 		UF_DEPARTMENT: [5],
 		ADMIN: 'Y',
-	}), { canCreateProduct: true, canEditCard: true, canEditPrices: false });
+	}), { canCreateProduct: true, canEditCard: true, canEditPrices: false, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1246,
 		NAME: 'Константин',
 		LAST_NAME: 'Ласкин',
 		UF_DEPARTMENT: [5],
-	}), { canCreateProduct: true, canEditCard: true, canEditPrices: true });
+	}), { canCreateProduct: true, canEditCard: true, canEditPrices: true, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1246,
 		NAME: 'Другое написание',
 		LAST_NAME: '',
 		UF_DEPARTMENT: [5],
-	}), { canCreateProduct: true, canEditCard: true, canEditPrices: true });
+	}), { canCreateProduct: true, canEditCard: true, canEditPrices: true, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 22,
 		NAME: 'Егор',
 		LAST_NAME: 'Кабардин',
 		UF_DEPARTMENT: [5],
-	}), { canCreateProduct: true, canEditCard: false, canEditPrices: false });
+	}), { canCreateProduct: true, canEditCard: false, canEditPrices: false, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 760,
 		NAME: 'Николай',
 		LAST_NAME: 'Савченко',
 		UF_DEPARTMENT: [310],
-	}), { canCreateProduct: true, canEditCard: false, canEditPrices: false });
+	}), { canCreateProduct: true, canEditCard: false, canEditPrices: false, canEditMarketplaceBundlePrices: true });
+	assert.deepEqual(catalogAccessForUser({
+		ID: 5000,
+		NAME: 'Другой',
+		LAST_NAME: 'Сотрудник маркетплейсов',
+		UF_DEPARTMENT: ['310'],
+	}), { canCreateProduct: false, canEditCard: false, canEditPrices: false, canEditMarketplaceBundlePrices: true });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 77,
 		NAME: 'Егор',
 		LAST_NAME: 'Кабардин',
 		UF_DEPARTMENT: [5],
-	}), { canCreateProduct: false, canEditCard: false, canEditPrices: false });
+	}), { canCreateProduct: false, canEditCard: false, canEditPrices: false, canEditMarketplaceBundlePrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 77,
 		NAME: 'Обычный',
 		LAST_NAME: 'Сотрудник',
 		UF_DEPARTMENT: [5],
-	}), { canCreateProduct: false, canEditCard: false, canEditPrices: false });
+	}), { canCreateProduct: false, canEditCard: false, canEditPrices: false, canEditMarketplaceBundlePrices: false });
 });
 
 test('delegated catalog creation is restricted to approved Bitrix IDs', () => {

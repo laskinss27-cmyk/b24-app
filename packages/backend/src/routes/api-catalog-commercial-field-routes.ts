@@ -1,28 +1,53 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
 import { updateCoreCatalogPrices, updateMarketplaceOldId } from '../erp/operations.js';
+import { MARKETPLACE_BUNDLE_SOURCE_FIELD } from '../erp/marketplace-fields.js';
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import type { AuthBody } from './api-catalog-types.js';
 import {
-	canEditCatalogPrices,
 	catalogAccess,
 	catalogClientFrom,
 	errInfo,
 } from './api-catalog-route-helpers.js';
 import { baseCache } from './api-catalog-cache.js';
 
+export type CatalogPriceEditScope = 'all' | 'marketplace-bundle' | 'none';
+
+export function catalogPriceEditScope(args: {
+	canEditAllPrices: boolean;
+	marketplaceMode: boolean;
+	canEditMarketplaceBundlePrices: boolean;
+}): CatalogPriceEditScope {
+	if (args.canEditAllPrices) return 'all';
+	if (args.marketplaceMode && args.canEditMarketplaceBundlePrices) return 'marketplace-bundle';
+	return 'none';
+}
+
+export function isMarketplaceBundlePriceTarget(item: Record<string, unknown> | null | undefined): boolean {
+	return Boolean(String(item?.[MARKETPLACE_BUNDLE_SOURCE_FIELD] ?? '').trim());
+}
+
 export function registerCatalogCommercialFieldRoutes(app: FastifyInstance): void {
 	app.post('/api/catalog/update-prices', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = catalogClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const legacyCanEditPrices = await canEditCatalogPrices(client);
-		if (
-			!appPermission(req, 'catalog.edit_retail_prices', legacyCanEditPrices)
-			|| !appPermission(req, 'catalog.edit_purchase_prices', legacyCanEditPrices)
-		) {
-			return reply.code(403).send({ ok: false, error: 'редактирование цен доступно снабжению и Константину Ласкину' });
+		const legacyAccess = await catalogAccess(client);
+		const canEditAllPrices = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices)
+			&& appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
+		const marketplaceMode = body['marketplaceMode'] === true;
+		const scope = catalogPriceEditScope({
+			canEditAllPrices,
+			marketplaceMode,
+			canEditMarketplaceBundlePrices: appPermission(
+				req,
+				'marketplaces.edit_bundle_prices',
+				legacyAccess.canEditMarketplaceBundlePrices,
+			),
+		});
+		if (scope === 'none') {
+			return reply.code(403).send({ ok: false, error: 'нет права на изменение цен' });
 		}
 		const productId = Number(body['productId']);
 		const retail = Number(body['retail']);
@@ -33,6 +58,12 @@ export function registerCatalogCommercialFieldRoutes(app: FastifyInstance): void
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
+			if (scope === 'marketplace-bundle') {
+				const item = await erp.get<Record<string, unknown>>('Item', String(productId));
+				if (!isMarketplaceBundlePriceTarget(item)) {
+					return reply.code(403).send({ ok: false, error: 'сотрудникам маркетплейсов разрешено менять цены только у комплектов' });
+				}
+			}
 			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
 			baseCache.delete(normalizeDomain(body.domain ?? ''));
 			app.log.info({ productId, retail, purchase }, '[api/catalog/update-prices] ok');

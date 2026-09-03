@@ -7,7 +7,8 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/catalog/browse': ['catalog.view', 'catalog.search'],
 	'/api/catalog/export-comparison': ['catalog.export_comparison'],
 	'/api/catalog/export-marketplace-selection': ['catalog.view', 'catalog.search'],
-	'/api/catalog/update-prices': ['catalog.edit_retail_prices', 'catalog.edit_purchase_prices'],
+	// У маршрута собственная проверка: полные права каталога ИЛИ узкое право
+	// маркетплейсов только на цены карточек комплектов.
 	'/api/catalog/update-marketplace-old-id': ['catalog.view'],
 	'/api/catalog/update-product': ['catalog.edit_card'],
 	'/api/catalog/create-product': ['catalog.create'],
@@ -155,7 +156,8 @@ export function registerAccessPolicyHook(app: FastifyInstance): void {
 		if (!route.startsWith('/api/') || route.startsWith('/api/access-control/')) return;
 		const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
 		const permissionIds = permissionsFor(route, body);
-		if (!permissionIds.length) return;
+		const resolveOnly = route === '/api/catalog/update-prices';
+		if (!permissionIds.length && !resolveOnly) return;
 		const domain = typeof body['domain'] === 'string' ? body['domain'] : '';
 		const accessToken = typeof body['accessToken'] === 'string' ? body['accessToken'] : '';
 		// Отсутствующую/битую авторизацию по-прежнему обрабатывает сам маршрут.

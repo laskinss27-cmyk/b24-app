@@ -73,6 +73,7 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 		canCreateProduct: true,
 		canEditCard: false,
 		canEditPrices: false,
+		canEditMarketplaceBundlePrices: false,
 		canEditMarketplaceOldId: false,
 	});
 });
@@ -121,9 +122,23 @@ test('catalog mutations preserve payload merging and current response fallbacks'
 		'/api/catalog/create-product',
 	]);
 	assert.deepEqual(requests[0]?.body, {
-		domain: 'mobile.example', accessToken: 'catalog-token', productId: 17, retail: 1200, purchase: 800,
+		domain: 'mobile.example', accessToken: 'catalog-token', productId: 17, retail: 1200, purchase: 800, marketplaceMode: false,
 	});
 	assert.equal(requests[3]?.body['manufacturer'], 'Vendor');
+});
+
+test('marketplace price editing marks the request as marketplace-only', async () => {
+	const requests = captureResponses([jsonResponse({ ok: true })]);
+
+	assert.deepEqual(await updateCatalogPrices(202, 500, 300, true), { retail: 500, purchase: 300 });
+	assert.deepEqual(requests[0]?.body, {
+		domain: 'mobile.example',
+		accessToken: 'catalog-token',
+		productId: 202,
+		retail: 500,
+		purchase: 300,
+		marketplaceMode: true,
+	});
 });
 
 test('catalog downloads preserve filenames, request bodies, and object URL cleanup', async () => {

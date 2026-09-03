@@ -5,6 +5,7 @@ import {
 	emptyAccessControlDraft,
 	hasDirectCatalogProductCreateAccess,
 	hasDirectMarketplaceAccess,
+	hasMarketplaceBundlePriceAccess,
 	type AccessControlDraft,
 	type AccessPermissionId,
 	type AccessProfileId,
@@ -177,10 +178,13 @@ export async function resolveCurrentAccess(
 	]);
 	const departmentRules = user.departments.map((id) => policy.departments[String(id)]);
 	const directMarketplaceAccess = hasDirectMarketplaceAccess(user.id);
+	const marketplaceBundlePriceAccess = hasMarketplaceBundlePriceAccess(user.id, user.departments);
 	const directCatalogCreateAccess = hasDirectCatalogProductCreateAccess(user.id);
 	const decisions = Object.fromEntries(ACCESS_PERMISSIONS.map((permission) => [
 		permission.id,
-		directMarketplaceAccess && permission.id.startsWith('marketplaces.')
+		marketplaceBundlePriceAccess && permission.id === 'marketplaces.edit_bundle_prices'
+			? 'allow'
+			: directMarketplaceAccess && permission.id.startsWith('marketplaces.')
 			? 'allow'
 			: directCatalogCreateAccess && permission.id === 'catalog.create'
 				? 'allow'

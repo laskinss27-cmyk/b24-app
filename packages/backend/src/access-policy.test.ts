@@ -5,6 +5,7 @@ import {
 	effectiveDraftDecision,
 	hasDirectCatalogProductCreateAccess,
 	hasDirectMarketplaceAccess,
+	hasMarketplaceBundlePriceAccess,
 	type AccessSubjectRule,
 } from '@b24-app/shared';
 import { parseStoredAccessPolicy } from './access-policy.js';
@@ -18,11 +19,18 @@ test('ненастроенный сотрудник сохраняет преж�
 	assert.equal(effectiveAccessDecision(undefined, [], 'catalog.view'), 'inherit');
 });
 
-test('точечный доступ к маркетплейсам выдан только двум сотрудникам', () => {
+test('прямой доступ к маркетплейсам сохраняют точечные сотрудники', () => {
 	assert.equal(hasDirectMarketplaceAccess('760'), true);
 	assert.equal(hasDirectMarketplaceAccess(3608), true);
 	assert.equal(hasDirectMarketplaceAccess('1858'), false);
 	assert.equal(hasDirectMarketplaceAccess(''), false);
+});
+
+test('цены комплектов доступны точечным сотрудникам и всему отделу маркетплейсов', () => {
+	assert.equal(hasMarketplaceBundlePriceAccess('760'), true);
+	assert.equal(hasMarketplaceBundlePriceAccess('5000', [310]), true);
+	assert.equal(hasMarketplaceBundlePriceAccess('5000', ['310']), true);
+	assert.equal(hasMarketplaceBundlePriceAccess('5000', [10]), false);
 });
 
 test('точечное создание обычных карточек каталога выдано Савченко', () => {

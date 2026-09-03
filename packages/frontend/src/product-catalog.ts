@@ -49,6 +49,8 @@ export interface ProductBaseResult {
 	canEditCard: boolean;
 	/** Право менять справочные цены: отдел снабжения или Константин Ласкин. */
 	canEditPrices: boolean;
+	/** Узкое право маркетплейсов менять обе цены только у комплектов. */
+	canEditMarketplaceBundlePrices: boolean;
 	/** Право видеть и менять старый ID в специальном режиме маркетплейсов. */
 	canEditMarketplaceOldId: boolean;
 }
@@ -64,7 +66,7 @@ export async function fetchProductBase(force = false, marketplaceMode = false, d
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode, ...(Number.isInteger(dealId) && Number(dealId) > 0 ? { dealId } : {}) }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canCreateProduct?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canCreateProduct?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceBundlePrices?: boolean; canEditMarketplaceOldId?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return {
 		rows: json.rows ?? [],
@@ -74,6 +76,7 @@ export async function fetchProductBase(force = false, marketplaceMode = false, d
 		canCreateProduct: Boolean(json.canCreateProduct),
 		canEditCard: Boolean(json.canEditCard),
 		canEditPrices: Boolean(json.canEditPrices),
+		canEditMarketplaceBundlePrices: Boolean(json.canEditMarketplaceBundlePrices),
 		canEditMarketplaceOldId: Boolean(json.canEditMarketplaceOldId),
 	};
 }
@@ -172,11 +175,11 @@ export async function downloadMarketplaceCatalogSelection(input: {
 	}
 }
 
-export async function updateCatalogPrices(productId: number, retail: number, purchase: number): Promise<{ retail: number; purchase: number }> {
+export async function updateCatalogPrices(productId: number, retail: number, purchase: number, marketplaceMode = false): Promise<{ retail: number; purchase: number }> {
 	const res = await fetch('/api/catalog/update-prices', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), productId, retail, purchase }),
+		body: JSON.stringify({ ...bx24Auth(), productId, retail, purchase, marketplaceMode }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; retail?: number; purchase?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить цены');

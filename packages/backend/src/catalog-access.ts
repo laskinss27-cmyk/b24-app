@@ -1,9 +1,10 @@
-import { hasDirectCatalogProductCreateAccess, SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
+import { hasDirectCatalogProductCreateAccess, hasMarketplaceBundlePriceAccess, SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
 
 export interface CatalogAccess {
 	canCreateProduct: boolean;
 	canEditCard: boolean;
 	canEditPrices: boolean;
+	canEditMarketplaceBundlePrices: boolean;
 }
 
 export interface CatalogAccessUser {
@@ -47,6 +48,7 @@ export function catalogAccessForUser(user: CatalogAccessUser | null): CatalogAcc
 			|| CATALOG_PRODUCT_CREATOR_USER_IDS.has(Number(user?.ID))
 			|| hasDirectCatalogProductCreateAccess(user?.ID),
 		canEditPrices,
+		canEditMarketplaceBundlePrices: hasMarketplaceBundlePriceAccess(user?.ID, departments),
 		canEditCard,
 	};
 }
