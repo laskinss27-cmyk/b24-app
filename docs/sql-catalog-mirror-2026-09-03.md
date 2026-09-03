@@ -84,3 +84,43 @@ duplicate checkpoint. Final fixture counts were `2` checkpoints, `1` product,
 `1` attribute, `2` prices, `1` warehouse and `1` stock row. The disposable
 container was stopped and automatically removed. No production connection or
 credential was used.
+
+## Production foundation evidence
+
+On 2026-09-03 the production `b24_app` database applied migrations
+`0038`-`0045` with the separate migration identity. Before catalog DDL, two
+full `b24_app` dumps were uploaded and checksum-verified in the existing
+private Bitrix Disk backup folder; isolated restore schemas reproduced table,
+migration and structure parity and were deliberately retained. A third backup
+after `0038`-`0043` was likewise uploaded, restored and verified. No backup
+retention was run and no prior backup was removed.
+
+The permanent `b24_app_catalog_sync` identity is stored only in root-owned
+mode-`0600` operator secret files. Its grants are exactly
+`SELECT/INSERT/UPDATE` on the six catalog tables; an independent negative check
+confirmed that it cannot read an unrelated workflow table. The credential is
+not present in the backend container environment.
+
+The first real source scan exposed a valid 506-character attribute label. Its
+transaction failed before checkpoint publication and an independent read
+confirmed zero rows in all six mirror tables. Migration `0044` widened only
+that normalized label column. Initial shadow comparison then exposed three
+lossless reconstruction edge cases: computed ERP-only section ids, an exact
+Bitrix fallback string containing trailing whitespace, and a valid empty
+catalog-content object. Migration `0045` stores the content-presence bit, while
+the reader derives the same section id and preserves the exact fallback value.
+
+The resulting production checkpoint is
+`f7607b0737d0e3136574aad4b2e61e4083ffff65fc1bae21ede4744fc415b61e`
+with `5,149` products, `38,708` attributes, `6,786` prices, `11` warehouses and
+`3,559` stock rows. Independent read-back through the permanent read-only
+runtime identity recomputed the same hash and exact counts. A fresh official
+ERPNext/Bitrix build compared with SQL at `5,149/5,149` products and `11/11`
+warehouses, with zero missing, extra or different products.
+
+The running backend remained image `b24-app:d4404dc`, restart count `0`, on
+`erpnext_frappe_network`. Internal and public health checks and an official
+ERPNext API read all returned HTTP `200`. `B24_APP_CATALOG_SQL_READ` remains
+unset, which is the fail-safe `off` default: no catalog request has switched to
+SQL, no scheduler was installed, and no backend deployment occurred in this
+foundation stage.
