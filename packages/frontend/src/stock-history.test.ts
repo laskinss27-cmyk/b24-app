@@ -30,7 +30,7 @@ test('stock history reads preserve endpoint payloads and empty list fallbacks', 
 	};
 	const requests = captureResponses([{ ok: true }, { ok: true, detail }, { ok: true }]);
 
-	assert.deepEqual(await fetchMovements('issue', { from: '2026-08-01', to: '2026-08-31', productId: 17 }), []);
+	assert.deepEqual(await fetchMovements('issue', { from: '2026-08-01', to: '2026-08-31', productId: 17, fullList: true }), []);
 	assert.deepEqual(await fetchDocDetail('Stock Entry', 'STE-1'), detail);
 	assert.deepEqual(await fetchItemHistory(17), []);
 	assert.deepEqual(requests, [
@@ -39,6 +39,7 @@ test('stock history reads preserve endpoint payloads and empty list fallbacks', 
 			body: {
 				domain: 'mobile.example', accessToken: 'history-token', kind: 'issue',
 				from: '2026-08-01', to: '2026-08-31', productId: 17,
+				fullList: true,
 			},
 		},
 		{

@@ -40,19 +40,20 @@ export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase
 /**
  * Документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация).
  * Период (from/to по posting_date, YYYY-MM-DD) фильтруется в ядре; без периода — последние 50.
+ * fullList используется журналом при поиске, чтобы искать не только среди первых 50 строк.
  * Сортировка posting_date desc (свежие сверху).
  */
 export async function listCoreMovements(
 	erp: ErpClient,
 	kind: 'issue' | 'receipt' | 'delivery' | 'return',
-	opts: { from?: string; to?: string; productId?: number } = {},
+	opts: { from?: string; to?: string; productId?: number; fullList?: boolean } = {},
 ): Promise<CoreMovement[]> {
 	const dateFilters: unknown[] = [];
 	if (opts.from) dateFilters.push(['posting_date', '>=', opts.from]);
 	if (opts.to) dateFilters.push(['posting_date', '<=', opts.to]);
 	// Фильтр по товару = по дочерней таблице документа (frappe: [child_doctype, field, op, val]).
 	const child = (childDt: string): unknown[] => opts.productId ? [[childDt, 'item_code', '=', String(opts.productId)]] : [];
-	const limit = (opts.from || opts.to || opts.productId) ? 1000 : 50;
+	const limit = opts.fullList ? 0 : (opts.from || opts.to || opts.productId) ? 1000 : 50;
 	const ORDER = 'posting_date desc';
 	if (kind === 'delivery' || kind === 'return') {
 		// Реализации и возвраты — один doctype (Delivery Note), разводим по is_return: 0=продажа, 1=возврат.
@@ -73,7 +74,7 @@ export async function listCoreMovements(
 			erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER),
 			erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Receipt'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail')], limit, ORDER),
 		]);
-		return [
+		const merged = [
 			...purchaseReceipts.map((row) => ({
 				name: String(row['name']), doctype: 'Purchase Receipt' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
 				summary: withNote(String(row['supplier'] ?? ''), String(row[NOTE_FIELD] ?? '')), dealId: String(row[DEAL_FIELD] ?? ''),
@@ -82,7 +83,8 @@ export async function listCoreMovements(
 				name: String(row['name']), doctype: 'Stock Entry' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
 				summary: String(row[NOTE_FIELD] ?? '') || 'оприходование', dealId: String(row[DEAL_FIELD] ?? ''),
 			})),
-		].sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name)).slice(0, limit);
+		].sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name));
+		return limit > 0 ? merged.slice(0, limit) : merged;
 	}
 	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
 	await ensureNoteField(erp, 'Stock Entry');

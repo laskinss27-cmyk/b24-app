@@ -35,15 +35,18 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string } | null>(null);
 	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
 	const canCancel = Boolean(form?.canCancel);
+	// Пустой журнал остаётся быстрым (последние 50), а непустой поиск работает по всей истории.
+	// Зависимость — boolean, поэтому набор каждого следующего символа не создаёт новый запрос.
+	const fullList = search.trim().length > 0;
 
 	useEffect(() => {
 		let alive = true; setList(null); setErr(null); setLoading(true);
-		fetchMovements(kind, { ...period, ...(prod ? { productId: prod.productId } : {}) })
+		fetchMovements(kind, { ...period, ...(prod ? { productId: prod.productId } : {}), ...(fullList ? { fullList: true } : {}) })
 			.then((m) => { if (alive) setList(m); })
 			.catch((e) => { if (alive) setErr(errText(e)); })
 			.finally(() => { if (alive) setLoading(false); });
 		return () => { alive = false; };
-	}, [kind, period, bump, prod]);
+	}, [kind, period, bump, prod, fullList]);
 
 	// Сброс фильтров при смене вкладки.
 	useEffect(() => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); setProd(null); }, [kind]);

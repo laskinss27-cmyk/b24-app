@@ -2078,6 +2078,14 @@ test('stock movement list keeps document filters, summaries and submission state
 		['Delivery Note Item', 'item_code', '=', '101'],
 	]);
 	assert.ok(calls.filter((call) => call.doctype !== 'Delivery Note').every((call) => call.limit === 50));
+
+	const allDeliveries = await listCoreMovements(client, 'delivery', { fullList: true });
+	assert.equal(allDeliveries.length, 1);
+	assert.equal(calls.at(-1)?.limit, 0);
+
+	const allReceipts = await listCoreMovements(client, 'receipt', { fullList: true });
+	assert.equal(allReceipts.length, 2, 'full receipt search must not slice the merged list to zero rows');
+	assert.ok(calls.slice(-2).every((call) => call.limit === 0));
 });
 
 test('stock document detail keeps header fields and warehouse-name conversion', async () => {

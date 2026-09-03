@@ -1,10 +1,16 @@
 import { bx24Auth } from './bitrix-auth.js';
 
 export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string; ownerName: string }
-export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery' | 'return', period?: { from?: string; to?: string; productId?: number }): Promise<CoreMovement[]> {
+export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery' | 'return', period?: { from?: string; to?: string; productId?: number; fullList?: boolean }): Promise<CoreMovement[]> {
 	const res = await fetch('/api/stock/movements', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), kind, ...(period?.from ? { from: period.from } : {}), ...(period?.to ? { to: period.to } : {}), ...(period?.productId ? { productId: period.productId } : {}) }),
+		body: JSON.stringify({
+			...bx24Auth(), kind,
+			...(period?.from ? { from: period.from } : {}),
+			...(period?.to ? { to: period.to } : {}),
+			...(period?.productId ? { productId: period.productId } : {}),
+			...(period?.fullList ? { fullList: true } : {}),
+		}),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; movements?: CoreMovement[] };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить движения');
