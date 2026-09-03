@@ -11,6 +11,7 @@ readonly BACKUP_SCRIPT="$SYNC_DIR/b24-app-backup.sh"
 readonly DISK_UPLOADER="$SYNC_DIR/b24-app-backup-disk.ts"
 readonly LOCK_FILE=/run/lock/b24-app-backup-job.lock
 readonly MAX_LOCAL_BACKUPS=14
+readonly RETENTION_MODE=${B24_APP_BACKUP_RETENTION:-on}
 
 log() {
   printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -25,6 +26,11 @@ done
 
 [[ -x "$BACKUP_SCRIPT" && -r "$DISK_UPLOADER" && -d "$BACKUP_DIR" ]] || {
   log "ERROR: b24_app backup job prerequisites are unavailable"
+  exit 1
+}
+
+[[ "$RETENTION_MODE" == on || "$RETENTION_MODE" == off ]] || {
+  log "ERROR: B24_APP_BACKUP_RETENTION must be on or off"
   exit 1
 }
 
@@ -58,31 +64,35 @@ grep -q '^disk verified:' <<<"$disk_output" || {
 printf 'uploaded_at=%s\n%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$disk_output" > "$dump_path.uploaded"
 chmod 600 "$dump_path.uploaded"
 
-mapfile -t dumps < <(
-  find "$BACKUP_DIR" -maxdepth 1 -type f -name '*-b24_app-database.sql.gz' -printf '%f\n' | sort -r
-)
-for dump_name in "${dumps[@]}"; do
-  [[ -f "$BACKUP_DIR/$dump_name.sha256" ]] || {
-    log "ERROR: refusing retention for incomplete local pair: $dump_name"
-    exit 1
-  }
-done
-
-for ((index = MAX_LOCAL_BACKUPS; index < ${#dumps[@]}; index += 1)); do
-  dump_name=${dumps[$index]}
-  [[ -f "$BACKUP_DIR/$dump_name.uploaded" ]] || {
-    log "ERROR: refusing to remove a backup without upload proof: $dump_name"
-    exit 1
-  }
-  (
-    cd "$BACKUP_DIR"
-    sha256sum -c "$dump_name.sha256" >/dev/null
+if [[ "$RETENTION_MODE" == on ]]; then
+  mapfile -t dumps < <(
+    find "$BACKUP_DIR" -maxdepth 1 -type f -name '*-b24_app-database.sql.gz' -printf '%f\n' | sort -r
   )
-  rm -f -- \
-    "$BACKUP_DIR/$dump_name" \
-    "$BACKUP_DIR/$dump_name.sha256" \
-    "$BACKUP_DIR/$dump_name.uploaded"
-  log "local retention removed: $dump_name"
-done
+  for dump_name in "${dumps[@]}"; do
+    [[ -f "$BACKUP_DIR/$dump_name.sha256" ]] || {
+      log "ERROR: refusing retention for incomplete local pair: $dump_name"
+      exit 1
+    }
+  done
+
+  for ((index = MAX_LOCAL_BACKUPS; index < ${#dumps[@]}; index += 1)); do
+    dump_name=${dumps[$index]}
+    [[ -f "$BACKUP_DIR/$dump_name.uploaded" ]] || {
+      log "ERROR: refusing to remove a backup without upload proof: $dump_name"
+      exit 1
+    }
+    (
+      cd "$BACKUP_DIR"
+      sha256sum -c "$dump_name.sha256" >/dev/null
+    )
+    rm -f -- \
+      "$BACKUP_DIR/$dump_name" \
+      "$BACKUP_DIR/$dump_name.sha256" \
+      "$BACKUP_DIR/$dump_name.uploaded"
+    log "local retention removed: $dump_name"
+  done
+else
+  log "local retention skipped"
+fi
 
 log "backup job complete: $(basename "$dump_path")"

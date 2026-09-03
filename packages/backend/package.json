@@ -16,6 +16,7 @@
     "db:migrate": "tsx src/database/migrate.ts",
     "transfers:backfill": "tsx src/transfers/backfill.ts",
     "tilda:mappings:backfill": "tsx src/tilda/backfill.ts",
+    "tilda:mappings:backfill:2026-09-03": "tsx src/tilda/backfill-2026-09-03.ts",
     "tilda:preview": "tsx src/tilda/preview.ts",
     "tilda:prepare-public-stock": "tsx src/tilda/prepare-public-stock.ts",
     "tilda:prepare-public-availability": "tsx src/tilda/prepare-public-availability.ts",

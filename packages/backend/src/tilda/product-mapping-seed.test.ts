@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parseTildaProductMappingSeed, readTildaProductMappingSeed } from './product-mapping-seed.js';
 
 const seedPath = fileURLToPath(new URL('../../migrations/data/tilda-product-mappings-2026-08-21.csv', import.meta.url));
+const newProductsSeedPath = fileURLToPath(new URL('../../migrations/data/tilda-product-mappings-2026-09-03.csv', import.meta.url));
 
 test('versioned Tilda mapping seed preserves the audited catalog identities', async () => {
 	const rows = await readTildaProductMappingSeed(seedPath);
@@ -29,6 +30,20 @@ test('versioned Tilda mapping seed preserves the audited catalog identities', as
 		erpItemCode: '18184',
 		mappingStatus: 'confirmed',
 	});
+});
+
+test('2026-09-03 Tilda seed contains the 12 newly published ERP products', async () => {
+	const rows = await readTildaProductMappingSeed(newProductsSeedPath);
+	assert.equal(rows.length, 12);
+	assert.equal(rows.every((row) => row.rowKind === 'parent'), true);
+	assert.equal(rows.every((row) => row.mappingStatus === 'confirmed'), true);
+	assert.equal(rows.every((row) => row.auditSource === 'erp:new_tilda_product_import:2026-09-03'), true);
+	assert.deepEqual(rows.map((row) => row.erpItemCode).sort(), [
+		'18136', '21484', '21486', '21488', '21492', '21494',
+		'21496', '21498', '21500', '21502', '21504', '21506',
+	]);
+	assert.equal(new Set(rows.map((row) => row.tildaUid)).size, 12);
+	assert.equal(new Set(rows.map((row) => row.tildaExternalId)).size, 12);
 });
 
 test('mapping seed parser rejects incomplete confirmed rows and duplicate identifiers', () => {
