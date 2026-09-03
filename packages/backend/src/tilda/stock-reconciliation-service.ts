@@ -47,9 +47,9 @@ function validateAuditedShape(input: {
 	blockedUids: string[];
 }): void {
 	if (
-		input.mappings.length !== 150 || input.offerCount !== 134 || input.skippedCount !== 16
-		|| input.publicCatalog.parentCount !== 131 || input.publicCatalog.rows.length !== 150
-		|| input.projectionCount !== 132 || input.rollbackCount !== 132
+		input.mappings.length !== 162 || input.offerCount !== 146 || input.skippedCount !== 16
+		|| input.publicCatalog.parentCount !== 143 || input.publicCatalog.rows.length !== 162
+		|| input.projectionCount !== 144 || input.rollbackCount !== 144
 	) throw new Error('Tilda reconciliation counts differ from the audited baseline');
 	if (
 		input.blockedUids.length !== EXPECTED_UNLIMITED_UIDS.size

@@ -16,8 +16,8 @@ function fixture(difference = false): {
 	const offers: TildaStockOffer[] = [];
 	const stocks = new Map<number, Record<string, number>>();
 	const rows: Array<{ tildaUid: string; sku: string; quantity: number | null }> = [];
-	for (let index = 0; index < 150; index += 1) {
-		const confirmed = index < 134;
+	for (let index = 0; index < 162; index += 1) {
+		const confirmed = index < 146;
 		const tildaUid = index < 2 ? unlimitedUids[index]! : `uid-${index}`;
 		const sku = `sku-${index}`;
 		const productId = index + 1;
@@ -53,7 +53,7 @@ function dependencies(difference = false) {
 		readMappings: async () => data.mappings,
 		fetchStocks: async () => data.stocks,
 		fetchReservations: async () => new Map(),
-		readPublicCatalog: async () => ({ parentCount: 131, rows: currentRows, contentHash: HASH }),
+		readPublicCatalog: async () => ({ parentCount: 143, rows: currentRows, contentHash: HASH }),
 		publishProjection: async () => {
 			calls.published += 1;
 			currentRows = data.rows.map((row) => row.tildaUid === 'uid-2' ? { ...row, quantity: 5 } : row);
@@ -80,7 +80,7 @@ test('reconciliation publishes a difference and records verified audit', async (
 	const result = await runTildaStockReconciliation('manual', deps);
 	assert.equal(result.status, 'verified');
 	assert.equal(result.changedCount, 1);
-	assert.equal(result.targetCount, 132);
+	assert.equal(result.targetCount, 144);
 	assert.equal('priceTargetCount' in result, false);
 	assert.deepEqual(calls, { start: 1, verified: 1, failed: 0, preparationFailed: 0, noOp: 0, published: 1 });
 });
@@ -103,7 +103,7 @@ test('price opt-in publishes reversible Standard Selling differences while prese
 		fetchReservations: async () => new Map(),
 		fetchPrices: async () => new Map(data.offers.map((offer, index) => [offer.productId, index === 2 ? 90 : 100])),
 		readPublicCatalog: async () => ({
-			parentCount: 131,
+			parentCount: 143,
 			rows: currentRows,
 			contentHash: 'd'.repeat(64),
 			protectedContentHash: HASH,
@@ -129,6 +129,6 @@ test('price opt-in publishes reversible Standard Selling differences while prese
 	assert.equal(result.status, 'verified');
 	assert.equal(result.changedCount, 1);
 	assert.equal(result.priceChangedCount, 1);
-	assert.equal(result.priceTargetCount, 132);
+	assert.equal(result.priceTargetCount, 144);
 	assert.deepEqual(calls, { published: 1, verified: 1 });
 });

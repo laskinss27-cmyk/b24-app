@@ -15,7 +15,7 @@ const report: TildaPreparedAvailabilityReport = {
 	propertyId: '10171262',
 	fullProjectionHash: 'b'.repeat(64),
 	publicCatalogContentHash: 'a'.repeat(64),
-	counts: { publicParents: 131, publicStockRows: 150, targets: 1, differences: 1, skippedGroups: 14 },
+	counts: { publicParents: 143, publicStockRows: 162, targets: 1, differences: 1, skippedGroups: 14 },
 	targets: [target],
 	anchorOffer: {
 		productId: 1, tildaUid: 'edition-0', externalId: 'edition-external-0', sku: 'sku-0', title: 'Shelly 1', quantity: 19,
@@ -28,15 +28,15 @@ const protocol = {
 
 function publicState(availability: 'В наличии' | 'Под заказ') {
 	return {
-		parentCount: 131,
+		parentCount: 143,
 		availabilityProtectedContentHash: 'a'.repeat(64),
 		rows: [
 			{ tildaUid: 'edition-0', sku: 'sku-0', quantity: 19, price: 1900 },
-			...Array.from({ length: 149 }, (_, index) => ({ tildaUid: `stock-${index}`, sku: `stock-sku-${index}`, quantity: index, price: 100 })),
+			...Array.from({ length: 161 }, (_, index) => ({ tildaUid: `stock-${index}`, sku: `stock-sku-${index}`, quantity: index, price: 100 })),
 		],
 		availabilityRows: [
 			{ tildaUid: 'parent-0', externalId: 'parent-external-0', title: 'Shelly 1', availability, editionUids: ['edition-0'] },
-			...Array.from({ length: 130 }, (_, index) => ({
+			...Array.from({ length: 142 }, (_, index) => ({
 				tildaUid: `parent-${index + 1}`, externalId: `parent-external-${index + 1}`, title: `Product ${index + 1}`,
 				availability: 'Под заказ' as const, editionUids: [`stock-${index}`],
 			})),

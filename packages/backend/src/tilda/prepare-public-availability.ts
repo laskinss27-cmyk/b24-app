@@ -38,12 +38,12 @@ try {
 		fetchReservations: (productIds, sourceStore) => fetchActiveTildaReservations(pool, erp, productIds, sourceStore),
 	});
 	const publicCatalog = await readTildaPublicStockRows(publicUrl);
-	if (mappings.length !== 150 || preview.offers.length !== 134 || preview.skippedCount !== 16
-		|| publicCatalog.parentCount !== 131 || publicCatalog.rows.length !== 150) {
+	if (mappings.length !== 162 || preview.offers.length !== 146 || preview.skippedCount !== 16
+		|| publicCatalog.parentCount !== 143 || publicCatalog.rows.length !== 162) {
 		throw new Error('Tilda availability preparation counts differ from the audited baseline');
 	}
 	const projection = buildTildaAvailabilityProjection(mappings, preview.offers, publicCatalog.availabilityRows);
-	if (projection.targets.length !== 112 || projection.skipped.length !== 14) {
+	if (projection.targets.length !== 124 || projection.skipped.length !== 14) {
 		throw new Error('Tilda availability parent projection differs from the audited baseline');
 	}
 	if (projection.targets.some((target) => target.currentAvailability === null)) {

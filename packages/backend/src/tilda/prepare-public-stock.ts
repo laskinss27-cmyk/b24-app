@@ -36,11 +36,11 @@ try {
 		...(priceSyncEnabled ? { fetchPrices: (productIds: number[]) => fetchCompleteTildaErpPrices(erp, productIds) } : {}),
 	});
 	const publicCatalog = await readTildaPublicStockRows(publicUrl);
-	if (mappings.length !== 150 || preview.offers.length !== 134 || preview.skippedCount !== 16 || publicCatalog.parentCount !== 131 || publicCatalog.rows.length !== 150) {
+	if (mappings.length !== 162 || preview.offers.length !== 146 || preview.skippedCount !== 16 || publicCatalog.parentCount !== 143 || publicCatalog.rows.length !== 162) {
 		throw new Error('Tilda preparation counts differ from the audited baseline');
 	}
 	const comparison = compareTildaPublicStock(mappings, preview.offers, publicCatalog.rows);
-	if (comparison.blockedUnlimited.length !== 2 || comparison.projectionOffers.length !== 132 || comparison.rollbackOffers.length !== 132) {
+	if (comparison.blockedUnlimited.length !== 2 || comparison.projectionOffers.length !== 144 || comparison.rollbackOffers.length !== 144) {
 		throw new Error('Tilda reversible projection counts differ from the audited baseline');
 	}
 	const generatedAt = new Date();

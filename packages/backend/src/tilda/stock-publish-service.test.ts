@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runTildaStockPublication, selectTildaPublicationReport } from './stock-publish-service.js';
 
-const offers = Array.from({ length: 132 }, (_, index) => ({
+const offers = Array.from({ length: 144 }, (_, index) => ({
 	productId: 18000 + index,
 	tildaUid: `uid-${index}`,
 	externalId: `external-${index}`,
@@ -15,7 +15,7 @@ const report = {
 	generatedAt: '2026-08-21T15:00:00.000Z',
 	publicCatalogContentHash: 'a'.repeat(64),
 	fullProjectionHash: 'b'.repeat(64),
-	counts: { differences: 77, publicParents: 131, publicStockRows: 150, reversibleProjectionOffers: 132 },
+	counts: { differences: 77, publicParents: 143, publicStockRows: 162, reversibleProjectionOffers: 144 },
 	projectionOffers: offers,
 	rollbackOffers,
 };
@@ -24,14 +24,14 @@ const baselineRows = [
 	...Array.from({ length: 18 }, (_, index) => ({ tildaUid: `untouched-${index}`, sku: `untouched-sku-${index}`, quantity: index === 0 ? null : index })),
 ];
 const publicState = (projected: boolean) => ({
-	parentCount: 131,
+	parentCount: 143,
 	contentHash: 'a'.repeat(64),
 	rows: baselineRows.map((row) => {
 		const projection = offers.find((offer) => offer.tildaUid === row.tildaUid);
 		return projected && projection ? { ...row, quantity: projection.quantity } : row;
 	}),
 });
-const confirmation = `publish:132:77:${'b'.repeat(64)}:${'a'.repeat(64)}`;
+const confirmation = `publish:144:77:${'b'.repeat(64)}:${'a'.repeat(64)}`;
 const protocol = {
 	catalog: { fileName: 'import0_1.xml', importResponses: ['success'] },
 	offers: { fileName: 'offers0_1.xml', importResponses: ['progress', 'success'] },
@@ -47,8 +47,8 @@ test('full Tilda publication verifies every projected and untouched public row',
 			return publicState(projected);
 		},
 		publishProjection: async (catalogXml, offersXml) => {
-			assert.equal(catalogXml.match(/<Товар>/gu)?.length, 132);
-			assert.equal(offersXml.match(/<Предложение>/gu)?.length, 132);
+			assert.equal(catalogXml.match(/<Товар>/gu)?.length, 144);
+			assert.equal(offersXml.match(/<Предложение>/gu)?.length, 144);
 			assert.match(offersXml, /<Наименование>b24-app stock only<\/Наименование>/u);
 			assert.equal(offersXml.match(/<Наименование>/gu)?.length, 1);
 			assert.doesNotMatch(offersXml, /Product|Артикул|Описание|Цена/u);
@@ -62,7 +62,7 @@ test('full Tilda publication verifies every projected and untouched public row',
 		wait: async () => undefined,
 	});
 	assert.equal(result.status, 'verified');
-	assert.equal(result.targetCount, 132);
+	assert.equal(result.targetCount, 144);
 	assert.equal(result.changedCount, 77);
 	assert.equal(rollbackCalls, 0);
 	assert.equal(publicReads, 4);
@@ -78,7 +78,7 @@ test('failed Tilda publication applies and verifies the complete numeric rollbac
 			throw new Error('simulated partial failure');
 		},
 		publishRollback: async (_catalogXml, rollbackXml) => {
-			assert.equal(rollbackXml.match(/<Предложение>/gu)?.length, 132);
+			assert.equal(rollbackXml.match(/<Предложение>/gu)?.length, 144);
 			projected = false;
 			rollbackCalls += 1;
 			return protocol;
@@ -97,7 +97,7 @@ test('failed price publication restores the exact prior numeric prices and ignor
 		counts: {
 			...report.counts,
 			differences: 1,
-			priceTargets: 132,
+			priceTargets: 144,
 			priceDifferences: 1,
 			blockedMissingPrices: 0,
 			missingErpPrices: 0,
@@ -108,7 +108,7 @@ test('failed price publication restores the exact prior numeric prices and ignor
 	let projected = false;
 	let rollbackCalls = 0;
 	const readPublicCatalog = async () => ({
-		parentCount: 131,
+		parentCount: 143,
 		contentHash: (projected ? 'd' : 'c').repeat(64),
 		protectedContentHash: 'a'.repeat(64),
 		rows: [
@@ -125,7 +125,7 @@ test('failed price publication restores the exact prior numeric prices and ignor
 	});
 	await assert.rejects(runTildaStockPublication({
 		report: priceReport,
-		confirmation: `publish:132:1:${'b'.repeat(64)}:${'a'.repeat(64)}`,
+		confirmation: `publish:144:1:${'b'.repeat(64)}:${'a'.repeat(64)}`,
 	}, {
 		readPublicCatalog,
 		publishProjection: async () => {
@@ -167,7 +167,7 @@ test('single price publication verifies the new price without changing quantity 
 		confirmation: `publish:1:1:${'b'.repeat(64)}:${'p'.repeat(64)}`,
 	}, {
 		readPublicCatalog: async () => ({
-			parentCount: 131,
+			parentCount: 143,
 			contentHash: currentPrice === projection.price ? 'changed'.repeat(9).slice(0, 64) : 'original'.repeat(10).slice(0, 64),
 			protectedContentHash: 'p'.repeat(64),
 			rows: baselineRows.map((row) => row.tildaUid === projection.tildaUid
@@ -199,6 +199,6 @@ test('single changed Tilda publication keeps the full audited catalog baseline',
 	assert.equal(selected.rollbackOffers.length, 1);
 	assert.equal(selected.counts.differences, 1);
 	assert.equal(selected.counts.reversibleProjectionOffers, 1);
-	assert.equal(selected.counts.publicParents, 131);
-	assert.equal(selected.counts.publicStockRows, 150);
+	assert.equal(selected.counts.publicParents, 143);
+	assert.equal(selected.counts.publicStockRows, 162);
 });

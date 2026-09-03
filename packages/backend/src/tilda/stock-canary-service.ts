@@ -58,7 +58,7 @@ export async function runTildaStockCanary(
 
 	const before = await dependencies.readPublicCatalog();
 	const beforeRow = before.rows.find((row) => row.tildaUid === projection.tildaUid);
-	if (before.parentCount !== 131 || before.rows.length !== 150 || before.contentHash !== input.report.publicCatalogContentHash) {
+	if (before.parentCount !== 143 || before.rows.length !== 162 || before.contentHash !== input.report.publicCatalogContentHash) {
 		throw new Error('Tilda public card content changed after preparation');
 	}
 	if (!beforeRow || beforeRow.sku !== projection.sku || beforeRow.quantity !== projection.quantity) {

@@ -135,7 +135,7 @@ export async function runTildaAvailabilityPublication(
 	if (!report.propertyId.trim() || report.targets.length !== report.counts.targets || report.targets.length < 1) {
 		throw new Error('Tilda availability publication report is incomplete');
 	}
-	if (report.counts.publicParents !== 131 || report.counts.publicStockRows !== 150 || report.counts.skippedGroups !== 14) {
+	if (report.counts.publicParents !== 143 || report.counts.publicStockRows !== 162 || report.counts.skippedGroups !== 14) {
 		throw new Error('Tilda availability counts differ from the audited baseline');
 	}
 	const changedCount = report.targets.filter((target) => target.availability !== target.currentAvailability).length;

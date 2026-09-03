@@ -3,6 +3,7 @@ import test from 'node:test';
 import Fastify from 'fastify';
 import type { ErpClient } from '../erp/client.js';
 import { withInventoryUpdateLock } from './api-inventory.js';
+import { isSafePublicErpFilePath } from './api-inventory-read-routes.js';
 import { submitInventoryDocumentSet } from './api-inventory-document-submission.js';
 import type { InventoryDocumentSet } from './api-inventory-document-state.js';
 import { inventoryStatusForPoints, synchronizeInventoryStatus } from './api-inventory-status.js';
@@ -33,6 +34,17 @@ const mobileConfig: Config = {
 	appClientSecret: 'secret',
 	nodeEnv: 'test',
 };
+
+test('ERP image proxy accepts real public filenames but rejects traversal and nested paths', () => {
+	assert.equal(isSafePublicErpFilePath('/files/images _23_.jpg'), true);
+	assert.equal(isSafePublicErpFilePath('/files/Без названия _5_.jpg'), true);
+	assert.equal(isSafePublicErpFilePath('/files/shelly-18136.webp'), true);
+	assert.equal(isSafePublicErpFilePath('/files/../private.jpg'), false);
+	assert.equal(isSafePublicErpFilePath('/files/nested/image.jpg'), false);
+	assert.equal(isSafePublicErpFilePath('/private/files/image.jpg'), false);
+	assert.equal(isSafePublicErpFilePath('/files/bad\\image.jpg'), false);
+	assert.equal(isSafePublicErpFilePath('/files/bad\u0000image.jpg'), false);
+});
 
 test('mobile inventory session keeps OAuth tokens encrypted and refreshes before expiry', async () => {
 	const now = 1_800_000_000;

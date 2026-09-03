@@ -18,10 +18,10 @@ const report: TildaPreparedStockReport = {
 	rollbackOffers: [{ ...offer }],
 };
 const publicCatalog = {
-	parentCount: 131,
+	parentCount: 143,
 	rows: [
 		{ tildaUid: offer.tildaUid, sku: offer.sku, quantity: 18 },
-		...Array.from({ length: 149 }, (_, index) => ({ tildaUid: `filler-${index}`, sku: `filler-${index}`, quantity: 0 })),
+		...Array.from({ length: 161 }, (_, index) => ({ tildaUid: `filler-${index}`, sku: `filler-${index}`, quantity: 0 })),
 	],
 	contentHash: 'a'.repeat(64),
 };

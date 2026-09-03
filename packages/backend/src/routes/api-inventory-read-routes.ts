@@ -14,6 +14,10 @@ import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-h
 import { inventoryStatusForPoints } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 
+export function isSafePublicErpFilePath(value: string): boolean {
+	return /^\/files\/[^/\\\u0000-\u001f\u007f]{1,255}$/u.test(value);
+}
+
 async function resolveCurrentStoreTitle(erp: ErpClient, storeId: number, storeName: unknown): Promise<string> {
 	const storeTitles = await listActiveStoreTitles(erp);
 	const requestedTitle = String(storeName ?? '').trim().toLocaleLowerCase('ru-RU');
@@ -104,7 +108,7 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 
 	app.get('/api/inventory/erp-image', async (req, reply) => {
 		const p = String((req.query as Record<string, unknown> | undefined)?.['p'] ?? '');
-		if (!/^\/files\/[\w.\-]+$/.test(p)) return reply.code(400).send('bad path');
+		if (!isSafePublicErpFilePath(p)) return reply.code(400).send('bad path');
 		const base = process.env['ERPNEXT_URL'];
 		if (!base) return reply.code(404).send('core off');
 		try {

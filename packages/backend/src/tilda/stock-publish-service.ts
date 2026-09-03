@@ -144,7 +144,7 @@ export async function runTildaStockPublication(
 	if (report.projectionOffers.length !== report.rollbackOffers.length || report.projectionOffers.length !== report.counts.reversibleProjectionOffers) {
 		throw new Error('Tilda publication target counts do not match');
 	}
-	if (report.counts.publicParents !== 131 || report.counts.publicStockRows !== 150 || report.projectionOffers.length < 1) {
+	if (report.counts.publicParents !== 143 || report.counts.publicStockRows !== 162 || report.projectionOffers.length < 1) {
 		throw new Error('Tilda publication counts differ from the audited baseline');
 	}
 
