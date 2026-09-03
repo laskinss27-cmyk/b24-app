@@ -61,6 +61,7 @@ export interface BaseRow {
 	status?: string | undefined;
 	description?: string | undefined;
 	content?: CatalogProductContent | undefined;
+	filterCategory?: string | undefined;
 	retail: number | null;
 	purchase: number | null;
 	photoPath?: string | undefined;

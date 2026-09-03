@@ -71,6 +71,12 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0035_make_stock_transfer_bitrix_identity_optional.sql',
 		'0036_create_stock_transfer_commands.sql',
 		'0037_create_stock_transfer_bitrix_outbox.sql',
+		'0038_create_catalog_mirror_checkpoints.sql',
+		'0039_create_catalog_mirror_products.sql',
+		'0040_create_catalog_mirror_attributes.sql',
+		'0041_create_catalog_mirror_prices.sql',
+		'0042_create_catalog_mirror_warehouses.sql',
+		'0043_create_catalog_mirror_stocks.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -104,7 +110,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	assert.match(transferPayloads, /JSON_VALID\(payload\).*JSON_TYPE\(payload\) = 'OBJECT'/);
 	assert.match(transferPayloads, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
 
-	for (const migration of migrations.slice(22)) {
+	for (const migration of migrations.slice(22, 37)) {
 		assert.match(migration.sql, /^(?:CREATE TABLE IF NOT EXISTS|ALTER TABLE) stock_transfer_[a-z_]+/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|TRUNCATE|GRANT)\b/im);
@@ -113,6 +119,15 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		if (migration.filename < '0030') {
 			assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
 		}
+		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
+		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
+	}
+	for (const migration of migrations.slice(37)) {
+		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS catalog_mirror_[a-z_]+ \(/);
+		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
+		assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
 		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
 		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
 	}
@@ -278,4 +293,30 @@ test('transfer SQL-first foundation is idempotent and keeps the Bitrix mirror pa
 	assert.match(outbox, /lease_token CHAR\(36\).*locked_until DATETIME\(6\)/s);
 	assert.match(outbox, /FOREIGN KEY \(revision_id\) REFERENCES stock_transfer_revisions \(id\).*ON DELETE RESTRICT/);
 	assert.doesNotMatch([commands, outbox].join('\n'), /\bJSON\b/i);
+});
+
+test('catalog mirror schema is normalized, checkpointed and payload-free', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const checkpoints = byName.get('0038_create_catalog_mirror_checkpoints.sql')!;
+	const products = byName.get('0039_create_catalog_mirror_products.sql')!;
+	const attributes = byName.get('0040_create_catalog_mirror_attributes.sql')!;
+	const prices = byName.get('0041_create_catalog_mirror_prices.sql')!;
+	const warehouses = byName.get('0042_create_catalog_mirror_warehouses.sql')!;
+	const stocks = byName.get('0043_create_catalog_mirror_stocks.sql')!;
+
+	assert.match(checkpoints, /snapshot_hash BINARY\(32\) NOT NULL/);
+	assert.match(checkpoints, /last_verified_at DATETIME\(6\) NOT NULL/);
+	assert.match(checkpoints, /source_complete = 1/);
+	assert.match(checkpoints, /UNIQUE KEY uq_catalog_mirror_checkpoints_observed \(observed_at\)/);
+	assert.match(products, /PRIMARY KEY \(item_code\)/);
+	assert.match(products, /content_summary TEXT NOT NULL/);
+	assert.match(attributes, /PRIMARY KEY \(item_code, attribute_id\)/);
+	assert.match(attributes, /attribute_type IN \('text', 'option', 'multi_option', 'number', 'range', 'boolean'\)/);
+	assert.match(prices, /PRIMARY KEY \(item_code, price_kind\)/);
+	assert.match(prices, /price_kind IN \('retail', 'purchase'\)/);
+	assert.match(warehouses, /PRIMARY KEY \(warehouse_name\)/);
+	assert.match(stocks, /PRIMARY KEY \(item_code, warehouse_name\)/);
+	assert.match(stocks, /FOREIGN KEY \(warehouse_name\) REFERENCES catalog_mirror_warehouses/);
+	assert.doesNotMatch([checkpoints, products, attributes, prices, warehouses, stocks].join('\n'), /\bJSON\b/i);
 });

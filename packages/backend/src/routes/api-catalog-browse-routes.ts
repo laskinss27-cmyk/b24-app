@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { buildProductBase } from '../b24/catalog.js';
+import { buildProductBase, type ProductBaseData } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
 import { coreStoreId, listActiveStoreTitles } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
@@ -10,8 +10,26 @@ import { baseCache, CACHE_TTL_MS } from './api-catalog-cache.js';
 import { buildCoreProductBase } from './api-catalog-core-base.js';
 import { ReservationService } from '../reservations/service.js';
 import { erpContext, erpWarehouse } from '../erp/warehouse-context.js';
+import { loadCatalogMirrorReadMode } from '../catalog-mirror/read-config.js';
+import { buildSqlProductBase } from '../catalog-mirror/product-base.js';
+import { compareCatalogMirrorBases } from '../catalog-mirror/compare.js';
+import type { CatalogMirrorPlan } from '../catalog-mirror/model.js';
+
+type BuiltCatalogBase = ReturnType<typeof buildSqlProductBase>;
+let sqlBaseCache: { snapshotHash: string; expires: number; value: BuiltCatalogBase } | null = null;
+const SQL_BASE_CACHE_TTL_MS = 30_000;
+
+export function cachedSqlProductBase(plan: CatalogMirrorPlan, force: boolean, now: number): { value: BuiltCatalogBase; cached: boolean } {
+	if (!force && sqlBaseCache?.snapshotHash === plan.snapshotHash && sqlBaseCache.expires > now) {
+		return { value: structuredClone(sqlBaseCache.value), cached: true };
+	}
+	const value = buildSqlProductBase(plan);
+	sqlBaseCache = { snapshotHash: plan.snapshotHash, expires: now + SQL_BASE_CACHE_TTL_MS, value };
+	return { value: structuredClone(value), cached: false };
+}
 
 export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
+	const sqlReadMode = loadCatalogMirrorReadMode();
 	app.post('/api/catalog/stores', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody;
 		const client = catalogClientFrom(app, body);
@@ -55,18 +73,57 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 		try {
 			const erp = ErpClient.fromEnv();
 			if (!erp) throw new Error('ядро склада не подключено (ERPNEXT_URL)');
-			const cached = !body.force && Boolean(hit && hit.expires > now);
-			let metadata = cached && hit ? hit.data : null;
-			if (!metadata) {
-				try {
-					metadata = await buildProductBase(client);
-				} catch (error) {
-					app.log.warn(`[api/catalog/browse] метаданные каталога Б24 недоступны: ${errInfo(error)}`);
-					metadata = { rows: [], generatedAt: new Date().toISOString() };
+			let liveMetadataCached = !body.force && Boolean(hit && hit.expires > now);
+			const buildLive = async (): Promise<BuiltCatalogBase> => {
+				let metadata: ProductBaseData | null = liveMetadataCached && hit ? hit.data : null;
+				if (!metadata) {
+					try {
+						metadata = await buildProductBase(client);
+					} catch (error) {
+						app.log.warn(`[api/catalog/browse] метаданные каталога Б24 недоступны: ${errInfo(error)}`);
+						metadata = { rows: [], generatedAt: new Date().toISOString() };
+					}
+					liveMetadataCached = false;
+					baseCache.set(cacheKey, { data: metadata, expires: now + CACHE_TTL_MS });
 				}
-				baseCache.set(cacheKey, { data: metadata, expires: now + CACHE_TTL_MS });
+				return buildCoreProductBase(erp, metadata);
+			};
+
+			let built: BuiltCatalogBase;
+			let cached = liveMetadataCached;
+			let source: 'core' | 'sql' | 'core-fallback' = 'core';
+			if (sqlReadMode === 'primary') {
+				try {
+					const plan = await app.databaseRuntime?.readLatestCatalogMirrorPlan?.();
+					if (!plan) throw new Error('SQL catalog mirror has no complete checkpoint');
+					const sqlBase = cachedSqlProductBase(plan, body.force === true, now);
+					built = sqlBase.value;
+					cached = sqlBase.cached;
+					source = 'sql';
+				} catch (error) {
+					app.log.warn(`[api/catalog/browse] SQL-каталог недоступен, используется ядро: ${errInfo(error)}`);
+					built = await buildLive();
+					cached = liveMetadataCached;
+					source = 'core-fallback';
+				}
+			} else {
+				const sqlPlanPromise = sqlReadMode === 'shadow'
+					? app.databaseRuntime?.readLatestCatalogMirrorPlan?.().catch((error) => {
+						app.log.warn(`[api/catalog/browse] SQL shadow недоступен: ${errInfo(error)}`);
+						return null;
+					})
+					: undefined;
+				built = await buildLive();
+				cached = liveMetadataCached;
+				if (sqlPlanPromise) {
+					const plan = await sqlPlanPromise;
+					if (plan) {
+						const comparison = compareCatalogMirrorBases(built, buildSqlProductBase(plan));
+						app.log[comparison.match ? 'info' : 'warn'](comparison, '[api/catalog/browse] SQL catalog shadow comparison');
+					}
+				}
 			}
-			const { data, stores } = await buildCoreProductBase(erp, metadata);
+			const { data, stores } = built;
 			const dealId = body.dealId == null ? 0 : Number(body.dealId);
 			if (!Number.isInteger(dealId) || dealId < 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 			if (app.reservationRuntime?.canWrite) {
@@ -92,7 +149,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 					Object.assign(row, { reservedByStore, ownReservedByStore });
 				}
 			}
-			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source: 'core' }, '[api/catalog/browse] ok');
+			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source }, '[api/catalog/browse] ok');
 			const pricedRows = canViewPurchasePrices
 				? data.rows
 				: data.rows.map((row) => ({ ...row, purchase: null }));

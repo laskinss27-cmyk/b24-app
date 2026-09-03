@@ -26,6 +26,7 @@ export interface BaseRow {
 	marketplaceOldId?: string | undefined;
 	description?: string | undefined;
 	content?: CatalogProductContent | undefined;
+	filterCategory?: string | undefined;
 	retail: number | null;
 	purchase: number | null;
 	photoPath?: string | undefined;

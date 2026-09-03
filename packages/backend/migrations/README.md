@@ -74,3 +74,14 @@ ledger, and add a normalized revision-reference outbox for the compatibility
 mirror. The outbox stores no JSON payload: every entry points to an immutable
 normalized revision. These migrations do not switch runtime flags, enqueue
 existing rows, or contact Bitrix24.
+
+`0038`-`0043` define the normalized product-catalog mirror: checkpoints,
+products, attributes, prices, warehouses and stock balances. ERPNext remains
+the source of truth and is read only through its official REST API; Bitrix24
+supplies existing iblock/section identity and metadata fallbacks. The mirror
+stores no JSON payloads and never physically deletes catalog rows. A complete
+snapshot is published atomically with its checkpoint last, while readers first
+select the latest checkpoint and then filter every graph table by the same
+observation timestamp. These migrations contain DDL only. They do not grant a
+sync credential, run a backfill, install a scheduler, enable
+`B24_APP_CATALOG_SQL_READ`, or switch the catalog route.

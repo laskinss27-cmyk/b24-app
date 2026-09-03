@@ -1,0 +1,68 @@
+import type { CatalogMirrorSnapshot } from './model.js';
+
+export function catalogMirrorFixture(): CatalogMirrorSnapshot {
+	return {
+		observedAt: '2026-09-03T16:00:00.000Z',
+		sources: {
+			items: { complete: true, records: 1 },
+			prices: { complete: true, records: 2 },
+			bins: { complete: true, records: 1 },
+			warehouses: { complete: true, records: 1 },
+			bitrix: { complete: true, records: 1 },
+		},
+		products: [{
+			itemCode: 101,
+			bitrixIblockId: 26,
+			bitrixSectionId: 77,
+			itemName: 'Монитор',
+			isStockItem: true,
+			isMarketplaceBundle: false,
+			article: 'MON-1',
+			model: 'M1',
+			brand: 'Test',
+			sectionName: 'Мониторы',
+			productStatus: '',
+			description: 'Описание',
+			contentSummary: 'Коротко',
+			filterCategory: 'Мониторы',
+			imagePath: '/files/monitor.jpg',
+			imageSource: 'erpnext',
+			marketplaceOldId: 'old-101',
+			sourceModifiedAt: '2026-09-03T15:59:00.000Z',
+		}],
+		attributes: [{
+			itemCode: 101,
+			attributeId: 'screen:1',
+			attributeOrdinal: 1,
+			attributeKey: 'screen',
+			attributeLabel: 'Диагональ',
+			attributeGroup: 'Экран',
+			attributeType: 'number',
+			rawValue: '24 дюйма',
+			normalizedValue: '24',
+			numberValue: 24,
+			numberMin: null,
+			numberMax: null,
+			unit: 'дюйм',
+			booleanValue: null,
+			filterable: true,
+		}],
+		prices: [
+			{ itemCode: 101, priceKind: 'retail', priceList: 'Standard Selling', sourceSystem: 'erpnext', currency: 'RUB', rate: 1200, sourceModifiedAt: '2026-09-03T15:58:00.000Z' },
+			{ itemCode: 101, priceKind: 'purchase', priceList: 'Standard Buying', sourceSystem: 'erpnext', currency: 'RUB', rate: 800, sourceModifiedAt: '2026-09-03T15:58:00.000Z' },
+		],
+		warehouses: [{
+			warehouseName: 'Основной - TEST',
+			displayTitle: 'Основной',
+			warehouseType: '',
+			active: true,
+			sourceModifiedAt: '2026-09-03T15:57:00.000Z',
+		}],
+		stocks: [{
+			itemCode: 101,
+			warehouseName: 'Основной - TEST',
+			actualQty: 3,
+			sourceModifiedAt: '2026-09-03T15:56:00.000Z',
+		}],
+	};
+}
