@@ -69,7 +69,7 @@ export function registerApiAdminDealDocumentsRoute(app: FastifyInstance): void {
 			if (!client) return reply.code(403).send({ ok: false, error: ACCESS_ERROR });
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(503).send({ ok: false, error: ERP_ERROR });
-			return { ok: true, diagnostic: await diagnoseAdminDealDocuments(client, erp, dealId) };
+			return { ok: true, diagnostic: await diagnoseAdminDealDocuments(client, erp, dealId, app) };
 		} catch (error) {
 			app.log.error({ dealId, error: String(error) }, '[admin/deal-documents/diagnose] failed');
 			return reply.code(500).send({ ok: false, error: 'Не удалось выполнить диагностику документов сделки.' });
@@ -97,7 +97,7 @@ export function registerApiAdminDealDocumentsRoute(app: FastifyInstance): void {
 			actor = owner.actor;
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(503).send({ ok: false, error: ERP_ERROR });
-			const diagnostic = await diagnoseAdminDealDocuments(owner.client, erp, dealId);
+			const diagnostic = await diagnoseAdminDealDocuments(owner.client, erp, dealId, app);
 			const result = await restoreUnlinkedDealDocument(erp, { dealId, targetType, targetName, comment }, diagnostic.structure.links);
 			await recordLinkRestore(app, { dealId, targetType, targetName, comment, ...(actor ? { actor } : {}), changed: result.changed });
 			return { ok: true, result };

@@ -3,7 +3,7 @@ import { listAllEntityItems } from '../b24/entity-items.js';
 import { SUPPLY_TYPE_ID } from '../deal-supply-cards.js';
 import { listDealContractDocumentsReadOnly } from '../deal-contract-storage.js';
 import { TRANSFERS_ENTITY } from '../b24/placement.js';
-import { parseTransferItem } from '../transfers/model.js';
+import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
 
 export interface AdminDealContractDocument {
 	id: string;
@@ -52,7 +52,11 @@ function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-export async function readDealApplicationDocuments(client: B24Client, dealId: number): Promise<AdminDealApplicationDocuments> {
+export async function readDealApplicationDocuments(
+	client: B24Client,
+	dealId: number,
+	transferReader?: () => Promise<StoredTransfer[]>,
+): Promise<AdminDealApplicationDocuments> {
 	const [contractsResult, supplyResult, transfersResult] = await Promise.allSettled([
 		listDealContractDocumentsReadOnly(dealId),
 		client.call<{ items?: Array<Record<string, unknown>> }>('crm.item.list', {
@@ -61,7 +65,9 @@ export async function readDealApplicationDocuments(client: B24Client, dealId: nu
 			select: ['id', 'title', 'stageId'],
 			order: { id: 'desc' },
 		}),
-		listAllEntityItems(client, TRANSFERS_ENTITY),
+		transferReader
+			? transferReader()
+			: listAllEntityItems(client, TRANSFERS_ENTITY).then((items) => items.map(parseTransferItem).filter((item): item is StoredTransfer => item != null)),
 	]);
 	const errors: AdminDealApplicationDocuments['errors'] = [];
 	if (contractsResult.status === 'rejected') errors.push({ source: 'contracts', message: message(contractsResult.reason) });
@@ -84,24 +90,23 @@ export async function readDealApplicationDocuments(client: B24Client, dealId: nu
 		stageId: String(item['stageId'] ?? ''),
 	})).filter((item) => Number.isInteger(item.id) && item.id > 0) : [];
 	const transfers = transfersResult.status === 'fulfilled' ? transfersResult.value
-		.map(parseTransferItem)
-		.filter((item) => item?.dealId === String(dealId))
+		.filter((item) => item.dealId === String(dealId))
 		.map((item) => ({
-			id: item!.id,
-			name: item!.name,
-			status: item!.status,
-			fromStore: item!.fromStore,
-			toStore: item!.toStore,
-			createdAt: item!.createdAt,
-			createdByName: item!.createdByName,
-			supplyRequest: item!.supplyRequest,
-			supplyRequestKey: item!.supplyRequestKey,
-			purchaseOrder: item!.purchaseOrder,
-			shipEntry: item!.shipEntry ?? '',
-			receiveEntry: item!.receiveEntry ?? '',
-			note: item!.note,
-			items: item!.lines.map((line) => ({ productId: line.productId, itemName: line.name, qty: line.qty })),
-			historyCount: item!.history.length,
+			id: item.id,
+			name: item.name,
+			status: item.status,
+			fromStore: item.fromStore,
+			toStore: item.toStore,
+			createdAt: item.createdAt,
+			createdByName: item.createdByName,
+			supplyRequest: item.supplyRequest,
+			supplyRequestKey: item.supplyRequestKey,
+			purchaseOrder: item.purchaseOrder,
+			shipEntry: item.shipEntry ?? '',
+			receiveEntry: item.receiveEntry ?? '',
+			note: item.note,
+			items: item.lines.map((line) => ({ productId: line.productId, itemName: line.name, qty: line.qty })),
+			historyCount: item.history.length,
 		})) : [];
 	return { contracts, supplyCards, transfers, errors };
 }

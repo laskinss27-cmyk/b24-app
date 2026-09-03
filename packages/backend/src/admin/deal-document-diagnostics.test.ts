@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
+import { newTransferData } from '../transfers/model.js';
+import { readDealApplicationDocuments } from './deal-application-documents.js';
 import { dealIdsModifiedInPeriod, diagnoseAdminDealDocuments, searchAdminDealDocuments } from './deal-document-diagnostics.js';
 
 function fakeErp(documents: Record<string, Array<Record<string, unknown>>>): ErpClient {
@@ -107,6 +109,25 @@ test('deal diagnostics reads Bitrix supply cards and application transfers witho
 	assert.equal(result.applicationDocuments.transfers[0]?.name, 'Перемещение #81');
 	assert.equal(result.applicationDocuments.transfers[0]?.items[0]?.qty, 1);
 	assert.deepEqual(result.applicationDocuments.errors, []);
+});
+
+test('admin application documents use the shared transfer reader when it is provided', async () => {
+	const client = {
+		async call(method: string) {
+			if (method === 'crm.item.list') return { items: [] };
+			throw new Error(`unexpected ${method}`);
+		},
+		async callWithMeta() { throw new Error('legacy transfer reader must not be called'); },
+	} as unknown as B24Client;
+	const data = newTransferData({
+		dealId: '37868', fromStore: 'Склад А', toStore: 'Склад Б',
+		lines: [{ productId: 18448, name: 'Камера', qty: 1 }],
+		createdAt: '2026-08-13T09:00:00Z', createdById: '1', createdByName: 'Сергей',
+	});
+	const result = await readDealApplicationDocuments(client, 37868, async () => [{ id: 81, name: 'Перемещение #81', ...data }]);
+	assert.equal(result.transfers[0]?.id, 81);
+	assert.equal(result.transfers[0]?.items[0]?.productId, 18448);
+	assert.equal(result.errors.some((error) => error.source === 'transfers'), false);
 });
 
 test('deal document diagnostics explains an unsubmitted realization without changing it', async () => {

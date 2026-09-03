@@ -24,7 +24,7 @@ export function registerApiAdminControlRoute(app: FastifyInstance): void {
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(503).send({ ok: false, error: ERP_ERROR });
 			const scanId = typeof body.scanId === 'string' && body.scanId ? body.scanId.slice(0, 100) : undefined;
-			return { ok: true, batch: await checkAdminControlBatch(client, erp, period, cursor, scanId) };
+			return { ok: true, batch: await checkAdminControlBatch(client, erp, period, cursor, scanId, app) };
 		} catch (error) {
 			app.log.error({ error: String(error) }, '[admin/control/check] failed');
 			if (error instanceof AdminControlPeriodError) return reply.code(400).send({ ok: false, error: error.message });

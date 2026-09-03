@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
 import { dealIdsModifiedInPeriod, diagnoseAdminDealDocuments, type AdminDealDocumentDiagnostic } from './deal-document-diagnostics.js';
@@ -104,10 +105,10 @@ export function controlFindings(deals: AdminDealDocumentDiagnostic[], repairs: A
 	return findings.sort((left, right) => severity[left.severity] - severity[right.severity] || right.entityId - left.entityId);
 }
 
-async function diagnoseDeals(client: B24Client, erp: ErpClient, dealIds: number[]): Promise<AdminDealDocumentDiagnostic[]> {
+async function diagnoseDeals(client: B24Client, erp: ErpClient, dealIds: number[], app?: FastifyInstance): Promise<AdminDealDocumentDiagnostic[]> {
 	const diagnostics: AdminDealDocumentDiagnostic[] = [];
 	for (let index = 0; index < dealIds.length; index += 2) {
-		diagnostics.push(...await Promise.all(dealIds.slice(index, index + 2).map((dealId) => diagnoseAdminDealDocuments(client, erp, dealId))));
+		diagnostics.push(...await Promise.all(dealIds.slice(index, index + 2).map((dealId) => diagnoseAdminDealDocuments(client, erp, dealId, app))));
 	}
 	return diagnostics;
 }
@@ -142,11 +143,12 @@ export async function checkAdminControlBatch(
 	period: AdminControlPeriod,
 	cursor: AdminControlCursor,
 	scanId?: string,
+	app?: FastifyInstance,
 ): Promise<AdminControlBatch> {
 	const prepared = await controlScan(client, erp, period, scanId);
 	const { dealIds, repairItems } = prepared.scan;
 	const [deals, repairs] = await Promise.all([
-		diagnoseDeals(client, erp, dealIds.slice(cursor.dealOffset, cursor.dealOffset + 1)),
+		diagnoseDeals(client, erp, dealIds.slice(cursor.dealOffset, cursor.dealOffset + 1), app),
 		diagnoseAdminRepairItems(client, erp, repairItems.slice(cursor.repairOffset, cursor.repairOffset + 1)),
 	]);
 	const nextDealOffset = cursor.dealOffset + deals.length;

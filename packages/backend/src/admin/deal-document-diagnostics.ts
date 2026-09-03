@@ -1,9 +1,11 @@
+import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import { calculateDealFulfillment, DEAL_FULFILLMENT_FIELD, type DealFulfillmentValue } from '../deal-fulfillment.js';
 import type { ErpClient } from '../erp/client.js';
 import type { ErpRealization } from '../erp/deal-realizations.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import type { PlanItem } from '../erp/deal-plan-state.js';
+import { loadTransfers } from '../routes/transfer-storage.js';
 import type { DiagnosticIssue } from './repair-diagnostics-model.js';
 import { readDealApplicationDocuments, type AdminDealApplicationDocuments } from './deal-application-documents.js';
 import { inspectDealDocumentStructure, type DealDocumentStructureReport } from './deal-document-structure.js';
@@ -281,10 +283,10 @@ function dealError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClient, dealId: number): Promise<AdminDealDocumentDiagnostic> {
+export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClient, dealId: number, app?: FastifyInstance): Promise<AdminDealDocumentDiagnostic> {
 	const [documents, applicationDocuments] = await Promise.all([
 		readDocuments(erp, dealId),
-		readDealApplicationDocuments(client, dealId),
+		readDealApplicationDocuments(client, dealId, app ? () => loadTransfers(app, client) : undefined),
 	]);
 	const structureInspection = await inspectDealDocumentStructure(erp, dealId, documents, applicationDocuments);
 	let rawDeal: Record<string, unknown> | null = null;

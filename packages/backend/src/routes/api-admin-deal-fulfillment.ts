@@ -58,7 +58,7 @@ export function registerApiAdminDealFulfillmentRoute(app: FastifyInstance): void
 			actor = owner.actor;
 			const erp = ErpClient.fromEnv();
 			if (!erp) return reply.code(503).send({ ok: false, error: 'Ядро склада не настроено.' });
-			const diagnostic = await diagnoseAdminDealDocuments(owner.client, erp, dealId);
+			const diagnostic = await diagnoseAdminDealDocuments(owner.client, erp, dealId, app);
 			const result = await synchronizeAdminDealFulfillment(owner.client, erp, { dealId, expectedCurrent, expectedValue, comment }, diagnostic);
 			await recordFulfillmentSync(app, { dealId, previous: result.previous, value: result.value, comment, ...(actor ? { actor } : {}) });
 			return { ok: true, result };
