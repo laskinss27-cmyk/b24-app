@@ -18,6 +18,7 @@ test('process health keeps its existing response contract', async () => {
 		appOAuthVault: 'off',
 		supplyShadowCompare: 'off',
 		supplySqlRead: 'off',
+		transferSqlRead: 'off',
 		nodeEnv: 'test',
 	};
 	const app = Fastify();
@@ -51,6 +52,8 @@ test('readiness fails explicitly when an enabled database is down', async () => 
 		mode: 'readiness',
 		async ping() { throw new Error('secret connection details'); },
 		async readLatestSupplyMirrorSnapshot() { return null; },
+		async readCurrentTransfer() { return null; },
+		async readCurrentTransfers() { return []; },
 		async close() {},
 	};
 	const app = Fastify();

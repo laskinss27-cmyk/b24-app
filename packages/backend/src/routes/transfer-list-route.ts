@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { listAllEntityItems } from '../b24/entity-items.js';
 import { resolveDealOwners } from '../b24/deal-info.js';
-import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
-import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
+import { ensureTransfersEntity } from '../b24/placement.js';
+import { loadTransfers } from './transfer-storage.js';
 import { currentUser } from './transfer-user-access.js';
 
 interface AuthBody {
@@ -31,8 +30,7 @@ export function registerTransferListRoute(
 		const from = isDate(b.from) ? b.from : '';
 		const to = isDate(b.to) ? b.to : '';
 		try {
-			const items = await listAllEntityItems(client, TRANSFERS_ENTITY);
-			let transfers = (items ?? []).map(parseTransferItem).filter((t): t is StoredTransfer => t != null);
+			let transfers = await loadTransfers(app, client);
 			const dealId = String(b.dealId ?? '').trim();
 			if (dealId) transfers = transfers.filter((t) => t.dealId === dealId);
 			if (from) transfers = transfers.filter((t) => (t.createdAt || '').slice(0, 10) >= from);

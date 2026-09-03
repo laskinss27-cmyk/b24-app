@@ -27,7 +27,7 @@ export function registerTransferCancelRoute(
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		try {
-			const [doc, me] = await Promise.all([loadTransfer(client, id), currentUser(client)]);
+			const [doc, me] = await Promise.all([loadTransfer(app, client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (!appPermission(req, 'transfers.cancel', me.isSupply)) {
 				return reply.code(403).send({ ok: false, error: 'отменять перемещение может только снабжение' });

@@ -28,6 +28,8 @@ const ConfigSchema = z.object({
 	supplyShadowCompare: z.enum(['off', 'on']).default('off'),
 	/** Per-request SQL graph observation; never replaces the legacy response. */
 	supplySqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
+	/** Transfer-card SQL read gate; verified returns SQL only after exact live parity. */
+	transferSqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 
@@ -51,6 +53,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		catalogWriteWebhook: env['CATALOG_WRITE_WEBHOOK'],
 		supplyShadowCompare: env['B24_APP_SUPPLY_SHADOW_COMPARE'],
 		supplySqlRead: env['B24_APP_SUPPLY_SQL_READ'],
+		transferSqlRead: env['B24_APP_TRANSFER_SQL_READ'],
 		nodeEnv: env['NODE_ENV'],
 	});
 

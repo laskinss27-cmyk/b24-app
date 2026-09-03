@@ -42,7 +42,7 @@ export function registerTransferShipRoute(
 		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'отправка этого перемещения уже выполняется' });
 		operationLocks.add(lockKey);
 		try {
-			const doc = await loadTransfer(client, id);
+			const doc = await loadTransfer(app, client, id);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (doc.status !== 'collected') return reply.code(409).send({ ok: false, error: `нельзя отправить из статуса ${doc.status}` });
 			const me = await currentUser(client);
@@ -51,7 +51,7 @@ export function registerTransferShipRoute(
 			}
 			// Даём понятную ошибку до создания Stock Entry и одновременно защищаем
 			// старые документы, созданные до проверки живого остатка.
-			await validateTransferReservation(erp, client, id, doc.fromStore, doc.collectedLines, app.reservationRuntime);
+			await validateTransferReservation(app, erp, client, id, doc.fromStore, doc.collectedLines, app.reservationRuntime);
 			const did = Number(doc.dealId) || 0;
 			const { name: entryName } = await shipTransferToTransit(erp, {
 				transferId: id,

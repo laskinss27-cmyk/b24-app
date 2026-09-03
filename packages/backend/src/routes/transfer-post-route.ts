@@ -43,7 +43,7 @@ export function registerTransferPostRoute(
 		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'проведение этого перемещения уже выполняется' });
 		operationLocks.add(lockKey);
 		try {
-			const [doc, me] = await Promise.all([loadTransfer(client, id), currentUser(client)]);
+			const [doc, me] = await Promise.all([loadTransfer(app, client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (!appPermission(req, 'transfers.post', me.isSupply)) {
 				return reply.code(403).send({ ok: false, error: 'проводить перемещение может только снабжение' });
@@ -57,7 +57,7 @@ export function registerTransferPostRoute(
 			const extraLines = doc.lines
 				.map((line) => ({ ...line, qty: Math.max(line.qty - (shippedMapForValidation.get(line.productId)?.qty ?? 0), 0) }))
 				.filter((line) => line.qty > 0);
-			if (extraLines.length) await validateTransferReservation(erp, client, id, doc.fromStore, extraLines, app.reservationRuntime);
+			if (extraLines.length) await validateTransferReservation(app, erp, client, id, doc.fromStore, extraLines, app.reservationRuntime);
 			const did = Number(doc.dealId) || 0;
 			const completion = await completeTransferFromTransit(erp, {
 				transferId: id,
@@ -72,7 +72,7 @@ export function registerTransferPostRoute(
 			});
 			const shippedMap = transferLineMap(shippedLines);
 			const nameByProduct = new Map([...shippedLines, ...doc.lines].map((line) => [line.productId, line.name]));
-			const existingCorrections = (await loadTransfers(client)).filter((transfer) => transfer.correctionOf === id);
+			const existingCorrections = (await loadTransfers(app, client)).filter((transfer) => transfer.correctionOf === id);
 			const correctionIds: number[] = [];
 			for (const correction of completion.corrections) {
 				let stored = existingCorrections.find((transfer) => transfer.correctionKind === correction.kind);

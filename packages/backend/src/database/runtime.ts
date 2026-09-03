@@ -1,11 +1,15 @@
 import mariadb, { type Pool } from 'mariadb';
 import type { DatabaseConfig } from './config.js';
 import { readLatestSupplyMirrorSnapshot, type StoredSupplyMirrorSnapshot } from './supply-mirror-reader.js';
+import { readCurrentSqlTransfer, readCurrentSqlTransfers } from '../transfers/sql-reader.js';
+import type { StoredTransfer } from '../transfers/model.js';
 
 export interface DatabaseRuntime {
 	readonly mode: DatabaseConfig['mode'];
 	ping(): Promise<void>;
 	readLatestSupplyMirrorSnapshot(): Promise<StoredSupplyMirrorSnapshot | null>;
+	readCurrentTransfer(externalId: number): Promise<StoredTransfer | null>;
+	readCurrentTransfers(): Promise<StoredTransfer[]>;
 	close(): Promise<void>;
 }
 
@@ -30,6 +34,8 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 			mode: 'off',
 			async ping() {},
 			async readLatestSupplyMirrorSnapshot() { return null; },
+			async readCurrentTransfer() { return null; },
+			async readCurrentTransfers() { return []; },
 			async close() {},
 		};
 	}
@@ -42,6 +48,12 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 		},
 		async readLatestSupplyMirrorSnapshot() {
 			return readLatestSupplyMirrorSnapshot(pool);
+		},
+		async readCurrentTransfer(externalId) {
+			return readCurrentSqlTransfer(pool, externalId);
+		},
+		async readCurrentTransfers() {
+			return readCurrentSqlTransfers(pool);
 		},
 		async close() {
 			await pool.end();

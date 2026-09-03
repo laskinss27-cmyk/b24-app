@@ -114,6 +114,8 @@ class FakeDatabase implements DatabaseRuntime {
 		if (this.result instanceof Error) throw this.result;
 		return this.result;
 	}
+	async readCurrentTransfer() { return null; }
+	async readCurrentTransfers() { return []; }
 	async close(): Promise<void> {}
 }
 

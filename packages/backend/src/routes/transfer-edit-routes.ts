@@ -36,7 +36,7 @@ export function registerTransferEditRoutes(
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		try {
 			const [doc, me, stores] = await Promise.all([
-				loadTransfer(client, id),
+				loadTransfer(app, client, id),
 				currentUser(client),
 				listActiveStoreTitles(erp),
 			]);
@@ -98,7 +98,7 @@ export function registerTransferEditRoutes(
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		try {
-			const [doc, me] = await Promise.all([loadTransfer(client, id), currentUser(client)]);
+			const [doc, me] = await Promise.all([loadTransfer(app, client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (!appPermission(req, 'transfers.edit_quantity', me.isSupply)) {
 				return reply.code(403).send({ ok: false, error: 'количество перемещения может менять только снабжение' });
@@ -123,13 +123,13 @@ export function registerTransferEditRoutes(
 				return reply.code(400).send({ ok: false, error: 'до отправки в перемещении должна остаться хотя бы одна позиция' });
 			}
 			if (doc.status === 'draft' || doc.status === 'collected' || doc.status === 'requested') {
-				await validateTransferReservation(erp, client, id, doc.fromStore, nextLines, app.reservationRuntime);
+				await validateTransferReservation(app, erp, client, id, doc.fromStore, nextLines, app.reservationRuntime);
 			} else if (doc.status === 'accepted') {
 				const shipped = transferLineMap(doc.shippedLines.length ? doc.shippedLines : doc.lines);
 				const extraLines = nextLines
 					.map((line) => ({ ...line, qty: Math.max(line.qty - (shipped.get(line.productId)?.qty ?? 0), 0) }))
 					.filter((line) => line.qty > 0);
-				if (extraLines.length) await validateTransferReservation(erp, client, id, doc.fromStore, extraLines, app.reservationRuntime);
+				if (extraLines.length) await validateTransferReservation(app, erp, client, id, doc.fromStore, extraLines, app.reservationRuntime);
 			}
 			const nextMap = transferLineMap(nextLines);
 			const changes: TransferHistoryChange[] = [];

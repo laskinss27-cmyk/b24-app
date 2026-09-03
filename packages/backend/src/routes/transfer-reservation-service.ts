@@ -1,3 +1,4 @@
+import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
 import { fetchErpStocksFor } from '../erp/operations.js';
@@ -7,6 +8,7 @@ import { ReservationService } from '../reservations/service.js';
 import type { ReservationRuntime } from '../reservations/runtime.js';
 
 export async function validateTransferReservation(
+	app: FastifyInstance,
 	erp: ErpClient,
 	client: B24Client,
 	docId: number,
@@ -16,7 +18,7 @@ export async function validateTransferReservation(
 ): Promise<void> {
 	const stocks = await fetchErpStocksFor(erp, lines.map((line) => line.productId));
 	const reserved = new Map<number, number>();
-	for (const transfer of await loadTransfers(client)) {
+	for (const transfer of await loadTransfers(app, client)) {
 		if (transfer.id === docId || transfer.fromStore !== fromStore || (transfer.status !== 'draft' && transfer.status !== 'collected')) continue;
 		for (const line of transfer.lines) reserved.set(line.productId, (reserved.get(line.productId) ?? 0) + line.qty);
 	}

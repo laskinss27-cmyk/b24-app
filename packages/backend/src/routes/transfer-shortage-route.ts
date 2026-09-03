@@ -31,7 +31,7 @@ export function registerTransferShortageRoute(
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		try {
-			const doc = await loadTransfer(client, id);
+			const doc = await loadTransfer(app, client, id);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (doc.status !== 'shortage') return reply.code(409).send({ ok: false, error: `нельзя скорректировать недовоз из статуса ${doc.status}` });
 			if (!doc.shortageLines.length) return reply.code(409).send({ ok: false, error: 'у перемещения нет хвоста недовоза' });

@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { loadConfig } from '../config.js';
 import { loadTransferSqlWriteConfig } from './sql-runtime.js';
 
 test('transfer SQL writes are disabled by default', () => {
 	assert.deepEqual(loadTransferSqlWriteConfig({}), { mode: 'off' });
+});
+
+test('transfer SQL reads allow only disabled, shadow and verified gates', (t) => {
+	assert.equal(loadConfig({}).transferSqlRead, 'off');
+	assert.equal(loadConfig({ B24_APP_TRANSFER_SQL_READ: 'shadow' }).transferSqlRead, 'shadow');
+	assert.equal(loadConfig({ B24_APP_TRANSFER_SQL_READ: 'verified' }).transferSqlRead, 'verified');
+	t.mock.method(console, 'error', () => {});
+	assert.throws(() => loadConfig({ B24_APP_TRANSFER_SQL_READ: 'sql' }), /Bad config/);
 });
 
 test('transfer SQL writer requires readiness and a separate least-privilege identity', () => {

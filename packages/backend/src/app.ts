@@ -112,6 +112,7 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	}
 
 	app.decorate('config', config);
+	app.decorate('databaseRuntime', database ?? null);
 	app.decorate('reservationRuntime', reservations ?? null);
 	app.decorate('transferSqlWriter', transferSqlWriter ?? null);
 	app.decorate('ownerOAuthVault', ownerOAuthVault);
@@ -173,6 +174,7 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 declare module 'fastify' {
 	interface FastifyInstance {
 		config: Config;
+		databaseRuntime: DatabaseRuntime | null;
 		ownerOAuthVault: OwnerOAuthVault | null;
 		reservationRuntime: ReservationRuntime | null;
 		transferSqlWriter: TransferSqlWriteRuntime | null;

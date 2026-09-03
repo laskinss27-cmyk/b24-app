@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
-import { createTransferData, deleteTransferData, saveTransferData } from '../routes/transfer-storage.js';
+import type { DatabaseRuntime } from '../database/runtime.js';
+import { createTransferData, deleteTransferData, loadTransfer, loadTransfers, saveTransferData } from '../routes/transfer-storage.js';
 import { newTransferData, type StoredTransfer } from './model.js';
 import type { TransferSqlWriteRuntime } from './sql-runtime.js';
 import {
@@ -208,4 +209,76 @@ test('a failed shadow write does not report a false failure after Bitrix succeed
 	await saveTransferData(app, client, 7, name, data);
 	await deleteTransferData(app, client, 7, name);
 	assert.equal(warned, 3);
+});
+
+function transferReadApp(
+	mode: 'off' | 'shadow' | 'verified',
+	sqlTransfers: StoredTransfer[] | Error,
+): FastifyInstance {
+	const databaseRuntime: DatabaseRuntime = {
+		mode: 'readiness',
+		async ping() {},
+		async readLatestSupplyMirrorSnapshot() { return null; },
+		async readCurrentTransfer(externalId) {
+			if (sqlTransfers instanceof Error) throw sqlTransfers;
+			return sqlTransfers.find((transfer) => transfer.id === externalId) ?? null;
+		},
+		async readCurrentTransfers() {
+			if (sqlTransfers instanceof Error) throw sqlTransfers;
+			return sqlTransfers;
+		},
+		async close() {},
+	};
+	return {
+		config: { transferSqlRead: mode },
+		databaseRuntime,
+		log: { info() {}, warn() {} },
+	} as unknown as FastifyInstance;
+}
+
+function transferReadClient(transfers: StoredTransfer[]): B24Client {
+	const items = transfers.map(({ id, name, ...data }) => ({ ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) }));
+	return {
+		async call(_method: string, params: Record<string, unknown>) {
+			const id = Number((params['FILTER'] as Record<string, unknown> | undefined)?.['ID']);
+			return id ? items.filter((item) => item.ID === id) : items;
+		},
+		async callWithMeta() { return { result: items }; },
+	} as unknown as B24Client;
+}
+
+test('verified transfer reads return canonical SQL only after exact live parity', async () => {
+	const legacy = storedTransfer();
+	legacy.history[0]!.changes = [];
+	const sql = normalizeTransferSqlState((() => {
+		const { id, name, ...data } = legacy;
+		return { externalId: id, name, data, sourceKind: 'bitrix_backfill' as const };
+	})());
+	const app = transferReadApp('verified', [sql]);
+	const client = transferReadClient([legacy]);
+	const single = await loadTransfer(app, client, legacy.id);
+	assert.ok(single);
+	assert.equal('changes' in single.history[0]!, false);
+	assert.deepEqual((await loadTransfers(app, client)).map((transfer) => transfer.id), [legacy.id]);
+});
+
+test('verified transfer reads preserve Bitrix on mismatch or SQL failure', async () => {
+	const legacy = storedTransfer();
+	const mismatch = structuredClone(legacy);
+	mismatch.lines[0]!.qty += 1;
+	const client = transferReadClient([legacy]);
+	assert.equal((await loadTransfer(transferReadApp('verified', [mismatch]), client, legacy.id))?.lines[0]?.qty, 2);
+	assert.equal((await loadTransfer(transferReadApp('verified', new Error('SQL unavailable')), client, legacy.id))?.lines[0]?.qty, 2);
+});
+
+test('shadow transfer reads compare SQL but always preserve the Bitrix object form', async () => {
+	const legacy = storedTransfer();
+	legacy.history[0]!.changes = [];
+	const sql = normalizeTransferSqlState((() => {
+		const { id, name, ...data } = legacy;
+		return { externalId: id, name, data, sourceKind: 'bitrix_backfill' as const };
+	})());
+	const result = await loadTransfer(transferReadApp('shadow', [sql]), transferReadClient([legacy]), legacy.id);
+	assert.ok(result);
+	assert.deepEqual(result.history[0]?.changes, []);
 });

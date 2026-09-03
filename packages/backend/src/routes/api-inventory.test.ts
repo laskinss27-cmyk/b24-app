@@ -30,6 +30,7 @@ const mobileConfig: Config = {
 	appOAuthVault: 'off',
 	supplyShadowCompare: 'off',
 	supplySqlRead: 'off',
+	transferSqlRead: 'off',
 	appClientId: 'local.test',
 	appClientSecret: 'secret',
 	nodeEnv: 'test',

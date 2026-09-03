@@ -3,16 +3,78 @@ import type { B24Client } from '../b24/client.js';
 import { listAllEntityItems } from '../b24/entity-items.js';
 import { TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
+import { compareTransferSqlParity } from '../transfers/sql-compare.js';
 
-export async function loadTransfer(client: B24Client, id: number): Promise<StoredTransfer | null> {
+async function loadBitrixTransfer(client: B24Client, id: number): Promise<StoredTransfer | null> {
 	const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, FILTER: { ID: id } });
 	const raw = (items ?? [])[0];
 	return raw ? parseTransferItem(raw) : null;
 }
 
-export async function loadTransfers(client: B24Client): Promise<StoredTransfer[]> {
+async function loadBitrixTransfers(client: B24Client): Promise<StoredTransfer[]> {
 	const items = await listAllEntityItems(client, TRANSFERS_ENTITY);
 	return (items ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);
+}
+
+function transferReadFallback(app: FastifyInstance, scope: 'single' | 'list', reason: string): void {
+	app.log.warn({ mode: app.config.transferSqlRead, scope, reason }, '[transfers/sql-read] legacy fallback');
+}
+
+export async function loadTransfer(app: FastifyInstance, client: B24Client, id: number): Promise<StoredTransfer | null> {
+	const legacyPromise = loadBitrixTransfer(client, id);
+	if (app.config.transferSqlRead === 'off') return legacyPromise;
+	if (!app.databaseRuntime || app.databaseRuntime.mode !== 'readiness') {
+		transferReadFallback(app, 'single', 'read-only SQL runtime unavailable');
+		return legacyPromise;
+	}
+	const legacy = await legacyPromise;
+	try {
+		const sql = await app.databaseRuntime.readCurrentTransfer(id);
+		const report = compareTransferSqlParity(legacy ? [legacy] : [], sql ? [sql] : []);
+		const responseSource = app.config.transferSqlRead === 'verified' && report.matches ? 'sql' : 'legacy';
+		app.log.info({
+			mode: app.config.transferSqlRead,
+			scope: 'single',
+			externalId: id,
+			matches: report.matches,
+			totalDifferences: report.differences.length,
+			responseSource,
+		}, '[transfers/sql-read] compared');
+		return responseSource === 'sql' ? sql : legacy;
+	} catch {
+		transferReadFallback(app, 'single', 'SQL read or parity check failed');
+		return legacy;
+	}
+}
+
+export async function loadTransfers(app: FastifyInstance, client: B24Client): Promise<StoredTransfer[]> {
+	const legacyPromise = loadBitrixTransfers(client);
+	if (app.config.transferSqlRead === 'off') return legacyPromise;
+	if (!app.databaseRuntime || app.databaseRuntime.mode !== 'readiness') {
+		transferReadFallback(app, 'list', 'read-only SQL runtime unavailable');
+		return legacyPromise;
+	}
+	const legacy = await legacyPromise;
+	try {
+		const sql = await app.databaseRuntime.readCurrentTransfers();
+		const report = compareTransferSqlParity(legacy, sql);
+		const responseSource = app.config.transferSqlRead === 'verified' && report.matches ? 'sql' : 'legacy';
+		app.log.info({
+			mode: app.config.transferSqlRead,
+			scope: 'list',
+			matches: report.matches,
+			legacyCount: report.legacyCount,
+			sqlCount: report.sqlCount,
+			totalDifferences: report.differences.length,
+			responseSource,
+		}, '[transfers/sql-read] compared');
+		if (responseSource === 'legacy') return legacy;
+		const sqlById = new Map(sql.map((transfer) => [transfer.id, transfer]));
+		return legacy.map((transfer) => sqlById.get(transfer.id)!);
+	} catch {
+		transferReadFallback(app, 'list', 'SQL read or parity check failed');
+		return legacy;
+	}
 }
 
 export async function saveTransferData(

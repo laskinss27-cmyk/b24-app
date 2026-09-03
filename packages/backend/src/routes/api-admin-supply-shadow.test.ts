@@ -38,6 +38,7 @@ function config(mode: 'off' | 'on'): Config {
 		appOAuthVault: 'off',
 		supplyShadowCompare: mode,
 		supplySqlRead: 'off',
+		transferSqlRead: 'off',
 		nodeEnv: 'test',
 	};
 }
@@ -47,6 +48,8 @@ function database(mode: 'off' | 'readiness' = 'readiness'): DatabaseRuntime {
 		mode,
 		async ping() {},
 		async readLatestSupplyMirrorSnapshot() { return null; },
+		async readCurrentTransfer() { return null; },
+		async readCurrentTransfers() { return []; },
 		async close() {},
 	};
 }

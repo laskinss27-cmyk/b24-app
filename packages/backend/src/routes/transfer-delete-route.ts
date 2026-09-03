@@ -33,7 +33,7 @@ export function registerTransferDeleteRoute(
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		try {
-			const allTransfers = await loadTransfers(client);
+			const allTransfers = await loadTransfers(app, client);
 			const doc = allTransfers.find((transfer) => transfer.id === id) ?? null;
 			if (!doc) return { ok: true };
 			if (doc.correctionOf) {

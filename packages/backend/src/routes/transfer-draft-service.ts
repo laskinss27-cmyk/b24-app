@@ -31,7 +31,7 @@ export function createTransferDraftService(
 	notifications: TransferNotificationService,
 ): (args: CreateTransferDraftArgs) => Promise<TransferData & { id: number; name: string }> {
 	return async (args: CreateTransferDraftArgs): Promise<TransferData & { id: number; name: string }> => {
-		await validateTransferReservation(args.erp, args.client, 0, args.fromStore, args.lines, app.reservationRuntime);
+		await validateTransferReservation(app, args.erp, args.client, 0, args.fromStore, args.lines, app.reservationRuntime);
 		const now = new Date().toISOString();
 		const data = newTransferData({
 			fromStore: args.fromStore,

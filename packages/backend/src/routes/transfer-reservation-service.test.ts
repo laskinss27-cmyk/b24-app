@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
 import { newTransferData } from '../transfers/model.js';
 import { errInfo } from './api-supply-route-helpers.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
+
+const app = {
+	config: { transferSqlRead: 'off' },
+} as unknown as FastifyInstance;
 
 function erpWithStock(productId: number, qty: number): ErpClient {
 	return {
@@ -39,6 +44,7 @@ function clientWithTransfers(items: Record<string, unknown>[]): B24Client {
 test('transfer reservation rejects a repeated document when source stock is already gone', async () => {
 	await assert.rejects(
 		validateTransferReservation(
+			app,
 			erpWithStock(14428, 0),
 			clientWithTransfers([]),
 			0,
@@ -60,9 +66,9 @@ test('transfer reservation excludes the current document but protects stock rese
 		transferItem(11, 14428, 1, 'canceled'),
 	]);
 
-	await validateTransferReservation(erp, client, 10, 'Склад Прихода', [{ productId: 14428, name: 'УЗО 2П40А', qty: 2 }]);
+	await validateTransferReservation(app, erp, client, 10, 'Склад Прихода', [{ productId: 14428, name: 'УЗО 2П40А', qty: 2 }]);
 	await assert.rejects(
-		validateTransferReservation(erp, client, 12, 'Склад Прихода', [{ productId: 14428, name: 'УЗО 2П40А', qty: 2 }]),
+		validateTransferReservation(app, erp, client, 12, 'Склад Прихода', [{ productId: 14428, name: 'УЗО 2П40А', qty: 2 }]),
 		/доступно 1, требуется 2/,
 	);
 });

@@ -36,7 +36,7 @@ export function registerTransferReceiveRoute(
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		try {
-			const [doc, me] = await Promise.all([loadTransfer(client, id), currentUser(client)]);
+			const [doc, me] = await Promise.all([loadTransfer(app, client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
 			if (doc.status !== 'in_transit') return reply.code(409).send({ ok: false, error: `нельзя принять из статуса ${doc.status}` });
 			const actualByProduct = new Map<number, number>();
