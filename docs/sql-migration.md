@@ -36,6 +36,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 Следующий [локально подготовленный full-payload gate](sql-supply-verified-read-foundation-2026-09-02.md) добавляет migration `0022` и переходный режим `verified`. Специализированная `supply_transfer_payloads` хранит каноническое полное состояние Bitrix transfer, привязанное к graph document и точному observation последнего checkpoint. Planner сверяет cardinality/header/lines, writer пишет payload и graph одной транзакцией, reader повторно проверяет JSON identity и hash. `verified` использует восстановленный SQL-объект только после полного сравнения с живым Bitrix реестром; любой stale/mismatch/error оставляет ответ на legacy. Change set прошёл `57/57` focused, `351/351` backend, `129/129` frontend, typecheck/build и одноразовую MariaDB 11.8 репетицию. На production migration/backfill/deploy ещё не выполнялись, flag остаётся `shadow`.
 
+3 сентября [нормализованное verified-чтение перемещений](sql-transfer-verified-read-2026-09-03.md) развёрнуто в `d25c0f4`. Реальный owner-authenticated gate последовательно прошёл `shadow`, затем `verified`: Bitrix/SQL `191/191`, `0` canonical differences; в `verified` ответ взят из SQL. При mismatch/error read adapter автоматически возвращает Bitrix. Запись остаётся `Bitrix primary + SQL shadow`, поэтому это ещё не полный отказ от JSON.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |
@@ -47,7 +49,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 | складские проводки | ERPNext | `Delivery Note`, `Purchase Receipt`, `Stock Entry`, `Stock Reconciliation` | истинный остаток меняет только проведённый документ |
 | заявка снаба | ERPNext | `Material Request` и её строки; связь со сделкой в custom field | прогресс вычисляется повторным объединением нескольких реестров |
 | заказ поставщику и приёмка | ERPNext | `Purchase Order` и `Purchase Receipt`; custom fields заявки/ключа | связь частично выводится из полей и строк |
-| перемещения приложения | Битрикс24 + ERPNext; SQL shadow подготовлен локально | `ctv_transfers.DETAIL_TEXT` пока authoritative; migrations `0023`–`0029` раскладывают полное состояние в append-only revisions/lines/history/corrections без SQL JSON; проводки — ERPNext | production shadow write ещё не активирован, Bitrix fallback обязателен |
+| перемещения приложения | SQL verified-read после live-проверки Bitrix; запись пока Bitrix primary | migrations `0023`–`0031`: append-only revisions/lines/history/corrections без SQL JSON; runtime shadow writer активен; проводки — ERPNext API | каждое чтение пока зависит от Bitrix для parity/fallback; primary write всё ещё JSON |
 | ручные заявки на перемещение/снаб | Битрикс24 | `ctv_tr_requests.DETAIL_TEXT`, ссылки на transfer/task | JSON без локальных ограничений ссылочной целостности |
 | инвентаризация | Битрикс24 + ERPNext | `ctv_inv.DETAIL_TEXT`: документ, точки и замороженный snapshot; итоговые документы — ERPNext | вся инвентаризация обновляется одной JSON-записью |
 | ремонты | Битрикс24 + ERPNext | `ctv_repairs.DETAIL_TEXT`: workflow, история, deal/task/file refs и имена ERP-документов; физическое движение — ERPNext | JSON и повторные entity reads |
