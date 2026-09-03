@@ -77,6 +77,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0041_create_catalog_mirror_prices.sql',
 		'0042_create_catalog_mirror_warehouses.sql',
 		'0043_create_catalog_mirror_stocks.sql',
+		'0044_expand_catalog_attribute_label.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -122,7 +123,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
 		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
 	}
-	for (const migration of migrations.slice(37)) {
+	for (const migration of migrations.slice(37, 43)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS catalog_mirror_[a-z_]+ \(/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
@@ -131,6 +132,11 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
 		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
 	}
+	const expandedCatalogLabel = migrations[43]!.sql;
+	assert.match(expandedCatalogLabel, /^ALTER TABLE catalog_mirror_attributes\b/);
+	assert.equal(expandedCatalogLabel.split(';').filter((statement) => statement.trim()).length, 1);
+	assert.match(expandedCatalogLabel, /MODIFY COLUMN attribute_label TEXT NOT NULL/);
+	assert.doesNotMatch(expandedCatalogLabel, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP)\b/i);
 });
 
 test('SQL schemas preserve workflow links and Tilda external identity', async () => {
@@ -304,6 +310,7 @@ test('catalog mirror schema is normalized, checkpointed and payload-free', async
 	const prices = byName.get('0041_create_catalog_mirror_prices.sql')!;
 	const warehouses = byName.get('0042_create_catalog_mirror_warehouses.sql')!;
 	const stocks = byName.get('0043_create_catalog_mirror_stocks.sql')!;
+	const expandedLabel = byName.get('0044_expand_catalog_attribute_label.sql')!;
 
 	assert.match(checkpoints, /snapshot_hash BINARY\(32\) NOT NULL/);
 	assert.match(checkpoints, /last_verified_at DATETIME\(6\) NOT NULL/);
@@ -318,5 +325,6 @@ test('catalog mirror schema is normalized, checkpointed and payload-free', async
 	assert.match(warehouses, /PRIMARY KEY \(warehouse_name\)/);
 	assert.match(stocks, /PRIMARY KEY \(item_code, warehouse_name\)/);
 	assert.match(stocks, /FOREIGN KEY \(warehouse_name\) REFERENCES catalog_mirror_warehouses/);
-	assert.doesNotMatch([checkpoints, products, attributes, prices, warehouses, stocks].join('\n'), /\bJSON\b/i);
+	assert.match(expandedLabel, /attribute_label TEXT NOT NULL/);
+	assert.doesNotMatch([checkpoints, products, attributes, prices, warehouses, stocks, expandedLabel].join('\n'), /\bJSON\b/i);
 });

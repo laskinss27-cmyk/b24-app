@@ -10,7 +10,7 @@ read or written through its MariaDB tables.
 
 ## Stored model
 
-Migrations `0038`-`0043` add six payload-free tables:
+Migrations `0038`-`0044` add six payload-free tables:
 
 - `catalog_mirror_checkpoints` — deterministic snapshot identity, source counts
   and normalized row counts;
@@ -64,7 +64,7 @@ scheduling, deployment or a read switch. Before the first authoritative write:
 
 1. extend and verify the separate `b24_app` backup job for all six tables;
 2. complete an isolated restore drill and record count/hash parity;
-3. apply `0038`-`0043` with the migration-only identity;
+3. apply `0038`-`0044` with the migration-only identity;
 4. provision the narrow catalog-sync identity and run one guarded snapshot;
 5. verify latest-checkpoint reads and full shadow parity;
 6. deploy with `off`, then explicitly authorize `shadow`, and only after stable

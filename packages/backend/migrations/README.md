@@ -75,7 +75,7 @@ mirror. The outbox stores no JSON payload: every entry points to an immutable
 normalized revision. These migrations do not switch runtime flags, enqueue
 existing rows, or contact Bitrix24.
 
-`0038`-`0043` define the normalized product-catalog mirror: checkpoints,
+`0038`-`0044` define the normalized product-catalog mirror: checkpoints,
 products, attributes, prices, warehouses and stock balances. ERPNext remains
 the source of truth and is read only through its official REST API; Bitrix24
 supplies existing iblock/section identity and metadata fallbacks. The mirror
@@ -85,3 +85,9 @@ select the latest checkpoint and then filter every graph table by the same
 observation timestamp. These migrations contain DDL only. They do not grant a
 sync credential, run a backfill, install a scheduler, enable
 `B24_APP_CATALOG_SQL_READ`, or switch the catalog route.
+
+`0044` expands the human-readable attribute label from `VARCHAR(255)` to
+`TEXT` after the first production source scan observed a valid 506-character
+label. The failed first snapshot rolled back before its checkpoint and left all
+six catalog tables empty; the append-only migration preserves the already
+applied checksum of `0040`.
