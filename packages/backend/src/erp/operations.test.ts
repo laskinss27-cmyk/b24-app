@@ -20,6 +20,7 @@ import {
 	appendDealStageItems,
 	assertDealQuoteVariantSelected,
 	calculateDealPlanTotal,
+	cancelMarketplaceOperation,
 	cancelSubmittedStockDoc,
 	cancelDealQuoteVariantSelection,
 	createDealQuoteVariant,
@@ -156,11 +157,23 @@ class FakeErp {
 			})).map((price) => structuredClone(price));
 		}
 		if (doctype !== 'Delivery Note' && doctype !== 'Stock Entry') return [];
-		return this.active().filter((document) => (document._doctype ?? 'Delivery Note') === doctype).map((document) => ({
+		return [...this.documents.values()]
+			.filter((document) => (document._doctype ?? 'Delivery Note') === doctype)
+			.filter((document) => (filters as unknown[][]).every((filter) => {
+				const [field, operator, value] = filter;
+				const actual = document[String(field)];
+				if (operator === '=') return actual === value;
+				if (operator === '!=') return actual !== value;
+				if (operator === '>=') return String(actual ?? '') >= String(value ?? '');
+				if (operator === '<=') return String(actual ?? '') <= String(value ?? '');
+				return true;
+			}))
+			.map((document) => ({
 			name: document.name,
 			docstatus: document.docstatus,
 			is_return: document['is_return'] ?? 0,
 			return_against: document['return_against'] ?? '',
+			[MARKETPLACE_OPERATION_FIELD]: document[MARKETPLACE_OPERATION_FIELD] ?? '',
 		}));
 	}
 
@@ -1091,6 +1104,46 @@ test('marketplace bundle repacks source units into finished bundle units on the 
 			[202, 4, 'in', 'Маркетплейс'],
 		],
 	);
+});
+
+test('marketplace cancellation validates the tagged document, keeps it in the journal and is not repeatable', async () => {
+	const erp = new FakeErp([], null, [
+		{ itemCode: 101, priceList: 'Standard Buying', rate: 100 },
+	]);
+	const created = await createMarketplaceBundle(erp.asClient(), {
+		sourceProductId: 101,
+		sourceItemName: 'Датчик',
+		bundleProductId: 202,
+		bundleItemName: 'Комплект Датчик 3 шт',
+		sourcePurchasePrice: 100,
+		unitsPerBundle: 3,
+		bundleQty: 1,
+		storeTitle: 'Маркетплейс',
+		postingDate: '2026-07-23',
+	});
+	let authorizedOperation = '';
+	assert.deepEqual(
+		await cancelMarketplaceOperation(erp.asClient(), created.name, (operation) => { authorizedOperation = operation; }),
+		{ name: created.name, doctype: 'Stock Entry', operation: 'bundle' },
+	);
+	assert.equal(authorizedOperation, 'bundle');
+	const journal = await listMarketplaceOperations(erp.asClient());
+	assert.equal(journal.length, 1);
+	assert.equal(journal[0]?.submitted, false);
+	assert.equal(journal[0]?.cancelled, true);
+	await assert.rejects(cancelMarketplaceOperation(erp.asClient(), created.name), /только проведённый/);
+});
+
+test('marketplace cancellation refuses a forged operation tag before cancel', async () => {
+	const erp = new FakeErp([{
+		name: 'DN-FORGED',
+		docstatus: 1,
+		items: [],
+		[MARKETPLACE_OPERATION_FIELD]: 'bundle',
+	}]);
+
+	await assert.rejects(cancelMarketplaceOperation(erp.asClient(), 'DN-FORGED'), /формированию комплекта/);
+	assert.equal(erp.active()[0]?.docstatus, 1);
 });
 
 test('marketplace return is linked to its sale and cannot exceed the quantity left to return', async () => {

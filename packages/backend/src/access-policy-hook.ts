@@ -124,6 +124,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 
 	'/api/marketplaces/form-data': ['marketplaces.view'],
 	'/api/marketplaces/list': ['marketplaces.view'],
+	'/api/marketplaces/cancel': ['marketplaces.view'],
 	'/api/marketplaces/return-options': ['marketplaces.view'],
 	'/api/marketplaces/sale': ['marketplaces.create_sale', 'marketplaces.post_sale'],
 	'/api/marketplaces/return': ['marketplaces.create_return', 'marketplaces.post_return'],

@@ -9,6 +9,7 @@ Object.defineProperty(globalThis, 'window', {
 });
 
 const {
+	cancelMarketplaceOperation,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
 	createMarketplaceSale,
@@ -66,6 +67,17 @@ test('marketplace sale preserves request and response fields', async () => {
 	assert.deepEqual(requests[0], {
 		url: '/api/marketplaces/sale',
 		body: { domain: 'market.example', accessToken: 'market-token', ...input },
+	});
+});
+
+test('marketplace cancellation sends only the document identity with current auth', async () => {
+	const requests = captureResponses([{ ok: true, cancelled: true }]);
+
+	await cancelMarketplaceOperation('MAT-STE-2026-00514');
+
+	assert.deepEqual(requests[0], {
+		url: '/api/marketplaces/cancel',
+		body: { domain: 'market.example', accessToken: 'market-token', name: 'MAT-STE-2026-00514' },
 	});
 });
 

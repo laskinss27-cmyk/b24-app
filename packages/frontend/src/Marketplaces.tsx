@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getContext } from './b24-context.js';
 import {
+	cancelMarketplaceOperation,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
 	createMarketplaceSale,
@@ -56,6 +57,8 @@ const MOCK_ROWS: MarketplaceOperationRow[] = [{
 	date: '2026-07-23',
 	storeTitle: 'Маркетплейс',
 	submitted: true,
+	cancelled: false,
+	canCancel: true,
 	total: 15990,
 	itemCount: 2,
 	quantity: 3,
@@ -79,6 +82,13 @@ const operationTone = (operation: MarketplaceOperationKind): string =>
 		: operation === 'return' ? 'return'
 			: operation === 'bundle' ? 'bundle'
 				: 'neutral';
+
+const operationStatus = (row: MarketplaceOperationRow): { label: string; tone: string } =>
+	row.cancelled
+		? { label: 'Отменено', tone: 'cancelled' }
+		: row.submitted
+			? { label: 'Проведено', tone: 'done' }
+			: { label: 'Черновик', tone: 'draft' };
 
 function MarketplaceSaleModal({
 	form,
@@ -151,6 +161,8 @@ function MarketplaceSaleModal({
 				date: postingDate,
 				storeTitle,
 				submitted: true,
+				cancelled: false,
+				canCancel: true,
 				total,
 				itemCount: lines.length,
 				quantity: lines.reduce((sum, line) => sum + line.qty, 0),
@@ -280,6 +292,8 @@ function MarketplaceBundleModal({
 				date: postingDate,
 				storeTitle: result.storeTitle,
 				submitted: true,
+				cancelled: false,
+				canCancel: true,
 				total: 0,
 				itemCount: 1,
 				quantity: result.bundleQty,
@@ -457,6 +471,8 @@ function MarketplaceReturnModal({
 				date: postingDate,
 				storeTitle: result.storeTitle,
 				submitted: true,
+				cancelled: false,
+				canCancel: true,
 				total: result.total,
 				itemCount: result.itemCount,
 				quantity: result.quantity,
@@ -534,11 +550,28 @@ function MarketplaceReturnModal({
 function MarketplaceDocumentModal({
 	row,
 	onClose,
+	onCancel,
 }: {
 	row: MarketplaceOperationRow;
 	onClose: () => void;
+	onCancel: (row: MarketplaceOperationRow) => Promise<void>;
 }): JSX.Element {
 	const items = row.items ?? [];
+	const [cancelling, setCancelling] = useState(false);
+	const [error, setError] = useState('');
+	const status = operationStatus(row);
+	const cancel = async (): Promise<void> => {
+		if (!row.canCancel || row.cancelled || cancelling) return;
+		if (!window.confirm(`Отменить проведение ${row.name}? Остатки будут возвращены обратно. Если товар уже использован в другой операции, отмена не выполнится.`)) return;
+		setCancelling(true);
+		setError('');
+		try {
+			await onCancel(row);
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : String(cause));
+			setCancelling(false);
+		}
+	};
 	return (
 		<div className="marketplace-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 			<section className="marketplace-modal marketplace-document-modal" role="dialog" aria-modal="true" aria-labelledby="marketplace-document-title">
@@ -553,7 +586,7 @@ function MarketplaceDocumentModal({
 					<div><span>Дата</span><b>{row.date.split('-').reverse().join('.')}</b></div>
 					<div><span>Маркетплейс</span><b>{row.marketplace || '—'}</b></div>
 					<div><span>Склад</span><b>{row.storeTitle || '—'}</b></div>
-					<div><span>Статус</span><b>{row.submitted ? 'Проведено' : 'Черновик'}</b></div>
+					<div><span>Статус</span><b>{status.label}</b></div>
 				</div>
 				<div className="marketplace-lines marketplace-document-lines">
 					<table>
@@ -576,7 +609,11 @@ function MarketplaceDocumentModal({
 					<span>{items.length} поз. · {items.reduce((sum, item) => sum + item.quantity, 0)} шт.</span>
 					<div><span>Сумма документа</span><b>{money(row.total)}</b></div>
 				</div>
-				<footer><button type="button" className="primary" onClick={onClose}>Закрыть</button></footer>
+				{error && <div className="marketplace-error marketplace-document-error">{error}</div>}
+				<footer>
+					{row.canCancel && !row.cancelled && <button type="button" className="marketplace-cancel" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? 'Отменяю…' : 'Отменить проведение'}</button>}
+					<button type="button" className="primary" disabled={cancelling} onClick={onClose}>Закрыть</button>
+				</footer>
 			</section>
 		</div>
 	);
@@ -620,6 +657,19 @@ export function Marketplaces(): JSX.Element {
 
 	const visibleRows = useMemo(() =>
 		filter === 'all' ? rows : rows.filter((row) => row.operation === filter), [rows, filter]);
+
+	const cancelOperation = async (row: MarketplaceOperationRow): Promise<void> => {
+		if (ctx.__mock) {
+			setRows((current) => current.map((item) => item.name === row.name
+				? { ...item, submitted: false, cancelled: true, canCancel: false }
+				: item));
+		} else {
+			await cancelMarketplaceOperation(row.name);
+		}
+		setOpenedDocument(null);
+		setNotice(`Проведение «${row.title}» отменено. Остатки пересчитаны.`);
+		if (!ctx.__mock) await load();
+	};
 
 	if (catalogOpen) {
 		return (
@@ -671,7 +721,7 @@ export function Marketplaces(): JSX.Element {
 										<td>{row.storeTitle || '—'}</td>
 										<td>{row.itemCount} поз. · {row.quantity} шт.</td>
 										<td><b>{money(row.total)}</b></td>
-										<td><span className={row.submitted ? 'marketplace-status done' : 'marketplace-status draft'}>{row.submitted ? 'Проведено' : 'Черновик'}</span></td>
+										<td><span className={`marketplace-status ${operationStatus(row).tone}`}>{operationStatus(row).label}</span></td>
 									</tr>)}
 						</tbody>
 					</table>
@@ -680,7 +730,7 @@ export function Marketplaces(): JSX.Element {
 			{saleOpen && form && <MarketplaceSaleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setSaleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setSaleOpen(false); setNotice(`Реализация «${row.title}» проведена.`); void load(); }} />}
 			{bundleOpen && form && <MarketplaceBundleModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setBundleOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setBundleOpen(false); setNotice(`Комплект сформирован. Операция «${row.title}» проведена.`); void load(); }} />}
 			{returnOpen && form && <MarketplaceReturnModal form={form} mock={Boolean(ctx.__mock)} onClose={() => setReturnOpen(false)} onDone={(row) => { setRows((current) => [row, ...current]); setReturnOpen(false); setNotice(`Возврат «${row.title}» проведён.`); void load(); }} />}
-			{openedDocument && <MarketplaceDocumentModal row={openedDocument} onClose={() => setOpenedDocument(null)} />}
+			{openedDocument && <MarketplaceDocumentModal row={openedDocument} onClose={() => setOpenedDocument(null)} onCancel={cancelOperation} />}
 		</section>
 	);
 }

@@ -105,6 +105,7 @@ export {
 	ensureMarketplaceOldIdField,
 } from './marketplace-fields.js';
 export {
+	cancelMarketplaceOperation,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
 	createMarketplaceReturnBatch,
@@ -115,6 +116,7 @@ export {
 	marketplaceSaleTitle,
 } from './marketplace-operations.js';
 export type {
+	CancelledMarketplaceOperation,
 	MarketplaceOperation,
 	MarketplaceOperationItem,
 	MarketplaceOperationKind,

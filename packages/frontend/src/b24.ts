@@ -140,6 +140,7 @@ export type {
 	SupplyTransferChild,
 } from './supply-api.js';
 export {
+	cancelMarketplaceOperation,
 	createMarketplaceBundle,
 	createMarketplaceReturn,
 	createMarketplaceSale,

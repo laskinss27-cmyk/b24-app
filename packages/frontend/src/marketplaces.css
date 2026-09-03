@@ -221,6 +221,12 @@
 	color: #8f6300;
 }
 
+.marketplace-status.cancelled {
+	background: #f1f3f6;
+	color: #687386;
+	text-decoration: line-through;
+}
+
 .marketplace-warning,
 .marketplace-notice,
 .marketplace-error {
@@ -612,6 +618,22 @@
 	border-color: #185fa5;
 	background: #185fa5;
 	color: #fff;
+}
+
+.marketplace-modal footer .marketplace-cancel {
+	margin-right: auto;
+	border-color: #dca8a8;
+	background: #fff7f7;
+	color: #a12626;
+}
+
+.marketplace-modal footer .marketplace-cancel:hover:not(:disabled) {
+	border-color: #ba6969;
+	background: #ffeded;
+}
+
+.marketplace-document-error {
+	margin: 0 20px 16px;
 }
 
 .marketplace-picker {

@@ -22,6 +22,8 @@ export interface MarketplaceOperationRow {
 	date: string;
 	storeTitle: string;
 	submitted: boolean;
+	cancelled: boolean;
+	canCancel: boolean;
 	total: number;
 	itemCount: number;
 	quantity: number;
@@ -78,6 +80,16 @@ export async function fetchMarketplaceOperations(period: { from?: string; to?: s
 	const json = (await res.json()) as { ok: boolean; error?: string; rows?: MarketplaceOperationRow[] };
 	if (!json.ok) throw new Error(json.error ?? 'Не удалось загрузить операции маркетплейсов');
 	return json.rows ?? [];
+}
+
+export async function cancelMarketplaceOperation(name: string): Promise<void> {
+	const res = await fetch('/api/marketplaces/cancel', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), name }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; cancelled?: boolean };
+	if (!json.ok || !json.cancelled) throw new Error(json.error ?? 'Не удалось отменить проведение операции');
 }
 
 export async function createMarketplaceSale(input: {

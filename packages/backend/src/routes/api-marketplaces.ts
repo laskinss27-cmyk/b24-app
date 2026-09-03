@@ -2,8 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { hasDirectMarketplaceAccess } from '@b24-app/shared';
 import { B24ApiError, B24Client } from '../b24/client.js';
 import { addCatalogProductWithAccessFallback } from '../catalog-product-writer.js';
-import { ErpClient } from '../erp/client.js';
+import { ErpApiError, ErpClient } from '../erp/client.js';
 import {
+	cancelMarketplaceOperation,
 	createMarketplaceBundle,
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
@@ -41,6 +42,26 @@ function errInfo(error: unknown): string {
 	return error instanceof B24ApiError
 		? `${error.code}: ${error.description ?? ''}`
 		: String(error instanceof Error ? error.message : error);
+}
+
+class MarketplaceCancellationAccessError extends Error {}
+
+const CANCELLATION_PERMISSION = {
+	sale: 'marketplaces.post_sale',
+	bundle: 'marketplaces.create_bundle',
+	return: 'marketplaces.post_return',
+	writeoff: 'marketplaces.post_sale',
+	receipt: 'marketplaces.post_return',
+} as const;
+
+function readableCancellationError(error: unknown): string {
+	const raw = error instanceof ErpApiError
+		? error.message.replace(/^ERPNext \[[^\]]+\]\s*\d*:\s*/i, '')
+		: errInfo(error);
+	if (/cannot cancel|linked|reference|submitted|depends|against|negative stock/i.test(raw)) {
+		return `Нельзя отменить проведение: товар или документ уже используется в последующей операции. ${raw}`;
+	}
+	return raw;
 }
 
 function marketplaceStores(stores: string[]): string[] {
@@ -138,12 +159,17 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		if (typeof body.from === 'string' && DATE_RE.test(body.from)) opts.from = body.from;
 		if (typeof body.to === 'string' && DATE_RE.test(body.to)) opts.to = body.to;
 		try {
-			const rows = await listMarketplaceOperations(erp, opts);
+			const [rows, legacyCanManage] = await Promise.all([
+				listMarketplaceOperations(erp, opts),
+				canManageStock(client),
+			]);
 			const catalog = new Map((await fetchCoreCatalogItems(erp)).map((item) => [item.productId, item]));
 			return {
 				ok: true,
 				rows: rows.map((row) => ({
 					...row,
+					canCancel: row.submitted
+						&& appPermission(req, CANCELLATION_PERMISSION[row.operation], legacyCanManage),
 					items: row.items.map((item) => ({
 						...item,
 						marketplaceOldId: catalog.get(item.productId)?.marketplaceOldId ?? '',
@@ -154,6 +180,50 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		} catch (error) {
 			app.log.error({}, `[api/marketplaces/list] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
+	app.post('/api/marketplaces/cancel', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & { name?: unknown };
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const name = String(body.name ?? '').trim();
+		if (!name) return reply.code(400).send({ ok: false, error: 'не указан документ' });
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
+		let operation = '';
+		try {
+			const legacyCanManage = await canManageStock(client);
+			const result = await cancelMarketplaceOperation(erp, name, (resolvedOperation) => {
+				operation = resolvedOperation;
+				if (!appPermission(req, CANCELLATION_PERMISSION[resolvedOperation], legacyCanManage)) {
+					throw new MarketplaceCancellationAccessError('нет доступа к отмене этого типа операции маркетплейса');
+				}
+			});
+			invalidateCatalogCache(body.domain ?? '');
+			const actor = req.appAccess?.user;
+			await app.operationLog.record({
+				area: 'marketplaces', operation: 'cancel_marketplace_operation', outcome: 'success', level: 'warning',
+				summary: `Отменено проведение операции маркетплейса ${result.name}.`,
+				...(actor ? { actor: { id: actor.id, name: actor.name } } : {}),
+				documents: [`${result.doctype} ${result.name}`],
+				details: { name: result.name, doctype: result.doctype, operation: result.operation },
+			});
+			return { ok: true, ...result, cancelled: true };
+		} catch (error) {
+			const message = readableCancellationError(error);
+			const actor = req.appAccess?.user;
+			await app.operationLog.record({
+				area: 'marketplaces', operation: 'cancel_marketplace_operation', outcome: 'failure', level: 'error',
+				summary: `Не удалось отменить операцию маркетплейса ${name}: ${message}`,
+				...(actor ? { actor: { id: actor.id, name: actor.name } } : {}),
+				documents: [name], details: { name, operation, error: message.slice(0, 500) },
+			});
+			app.log.error({ name, operation }, `[api/marketplaces/cancel] failed — ${message}`);
+			if (error instanceof MarketplaceCancellationAccessError) {
+				return reply.code(403).send({ ok: false, error: message });
+			}
+			return reply.code(200).send({ ok: false, error: message });
 		}
 	});
 

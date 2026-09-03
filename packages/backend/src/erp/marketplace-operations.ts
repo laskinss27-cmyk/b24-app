@@ -34,10 +34,17 @@ export interface MarketplaceOperation {
 	date: string;
 	storeTitle: string;
 	submitted: boolean;
+	cancelled: boolean;
 	total: number;
 	itemCount: number;
 	quantity: number;
 	items: MarketplaceOperationItem[];
+}
+
+export interface CancelledMarketplaceOperation {
+	name: string;
+	doctype: 'Delivery Note' | 'Stock Entry';
+	operation: MarketplaceOperationKind;
 }
 
 export interface MarketplaceReturnOption {
@@ -388,6 +395,57 @@ export async function createMarketplaceReturn(
 	};
 }
 
+/** Cancel one submitted marketplace document while preserving it in ERPNext history. */
+export async function cancelMarketplaceOperation(
+	erp: ErpClient,
+	name: string,
+	authorize: (operation: MarketplaceOperationKind) => void = () => undefined,
+): Promise<CancelledMarketplaceOperation> {
+	const normalizedName = name.trim();
+	if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{2,139}$/.test(normalizedName)) {
+		throw new Error('неверный номер документа маркетплейса');
+	}
+	const [deliveryNote, stockEntry] = await Promise.all([
+		erp.get<Record<string, unknown>>('Delivery Note', normalizedName),
+		erp.get<Record<string, unknown>>('Stock Entry', normalizedName),
+	]);
+	if (Boolean(deliveryNote) === Boolean(stockEntry)) {
+		throw new Error(deliveryNote ? 'номер документа неоднозначен' : 'документ маркетплейса не найден');
+	}
+	const doctype = deliveryNote ? 'Delivery Note' : 'Stock Entry';
+	const document = deliveryNote ?? stockEntry!;
+	const operation = String(document[MARKETPLACE_OPERATION_FIELD] ?? '') as MarketplaceOperationKind;
+	if (!['sale', 'bundle', 'return', 'writeoff', 'receipt'].includes(operation)) {
+		throw new Error('документ не является операцией маркетплейса');
+	}
+	if (Number(document['docstatus'] ?? 0) !== 1) {
+		throw new Error('отменить можно только проведённый документ');
+	}
+	if (operation === 'sale' && (doctype !== 'Delivery Note' || Number(document['is_return'] ?? 0) !== 0)) {
+		throw new Error('тип документа не соответствует реализации маркетплейса');
+	}
+	if (operation === 'return' && (doctype !== 'Delivery Note' || Number(document['is_return'] ?? 0) !== 1)) {
+		throw new Error('тип документа не соответствует возврату маркетплейса');
+	}
+	const purpose = String(document['purpose'] ?? document['stock_entry_type'] ?? '');
+	if (operation === 'bundle' && (doctype !== 'Stock Entry' || purpose !== 'Repack')) {
+		throw new Error('тип документа не соответствует формированию комплекта');
+	}
+	if (operation === 'writeoff' && (doctype !== 'Stock Entry' || purpose !== 'Material Issue')) {
+		throw new Error('тип документа не соответствует списанию маркетплейса');
+	}
+	if (operation === 'receipt' && (doctype !== 'Stock Entry' || purpose !== 'Material Receipt')) {
+		throw new Error('тип документа не соответствует зачислению маркетплейса');
+	}
+	authorize(operation);
+	await erp.cancel(doctype, normalizedName);
+	const canceled = await erp.get<Record<string, unknown>>(doctype, normalizedName);
+	if (Number(canceled?.['docstatus'] ?? 0) !== 2) {
+		throw new Error('ERPNext не подтвердил отмену документа');
+	}
+	return { name: normalizedName, doctype, operation };
+}
+
 /** Convert several units of one item into a stock item representing a marketplace bundle. */
 export async function createMarketplaceBundle(
 	erp: ErpClient,
@@ -480,7 +538,6 @@ export async function listMarketplaceOperations(
 	const ctx = await erpContext(erp);
 	await ensureMarketplaceFields(erp);
 	const filters: unknown[] = [
-		['docstatus', '!=', 2],
 		[MARKETPLACE_OPERATION_FIELD, '!=', ''],
 	];
 	if (opts.from) filters.push(['posting_date', '>=', opts.from]);
@@ -547,6 +604,7 @@ export async function listMarketplaceOperations(
 				date,
 				storeTitle: firstWarehouse ? b24StoreTitle(ctx, firstWarehouse) : '',
 				submitted: Number(doc['docstatus'] ?? head['docstatus'] ?? 0) === 1,
+				cancelled: Number(doc['docstatus'] ?? head['docstatus'] ?? 0) === 2,
 				total: Number(doc['grand_total'] ?? head['grand_total'] ?? 0),
 				itemCount: operationItems.length,
 				quantity: operationItems.reduce((sum, item) => sum + Math.abs(Number(item['qty'] ?? 0)), 0),
