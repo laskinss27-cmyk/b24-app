@@ -84,6 +84,13 @@ test('readiness fails explicitly when the transfer shadow writer cannot reach SQ
 	const transferSqlWriter: TransferSqlWriteRuntime = {
 		mode: 'shadow', enabled: true,
 		async write() { throw new Error('unused'); },
+		async createNative() { throw new Error('unused'); },
+		async updateNative() { throw new Error('unused'); },
+		async pendingMirrors() { return []; },
+		async claimMirror() { throw new Error('unused'); },
+		async bitrixExternalId() { return null; },
+		async markMirrorDelivered() {},
+		async recordMirrorFailure() {},
 		async markDeleted() { throw new Error('unused'); },
 		async readAll() { throw new Error('unused'); },
 		async read() { throw new Error('unused'); },

@@ -10,8 +10,18 @@ import { newTransferData, type StoredTransfer } from './model.js';
 import { applyTransferSqlBackfill, buildTransferSqlBackfillPlan } from './sql-backfill.js';
 import { compareTransferSqlParity } from './sql-compare.js';
 import { applyTransferIdentityBackfill, buildTransferIdentityBackfillPlan, readTransferIdentityRows } from './sql-identity.js';
-import { readCurrentSqlTransfers } from './sql-reader.js';
-import { markTransferSqlDeleted, writeTransferSqlRevision, type TransferSqlPool } from './sql-store.js';
+import { readCurrentSqlTransfer, readCurrentSqlTransfers } from './sql-reader.js';
+import {
+	createNativeTransferSql,
+	claimTransferBitrixMirror,
+	markTransferBitrixMirrorDelivered,
+	markTransferSqlDeleted,
+	readPendingTransferBitrixMirrors,
+	readTransferBitrixExternalId,
+	updateNativeTransferSql,
+	writeTransferSqlRevision,
+	type TransferSqlPool,
+} from './sql-store.js';
 
 const enabled = process.env['B24_TRANSFER_TEST_MARIADB'] === '1';
 const database = 'b24_transfer_rehearsal';
@@ -65,13 +75,16 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 			'0032_add_stock_transfer_public_id.sql',
 			'0033_create_stock_transfer_public_ids.sql',
 			'0034_create_stock_transfer_identity_checkpoints.sql',
+			'0035_make_stock_transfer_bitrix_identity_optional.sql',
+			'0036_create_stock_transfer_commands.sql',
+			'0037_create_stock_transfer_bitrix_outbox.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalMigrationsDirectory, filename));
 
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 12);
+		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 15);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalMigrationsDirectory), []);
 
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
@@ -95,7 +108,7 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 		);
 		const identityApplied = await applyTransferIdentityBackfill(sqlPool, identityPlan, identityPlan.planHash);
 		const identityRepeated = await applyTransferIdentityBackfill(sqlPool, identityPlan, identityPlan.planHash);
-		assert.equal(identityApplied.assignedRecordCount, 1);
+		assert.equal(identityApplied.assignedRecordCount, 0);
 		assert.equal(identityRepeated.alreadyApplied, true);
 		assert.deepEqual(await readTransferIdentityRows(sqlPool), [{ recordId: 1, bitrixExternalId: 7, publicId: 7 }]);
 		const allocator = await schemaPool.query<Array<Record<string, unknown>>>(
@@ -112,11 +125,60 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 		assert.equal(await count(schemaPool, 'stock_transfer_backfill_checkpoints'), 1);
 		assert.equal(await count(schemaPool, 'stock_transfer_identity_checkpoints'), 1);
 
+		const nativeData = newTransferData({
+			fromStore: 'Склад В', toStore: 'Склад Г', lines: [{ productId: 200, name: 'Монитор', qty: 1 }],
+			createdAt: '2026-09-03T10:00:00.000Z', createdById: '2', createdByName: 'Снабжение',
+		});
+		const native = await createNativeTransferSql(sqlPool, {
+			idempotencyKey: 'integration:create:one', name: 'Перемещение SQL', data: nativeData,
+		});
+		const nativeRepeated = await createNativeTransferSql(sqlPool, {
+			idempotencyKey: 'integration:create:one', name: 'Перемещение SQL', data: nativeData,
+		});
+		assert.equal(native.publicId, 8);
+		assert.equal(native.alreadyApplied, false);
+		assert.equal(nativeRepeated.publicId, native.publicId);
+		assert.equal(nativeRepeated.alreadyApplied, true);
+		await assert.rejects(() => createNativeTransferSql(sqlPool, {
+			idempotencyKey: 'integration:create:one', name: 'Другой документ', data: nativeData,
+		}), /already used/);
+		assert.equal((await readCurrentSqlTransfer(sqlPool, native.publicId))?.lines[0]?.qty, 1);
+
+		const nativeChanged = structuredClone(nativeData);
+		nativeChanged.lines[0]!.qty = 2;
+		const nativeUpdate = await updateNativeTransferSql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'integration:update:one', name: 'Перемещение SQL', data: nativeChanged,
+		});
+		const nativeUpdateRepeated = await updateNativeTransferSql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'integration:update:one', name: 'Перемещение SQL', data: nativeChanged,
+		});
+		assert.equal(nativeUpdate.revisionNo, 2);
+		assert.equal(nativeUpdateRepeated.alreadyApplied, true);
+		assert.equal((await readCurrentSqlTransfer(sqlPool, native.publicId))?.lines[0]?.qty, 2);
+		const pending = await readPendingTransferBitrixMirrors(sqlPool);
+		assert.deepEqual(pending.map((entry) => [entry.publicId, entry.revisionId]), [[native.publicId, nativeUpdate.revisionId]]);
+		const mirrorLeaseToken = '00000000-0000-4000-8000-000000000001';
+		assert.equal(await claimTransferBitrixMirror(sqlPool, {
+			publicId: native.publicId, revisionId: nativeUpdate.revisionId, leaseToken: mirrorLeaseToken,
+		}), true);
+		assert.equal(await claimTransferBitrixMirror(sqlPool, {
+			publicId: native.publicId,
+			revisionId: nativeUpdate.revisionId,
+			leaseToken: '00000000-0000-4000-8000-000000000002',
+		}), false);
+		await markTransferBitrixMirrorDelivered(sqlPool, {
+			publicId: native.publicId, revisionId: nativeUpdate.revisionId, bitrixExternalId: 900, leaseToken: mirrorLeaseToken,
+		});
+		assert.equal(await readTransferBitrixExternalId(sqlPool, native.publicId), 900);
+		assert.deepEqual(await readPendingTransferBitrixMirrors(sqlPool), []);
+		assert.equal(await count(schemaPool, 'stock_transfer_commands'), 2);
+		assert.equal(await count(schemaPool, 'stock_transfer_bitrix_outbox'), 2);
+
 		await markTransferSqlDeleted(sqlPool, { externalId: 7, name: 'Перемещение #7' });
-		assert.deepEqual(await readCurrentSqlTransfers(sqlPool), []);
+		assert.deepEqual((await readCurrentSqlTransfers(sqlPool)).map((item) => item.id), [native.publicId]);
 		await writeTransferSqlRevision(sqlPool, { externalId: id, name, data, sourceKind: 'repair' });
-		assert.equal(compareTransferSqlParity([changed], await readCurrentSqlTransfers(sqlPool)).matches, true);
-		assert.equal(await count(schemaPool, 'stock_transfer_revisions'), 2);
+		assert.deepEqual((await readCurrentSqlTransfers(sqlPool)).map((item) => item.id), [7, native.publicId]);
+		assert.equal(await count(schemaPool, 'stock_transfer_revisions'), 4);
 
 		await assert.rejects(() => writerPool!.query('DELETE FROM stock_transfer_records WHERE id = -1'), /(?:denied|command)/i);
 		await assert.rejects(() => writerPool!.query('CREATE TABLE forbidden_ddl (id INT NOT NULL)'), /(?:denied|command)/i);

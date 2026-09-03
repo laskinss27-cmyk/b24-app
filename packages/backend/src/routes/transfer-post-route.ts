@@ -111,7 +111,7 @@ export function registerTransferPostRoute(
 						}],
 					};
 					const itemName = `Корректировка #${id}: ${fromStore} → ${toStore}`;
-					const correctionId = await createTransferData(app, client, itemName, correctionData);
+					const { id: correctionId } = await createTransferData(app, client, itemName, correctionData, `transfer-correction:${id}:${correction.kind}`);
 					stored = { id: correctionId, name: itemName, ...correctionData };
 				}
 				correctionIds.push(stored.id);

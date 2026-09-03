@@ -1,12 +1,24 @@
 import mariadb, { type Pool } from 'mariadb';
-import { markTransferSqlDeleted, writeTransferSqlRevision, type TransferSqlSourceKind } from './sql-store.js';
+import {
+	createNativeTransferSql,
+	claimTransferBitrixMirror,
+	markTransferBitrixMirrorDelivered,
+	markTransferSqlDeleted,
+	readPendingTransferBitrixMirrors,
+	readTransferBitrixExternalId,
+	recordTransferBitrixMirrorFailure,
+	updateNativeTransferSql,
+	writeTransferSqlRevision,
+	type PendingTransferBitrixMirror,
+	type TransferSqlSourceKind,
+} from './sql-store.js';
 import type { TransferData } from './model.js';
 import { readCurrentSqlTransfer, readCurrentSqlTransfers } from './sql-reader.js';
 
 export type TransferSqlWriteConfig =
 	| { mode: 'off' }
 	| {
-		mode: 'shadow';
+	mode: 'shadow' | 'primary';
 		host: string;
 		port: number;
 		database: string;
@@ -20,6 +32,13 @@ export interface TransferSqlWriteRuntime {
 	readonly mode: TransferSqlWriteConfig['mode'];
 	readonly enabled: boolean;
 	write(input: { externalId: number; name: string; data: TransferData; sourceKind?: TransferSqlSourceKind }): ReturnType<typeof writeTransferSqlRevision>;
+	createNative(input: { idempotencyKey: string; name: string; data: TransferData }): ReturnType<typeof createNativeTransferSql>;
+	updateNative(input: { publicId: number; idempotencyKey: string; name: string; data: TransferData }): ReturnType<typeof updateNativeTransferSql>;
+	pendingMirrors(limit?: number): Promise<PendingTransferBitrixMirror[]>;
+	claimMirror(input: { publicId: number; revisionId: number; leaseToken: string }): Promise<boolean>;
+	bitrixExternalId(publicId: number): Promise<number | null>;
+	markMirrorDelivered(input: { publicId: number; revisionId: number; bitrixExternalId: number; leaseToken: string }): Promise<void>;
+	recordMirrorFailure(input: { publicId: number; revisionId: number; leaseToken: string; error: string }): Promise<void>;
 	markDeleted(input: { externalId: number; name: string; deletedAt?: Date }): Promise<void>;
 	readAll(): ReturnType<typeof readCurrentSqlTransfers>;
 	read(externalId: number): ReturnType<typeof readCurrentSqlTransfer>;
@@ -29,7 +48,7 @@ export interface TransferSqlWriteRuntime {
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
 	const value = String(env[name] ?? '').trim();
-	if (!value) throw new Error(`${name} is required when transfer SQL shadow writes are enabled`);
+	if (!value) throw new Error(`${name} is required when transfer SQL writes are enabled`);
 	return value;
 }
 
@@ -42,9 +61,12 @@ function positiveInteger(value: unknown, fallback: number, max: number, name: st
 export function loadTransferSqlWriteConfig(env: NodeJS.ProcessEnv = process.env): TransferSqlWriteConfig {
 	const mode = String(env['B24_APP_TRANSFER_SQL_WRITE'] ?? 'off').trim();
 	if (mode === 'off') return { mode: 'off' };
-	if (mode !== 'shadow') throw new Error('B24_APP_TRANSFER_SQL_WRITE must be off or shadow');
+	if (mode !== 'shadow' && mode !== 'primary') throw new Error('B24_APP_TRANSFER_SQL_WRITE must be off, shadow or primary');
 	if (String(env['B24_APP_DB_MODE'] ?? 'off').trim() !== 'readiness') {
-		throw new Error('B24_APP_DB_MODE=readiness is required for transfer SQL shadow writes');
+		throw new Error('B24_APP_DB_MODE=readiness is required for transfer SQL writes');
+	}
+	if (mode === 'primary' && String(env['B24_APP_TRANSFER_SQL_READ'] ?? 'off').trim() !== 'primary') {
+		throw new Error('B24_APP_TRANSFER_SQL_READ=primary is required for transfer SQL primary writes');
 	}
 	const user = required(env, 'B24_APP_TRANSFER_DB_USER');
 	const forbidden = [
@@ -65,7 +87,7 @@ export function loadTransferSqlWriteConfig(env: NodeJS.ProcessEnv = process.env)
 }
 
 function disabledError(): Error {
-	return new Error('Transfer SQL shadow writes are disabled');
+	return new Error('Transfer SQL writes are disabled');
 }
 
 export function createTransferSqlWriteRuntime(config: TransferSqlWriteConfig): TransferSqlWriteRuntime {
@@ -73,6 +95,13 @@ export function createTransferSqlWriteRuntime(config: TransferSqlWriteConfig): T
 		return {
 			mode: 'off', enabled: false,
 			async write() { throw disabledError(); },
+			async createNative() { throw disabledError(); },
+			async updateNative() { throw disabledError(); },
+			async pendingMirrors() { throw disabledError(); },
+			async claimMirror() { throw disabledError(); },
+			async bitrixExternalId() { throw disabledError(); },
+			async markMirrorDelivered() { throw disabledError(); },
+			async recordMirrorFailure() { throw disabledError(); },
 			async markDeleted() { throw disabledError(); },
 			async readAll() { throw disabledError(); },
 			async read() { throw disabledError(); },
@@ -98,10 +127,27 @@ export function createTransferSqlWriteRuntime(config: TransferSqlWriteConfig): T
 		write(input) {
 			return writeTransferSqlRevision(pool, { ...input, sourceKind: input.sourceKind ?? 'bitrix_dual_write' });
 		},
+		createNative(input) { return createNativeTransferSql(pool, input); },
+		updateNative(input) { return updateNativeTransferSql(pool, input); },
+		pendingMirrors(limit) { return readPendingTransferBitrixMirrors(pool, limit); },
+		claimMirror(input) { return claimTransferBitrixMirror(pool, input); },
+		bitrixExternalId(publicId) { return readTransferBitrixExternalId(pool, publicId); },
+		markMirrorDelivered(input) { return markTransferBitrixMirrorDelivered(pool, input); },
+		recordMirrorFailure(input) { return recordTransferBitrixMirrorFailure(pool, input); },
 		markDeleted(input) { return markTransferSqlDeleted(pool, input); },
 		readAll() { return readCurrentSqlTransfers(pool); },
 		read(externalId) { return readCurrentSqlTransfer(pool, externalId); },
-		async ping() { await pool.query('SELECT 1 AS ok'); },
+		async ping() {
+			await pool.query('SELECT 1 AS ok');
+			if (config.mode === 'primary') {
+				await Promise.all([
+					pool.query('SELECT public_id, bitrix_external_id FROM stock_transfer_records LIMIT 0'),
+					pool.query('SELECT idempotency_key FROM stock_transfer_commands LIMIT 0'),
+					pool.query('SELECT status FROM stock_transfer_bitrix_outbox LIMIT 0'),
+					pool.query('SELECT public_id FROM stock_transfer_public_ids LIMIT 0'),
+				]);
+			}
+		},
 		async close() { await pool.end(); },
 	};
 }

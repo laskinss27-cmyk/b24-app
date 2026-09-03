@@ -1,19 +1,42 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import { listAllEntityItems } from '../b24/entity-items.js';
 import { TRANSFERS_ENTITY } from '../b24/placement.js';
 import { parseTransferItem, type StoredTransfer, type TransferData } from '../transfers/model.js';
 import { compareTransferSqlParity } from '../transfers/sql-compare.js';
+import { normalizeTransferSqlState, transferSqlStateHash } from '../transfers/sql-store.js';
+
+const SQL_PUBLIC_ID_FIELD = 'sqlPublicId';
+
+function rawSqlPublicId(raw: Record<string, unknown>): number | null {
+	try {
+		const detail = raw['DETAIL_TEXT'];
+		if (typeof detail !== 'string' || !detail.trim()) return null;
+		const value = (JSON.parse(detail) as Record<string, unknown>)[SQL_PUBLIC_ID_FIELD];
+		const id = Number(value);
+		return Number.isInteger(id) && id > 0 ? id : null;
+	} catch {
+		return null;
+	}
+}
+
+function parseBitrixTransfer(raw: Record<string, unknown>): StoredTransfer | null {
+	const parsed = parseTransferItem(raw);
+	if (!parsed) return null;
+	const publicId = rawSqlPublicId(raw);
+	return publicId ? { ...parsed, id: publicId } : parsed;
+}
 
 async function loadBitrixTransfer(client: B24Client, id: number): Promise<StoredTransfer | null> {
 	const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFERS_ENTITY, FILTER: { ID: id } });
 	const raw = (items ?? [])[0];
-	return raw ? parseTransferItem(raw) : null;
+	return raw ? parseBitrixTransfer(raw) : null;
 }
 
 async function loadBitrixTransfers(client: B24Client): Promise<StoredTransfer[]> {
 	const items = await listAllEntityItems(client, TRANSFERS_ENTITY);
-	return (items ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);
+	return (items ?? []).map(parseBitrixTransfer).filter((item): item is StoredTransfer => item != null);
 }
 
 function transferReadFallback(app: FastifyInstance, scope: 'single' | 'list', reason: string): void {
@@ -21,6 +44,22 @@ function transferReadFallback(app: FastifyInstance, scope: 'single' | 'list', re
 }
 
 export async function loadTransfer(app: FastifyInstance, client: B24Client, id: number): Promise<StoredTransfer | null> {
+	if (app.config.transferSqlRead === 'primary') {
+		try {
+			if (!app.databaseRuntime || app.databaseRuntime.mode !== 'readiness') throw new Error('read-only SQL runtime unavailable');
+			const sql = await app.databaseRuntime.readCurrentTransfer(id);
+			await flushPendingNativeTransferMirrors(app, client);
+			return sql;
+		} catch {
+			transferReadFallback(app, 'single', 'primary SQL read failed');
+		}
+		const externalId = await app.transferSqlWriter?.bitrixExternalId(id).catch(() => null);
+		if (externalId) {
+			const legacy = await loadBitrixTransfer(client, externalId);
+			return legacy ? { ...legacy, id } : null;
+		}
+		return (await loadBitrixTransfers(client)).find((transfer) => transfer.id === id) ?? null;
+	}
 	const legacyPromise = loadBitrixTransfer(client, id);
 	if (app.config.transferSqlRead === 'off') return legacyPromise;
 	if (!app.databaseRuntime || app.databaseRuntime.mode !== 'readiness') {
@@ -48,6 +87,17 @@ export async function loadTransfer(app: FastifyInstance, client: B24Client, id: 
 }
 
 export async function loadTransfers(app: FastifyInstance, client: B24Client): Promise<StoredTransfer[]> {
+	if (app.config.transferSqlRead === 'primary') {
+		try {
+			if (!app.databaseRuntime || app.databaseRuntime.mode !== 'readiness') throw new Error('read-only SQL runtime unavailable');
+			const sql = await app.databaseRuntime.readCurrentTransfers();
+			await flushPendingNativeTransferMirrors(app, client);
+			return sql;
+		} catch {
+			transferReadFallback(app, 'list', 'primary SQL read failed');
+			return loadBitrixTransfers(client);
+		}
+	}
 	const legacyPromise = loadBitrixTransfers(client);
 	if (app.config.transferSqlRead === 'off') return legacyPromise;
 	if (!app.databaseRuntime || app.databaseRuntime.mode !== 'readiness') {
@@ -83,7 +133,16 @@ export async function saveTransferData(
 	id: number,
 	name: string,
 	data: TransferData,
+	idempotencyKey?: string,
 ): Promise<void> {
+	if (app.transferSqlWriter?.mode === 'primary') {
+		const state = normalizeTransferSqlState({ externalId: id, name, data, sourceKind: 'sql_native' });
+		const key = idempotencyKey?.trim() || `update:${id}:${transferSqlStateHash(state)}`;
+		const result = await app.transferSqlWriter.updateNative({ publicId: id, idempotencyKey: key, name, data });
+		await mirrorNativeTransfer(app, client, id, result.revisionId, name, data);
+		await flushPendingNativeTransferMirrors(app, client);
+		return;
+	}
 	await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
 	await persistTransferSqlShadow(app, id, name, data, 'update');
 }
@@ -93,7 +152,16 @@ export async function createTransferData(
 	client: B24Client,
 	name: string,
 	data: TransferData,
-): Promise<number> {
+	idempotencyKey?: string,
+): Promise<{ id: number; alreadyApplied: boolean }> {
+	if (app.transferSqlWriter?.mode === 'primary') {
+		const key = idempotencyKey?.trim();
+		if (!key) throw new Error('SQL-first создание перемещения требует idempotencyKey');
+		const result = await app.transferSqlWriter.createNative({ idempotencyKey: key, name, data });
+		if (!result.alreadyApplied) await mirrorNativeTransfer(app, client, result.publicId, result.revisionId, name, data);
+		await flushPendingNativeTransferMirrors(app, client);
+		return { id: result.publicId, alreadyApplied: result.alreadyApplied };
+	}
 	const added = await client.call<number | { id?: number }>('entity.item.add', {
 		ENTITY: TRANSFERS_ENTITY,
 		NAME: name,
@@ -102,7 +170,61 @@ export async function createTransferData(
 	const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 	if (!id) throw new Error('entity.item.add не вернул id');
 	await persistTransferSqlShadow(app, id, name, data, 'create');
-	return id;
+	return { id, alreadyApplied: false };
+}
+
+async function mirrorNativeTransfer(
+	app: FastifyInstance,
+	client: B24Client,
+	publicId: number,
+	revisionId: number,
+	name: string,
+	data: TransferData,
+): Promise<void> {
+	const writer = app.transferSqlWriter;
+	if (!writer || writer.mode !== 'primary') return;
+	const leaseToken = randomUUID();
+	try {
+		if (!await writer.claimMirror({ publicId, revisionId, leaseToken })) return;
+		let externalId = await writer.bitrixExternalId(publicId);
+		if (!externalId) {
+			const existing = (await listAllEntityItems(client, TRANSFERS_ENTITY))
+				.find((item) => rawSqlPublicId(item) === publicId);
+			externalId = existing ? Number(existing['ID']) : null;
+		}
+		const detail = JSON.stringify({ ...data, [SQL_PUBLIC_ID_FIELD]: publicId });
+		if (externalId) {
+			await client.call('entity.item.update', { ENTITY: TRANSFERS_ENTITY, ID: externalId, NAME: name, DETAIL_TEXT: detail });
+		} else {
+			const added = await client.call<number | { id?: number }>('entity.item.add', {
+				ENTITY: TRANSFERS_ENTITY,
+				NAME: name,
+				DETAIL_TEXT: detail,
+			});
+			externalId = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
+			if (!externalId) throw new Error('entity.item.add не вернул id зеркала');
+		}
+		await writer.markMirrorDelivered({ publicId, revisionId, bitrixExternalId: externalId, leaseToken });
+		app.log.debug({ publicId, externalId, revisionId }, '[transfers/sql-primary] Bitrix mirror delivered');
+	} catch (error) {
+		await writer.recordMirrorFailure({ publicId, revisionId, leaseToken, error: String(error) }).catch(() => undefined);
+		app.log.warn({ publicId, revisionId, error: String(error) }, '[transfers/sql-primary] Bitrix mirror pending');
+	}
+}
+
+async function flushPendingNativeTransferMirrors(app: FastifyInstance, client: B24Client): Promise<void> {
+	const writer = app.transferSqlWriter;
+	if (!writer || writer.mode !== 'primary') return;
+	try {
+		for (const pending of await writer.pendingMirrors(3)) {
+			const transfer = await writer.read(pending.publicId);
+			if (!transfer) continue;
+			const { id: _id, name, ...data } = transfer;
+			await mirrorNativeTransfer(app, client, pending.publicId, pending.revisionId, name, data);
+		}
+	} catch (error) {
+		app.log.warn({ error: String(error) }, '[transfers/sql-primary] pending Bitrix mirror flush failed');
+	}
 }
 
 export async function deleteTransferData(
@@ -111,6 +233,9 @@ export async function deleteTransferData(
 	id: number,
 	name: string,
 ): Promise<void> {
+	if (app.transferSqlWriter?.mode === 'primary') {
+		throw new Error('Удаление SQL-first перемещений пока не активировано');
+	}
 	await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: id });
 	if (!app.transferSqlWriter?.enabled) return;
 	try {

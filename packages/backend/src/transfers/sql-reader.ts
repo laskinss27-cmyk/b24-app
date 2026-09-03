@@ -4,7 +4,7 @@ import { transferSqlStateHash, type TransferSqlPool } from './sql-store.js';
 type QueryRow = Record<string, unknown>;
 
 const LATEST_REVISIONS_QUERY = `
-	SELECT tr.bitrix_external_id, tr.display_name, tr.last_state_hash,
+	SELECT tr.public_id, tr.bitrix_external_id, tr.display_name, tr.last_state_hash,
 		r.id AS revision_id, r.revision_no, r.state_hash, r.state_format_version, r.supply_request,
 		r.supply_request_key, r.purchase_order, r.deal_id, r.to_store,
 		r.from_store, r.status, r.note, r.task_id, r.ship_entry,
@@ -62,10 +62,10 @@ function placeholders(values: unknown[]): string {
 	return values.map(() => '?').join(', ');
 }
 
-export async function readCurrentSqlTransfers(pool: TransferSqlPool, externalId?: number): Promise<StoredTransfer[]> {
+export async function readCurrentSqlTransfers(pool: TransferSqlPool, publicId?: number): Promise<StoredTransfer[]> {
 	const revisions = await pool.query<QueryRow[]>(
-		`${LATEST_REVISIONS_QUERY}${externalId == null ? '' : ' AND tr.bitrix_external_id = ?'} ORDER BY tr.bitrix_external_id`,
-		externalId == null ? [] : [externalId],
+		`${LATEST_REVISIONS_QUERY}${publicId == null ? '' : ' AND tr.public_id = ?'} ORDER BY tr.public_id`,
+		publicId == null ? [] : [publicId],
 	);
 	if (!revisions.length) return [];
 	const revisionIds = revisions.map((row) => row['revision_id']);
@@ -159,12 +159,12 @@ export async function readCurrentSqlTransfers(pool: TransferSqlPool, externalId?
 
 	return revisions.map((row) => {
 		if (integer(row, 'state_format_version') !== 2) {
-			throw new Error(`Unsupported SQL transfer state format for ${String(row['bitrix_external_id'])}`);
+			throw new Error(`Unsupported SQL transfer state format for ${String(row['public_id'])}`);
 		}
 		const revisionId = String(row['revision_id']);
 		const phase = (name: string): TransferLine[] => linesByRevisionPhase.get(`${revisionId}:${name}`) ?? [];
 		const transfer: StoredTransfer = {
-			id: integer(row, 'bitrix_external_id'),
+			id: integer(row, 'public_id'),
 			name: string(row, 'display_name'),
 			supplyRequest: string(row, 'supply_request'),
 			supplyRequestKey: string(row, 'supply_request_key'),
@@ -199,7 +199,7 @@ export async function readCurrentSqlTransfers(pool: TransferSqlPool, externalId?
 	});
 }
 
-export async function readCurrentSqlTransfer(pool: TransferSqlPool, externalId: number): Promise<StoredTransfer | null> {
-	const all = await readCurrentSqlTransfers(pool, externalId);
+export async function readCurrentSqlTransfer(pool: TransferSqlPool, publicId: number): Promise<StoredTransfer | null> {
+	const all = await readCurrentSqlTransfers(pool, publicId);
 	return all[0] ?? null;
 }

@@ -29,8 +29,9 @@ class BackfillConnection implements TransferSqlConnection {
 		if (sql.includes('FROM stock_transfer_backfill_checkpoints')) {
 			return (this.checkpointExists ? [{ created_revision_count: 1, unchanged_record_count: 0 }] : []) as T;
 		}
-		if (sql.includes('SELECT id, last_state_hash')) return [{ id: 41, last_state_hash: null }] as T;
-		if (sql.includes('SELECT revision_no')) return [] as T;
+		if (sql.includes('SELECT public_id, legacy_bitrix_external_id')) return [{ public_id: 7, legacy_bitrix_external_id: 7 }] as T;
+		if (sql.includes('SELECT id, public_id, last_state_hash')) return [{ id: 41, public_id: 7, last_state_hash: null }] as T;
+		if (sql.includes('SELECT id, revision_no')) return [] as T;
 		if (sql.includes('INSERT INTO stock_transfer_revisions')) {
 			if (this.failRevision) throw new Error('revision failed');
 			return { insertId: 51 } as T;

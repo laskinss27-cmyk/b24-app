@@ -4,7 +4,7 @@ import type { ErpClient } from '../erp/client.js';
 import { newTransferData, type TransferData, type TransferLine } from '../transfers/model.js';
 import type { TransferNotificationService } from './transfer-notification-service.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
-import { createTransferData, saveTransferData } from './transfer-storage.js';
+import { createTransferData, loadTransfer, saveTransferData } from './transfer-storage.js';
 import { formatTransferLines } from './transfer-task-service.js';
 import type { CurrentUser } from './transfer-user-access.js';
 
@@ -20,6 +20,7 @@ export interface CreateTransferDraftArgs {
 	supplyRequestKey?: string;
 	historyNote: string;
 	taskId?: number | null;
+	idempotencyKey?: string;
 }
 
 function errInfo(err: unknown): string {
@@ -47,7 +48,13 @@ export function createTransferDraftService(
 		});
 		data.taskId = args.taskId ?? null;
 		const itemName = `Перемещение: ${args.fromStore} → ${args.toStore}`;
-		const id = await createTransferData(app, args.client, itemName, data);
+		const createdTransfer = await createTransferData(app, args.client, itemName, data, args.idempotencyKey);
+		const id = createdTransfer.id;
+		if (createdTransfer.alreadyApplied) {
+			const existing = await loadTransfer(app, args.client, id);
+			if (!existing) throw new Error(`SQL-first перемещение #${id} не найдено после повтора команды`);
+			return existing;
+		}
 		const notification = await notifications.notifyStore(
 			args.client,
 			args.fromStore,

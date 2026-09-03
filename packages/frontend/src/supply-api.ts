@@ -1,4 +1,5 @@
 import { bx24Auth } from './bitrix-auth.js';
+import { newIdempotencyKey } from './idempotency-key.js';
 import type { TransferDoc, TransferHistoryEventDto, TransferLineDto } from './stock-transfer-types.js';
 
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
@@ -131,7 +132,7 @@ export async function createSupplyDocuments(args: { requestName: string; request
 	const res = await fetch('/api/supply/create-documents', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...args }),
+		body: JSON.stringify({ ...bx24Auth(), ...args, idempotencyKey: newIdempotencyKey('supply-documents') }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; partial?: boolean; transfers?: TransferDoc[]; purchases?: string[]; updatedPurchases?: string[] };
 	if (!json.ok) {
@@ -237,7 +238,7 @@ export async function createSupplyPurchaseTransfer(requestName: string, requestK
 	const res = await fetch('/api/supply/purchase-transfer', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), requestName, requestKey, dealId, purchaseOrder, lines }),
+		body: JSON.stringify({ ...bx24Auth(), requestName, requestKey, dealId, purchaseOrder, lines, idempotencyKey: newIdempotencyKey('purchase-transfer') }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: SupplyTransferChild };
 	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось создать перемещение на точку');

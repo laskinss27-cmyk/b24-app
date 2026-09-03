@@ -104,6 +104,7 @@ export function registerTransferRequestManagementRoutes(
 				supplyRequestKey: `transfer-request:${request.id}`,
 				historyNote: `создано по заказу на перемещение #${request.id}`,
 				taskId: request.taskId,
+				idempotencyKey: `transfer-request-convert:${request.id}`,
 			});
 			createdTransferId = transfer.id;
 			const converted = {

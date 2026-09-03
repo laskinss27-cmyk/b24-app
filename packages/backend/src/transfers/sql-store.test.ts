@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import type { DatabaseRuntime } from '../database/runtime.js';
 import { createTransferData, deleteTransferData, loadTransfer, loadTransfers, saveTransferData } from '../routes/transfer-storage.js';
-import { newTransferData, type StoredTransfer } from './model.js';
+import { newTransferData, parseTransferItem, type StoredTransfer } from './model.js';
 import type { TransferSqlWriteRuntime } from './sql-runtime.js';
 import {
 	markTransferSqlDeleted,
@@ -52,8 +52,9 @@ class FakeConnection implements TransferSqlConnection {
 
 	async query<T = unknown>(sql: string, values?: unknown[]): Promise<T> {
 		this.queries.push(values === undefined ? { sql } : { sql, values });
-		if (sql.includes('SELECT id, last_state_hash')) return [{ id: 41, last_state_hash: this.currentHash }] as T;
-		if (sql.includes('SELECT revision_no')) return (this.currentHash ? [{ revision_no: 3, state_format_version: this.currentFormatVersion }] : []) as T;
+		if (sql.includes('SELECT public_id, legacy_bitrix_external_id')) return [{ public_id: 7, legacy_bitrix_external_id: 7 }] as T;
+		if (sql.includes('SELECT id, public_id, last_state_hash')) return [{ id: 41, public_id: 7, last_state_hash: this.currentHash }] as T;
+		if (sql.includes('SELECT id, revision_no')) return (this.currentHash ? [{ id: 50, revision_no: 3, state_format_version: this.currentFormatVersion }] : []) as T;
 		if (sql.includes('INSERT INTO stock_transfer_revisions')) return { insertId: 51 } as T;
 		if (sql.includes('UPDATE stock_transfer_records')) return { affectedRows: 1 } as T;
 		return {} as T;
@@ -84,6 +85,7 @@ test('transfer SQL writer creates one immutable revision and all normalized chil
 	const { id, name, ...data } = transfer;
 	const result = await writeTransferSqlRevision(pool(connection), { externalId: id, name, data, sourceKind: 'bitrix_dual_write' });
 	assert.equal(result.revisionNo, 1);
+	assert.equal(result.revisionId, 51);
 	assert.equal(result.alreadyCurrent, false);
 	assert.match(result.stateHash, /^[a-f0-9]{64}$/);
 	assert.equal(connection.beginCount, 1);
@@ -163,8 +165,11 @@ test('Bitrix transfer create, update and delete feed the SQL shadow adapter in o
 		mode: 'shadow', enabled: true,
 		async write(input) {
 			trace.push(`sql-write:${input.externalId}`);
-			return { externalId: input.externalId, revisionNo: 1, stateHash: '0'.repeat(64), alreadyCurrent: false };
+			return { externalId: input.externalId, revisionId: 1, revisionNo: 1, stateHash: '0'.repeat(64), alreadyCurrent: false };
 		},
+		async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); },
+		async pendingMirrors() { return []; }, async claimMirror() { throw new Error('unused'); }, async bitrixExternalId() { return null; },
+		async markMirrorDelivered() {}, async recordMirrorFailure() {},
 		async markDeleted(input) { trace.push(`sql-delete:${input.externalId}`); },
 		async readAll() { return []; }, async read() { return null; }, async ping() {}, async close() {},
 	};
@@ -180,7 +185,7 @@ test('Bitrix transfer create, update and delete feed the SQL shadow adapter in o
 	} as unknown as B24Client;
 	const { name, ...withId } = storedTransfer();
 	const { id: _id, ...data } = withId;
-	const id = await createTransferData(app, client, name, data);
+	const { id } = await createTransferData(app, client, name, data);
 	await saveTransferData(app, client, id, name, data);
 	await deleteTransferData(app, client, id, name);
 	assert.deepEqual(trace, [
@@ -195,6 +200,9 @@ test('a failed shadow write does not report a false failure after Bitrix succeed
 	const writer: TransferSqlWriteRuntime = {
 		mode: 'shadow', enabled: true,
 		async write() { throw new Error('SQL unavailable'); },
+		async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); },
+		async pendingMirrors() { return []; }, async claimMirror() { throw new Error('unused'); }, async bitrixExternalId() { return null; },
+		async markMirrorDelivered() {}, async recordMirrorFailure() {},
 		async markDeleted() { throw new Error('SQL unavailable'); },
 		async readAll() { return []; }, async read() { return null; }, async ping() {}, async close() {},
 	};
@@ -205,14 +213,111 @@ test('a failed shadow write does not report a false failure after Bitrix succeed
 	const client = { async call(method: string) { return method === 'entity.item.add' ? 7 : {}; } } as unknown as B24Client;
 	const { name, ...withId } = storedTransfer();
 	const { id: _id, ...data } = withId;
-	assert.equal(await createTransferData(app, client, name, data), 7);
+	assert.deepEqual(await createTransferData(app, client, name, data), { id: 7, alreadyApplied: false });
 	await saveTransferData(app, client, 7, name, data);
 	await deleteTransferData(app, client, 7, name);
 	assert.equal(warned, 3);
 });
 
+test('Bitrix compatibility mirrors expose the SQL public number to every legacy parser', () => {
+	const { id: _id, name, ...data } = storedTransfer();
+	const parsed = parseTransferItem({ ID: 900, NAME: name, DETAIL_TEXT: JSON.stringify({ ...data, sqlPublicId: 42 }) });
+	assert.equal(parsed?.id, 42);
+});
+
+test('SQL-primary create commits the document before its recoverable Bitrix mirror', async () => {
+	const trace: string[] = [];
+	const writer: TransferSqlWriteRuntime = {
+		mode: 'primary', enabled: true,
+		async write() { throw new Error('unused'); },
+		async createNative() {
+			trace.push('sql-create');
+			return { publicId: 42, revisionId: 71, revisionNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: false, alreadyApplied: false };
+		},
+		async updateNative() { throw new Error('unused'); },
+		async pendingMirrors() { return []; },
+		async claimMirror() { trace.push('sql-claim'); return true; },
+		async bitrixExternalId() { trace.push('sql-identity'); return null; },
+		async markMirrorDelivered(input) { trace.push(`sql-delivered:${input.bitrixExternalId}`); },
+		async recordMirrorFailure() { trace.push('sql-failed'); },
+		async markDeleted() { throw new Error('unused'); }, async readAll() { return []; }, async read() { return null; },
+		async ping() {}, async close() {},
+	};
+	const app = { transferSqlWriter: writer, log: { debug() {}, warn() {} } } as unknown as FastifyInstance;
+	const client = {
+		async call(method: string, params: Record<string, unknown>) {
+			trace.push(`bitrix:${method}`);
+			if (method === 'entity.item.add') {
+				const detail = JSON.parse(String(params['DETAIL_TEXT'])) as Record<string, unknown>;
+				assert.equal(detail['sqlPublicId'], 42);
+				return 900;
+			}
+			return {};
+		},
+		async callWithMeta() { trace.push('bitrix:scan'); return { result: [] }; },
+	} as unknown as B24Client;
+	const { name, ...withId } = storedTransfer();
+	const { id: _id, ...data } = withId;
+	assert.deepEqual(await createTransferData(app, client, name, data, 'test:create:42'), { id: 42, alreadyApplied: false });
+	assert.deepEqual(trace, ['sql-create', 'sql-claim', 'sql-identity', 'bitrix:scan', 'bitrix:entity.item.add', 'sql-delivered:900']);
+});
+
+test('SQL-primary create stays successful when Bitrix is down and leaves the outbox pending', async () => {
+	let recorded = '';
+	const writer: TransferSqlWriteRuntime = {
+		mode: 'primary', enabled: true,
+		async write() { throw new Error('unused'); },
+		async createNative() {
+			return { publicId: 42, revisionId: 71, revisionNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: false, alreadyApplied: false };
+		},
+		async updateNative() { throw new Error('unused'); },
+		async pendingMirrors() { return []; },
+		async claimMirror() { return true; },
+		async bitrixExternalId() { return null; }, async markMirrorDelivered() { throw new Error('unused'); },
+		async recordMirrorFailure(input) { recorded = input.error; },
+		async markDeleted() { throw new Error('unused'); }, async readAll() { return []; }, async read() { return null; },
+		async ping() {}, async close() {},
+	};
+	const app = { transferSqlWriter: writer, log: { debug() {}, warn() {} } } as unknown as FastifyInstance;
+	const client = {
+		async call() { throw new Error('Bitrix unavailable'); },
+		async callWithMeta() { throw new Error('Bitrix unavailable'); },
+	} as unknown as B24Client;
+	const { name, ...withId } = storedTransfer();
+	const { id: _id, ...data } = withId;
+	assert.deepEqual(await createTransferData(app, client, name, data, 'test:create:42'), { id: 42, alreadyApplied: false });
+	assert.match(recorded, /Bitrix unavailable/);
+});
+
+test('SQL-primary retry discovers its public marker and updates instead of duplicating a Bitrix mirror', async () => {
+	const calls: string[] = [];
+	const writer: TransferSqlWriteRuntime = {
+		mode: 'primary', enabled: true, async write() { throw new Error('unused'); },
+		async createNative() {
+			return { publicId: 42, revisionId: 71, revisionNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: true, alreadyApplied: true };
+		},
+		async updateNative() { throw new Error('unused'); },
+		async pendingMirrors() { return [{ publicId: 42, bitrixExternalId: null, revisionId: 71, attemptCount: 1 }]; },
+		async claimMirror() { return true; },
+		async bitrixExternalId() { return null; },
+		async markMirrorDelivered(input) { calls.push(`delivered:${input.bitrixExternalId}`); },
+		async recordMirrorFailure() { throw new Error('unexpected'); }, async markDeleted() { throw new Error('unused'); },
+		async readAll() { return []; }, async read() { return { ...storedTransfer(), id: 42 }; }, async ping() {}, async close() {},
+	};
+	const { id: _id, name, ...data } = storedTransfer();
+	const app = { transferSqlWriter: writer, log: { debug() {}, warn() {} } } as unknown as FastifyInstance;
+	const client = {
+		async call(method: string, params: Record<string, unknown>) { calls.push(`${method}:${String(params['ID'] ?? '')}`); return {}; },
+		async callWithMeta() {
+			return { result: [{ ID: 900, NAME: name, DETAIL_TEXT: JSON.stringify({ ...data, sqlPublicId: 42 }) }] };
+		},
+	} as unknown as B24Client;
+	assert.deepEqual(await createTransferData(app, client, name, data, 'test:create:42'), { id: 42, alreadyApplied: true });
+	assert.deepEqual(calls, ['entity.item.update:900', 'delivered:900']);
+});
+
 function transferReadApp(
-	mode: 'off' | 'shadow' | 'verified',
+	mode: 'off' | 'shadow' | 'verified' | 'primary',
 	sqlTransfers: StoredTransfer[] | Error,
 ): FastifyInstance {
 	const databaseRuntime: DatabaseRuntime = {
@@ -281,4 +386,26 @@ test('shadow transfer reads compare SQL but always preserve the Bitrix object fo
 	const result = await loadTransfer(transferReadApp('shadow', [sql]), transferReadClient([legacy]), legacy.id);
 	assert.ok(result);
 	assert.deepEqual(result.history[0]?.changes, []);
+});
+
+test('primary transfer reads use SQL without touching Bitrix', async () => {
+	const sql = storedTransfer();
+	const client = {
+		async call() { throw new Error('Bitrix must not be read'); },
+		async callWithMeta() { throw new Error('Bitrix must not be read'); },
+	} as unknown as B24Client;
+	assert.equal((await loadTransfer(transferReadApp('primary', [sql]), client, sql.id))?.id, sql.id);
+	assert.deepEqual((await loadTransfers(transferReadApp('primary', [sql]), client)).map((item) => item.id), [sql.id]);
+});
+
+test('primary transfer fallback recovers the public number from the Bitrix compatibility marker', async () => {
+	const legacy = storedTransfer();
+	const { id: _id, name, ...data } = legacy;
+	const item = { ID: 900, NAME: name, DETAIL_TEXT: JSON.stringify({ ...data, sqlPublicId: 42 }) };
+	const client = {
+		async call() { return []; },
+		async callWithMeta() { return { result: [item] }; },
+	} as unknown as B24Client;
+	assert.equal((await loadTransfer(transferReadApp('primary', new Error('SQL unavailable')), client, 42))?.id, 42);
+	assert.deepEqual((await loadTransfers(transferReadApp('primary', new Error('SQL unavailable')), client)).map((transfer) => transfer.id), [42]);
 });

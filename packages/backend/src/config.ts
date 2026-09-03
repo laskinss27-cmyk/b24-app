@@ -28,8 +28,8 @@ const ConfigSchema = z.object({
 	supplyShadowCompare: z.enum(['off', 'on']).default('off'),
 	/** Per-request SQL graph observation; never replaces the legacy response. */
 	supplySqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
-	/** Transfer-card SQL read gate; verified returns SQL only after exact live parity. */
-	transferSqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
+	/** Transfer-card SQL read gate; primary is allowed only with the SQL-first writer. */
+	transferSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 

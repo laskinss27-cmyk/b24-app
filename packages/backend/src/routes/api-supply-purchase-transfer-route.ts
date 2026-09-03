@@ -11,7 +11,7 @@ import {
 } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData } from '../transfers/model.js';
-import { createTransferData } from './transfer-storage.js';
+import { createTransferData, loadTransfer } from './transfer-storage.js';
 import type { AuthBody, TransferProgress } from './api-supply-types.js';
 import { currentRequest, parseTransferProgress, transferBelongsToRequest } from './api-supply-request-progress.js';
 import { currentUser, errInfo, notifyTransferCreated, supplyClientFrom } from './api-supply-route-helpers.js';
@@ -19,7 +19,7 @@ import { validateTransferReservation } from './transfer-reservation-service.js';
 
 export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supplyCreationLocks: Set<string>): void {
 	app.post('/api/supply/purchase-transfer', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; purchaseOrder?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; purchaseOrder?: unknown; idempotencyKey?: unknown; lines?: unknown };
 		const client = supplyClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -30,7 +30,9 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
 		const requestKey = String(b.requestKey ?? '').trim();
 		const purchaseOrder = String(b.purchaseOrder ?? '').trim();
+		const idempotencyKey = String(b.idempotencyKey ?? '').trim();
 		if (!purchaseOrder) return reply.code(400).send({ ok: false, error: 'bad purchaseOrder' });
+		if (app.transferSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание перемещения после обновления страницы' });
 		const incoming = new Map<number, number>();
 		for (const raw of Array.isArray(b.lines) ? b.lines as Array<Record<string, unknown>> : []) {
 			const productId = Number(raw['productId']);
@@ -128,7 +130,13 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 				historyNote: `создано после оприходования ${purchaseOrder}`,
 			});
 			const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
-			const id = await createTransferData(app, client, itemName, baseData);
+			const createdTransfer = await createTransferData(app, client, itemName, baseData, idempotencyKey || undefined);
+			const id = createdTransfer.id;
+			if (createdTransfer.alreadyApplied) {
+				const existing = await loadTransfer(app, client, id);
+				if (!existing) throw new Error(`SQL-first перемещение #${id} не найдено после повтора команды`);
+				return { ok: true, transfer: existing };
+			}
 			baseData = await notifyTransferCreated(app, client, id, itemName, baseData, me);
 			app.log.info({ requestName, purchaseOrder, id }, '[api/supply/purchase-transfer] created');
 			return { ok: true, transfer: { id, name: itemName, ...baseData } };

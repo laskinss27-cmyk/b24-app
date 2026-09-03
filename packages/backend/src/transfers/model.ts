@@ -105,13 +105,13 @@ export function normalizeTransferLines(raw: unknown): TransferLine[] {
 }
 
 export function parseTransferItem(item: Record<string, unknown>): StoredTransfer | null {
-	let data: Partial<TransferData>;
+	let data: Partial<TransferData> & { sqlPublicId?: unknown };
 	try {
-		data = item['DETAIL_TEXT'] ? JSON.parse(String(item['DETAIL_TEXT'])) as Partial<TransferData> : {};
+		data = item['DETAIL_TEXT'] ? JSON.parse(String(item['DETAIL_TEXT'])) as Partial<TransferData> & { sqlPublicId?: unknown } : {};
 	} catch {
 		return null;
 	}
-	const id = Number(item['ID'] ?? item['id']);
+	const id = Number(data.sqlPublicId ?? item['ID'] ?? item['id']);
 	if (!Number.isInteger(id) || id <= 0) return null;
 	const status = statuses.has(data.status as TransferStatus) ? data.status as TransferStatus : 'draft';
 	const lines = normalizeTransferLines(data.lines);

@@ -30,7 +30,7 @@ function poolWithHash(hash: string): TransferSqlPool {
 		async getConnection() { throw new Error('unused'); },
 		async query<T = unknown>(sql: string): Promise<T> {
 			if (sql.includes('FROM stock_transfer_records tr')) return [{
-				bitrix_external_id: 7, display_name: 'Перемещение #7', last_state_hash: binaryHash,
+				public_id: 7, bitrix_external_id: 7, display_name: 'Перемещение #7', last_state_hash: binaryHash,
 				revision_id: 51, revision_no: 1, state_hash: binaryHash, state_format_version: 2,
 				supply_request: '', supply_request_key: '', purchase_order: '', deal_id: '',
 				to_store: 'Склад Б', from_store: 'Склад А', status: 'accepted', note: '', task_id: null,

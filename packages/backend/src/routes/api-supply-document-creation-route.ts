@@ -5,7 +5,7 @@ import { ErpClient } from '../erp/client.js';
 import { createPurchaseOrderDraft, listSupplyRequests, updatePurchaseOrderDraft } from '../erp/operations.js';
 import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData } from '../transfers/model.js';
-import { createTransferData } from './transfer-storage.js';
+import { createTransferData, loadTransfer } from './transfer-storage.js';
 import type { AuthBody, SupplyDecisionLine, TransferProgress } from './api-supply-types.js';
 import { ensureB24SupplierCompany, supplierNorm } from './api-supply-suppliers.js';
 import {
@@ -24,7 +24,7 @@ import {
 
 export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supplyCreationLocks: Set<string>): void {
 	app.post('/api/supply/create-documents', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; toStore?: unknown; lines?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; requestName?: unknown; requestKey?: unknown; idempotencyKey?: unknown; toStore?: unknown; lines?: unknown };
 		const client = supplyClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
@@ -34,6 +34,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 		const requestName = String(b.requestName ?? '').trim();
 		if (!requestName) return reply.code(400).send({ ok: false, error: 'bad requestName' });
 		const requestKey = String(b.requestKey ?? '').trim();
+		const idempotencyKey = String(b.idempotencyKey ?? '').trim();
 		const toStore = String(b.toStore ?? '').trim();
 		if (!toStore) return reply.code(400).send({ ok: false, error: 'bad toStore' });
 		const lines: SupplyDecisionLine[] = (Array.isArray(b.lines) ? b.lines : [])
@@ -48,6 +49,9 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 			}))
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0 && (l.action === 'transfer' || l.action === 'purchase'));
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет строк для создания документов' });
+		if (app.transferSqlWriter?.mode === 'primary' && lines.some((line) => line.action === 'transfer') && !idempotencyKey) {
+			return reply.code(400).send({ ok: false, error: 'повтори создание документов после обновления страницы' });
+		}
 		const badTransfer = lines.find((l) => l.action === 'transfer' && (!l.fromStore || l.fromStore === toStore));
 		if (badTransfer) return reply.code(400).send({ ok: false, error: `для перемещения нужен другой склад-источник: ${badTransfer.itemName || badTransfer.productId}` });
 		const badPurchase = lines.find((l) => l.action === 'purchase' && !l.supplier);
@@ -167,7 +171,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 			for (const line of lines.filter((l) => l.action === 'transfer')) {
 				transfersByStore.set(line.fromStore, [...(transfersByStore.get(line.fromStore) ?? []), line]);
 			}
-			for (const [fromStore, storeLines] of transfersByStore.entries()) {
+			for (const [transferIndex, [fromStore, storeLines]] of [...transfersByStore.entries()].entries()) {
 				const transferLines = storeLines.map((l) => ({ productId: l.productId, name: l.itemName || `#${l.productId}`, qty: l.qty }));
 				let baseData = newTransferData({
 					supplyRequest: requestName,
@@ -182,7 +186,14 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 					historyNote: 'создано из дисплея снабжения',
 				});
 				const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
-				const id = await createTransferData(app, client, itemName, baseData);
+				const createdTransfer = await createTransferData(app, client, itemName, baseData, idempotencyKey ? `${idempotencyKey}:transfer:${transferIndex}` : undefined);
+				const id = createdTransfer.id;
+				if (createdTransfer.alreadyApplied) {
+					const existing = await loadTransfer(app, client, id);
+					if (!existing) throw new Error(`SQL-first перемещение #${id} не найдено после повтора команды`);
+					createdTransfers.push(existing);
+					continue;
+				}
 				baseData = await notifyTransferCreated(app, client, id, itemName, baseData, me);
 				createdTransfers.push({ id, name: itemName, ...baseData });
 			}

@@ -67,3 +67,10 @@ They add a nullable, unique `public_id`, an allocator seeded later by a guarded
 one-shot backfill, and a deterministic checkpoint table. DDL alone does not
 populate a number, loosen the existing Bitrix identity constraint, grant DML,
 or change any runtime read/write path.
+
+`0035`-`0037` prepare SQL-first transfer mutations after the identity backfill.
+They make the legacy Bitrix entity ID optional, add an idempotency command
+ledger, and add a normalized revision-reference outbox for the compatibility
+mirror. The outbox stores no JSON payload: every entry points to an immutable
+normalized revision. These migrations do not switch runtime flags, enqueue
+existing rows, or contact Bitrix24.

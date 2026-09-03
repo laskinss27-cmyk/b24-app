@@ -1,11 +1,12 @@
 import { bx24Auth } from './bitrix-auth.js';
+import { newIdempotencyKey } from './idempotency-key.js';
 import type { SupplyRequestLineDto, TransferDoc, TransferLineDto, TransferRequestDoc } from './stock-transfer-types.js';
 
 /** Создать перемещение(я) из сделки: глобальный склад-получатель + группы по складам-источникам. */
 export async function createTransfers(args: { dealId: number; toStore: string; groups: Array<{ fromStore: string; lines: TransferLineDto[] }>; supplyRequest?: string; supplyRequestKey?: string }): Promise<TransferDoc[]> {
 	const res = await fetch('/api/transfers/create', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...args }),
+		body: JSON.stringify({ ...bx24Auth(), ...args, idempotencyKey: newIdempotencyKey('transfer-create') }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; transfers?: TransferDoc[] };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось создать перемещение');
@@ -173,7 +174,7 @@ export async function deleteTransfer(id: number): Promise<void> {
 export async function createManualTransfer(input: { fromStore: string; toStore: string; note?: string; lines: TransferLineDto[] }): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/create-manual', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...input }),
+		body: JSON.stringify({ ...bx24Auth(), ...input, idempotencyKey: newIdempotencyKey('transfer-manual') }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
 	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось создать перемещение');

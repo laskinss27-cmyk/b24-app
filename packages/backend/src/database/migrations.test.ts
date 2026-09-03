@@ -68,6 +68,9 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0032_add_stock_transfer_public_id.sql',
 		'0033_create_stock_transfer_public_ids.sql',
 		'0034_create_stock_transfer_identity_checkpoints.sql',
+		'0035_make_stock_transfer_bitrix_identity_optional.sql',
+		'0036_create_stock_transfer_commands.sql',
+		'0037_create_stock_transfer_bitrix_outbox.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -104,7 +107,8 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	for (const migration of migrations.slice(22)) {
 		assert.match(migration.sql, /^(?:CREATE TABLE IF NOT EXISTS|ALTER TABLE) stock_transfer_[a-z_]+/);
 		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
-		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration.sql, /\bDROP\s+(?:TABLE|DATABASE|COLUMN)\b/i);
 		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
 		if (migration.filename < '0030') {
 			assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
@@ -254,4 +258,23 @@ test('transfer public identity foundation preserves legacy numbers without runti
 	assert.match(checkpoints, /UNIQUE KEY uq_stock_transfer_identity_checkpoints_hash \(plan_hash\)/);
 	assert.match(checkpoints, /assigned_record_count <= source_record_count/);
 	assert.doesNotMatch([publicId, allocator, checkpoints].join('\n'), /\bJSON\b/i);
+});
+
+test('transfer SQL-first foundation is idempotent and keeps the Bitrix mirror payload-free', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const optionalBitrix = byName.get('0035_make_stock_transfer_bitrix_identity_optional.sql')!;
+	const commands = byName.get('0036_create_stock_transfer_commands.sql')!;
+	const outbox = byName.get('0037_create_stock_transfer_bitrix_outbox.sql')!;
+
+	assert.match(optionalBitrix, /MODIFY COLUMN bitrix_external_id BIGINT UNSIGNED NULL/);
+	assert.match(optionalBitrix, /bitrix_external_id IS NULL OR bitrix_external_id > 0/);
+	assert.match(commands, /UNIQUE KEY uq_stock_transfer_commands_key \(idempotency_key\)/);
+	assert.match(commands, /request_hash BINARY\(32\) NOT NULL/);
+	assert.match(commands, /command_kind IN \('create', 'update'\)/);
+	assert.match(outbox, /UNIQUE KEY uq_stock_transfer_bitrix_outbox_revision \(revision_id, operation_kind\)/);
+	assert.match(outbox, /status IN \('pending', 'processing', 'delivered'\)/);
+	assert.match(outbox, /lease_token CHAR\(36\).*locked_until DATETIME\(6\)/s);
+	assert.match(outbox, /FOREIGN KEY \(revision_id\) REFERENCES stock_transfer_revisions \(id\).*ON DELETE RESTRICT/);
+	assert.doesNotMatch([commands, outbox].join('\n'), /\bJSON\b/i);
 });

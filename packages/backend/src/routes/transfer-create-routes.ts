@@ -9,7 +9,7 @@ import { newTransferData, type TransferData, type TransferLine } from '../transf
 import type { TransferDraftCreator } from './transfer-draft-service.js';
 import type { TransferNotificationService } from './transfer-notification-service.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
-import { createTransferData, saveTransferData } from './transfer-storage.js';
+import { createTransferData, loadTransfer, saveTransferData } from './transfer-storage.js';
 import { formatTransferLines } from './transfer-task-service.js';
 import { currentUser } from './transfer-user-access.js';
 
@@ -37,8 +37,10 @@ export function registerTransferCreateRoutes(
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = String(b['dealId'] ?? '').trim();
 		const toStore = String(b['toStore'] ?? '').trim();
+		const idempotencyKey = String(b['idempotencyKey'] ?? '').trim();
 		const groups = Array.isArray(b['groups']) ? (b['groups'] as Array<Record<string, unknown>>) : [];
 		if (!dealId || !toStore || !groups.length) return reply.code(400).send({ ok: false, error: 'нужны dealId, toStore и хотя бы одна группа источника' });
+		if (app.transferSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание перемещения после обновления страницы' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		await ensureTransfersEntity(client);
@@ -48,7 +50,7 @@ export function registerTransferCreateRoutes(
 			const now = new Date().toISOString();
 			const created: Array<TransferData & { id: number; name: string }> = [];
 
-			for (const g of groups) {
+			for (const [groupIndex, g] of groups.entries()) {
 				const fromStore = String(g['fromStore'] ?? '').trim();
 				const rawLines = Array.isArray(g['lines']) ? (g['lines'] as Array<Record<string, unknown>>) : [];
 				const lines: TransferLine[] = rawLines
@@ -64,7 +66,14 @@ export function registerTransferCreateRoutes(
 					createdAt: now, createdById: me.id, createdByName: me.name,
 				});
 				const itemName = `Перемещение #${dealId}: ${fromStore} → ${toStore}`;
-				const id = await createTransferData(app, client, itemName, data);
+				const createdTransfer = await createTransferData(app, client, itemName, data, idempotencyKey ? `${idempotencyKey}:group:${groupIndex}` : undefined);
+				const id = createdTransfer.id;
+				if (createdTransfer.alreadyApplied) {
+					const existing = await loadTransfer(app, client, id);
+					if (!existing) throw new Error(`SQL-first перемещение #${id} не найдено после повтора команды`);
+					created.push(existing);
+					continue;
+				}
 				const task = await createSupplyTask(client, {
 					title: `Перемещение #${id} по сделке #${dealId}`,
 					description: [
@@ -111,12 +120,14 @@ export function registerTransferCreateRoutes(
 		const fromStore = String(b['fromStore'] ?? '').trim();
 		const toStore = String(b['toStore'] ?? '').trim();
 		const note = String(b['note'] ?? '').trim().slice(0, 140);
+		const idempotencyKey = String(b['idempotencyKey'] ?? '').trim();
 		const rawLines = Array.isArray(b['lines']) ? (b['lines'] as Array<Record<string, unknown>>) : [];
 		const lines: TransferLine[] = rawLines
 			.map((l) => ({ productId: Number(l['productId']), name: String(l['name'] ?? ''), qty: Number(l['qty']) }))
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 		if (!fromStore || !toStore || fromStore === toStore) return reply.code(400).send({ ok: false, error: 'нужны разные склады «откуда» и «куда»' });
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
+		if (app.transferSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание перемещения после обновления страницы' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
 		await ensureTransfersEntity(client);
@@ -125,7 +136,7 @@ export function registerTransferCreateRoutes(
 			if (!appPermission(req, 'transfers.create', me.isSupply)) {
 				return reply.code(403).send({ ok: false, error: 'создавать перемещение может только снабжение' });
 			}
-			const transfer = await createDraftTransfer({ client, erp, me, fromStore, toStore, lines, ...(note ? { note } : {}), historyNote: 'создано вручную в окне' });
+			const transfer = await createDraftTransfer({ client, erp, me, fromStore, toStore, lines, ...(note ? { note } : {}), historyNote: 'создано вручную в окне', ...(idempotencyKey ? { idempotencyKey } : {}) });
 			app.log.info({ id: transfer.id, fromStore, toStore }, '[api/transfers/create-manual] ok');
 			return { ok: true, transfer };
 		} catch (err) {
