@@ -65,6 +65,9 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0029_create_stock_transfer_backfill_checkpoints.sql',
 		'0030_add_stock_transfer_revision_format.sql',
 		'0031_add_stock_transfer_change_value_types.sql',
+		'0032_add_stock_transfer_public_id.sql',
+		'0033_create_stock_transfer_public_ids.sql',
+		'0034_create_stock_transfer_identity_checkpoints.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -234,4 +237,21 @@ test('reservation schema preserves soft monotonic promises and append-only evide
 		[keys, requests, requestLines, reservations, lines, releaseRequests, commands, events, backfillCheckpoints].join('\n'),
 		/^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im,
 	);
+});
+
+test('transfer public identity foundation preserves legacy numbers without runtime activation', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const publicId = byName.get('0032_add_stock_transfer_public_id.sql')!;
+	const allocator = byName.get('0033_create_stock_transfer_public_ids.sql')!;
+	const checkpoints = byName.get('0034_create_stock_transfer_identity_checkpoints.sql')!;
+
+	assert.match(publicId, /ADD COLUMN public_id BIGINT UNSIGNED NULL/);
+	assert.match(publicId, /UNIQUE KEY uq_stock_transfer_records_public_id \(public_id\)/);
+	assert.doesNotMatch(publicId, /MODIFY COLUMN bitrix_external_id/);
+	assert.match(allocator, /public_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT/);
+	assert.match(allocator, /UNIQUE KEY uq_stock_transfer_public_ids_legacy \(legacy_bitrix_external_id\)/);
+	assert.match(checkpoints, /UNIQUE KEY uq_stock_transfer_identity_checkpoints_hash \(plan_hash\)/);
+	assert.match(checkpoints, /assigned_record_count <= source_record_count/);
+	assert.doesNotMatch([publicId, allocator, checkpoints].join('\n'), /\bJSON\b/i);
 });

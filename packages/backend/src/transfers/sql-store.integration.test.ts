@@ -9,6 +9,7 @@ import { applyMigrations } from '../database/migrations.js';
 import { newTransferData, type StoredTransfer } from './model.js';
 import { applyTransferSqlBackfill, buildTransferSqlBackfillPlan } from './sql-backfill.js';
 import { compareTransferSqlParity } from './sql-compare.js';
+import { applyTransferIdentityBackfill, buildTransferIdentityBackfillPlan, readTransferIdentityRows } from './sql-identity.js';
 import { readCurrentSqlTransfers } from './sql-reader.js';
 import { markTransferSqlDeleted, writeTransferSqlRevision, type TransferSqlPool } from './sql-store.js';
 
@@ -61,13 +62,16 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 			'0029_create_stock_transfer_backfill_checkpoints.sql',
 			'0030_add_stock_transfer_revision_format.sql',
 			'0031_add_stock_transfer_change_value_types.sql',
+			'0032_add_stock_transfer_public_id.sql',
+			'0033_create_stock_transfer_public_ids.sql',
+			'0034_create_stock_transfer_identity_checkpoints.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalMigrationsDirectory, filename));
 
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 9);
+		assert.equal((await applyMigrations(schemaPool, rehearsalMigrationsDirectory)).length, 12);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalMigrationsDirectory), []);
 
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
@@ -85,6 +89,20 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 		assert.equal(repeated.alreadyApplied, true);
 		assert.equal(compareTransferSqlParity([initial], await readCurrentSqlTransfers(sqlPool)).matches, true);
 
+		const identityPlan = buildTransferIdentityBackfillPlan(
+			await readTransferIdentityRows(sqlPool),
+			'2026-09-03T08:00:00.000Z',
+		);
+		const identityApplied = await applyTransferIdentityBackfill(sqlPool, identityPlan, identityPlan.planHash);
+		const identityRepeated = await applyTransferIdentityBackfill(sqlPool, identityPlan, identityPlan.planHash);
+		assert.equal(identityApplied.assignedRecordCount, 1);
+		assert.equal(identityRepeated.alreadyApplied, true);
+		assert.deepEqual(await readTransferIdentityRows(sqlPool), [{ recordId: 1, bitrixExternalId: 7, publicId: 7 }]);
+		const allocator = await schemaPool.query<Array<Record<string, unknown>>>(
+			'SELECT public_id, legacy_bitrix_external_id FROM stock_transfer_public_ids',
+		);
+		assert.deepEqual(allocator.map((row) => [Number(row['public_id']), Number(row['legacy_bitrix_external_id'])]), [[7, 7]]);
+
 		const changed = transfer(3);
 		const { id, name, ...data } = changed;
 		await writeTransferSqlRevision(sqlPool, { externalId: id, name, data, sourceKind: 'bitrix_dual_write' });
@@ -92,6 +110,7 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 		assert.equal(await count(schemaPool, 'stock_transfer_records'), 1);
 		assert.equal(await count(schemaPool, 'stock_transfer_revisions'), 2);
 		assert.equal(await count(schemaPool, 'stock_transfer_backfill_checkpoints'), 1);
+		assert.equal(await count(schemaPool, 'stock_transfer_identity_checkpoints'), 1);
 
 		await markTransferSqlDeleted(sqlPool, { externalId: 7, name: 'Перемещение #7' });
 		assert.deepEqual(await readCurrentSqlTransfers(sqlPool), []);

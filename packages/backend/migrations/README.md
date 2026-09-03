@@ -61,3 +61,9 @@ Future files must use `NNNN_short_name.sql`, be append-only after application,
 and contain one idempotent MariaDB statement per file. A changed checksum stops
 the runner. The first production run independently verified columns, indexes,
 foreign keys and CHECK constraints rather than relying on `IF NOT EXISTS`.
+
+`0032`-`0034` prepare an application-owned public number for transfer documents.
+They add a nullable, unique `public_id`, an allocator seeded later by a guarded
+one-shot backfill, and a deterministic checkpoint table. DDL alone does not
+populate a number, loosen the existing Bitrix identity constraint, grant DML,
+or change any runtime read/write path.
