@@ -19,12 +19,12 @@ CREATE TABLE IF NOT EXISTS stock_transfer_bitrix_outbox (
     KEY ix_stock_transfer_bitrix_outbox_transfer (transfer_id, id),
     CONSTRAINT fk_stock_transfer_bitrix_outbox_record FOREIGN KEY (transfer_id) REFERENCES stock_transfer_records (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_stock_transfer_bitrix_outbox_revision FOREIGN KEY (revision_id) REFERENCES stock_transfer_revisions (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_stock_transfer_bitrix_outbox_operation CHECK (operation_kind = 'upsert'),
-    CONSTRAINT chk_stock_transfer_bitrix_outbox_status CHECK (status IN ('pending', 'processing', 'delivered')),
+    CONSTRAINT chk_stock_transfer_bitrix_outbox_operation CHECK (operation_kind IN ('upsert', 'delete')),
+    CONSTRAINT chk_stock_transfer_bitrix_outbox_status CHECK (status IN ('pending', 'processing', 'delivered', 'superseded')),
     CONSTRAINT chk_stock_transfer_bitrix_outbox_attempts CHECK (attempt_count <= 1000000),
     CONSTRAINT chk_stock_transfer_bitrix_outbox_completion CHECK (
         (status = 'pending' AND lease_token IS NULL AND locked_until IS NULL AND completed_at IS NULL)
         OR (status = 'processing' AND lease_token IS NOT NULL AND locked_until IS NOT NULL AND completed_at IS NULL)
-        OR (status = 'delivered' AND lease_token IS NULL AND locked_until IS NULL AND completed_at IS NOT NULL)
+        OR (status IN ('delivered', 'superseded') AND lease_token IS NULL AND locked_until IS NULL AND completed_at IS NOT NULL)
     )
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

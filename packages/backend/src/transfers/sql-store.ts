@@ -58,6 +58,7 @@ export interface PendingTransferBitrixMirror {
 	bitrixExternalId: number | null;
 	revisionId: number;
 	attemptCount: number;
+	operationKind: 'upsert' | 'delete';
 }
 
 type QueryRow = Record<string, unknown>;
@@ -266,6 +267,11 @@ export async function writeTransferSqlRevisionOnConnection(
 	return { externalId, ...result };
 }
 
+function storedHash(value: unknown, name: string): string {
+	if (!Buffer.isBuffer(value) || value.length !== 32) throw new Error(`Invalid ${name}`);
+	return value.toString('hex');
+}
+
 async function writeLockedTransferRevision(
 	connection: TransferSqlConnection,
 	transfer: StoredTransfer,
@@ -381,7 +387,7 @@ export async function writeTransferSqlRevision(
 	}
 }
 
-type NativeCommandKind = 'create' | 'update';
+type NativeCommandKind = 'create' | 'update' | 'delete';
 
 async function lockNativeCommand(
 	connection: TransferSqlConnection,
@@ -416,11 +422,10 @@ async function lockNativeCommand(
 async function completedNativeCommandResult(
 	connection: TransferSqlConnection,
 	command: QueryRow,
-	requestHash: string,
 ): Promise<WriteNativeTransferResult | null> {
 	if (command['transfer_id'] == null) return null;
 	const rows = await connection.query<QueryRow[]>(`
-		SELECT tr.public_id, r.id AS revision_id, r.revision_no
+		SELECT tr.public_id, r.id AS revision_id, r.revision_no, r.state_hash
 		FROM stock_transfer_records tr
 		JOIN stock_transfer_revisions r ON r.id = ? AND r.transfer_id = tr.id
 		WHERE tr.id = ?
@@ -431,7 +436,7 @@ async function completedNativeCommandResult(
 		publicId: requiredInteger(rows[0]!['public_id'], 'transfer public id'),
 		revisionId: sqlIdentifier(rows[0]!['revision_id'], 'transfer revision id'),
 		revisionNo: requiredInteger(rows[0]!['revision_no'], 'transfer revision number'),
-		stateHash: requestHash,
+		stateHash: storedHash(rows[0]!['state_hash'], 'transfer revision hash'),
 		alreadyCurrent: true,
 		alreadyApplied: true,
 	};
@@ -455,11 +460,12 @@ async function enqueueBitrixMirror(
 	connection: TransferSqlConnection,
 	transferId: unknown,
 	revisionId: number,
+	operationKind: 'upsert' | 'delete' = 'upsert',
 ): Promise<void> {
 	await connection.query(`
 		INSERT IGNORE INTO stock_transfer_bitrix_outbox (transfer_id, revision_id, operation_kind)
-		VALUES (?, ?, 'upsert')
-	`, [transferId, revisionId]);
+		VALUES (?, ?, ?)
+	`, [transferId, revisionId, operationKind]);
 }
 
 function nativeRequestState(name: string, data: TransferData, publicId = 1): StoredTransfer {
@@ -479,7 +485,7 @@ export async function createNativeTransferSql(
 		await connection.beginTransaction();
 		transaction = true;
 		const command = await lockNativeCommand(connection, key, 'create', requestHash);
-		const completed = await completedNativeCommandResult(connection, command, requestHash);
+		const completed = await completedNativeCommandResult(connection, command);
 		if (completed) {
 			await connection.commit();
 			transaction = false;
@@ -526,7 +532,7 @@ export async function updateNativeTransferSql(
 		await connection.beginTransaction();
 		transaction = true;
 		const command = await lockNativeCommand(connection, key, 'update', requestHash);
-		const completed = await completedNativeCommandResult(connection, command, requestHash);
+		const completed = await completedNativeCommandResult(connection, command);
 		if (completed) {
 			if (completed.publicId !== publicId) throw new Error(`Transfer idempotency key ${key} belongs to another document`);
 			await connection.commit();
@@ -562,21 +568,91 @@ export async function updateNativeTransferSql(
 	}
 }
 
+export async function deleteNativeTransferSql(
+	pool: TransferSqlPool,
+	input: { publicId: number; idempotencyKey: string; name: string },
+): Promise<WriteNativeTransferResult> {
+	const publicId = requiredInteger(input.publicId, 'transfer public id');
+	const key = idempotencyKey(input.idempotencyKey);
+	const name = bounded(input.name.trim(), 255, 'transfer display name');
+	if (!name) throw new Error('Transfer display name is required');
+	const requestHash = createHash('sha256')
+		.update(supplyMirrorCanonicalJson({ command: 'delete', publicId }))
+		.digest('hex');
+	const connection = await pool.getConnection();
+	let transaction = false;
+	try {
+		await connection.beginTransaction();
+		transaction = true;
+		const command = await lockNativeCommand(connection, key, 'delete', requestHash);
+		const completed = await completedNativeCommandResult(connection, command);
+		if (completed) {
+			if (completed.publicId !== publicId) throw new Error(`Transfer idempotency key ${key} belongs to another document`);
+			await connection.commit();
+			transaction = false;
+			return completed;
+		}
+		const records = await connection.query<QueryRow[]>(`
+			SELECT id, last_state_hash
+			FROM stock_transfer_records
+			WHERE public_id = ?
+			FOR UPDATE
+		`, [publicId]);
+		if (records.length !== 1) throw new Error(`Transfer #${publicId} was not found in SQL`);
+		const transferId = records[0]!['id'];
+		const revisions = await connection.query<QueryRow[]>(`
+			SELECT id, revision_no, state_hash
+			FROM stock_transfer_revisions
+			WHERE transfer_id = ?
+			ORDER BY revision_no DESC
+			LIMIT 1
+			FOR UPDATE
+		`, [transferId]);
+		if (revisions.length !== 1) throw new Error(`Transfer #${publicId} has no SQL revision`);
+		const revisionId = sqlIdentifier(revisions[0]!['id'], 'transfer revision id');
+		const revisionNo = requiredInteger(revisions[0]!['revision_no'], 'transfer revision number');
+		const stateHash = storedHash(revisions[0]!['state_hash'], 'transfer revision hash');
+		await connection.query(`
+			UPDATE stock_transfer_records
+			SET display_name = ?, deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP(6))
+			WHERE id = ?
+		`, [name, transferId]);
+		await connection.query(`
+			UPDATE stock_transfer_bitrix_outbox
+			SET status = 'superseded', lease_token = NULL, locked_until = NULL,
+				completed_at = CURRENT_TIMESTAMP(6), last_error = 'superseded by delete'
+			WHERE transfer_id = ? AND operation_kind = 'upsert' AND (
+				status = 'pending' OR (status = 'processing' AND locked_until <= CURRENT_TIMESTAMP(6))
+			)
+		`, [transferId]);
+		await enqueueBitrixMirror(connection, transferId, revisionId, 'delete');
+		await completeNativeCommand(connection, command['id'], transferId, revisionId);
+		await connection.commit();
+		transaction = false;
+		return { publicId, revisionId, revisionNo, stateHash, alreadyCurrent: true, alreadyApplied: false };
+	} catch (error) {
+		if (transaction) await connection.rollback().catch(() => undefined);
+		throw error;
+	} finally {
+		await connection.release();
+	}
+}
+
 export async function readPendingTransferBitrixMirrors(
 	pool: TransferSqlPool,
 	limit = 20,
 ): Promise<PendingTransferBitrixMirror[]> {
 	const safeLimit = Math.min(Math.max(requiredInteger(limit, 'transfer outbox limit'), 1), 100);
 	const rows = await pool.query<QueryRow[]>(`
-		SELECT tr.public_id, tr.bitrix_external_id, MAX(o.revision_id) AS revision_id,
-			MAX(o.attempt_count) AS attempt_count
+		SELECT tr.public_id, tr.bitrix_external_id, o.operation_kind,
+			MAX(o.revision_id) AS revision_id, MAX(o.attempt_count) AS attempt_count
 		FROM stock_transfer_bitrix_outbox o
 		JOIN stock_transfer_records tr ON tr.id = o.transfer_id
 		WHERE (
 			(o.status = 'pending' AND o.available_at <= CURRENT_TIMESTAMP(6))
 			OR (o.status = 'processing' AND o.locked_until <= CURRENT_TIMESTAMP(6))
-		) AND tr.deleted_at IS NULL
-		GROUP BY tr.id, tr.public_id, tr.bitrix_external_id
+		) AND ((o.operation_kind = 'upsert' AND tr.deleted_at IS NULL) OR o.operation_kind = 'delete')
+		GROUP BY tr.id, tr.public_id, tr.bitrix_external_id, o.operation_kind
 		ORDER BY MIN(o.id)
 		LIMIT ${safeLimit}
 	`);
@@ -585,6 +661,7 @@ export async function readPendingTransferBitrixMirrors(
 		bitrixExternalId: row['bitrix_external_id'] == null ? null : requiredInteger(row['bitrix_external_id'], 'transfer Bitrix id'),
 		revisionId: sqlIdentifier(row['revision_id'], 'transfer revision id'),
 		attemptCount: requiredInteger(row['attempt_count'], 'transfer mirror attempt count', true),
+		operationKind: String(row['operation_kind']) === 'delete' ? 'delete' : 'upsert',
 	}));
 }
 
@@ -598,7 +675,7 @@ function mirrorLeaseToken(value: unknown): string {
 
 export async function claimTransferBitrixMirror(
 	pool: TransferSqlPool,
-	input: { publicId: number; revisionId: number; leaseToken: string },
+	input: { publicId: number; revisionId: number; operationKind: 'upsert' | 'delete'; leaseToken: string },
 ): Promise<boolean> {
 	const publicId = requiredInteger(input.publicId, 'transfer public id');
 	const revisionId = requiredInteger(input.revisionId, 'transfer revision id');
@@ -611,9 +688,9 @@ export async function claimTransferBitrixMirror(
 		const records = await connection.query<QueryRow[]>(`
 			SELECT id
 			FROM stock_transfer_records
-			WHERE public_id = ? AND deleted_at IS NULL
+			WHERE public_id = ? AND (? = 'delete' OR deleted_at IS NULL)
 			FOR UPDATE
-		`, [publicId]);
+		`, [publicId, input.operationKind]);
 		if (records.length !== 1) throw new Error(`Transfer #${publicId} was not found for Bitrix mirroring`);
 		const transferId = records[0]!['id'];
 		const active = await connection.query<QueryRow[]>(`
@@ -631,11 +708,11 @@ export async function claimTransferBitrixMirror(
 		const claimed = await connection.query<SqlResult>(`
 			UPDATE stock_transfer_bitrix_outbox
 			SET status = 'processing', lease_token = ?, locked_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 60 SECOND)
-			WHERE transfer_id = ? AND revision_id <= ? AND (
+			WHERE transfer_id = ? AND operation_kind = ? AND revision_id <= ? AND (
 				(status = 'pending' AND available_at <= CURRENT_TIMESTAMP(6))
 				OR (status = 'processing' AND locked_until <= CURRENT_TIMESTAMP(6))
 			)
-		`, [leaseToken, transferId, revisionId]);
+		`, [leaseToken, transferId, input.operationKind, revisionId]);
 		await connection.commit();
 		transaction = false;
 		return Number(claimed.affectedRows ?? 0) > 0;
@@ -655,7 +732,7 @@ export async function readTransferBitrixExternalId(
 	const rows = await pool.query<QueryRow[]>(`
 		SELECT bitrix_external_id
 		FROM stock_transfer_records
-		WHERE public_id = ? AND deleted_at IS NULL
+		WHERE public_id = ?
 	`, [publicId]);
 	if (!rows.length) return null;
 	if (rows.length !== 1) throw new Error(`Transfer #${publicId} identity is ambiguous`);
@@ -666,7 +743,7 @@ export async function readTransferBitrixExternalId(
 
 export async function recordTransferBitrixMirrorFailure(
 	pool: TransferSqlPool,
-	input: { publicId: number; revisionId: number; leaseToken: string; error: string },
+	input: { publicId: number; revisionId: number; operationKind: 'upsert' | 'delete'; leaseToken: string; error: string },
 ): Promise<void> {
 	const publicId = requiredInteger(input.publicId, 'transfer public id');
 	const revisionId = requiredInteger(input.revisionId, 'transfer revision id');
@@ -679,8 +756,9 @@ export async function recordTransferBitrixMirrorFailure(
 			o.last_attempt_at = CURRENT_TIMESTAMP(6),
 			o.available_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL LEAST(300, POW(2, LEAST(o.attempt_count, 8))) SECOND),
 			o.last_error = ?, o.status = 'pending', o.lease_token = NULL, o.locked_until = NULL
-		WHERE tr.public_id = ? AND o.status = 'processing' AND o.lease_token = ? AND o.revision_id <= ?
-	`, [error, publicId, leaseToken, revisionId]);
+		WHERE tr.public_id = ? AND o.operation_kind = ? AND o.status = 'processing'
+			AND o.lease_token = ? AND o.revision_id <= ?
+	`, [error, publicId, input.operationKind, leaseToken, revisionId]);
 }
 
 export async function markTransferBitrixMirrorDelivered(
@@ -700,7 +778,8 @@ export async function markTransferBitrixMirrorDelivered(
 			SELECT o.id
 			FROM stock_transfer_bitrix_outbox o
 			JOIN stock_transfer_records tr ON tr.id = o.transfer_id
-			WHERE tr.public_id = ? AND o.status = 'processing' AND o.lease_token = ? AND o.revision_id <= ?
+			WHERE tr.public_id = ? AND o.operation_kind = 'upsert' AND o.status = 'processing'
+				AND o.lease_token = ? AND o.revision_id <= ?
 			FOR UPDATE
 		`, [publicId, leaseToken, revisionId]);
 		if (!claims.length) {
@@ -744,7 +823,8 @@ export async function markTransferBitrixMirrorDelivered(
 			SET o.status = 'delivered', o.attempt_count = o.attempt_count + 1,
 				o.last_attempt_at = CURRENT_TIMESTAMP(6), o.lease_token = NULL, o.locked_until = NULL,
 				o.completed_at = CURRENT_TIMESTAMP(6), o.last_error = ''
-			WHERE tr.public_id = ? AND o.status = 'processing' AND o.lease_token = ? AND o.revision_id <= ?
+			WHERE tr.public_id = ? AND o.operation_kind = 'upsert' AND o.status = 'processing'
+				AND o.lease_token = ? AND o.revision_id <= ?
 		`, [publicId, leaseToken, revisionId]);
 		await connection.commit();
 		transaction = false;
@@ -754,6 +834,24 @@ export async function markTransferBitrixMirrorDelivered(
 	} finally {
 		await connection.release();
 	}
+}
+
+export async function markTransferBitrixDeleteDelivered(
+	pool: TransferSqlPool,
+	input: { publicId: number; revisionId: number; leaseToken: string },
+): Promise<void> {
+	const publicId = requiredInteger(input.publicId, 'transfer public id');
+	const revisionId = requiredInteger(input.revisionId, 'transfer revision id');
+	const leaseToken = mirrorLeaseToken(input.leaseToken);
+	await pool.query(`
+		UPDATE stock_transfer_bitrix_outbox o
+		JOIN stock_transfer_records tr ON tr.id = o.transfer_id
+		SET o.status = 'delivered', o.attempt_count = o.attempt_count + 1,
+			o.last_attempt_at = CURRENT_TIMESTAMP(6), o.lease_token = NULL, o.locked_until = NULL,
+			o.completed_at = CURRENT_TIMESTAMP(6), o.last_error = ''
+		WHERE tr.public_id = ? AND o.operation_kind = 'delete' AND o.status = 'processing'
+			AND o.lease_token = ? AND o.revision_id <= ?
+	`, [publicId, leaseToken, revisionId]);
 }
 
 export async function markTransferSqlDeleted(

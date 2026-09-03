@@ -17,6 +17,7 @@ import {
 } from './api-supply-request-progress.js';
 import { errInfo, supplyClientFrom } from './api-supply-route-helpers.js';
 import type { AuthBody, TransferProgress } from './api-supply-types.js';
+import { loadTransfers } from './transfer-storage.js';
 
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 
@@ -52,11 +53,16 @@ export function registerSupplyOrdersRoute(app: FastifyInstance, database?: Datab
 			const standaloneTransfers: TransferProgress[] = [];
 			const reservations = new Map<string, number>();
 			try {
-				await ensureTransfersEntity(client);
-				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
-				rawTransferRecordCount = transferItems?.length ?? 0;
-				parsedTransfers = (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null);
-				if (app.config.supplySqlRead !== 'off') {
+				if (app.config.transferSqlRead === 'primary') {
+					parsedTransfers = await loadTransfers(app, client);
+					rawTransferRecordCount = parsedTransfers.length;
+				} else {
+					await ensureTransfersEntity(client);
+					const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
+					rawTransferRecordCount = transferItems?.length ?? 0;
+					parsedTransfers = (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null);
+				}
+				if (app.config.transferSqlRead !== 'primary' && app.config.supplySqlRead !== 'off') {
 					const resolved = await resolveSupplySqlTransfers(app.config.supplySqlRead, database, {
 						rawRecordCount: rawTransferRecordCount,
 						transfers: parsedTransfers,

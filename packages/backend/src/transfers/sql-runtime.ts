@@ -2,6 +2,8 @@ import mariadb, { type Pool } from 'mariadb';
 import {
 	createNativeTransferSql,
 	claimTransferBitrixMirror,
+	deleteNativeTransferSql,
+	markTransferBitrixDeleteDelivered,
 	markTransferBitrixMirrorDelivered,
 	markTransferSqlDeleted,
 	readPendingTransferBitrixMirrors,
@@ -34,11 +36,13 @@ export interface TransferSqlWriteRuntime {
 	write(input: { externalId: number; name: string; data: TransferData; sourceKind?: TransferSqlSourceKind }): ReturnType<typeof writeTransferSqlRevision>;
 	createNative(input: { idempotencyKey: string; name: string; data: TransferData }): ReturnType<typeof createNativeTransferSql>;
 	updateNative(input: { publicId: number; idempotencyKey: string; name: string; data: TransferData }): ReturnType<typeof updateNativeTransferSql>;
+	deleteNative(input: { publicId: number; idempotencyKey: string; name: string }): ReturnType<typeof deleteNativeTransferSql>;
 	pendingMirrors(limit?: number): Promise<PendingTransferBitrixMirror[]>;
-	claimMirror(input: { publicId: number; revisionId: number; leaseToken: string }): Promise<boolean>;
+	claimMirror(input: { publicId: number; revisionId: number; operationKind: 'upsert' | 'delete'; leaseToken: string }): Promise<boolean>;
 	bitrixExternalId(publicId: number): Promise<number | null>;
 	markMirrorDelivered(input: { publicId: number; revisionId: number; bitrixExternalId: number; leaseToken: string }): Promise<void>;
-	recordMirrorFailure(input: { publicId: number; revisionId: number; leaseToken: string; error: string }): Promise<void>;
+	markDeleteDelivered(input: { publicId: number; revisionId: number; leaseToken: string }): Promise<void>;
+	recordMirrorFailure(input: { publicId: number; revisionId: number; operationKind: 'upsert' | 'delete'; leaseToken: string; error: string }): Promise<void>;
 	markDeleted(input: { externalId: number; name: string; deletedAt?: Date }): Promise<void>;
 	readAll(): ReturnType<typeof readCurrentSqlTransfers>;
 	read(externalId: number): ReturnType<typeof readCurrentSqlTransfer>;
@@ -97,10 +101,12 @@ export function createTransferSqlWriteRuntime(config: TransferSqlWriteConfig): T
 			async write() { throw disabledError(); },
 			async createNative() { throw disabledError(); },
 			async updateNative() { throw disabledError(); },
+			async deleteNative() { throw disabledError(); },
 			async pendingMirrors() { throw disabledError(); },
 			async claimMirror() { throw disabledError(); },
 			async bitrixExternalId() { throw disabledError(); },
 			async markMirrorDelivered() { throw disabledError(); },
+			async markDeleteDelivered() { throw disabledError(); },
 			async recordMirrorFailure() { throw disabledError(); },
 			async markDeleted() { throw disabledError(); },
 			async readAll() { throw disabledError(); },
@@ -129,10 +135,12 @@ export function createTransferSqlWriteRuntime(config: TransferSqlWriteConfig): T
 		},
 		createNative(input) { return createNativeTransferSql(pool, input); },
 		updateNative(input) { return updateNativeTransferSql(pool, input); },
+		deleteNative(input) { return deleteNativeTransferSql(pool, input); },
 		pendingMirrors(limit) { return readPendingTransferBitrixMirrors(pool, limit); },
 		claimMirror(input) { return claimTransferBitrixMirror(pool, input); },
 		bitrixExternalId(publicId) { return readTransferBitrixExternalId(pool, publicId); },
 		markMirrorDelivered(input) { return markTransferBitrixMirrorDelivered(pool, input); },
+		markDeleteDelivered(input) { return markTransferBitrixDeleteDelivered(pool, input); },
 		recordMirrorFailure(input) { return recordTransferBitrixMirrorFailure(pool, input); },
 		markDeleted(input) { return markTransferSqlDeleted(pool, input); },
 		readAll() { return readCurrentSqlTransfers(pool); },

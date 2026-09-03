@@ -271,9 +271,10 @@ test('transfer SQL-first foundation is idempotent and keeps the Bitrix mirror pa
 	assert.match(optionalBitrix, /bitrix_external_id IS NULL OR bitrix_external_id > 0/);
 	assert.match(commands, /UNIQUE KEY uq_stock_transfer_commands_key \(idempotency_key\)/);
 	assert.match(commands, /request_hash BINARY\(32\) NOT NULL/);
-	assert.match(commands, /command_kind IN \('create', 'update'\)/);
+	assert.match(commands, /command_kind IN \('create', 'update', 'delete'\)/);
 	assert.match(outbox, /UNIQUE KEY uq_stock_transfer_bitrix_outbox_revision \(revision_id, operation_kind\)/);
-	assert.match(outbox, /status IN \('pending', 'processing', 'delivered'\)/);
+	assert.match(outbox, /operation_kind IN \('upsert', 'delete'\)/);
+	assert.match(outbox, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
 	assert.match(outbox, /lease_token CHAR\(36\).*locked_until DATETIME\(6\)/s);
 	assert.match(outbox, /FOREIGN KEY \(revision_id\) REFERENCES stock_transfer_revisions \(id\).*ON DELETE RESTRICT/);
 	assert.doesNotMatch([commands, outbox].join('\n'), /\bJSON\b/i);

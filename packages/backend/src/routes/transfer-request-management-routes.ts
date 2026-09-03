@@ -79,7 +79,8 @@ export function registerTransferRequestManagementRoutes(
 		operationLocks.add(lockKey);
 		let createdTransferId = 0;
 		try {
-			await Promise.all([ensureTransferRequestsEntity(client), ensureTransfersEntity(client)]);
+			await ensureTransferRequestsEntity(client);
+			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
 			if (!appPermission(req, 'transfers.manage_requests', me.isSupply)) {

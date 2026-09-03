@@ -11,18 +11,17 @@ import {
 	updateSupplyRequestStore,
 } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
-import { listAllEntityItems } from '../b24/entity-items.js';
-import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
+import { ensureTransfersEntity } from '../b24/placement.js';
 import { canManageStock } from './api-stock.js';
-import type { AuthBody, TransferProgress } from './api-supply-types.js';
+import type { AuthBody } from './api-supply-types.js';
 import {
 	currentRequest,
 	listPurchaseChildren,
-	parseTransferProgress,
 	STANDALONE_SUPPLY_REQUEST,
 	transferBelongsToRequest,
 } from './api-supply-request-progress.js';
 import { currentUser, errInfo, supplyClientFrom } from './api-supply-route-helpers.js';
+import { loadTransfers } from './transfer-storage.js';
 
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 
@@ -101,10 +100,8 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 		try {
 			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (MR_DONE.has(request.status)) throw new Error('у выполненной заявки нельзя менять склад');
-			await ensureTransfersEntity(client);
-			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
-			const linkedTransfer = (transferItems ?? [])
-				.map(parseTransferProgress)
+			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
+			const linkedTransfer = (await loadTransfers(app, client))
 				.find((transfer) => transfer && transfer.status !== 'canceled' && transferBelongsToRequest(transfer, request));
 			if (linkedTransfer) throw new Error('склад уже закреплён в перемещении; сначала измени или отмени перемещение');
 			const purchases = (await listPurchaseChildren(erp, [request])).get(request.requestKey) ?? [];
@@ -152,10 +149,9 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			return reply.code(400).send({ ok: false, error: 'некорректные данные строки заявки' });
 		}
 		try {
-			await ensureTransfersEntity(client);
-			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
+			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 			const transferAllocation = new Map<string, Map<number, number>>();
-			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
+			for (const transfer of await loadTransfers(app, client)) {
 				if (transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || transfer.supplyRequestKey !== requestKey) continue;
 				const byProduct = transferAllocation.get(transfer.supplyRequestKey) ?? new Map<number, number>();
 				for (const line of transfer.lines) byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);

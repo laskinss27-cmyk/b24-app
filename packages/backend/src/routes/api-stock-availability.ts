@@ -1,25 +1,23 @@
+import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
-import { listAllEntityItems } from '../b24/entity-items.js';
 import type { ErpClient } from '../erp/client.js';
 import { fetchErpStocksFor } from '../erp/operations.js';
-import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
-import { parseTransferItem, type StoredTransfer } from '../transfers/model.js';
 import { ReservationService } from '../reservations/service.js';
 import type { ReservationRuntime } from '../reservations/runtime.js';
+import { loadTransfers } from './transfer-storage.js';
 
 export async function validateFreeStock(
+	app: FastifyInstance,
 	client: B24Client,
 	erp: ErpClient,
 	lines: Array<{ productId: number; qty: number; fromStore: string }>,
 	reservationRuntime?: ReservationRuntime | null,
 ): Promise<void> {
 	if (!lines.length) return;
-	await ensureTransfersEntity(client);
-	const [rawTransfers, stocks] = await Promise.all([
-		listAllEntityItems(client, TRANSFERS_ENTITY),
+	const [transfers, stocks] = await Promise.all([
+		loadTransfers(app, client),
 		fetchErpStocksFor(erp, lines.map((line) => line.productId)),
 	]);
-	const transfers = (rawTransfers ?? []).map(parseTransferItem).filter((item): item is StoredTransfer => item != null);
 	const reserved = new Map<string, number>();
 	for (const transfer of transfers) {
 		if (transfer.status !== 'draft' && transfer.status !== 'collected') continue;

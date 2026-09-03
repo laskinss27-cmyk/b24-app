@@ -1,17 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeDomain } from '../security.js';
-import { listAllEntityItems } from '../b24/entity-items.js';
 import { ErpClient } from '../erp/client.js';
 import { createPurchaseOrderDraft, listSupplyRequests, updatePurchaseOrderDraft } from '../erp/operations.js';
-import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
+import { ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData } from '../transfers/model.js';
-import { createTransferData, loadTransfer } from './transfer-storage.js';
+import { createTransferData, loadTransfer, loadTransfers } from './transfer-storage.js';
 import type { AuthBody, SupplyDecisionLine, TransferProgress } from './api-supply-types.js';
 import { ensureB24SupplierCompany, supplierNorm } from './api-supply-suppliers.js';
 import {
 	currentRequest,
 	listPurchaseChildren,
-	parseTransferProgress,
 	purchaseRequestLines,
 	transferBelongsToRequest,
 } from './api-supply-request-progress.js';
@@ -66,7 +64,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 		const updatedPurchases: string[] = [];
 
 		try {
-			await ensureTransfersEntity(client);
+			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			if (request.toStore && request.toStore !== toStore) throw new Error(`склад назначения заявки изменился: ${request.toStore}`);
@@ -74,8 +72,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 			const requested = new Map<number, number>();
 			for (const item of request.items) requested.set(item.productId, (requested.get(item.productId) ?? 0) + item.qty);
 			const planned = new Map<number, number>();
-			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
-			const existingTransfers = (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null);
+			const existingTransfers: TransferProgress[] = await loadTransfers(app, client);
 			const reservedByProductStore = new Map<string, number>();
 			for (const transfer of existingTransfers) {
 				if (transfer.status === 'draft' || transfer.status === 'collected' || transfer.status === 'requested') {

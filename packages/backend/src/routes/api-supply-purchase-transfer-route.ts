@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeDomain } from '../security.js';
-import { listAllEntityItems } from '../b24/entity-items.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	listSupplyRequests,
@@ -9,11 +8,11 @@ import {
 	SUPPLY_REQUEST_FIELD,
 	SUPPLY_REQUEST_KEY_FIELD,
 } from '../erp/operations.js';
-import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
+import { ensureTransfersEntity } from '../b24/placement.js';
 import { newTransferData } from '../transfers/model.js';
-import { createTransferData, loadTransfer } from './transfer-storage.js';
-import type { AuthBody, TransferProgress } from './api-supply-types.js';
-import { currentRequest, parseTransferProgress, transferBelongsToRequest } from './api-supply-request-progress.js';
+import { createTransferData, loadTransfer, loadTransfers } from './transfer-storage.js';
+import type { AuthBody } from './api-supply-types.js';
+import { currentRequest, transferBelongsToRequest } from './api-supply-request-progress.js';
 import { currentUser, errInfo, notifyTransferCreated, supplyClientFrom } from './api-supply-route-helpers.js';
 import { validateTransferReservation } from './transfer-reservation-service.js';
 
@@ -46,7 +45,7 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 		if (supplyCreationLocks.has(lockKey)) return reply.code(200).send({ ok: false, error: 'перемещение по этому заказу уже создаётся' });
 		supplyCreationLocks.add(lockKey);
 		try {
-			await ensureTransfersEntity(client);
+			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 			const request = currentRequest(await listSupplyRequests(erp), requestName, requestKey);
 			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			const toStore = String(request.toStore ?? '').trim();
@@ -91,8 +90,7 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 			for (const line of request.items) requested.set(line.productId, (requested.get(line.productId) ?? 0) + line.qty);
 			const covered = new Map<number, number>();
 			const forwarded = new Map<number, number>();
-			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
-			for (const transfer of (transferItems ?? []).map(parseTransferProgress).filter((item): item is TransferProgress => item != null)) {
+			for (const transfer of await loadTransfers(app, client)) {
 				if (transfer.correctionOf || !transferBelongsToRequest(transfer, request) || transfer.status === 'canceled') continue;
 				for (const line of transfer.lines) {
 					covered.set(line.productId, (covered.get(line.productId) ?? 0) + line.qty);

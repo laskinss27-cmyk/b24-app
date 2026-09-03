@@ -167,9 +167,9 @@ test('Bitrix transfer create, update and delete feed the SQL shadow adapter in o
 			trace.push(`sql-write:${input.externalId}`);
 			return { externalId: input.externalId, revisionId: 1, revisionNo: 1, stateHash: '0'.repeat(64), alreadyCurrent: false };
 		},
-		async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); },
+		async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); }, async deleteNative() { throw new Error('unused'); },
 		async pendingMirrors() { return []; }, async claimMirror() { throw new Error('unused'); }, async bitrixExternalId() { return null; },
-		async markMirrorDelivered() {}, async recordMirrorFailure() {},
+		async markMirrorDelivered() {}, async markDeleteDelivered() {}, async recordMirrorFailure() {},
 		async markDeleted(input) { trace.push(`sql-delete:${input.externalId}`); },
 		async readAll() { return []; }, async read() { return null; }, async ping() {}, async close() {},
 	};
@@ -200,9 +200,9 @@ test('a failed shadow write does not report a false failure after Bitrix succeed
 	const writer: TransferSqlWriteRuntime = {
 		mode: 'shadow', enabled: true,
 		async write() { throw new Error('SQL unavailable'); },
-		async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); },
+		async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); }, async deleteNative() { throw new Error('unused'); },
 		async pendingMirrors() { return []; }, async claimMirror() { throw new Error('unused'); }, async bitrixExternalId() { return null; },
-		async markMirrorDelivered() {}, async recordMirrorFailure() {},
+		async markMirrorDelivered() {}, async markDeleteDelivered() {}, async recordMirrorFailure() {},
 		async markDeleted() { throw new Error('SQL unavailable'); },
 		async readAll() { return []; }, async read() { return null; }, async ping() {}, async close() {},
 	};
@@ -234,11 +234,11 @@ test('SQL-primary create commits the document before its recoverable Bitrix mirr
 			trace.push('sql-create');
 			return { publicId: 42, revisionId: 71, revisionNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: false, alreadyApplied: false };
 		},
-		async updateNative() { throw new Error('unused'); },
+		async updateNative() { throw new Error('unused'); }, async deleteNative() { throw new Error('unused'); },
 		async pendingMirrors() { return []; },
 		async claimMirror() { trace.push('sql-claim'); return true; },
 		async bitrixExternalId() { trace.push('sql-identity'); return null; },
-		async markMirrorDelivered(input) { trace.push(`sql-delivered:${input.bitrixExternalId}`); },
+		async markMirrorDelivered(input) { trace.push(`sql-delivered:${input.bitrixExternalId}`); }, async markDeleteDelivered() {},
 		async recordMirrorFailure() { trace.push('sql-failed'); },
 		async markDeleted() { throw new Error('unused'); }, async readAll() { return []; }, async read() { return null; },
 		async ping() {}, async close() {},
@@ -270,10 +270,10 @@ test('SQL-primary create stays successful when Bitrix is down and leaves the out
 		async createNative() {
 			return { publicId: 42, revisionId: 71, revisionNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: false, alreadyApplied: false };
 		},
-		async updateNative() { throw new Error('unused'); },
+		async updateNative() { throw new Error('unused'); }, async deleteNative() { throw new Error('unused'); },
 		async pendingMirrors() { return []; },
 		async claimMirror() { return true; },
-		async bitrixExternalId() { return null; }, async markMirrorDelivered() { throw new Error('unused'); },
+		async bitrixExternalId() { return null; }, async markMirrorDelivered() { throw new Error('unused'); }, async markDeleteDelivered() {},
 		async recordMirrorFailure(input) { recorded = input.error; },
 		async markDeleted() { throw new Error('unused'); }, async readAll() { return []; }, async read() { return null; },
 		async ping() {}, async close() {},
@@ -289,6 +289,61 @@ test('SQL-primary create stays successful when Bitrix is down and leaves the out
 	assert.match(recorded, /Bitrix unavailable/);
 });
 
+test('SQL-primary delete tombstones first and idempotently removes its Bitrix mirror', async () => {
+	const trace: string[] = [];
+	const writer: TransferSqlWriteRuntime = {
+		mode: 'primary', enabled: true,
+		async write() { throw new Error('unused'); },
+		async createNative() { throw new Error('unused'); },
+		async updateNative() { throw new Error('unused'); },
+		async deleteNative(input) {
+			trace.push(`sql-delete:${input.publicId}:${input.idempotencyKey}`);
+			return { publicId: input.publicId, revisionId: 71, revisionNo: 2, stateHash: '1'.repeat(64), alreadyCurrent: true, alreadyApplied: false };
+		},
+		async pendingMirrors() { return []; },
+		async claimMirror(input) { trace.push(`sql-claim:${input.operationKind}`); return true; },
+		async bitrixExternalId() { trace.push('sql-identity'); return 900; },
+		async markMirrorDelivered() { throw new Error('unused'); },
+		async markDeleteDelivered() { trace.push('sql-delete-delivered'); },
+		async recordMirrorFailure() { trace.push('sql-delete-failed'); },
+		async markDeleted() { throw new Error('unused'); }, async readAll() { return []; }, async read() { return null; },
+		async ping() {}, async close() {},
+	};
+	const app = { transferSqlWriter: writer, log: { debug() {}, warn() {} } } as unknown as FastifyInstance;
+	const client = {
+		async call(method: string) {
+			trace.push(`bitrix:${method}`);
+			return {};
+		},
+		async callWithMeta() { trace.push('bitrix:scan'); return { result: [{ ID: 900 }] }; },
+	} as unknown as B24Client;
+	await deleteTransferData(app, client, 42, 'Перемещение #42');
+	assert.deepEqual(trace, [
+		'sql-delete:42:transfer-delete:42',
+		'sql-claim:delete',
+		'sql-identity',
+		'bitrix:scan',
+		'bitrix:entity.item.delete',
+		'sql-delete-delivered',
+	]);
+});
+
+test('SQL-primary delete completes when its Bitrix mirror is already absent', async () => {
+	const trace: string[] = [];
+	const writer: TransferSqlWriteRuntime = {
+		mode: 'primary', enabled: true,
+		async write() { throw new Error('unused'); }, async createNative() { throw new Error('unused'); }, async updateNative() { throw new Error('unused'); },
+		async deleteNative(input) { return { publicId: input.publicId, revisionId: 71, revisionNo: 2, stateHash: '1'.repeat(64), alreadyCurrent: true, alreadyApplied: false }; },
+		async pendingMirrors() { return []; }, async claimMirror() { return true; }, async bitrixExternalId() { return 900; },
+		async markMirrorDelivered() { throw new Error('unused'); }, async markDeleteDelivered() { trace.push('delivered'); }, async recordMirrorFailure() { trace.push('failed'); },
+		async markDeleted() { throw new Error('unused'); }, async readAll() { return []; }, async read() { return null; }, async ping() {}, async close() {},
+	};
+	const app = { transferSqlWriter: writer, log: { debug() {}, warn() {} } } as unknown as FastifyInstance;
+	const client = { async call(method: string) { trace.push(method); return {}; }, async callWithMeta() { trace.push('scan'); return { result: [] }; } } as unknown as B24Client;
+	await deleteTransferData(app, client, 42, 'Перемещение #42');
+	assert.deepEqual(trace, ['scan', 'delivered']);
+});
+
 test('SQL-primary retry discovers its public marker and updates instead of duplicating a Bitrix mirror', async () => {
 	const calls: string[] = [];
 	const writer: TransferSqlWriteRuntime = {
@@ -296,11 +351,11 @@ test('SQL-primary retry discovers its public marker and updates instead of dupli
 		async createNative() {
 			return { publicId: 42, revisionId: 71, revisionNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: true, alreadyApplied: true };
 		},
-		async updateNative() { throw new Error('unused'); },
-		async pendingMirrors() { return [{ publicId: 42, bitrixExternalId: null, revisionId: 71, attemptCount: 1 }]; },
+		async updateNative() { throw new Error('unused'); }, async deleteNative() { throw new Error('unused'); },
+		async pendingMirrors() { return [{ publicId: 42, bitrixExternalId: null, revisionId: 71, attemptCount: 1, operationKind: 'upsert' as const }]; },
 		async claimMirror() { return true; },
 		async bitrixExternalId() { return null; },
-		async markMirrorDelivered(input) { calls.push(`delivered:${input.bitrixExternalId}`); },
+		async markMirrorDelivered(input) { calls.push(`delivered:${input.bitrixExternalId}`); }, async markDeleteDelivered() {},
 		async recordMirrorFailure() { throw new Error('unexpected'); }, async markDeleted() { throw new Error('unused'); },
 		async readAll() { return []; }, async read() { return { ...storedTransfer(), id: 42 }; }, async ping() {}, async close() {},
 	};

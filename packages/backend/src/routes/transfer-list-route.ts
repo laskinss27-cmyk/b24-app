@@ -25,7 +25,7 @@ export function registerTransferListRoute(
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; from?: unknown; to?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		await ensureTransfersEntity(client);
+		if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 		const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 		const from = isDate(b.from) ? b.from : '';
 		const to = isDate(b.to) ? b.to : '';

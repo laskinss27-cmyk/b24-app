@@ -14,6 +14,8 @@ import { readCurrentSqlTransfer, readCurrentSqlTransfers } from './sql-reader.js
 import {
 	createNativeTransferSql,
 	claimTransferBitrixMirror,
+	deleteNativeTransferSql,
+	markTransferBitrixDeleteDelivered,
 	markTransferBitrixMirrorDelivered,
 	markTransferSqlDeleted,
 	readPendingTransferBitrixMirrors,
@@ -156,14 +158,15 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 		assert.equal(nativeUpdateRepeated.alreadyApplied, true);
 		assert.equal((await readCurrentSqlTransfer(sqlPool, native.publicId))?.lines[0]?.qty, 2);
 		const pending = await readPendingTransferBitrixMirrors(sqlPool);
-		assert.deepEqual(pending.map((entry) => [entry.publicId, entry.revisionId]), [[native.publicId, nativeUpdate.revisionId]]);
+		assert.deepEqual(pending.map((entry) => [entry.publicId, entry.revisionId, entry.operationKind]), [[native.publicId, nativeUpdate.revisionId, 'upsert']]);
 		const mirrorLeaseToken = '00000000-0000-4000-8000-000000000001';
 		assert.equal(await claimTransferBitrixMirror(sqlPool, {
-			publicId: native.publicId, revisionId: nativeUpdate.revisionId, leaseToken: mirrorLeaseToken,
+			publicId: native.publicId, revisionId: nativeUpdate.revisionId, operationKind: 'upsert', leaseToken: mirrorLeaseToken,
 		}), true);
 		assert.equal(await claimTransferBitrixMirror(sqlPool, {
 			publicId: native.publicId,
 			revisionId: nativeUpdate.revisionId,
+			operationKind: 'upsert',
 			leaseToken: '00000000-0000-4000-8000-000000000002',
 		}), false);
 		await markTransferBitrixMirrorDelivered(sqlPool, {
@@ -174,10 +177,39 @@ test('real MariaDB transfer store is normalized, append-only, recoverable and DM
 		assert.equal(await count(schemaPool, 'stock_transfer_commands'), 2);
 		assert.equal(await count(schemaPool, 'stock_transfer_bitrix_outbox'), 2);
 
+		const nativeDelete = await deleteNativeTransferSql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'integration:delete:one', name: 'Перемещение SQL',
+		});
+		const nativeDeleteRepeated = await deleteNativeTransferSql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'integration:delete:one', name: 'Переименованное удалённое перемещение',
+		});
+		assert.equal(nativeDelete.alreadyApplied, false);
+		assert.equal(nativeDeleteRepeated.alreadyApplied, true);
+		assert.equal(await readCurrentSqlTransfer(sqlPool, native.publicId), null);
+		assert.deepEqual((await readPendingTransferBitrixMirrors(sqlPool)).map((entry) => [entry.publicId, entry.operationKind]), [[native.publicId, 'delete']]);
+		const deleteLeaseToken = '00000000-0000-4000-8000-000000000003';
+		assert.equal(await claimTransferBitrixMirror(sqlPool, {
+			publicId: native.publicId, revisionId: nativeDelete.revisionId, operationKind: 'delete', leaseToken: deleteLeaseToken,
+		}), true);
+		assert.equal(await claimTransferBitrixMirror(sqlPool, {
+			publicId: native.publicId,
+			revisionId: nativeDelete.revisionId,
+			operationKind: 'delete',
+			leaseToken: '00000000-0000-4000-8000-000000000004',
+		}), false);
+		await markTransferBitrixDeleteDelivered(sqlPool, {
+			publicId: native.publicId, revisionId: nativeDelete.revisionId, leaseToken: deleteLeaseToken,
+		});
+		assert.deepEqual(await readPendingTransferBitrixMirrors(sqlPool), []);
+		assert.equal(await count(schemaPool, 'stock_transfer_commands'), 3);
+		assert.equal(await count(schemaPool, 'stock_transfer_bitrix_outbox'), 3);
+		assert.equal(await count(schemaPool, 'stock_transfer_records'), 2);
+		assert.equal(await count(schemaPool, 'stock_transfer_revisions'), 4);
+
 		await markTransferSqlDeleted(sqlPool, { externalId: 7, name: 'Перемещение #7' });
-		assert.deepEqual((await readCurrentSqlTransfers(sqlPool)).map((item) => item.id), [native.publicId]);
+		assert.deepEqual((await readCurrentSqlTransfers(sqlPool)).map((item) => item.id), []);
 		await writeTransferSqlRevision(sqlPool, { externalId: id, name, data, sourceKind: 'repair' });
-		assert.deepEqual((await readCurrentSqlTransfers(sqlPool)).map((item) => item.id), [7, native.publicId]);
+		assert.deepEqual((await readCurrentSqlTransfers(sqlPool)).map((item) => item.id), [7]);
 		assert.equal(await count(schemaPool, 'stock_transfer_revisions'), 4);
 
 		await assert.rejects(() => writerPool!.query('DELETE FROM stock_transfer_records WHERE id = -1'), /(?:denied|command)/i);

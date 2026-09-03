@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { listAllEntityItems } from '../b24/entity-items.js';
-import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
+import { ensureTransfersEntity } from '../b24/placement.js';
 import { fetchServiceProductIds, setDealB24Service } from '../deal-product-catalog.js';
 import { ErpClient } from '../erp/client.js';
 import {
@@ -16,9 +15,9 @@ import {
 	reduceDealPlanForReturns,
 	submitRealization,
 } from '../erp/operations.js';
-import { parseTransferItem } from '../transfers/model.js';
 import { recordRealizationEvent } from '../operation-log/realization-events.js';
 import { ReservationService } from '../reservations/service.js';
+import { loadTransfers } from './transfer-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -103,12 +102,11 @@ export function registerDealCoreRealizationRoute(
 						throw new Error(`этап реализации для позиции #${line.productId} не найден`);
 					}
 				}
-				await ensureTransfersEntity(client);
-				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
+				if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 				const reserved = new Map<string, number>();
-				for (const transfer of (transferItems ?? []).map(parseTransferItem).filter((item) => item && (item.status === 'draft' || item.status === 'collected' || item.status === 'requested'))) {
-					for (const line of transfer!.lines) {
-						const key = `${line.productId}:${transfer!.fromStore}`;
+				for (const transfer of (await loadTransfers(app, client)).filter((item) => item.status === 'draft' || item.status === 'collected' || item.status === 'requested')) {
+					for (const line of transfer.lines) {
+						const key = `${line.productId}:${transfer.fromStore}`;
 						reserved.set(key, (reserved.get(key) ?? 0) + line.qty);
 					}
 				}

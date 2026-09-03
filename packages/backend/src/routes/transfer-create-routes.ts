@@ -43,7 +43,7 @@ export function registerTransferCreateRoutes(
 		if (app.transferSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание перемещения после обновления страницы' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
-		await ensureTransfersEntity(client);
+		if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 		try {
 			await assertDealQuoteVariantSelected(erp, Number(dealId));
 			const me = await currentUser(client);
@@ -130,7 +130,7 @@ export function registerTransferCreateRoutes(
 		if (app.transferSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание перемещения после обновления страницы' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
-		await ensureTransfersEntity(client);
+		if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 		try {
 			const me = await currentUser(client);
 			if (!appPermission(req, 'transfers.create', me.isSupply)) {

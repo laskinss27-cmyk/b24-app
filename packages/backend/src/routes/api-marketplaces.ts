@@ -226,7 +226,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 					&& line.qty > 0
 					&& line.rate >= 0);
 			if (!lines.length) return reply.code(400).send({ ok: false, error: 'добавьте товары в реализацию' });
-			await validateFreeStock(client, erp, lines.map((line) => ({
+			await validateFreeStock(app, client, erp, lines.map((line) => ({
 				productId: line.productId,
 				qty: line.qty,
 				fromStore: resolvedStore,
@@ -346,7 +346,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			}
 			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
 			const sourceQty = unitsPerBundle * bundleQty;
-			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }], app.reservationRuntime);
+			await validateFreeStock(app, client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }], app.reservationRuntime);
 			const systemClient = hasDirectMarketplaceAccess(req.appAccess?.user.id) && app.config.catalogWriteWebhook
 				? new B24Client({ auth: { kind: 'webhook', url: app.config.catalogWriteWebhook } })
 				: null;

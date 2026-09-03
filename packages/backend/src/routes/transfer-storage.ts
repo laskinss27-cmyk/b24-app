@@ -185,7 +185,7 @@ async function mirrorNativeTransfer(
 	if (!writer || writer.mode !== 'primary') return;
 	const leaseToken = randomUUID();
 	try {
-		if (!await writer.claimMirror({ publicId, revisionId, leaseToken })) return;
+		if (!await writer.claimMirror({ publicId, revisionId, operationKind: 'upsert', leaseToken })) return;
 		let externalId = await writer.bitrixExternalId(publicId);
 		if (!externalId) {
 			const existing = (await listAllEntityItems(client, TRANSFERS_ENTITY))
@@ -207,8 +207,36 @@ async function mirrorNativeTransfer(
 		await writer.markMirrorDelivered({ publicId, revisionId, bitrixExternalId: externalId, leaseToken });
 		app.log.debug({ publicId, externalId, revisionId }, '[transfers/sql-primary] Bitrix mirror delivered');
 	} catch (error) {
-		await writer.recordMirrorFailure({ publicId, revisionId, leaseToken, error: String(error) }).catch(() => undefined);
+		await writer.recordMirrorFailure({ publicId, revisionId, operationKind: 'upsert', leaseToken, error: String(error) }).catch(() => undefined);
 		app.log.warn({ publicId, revisionId, error: String(error) }, '[transfers/sql-primary] Bitrix mirror pending');
+	}
+}
+
+async function mirrorNativeTransferDelete(
+	app: FastifyInstance,
+	client: B24Client,
+	publicId: number,
+	revisionId: number,
+): Promise<void> {
+	const writer = app.transferSqlWriter;
+	if (!writer || writer.mode !== 'primary') return;
+	const leaseToken = randomUUID();
+	try {
+		if (!await writer.claimMirror({ publicId, revisionId, operationKind: 'delete', leaseToken })) return;
+		let externalId = await writer.bitrixExternalId(publicId);
+		const items = await listAllEntityItems(client, TRANSFERS_ENTITY);
+		const existing = externalId
+			? items.find((item) => Number(item['ID']) === externalId)
+			: items.find((item) => rawSqlPublicId(item) === publicId);
+		externalId = existing ? Number(existing['ID']) : null;
+		if (externalId) {
+			await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: externalId });
+		}
+		await writer.markDeleteDelivered({ publicId, revisionId, leaseToken });
+		app.log.debug({ publicId, externalId, revisionId }, '[transfers/sql-primary] Bitrix mirror deletion delivered');
+	} catch (error) {
+		await writer.recordMirrorFailure({ publicId, revisionId, operationKind: 'delete', leaseToken, error: String(error) }).catch(() => undefined);
+		app.log.warn({ publicId, revisionId, error: String(error) }, '[transfers/sql-primary] Bitrix mirror deletion pending');
 	}
 }
 
@@ -217,6 +245,10 @@ async function flushPendingNativeTransferMirrors(app: FastifyInstance, client: B
 	if (!writer || writer.mode !== 'primary') return;
 	try {
 		for (const pending of await writer.pendingMirrors(3)) {
+			if (pending.operationKind === 'delete') {
+				await mirrorNativeTransferDelete(app, client, pending.publicId, pending.revisionId);
+				continue;
+			}
 			const transfer = await writer.read(pending.publicId);
 			if (!transfer) continue;
 			const { id: _id, name, ...data } = transfer;
@@ -234,7 +266,16 @@ export async function deleteTransferData(
 	name: string,
 ): Promise<void> {
 	if (app.transferSqlWriter?.mode === 'primary') {
-		throw new Error('Удаление SQL-first перемещений пока не активировано');
+		const result = await app.transferSqlWriter.deleteNative({
+			publicId: id,
+			idempotencyKey: `transfer-delete:${id}`,
+			name,
+		});
+		if (!result.alreadyApplied) {
+			await mirrorNativeTransferDelete(app, client, id, result.revisionId);
+		}
+		await flushPendingNativeTransferMirrors(app, client);
+		return;
 	}
 	await client.call('entity.item.delete', { ENTITY: TRANSFERS_ENTITY, ID: id });
 	if (!app.transferSqlWriter?.enabled) return;
