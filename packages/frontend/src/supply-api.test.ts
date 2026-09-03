@@ -58,8 +58,8 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 	return requests;
 }
 
-test('supply order listing rejects backend errors and request creation preserves its payload', async () => {
-	const requests = captureResponses([{ ok: false, error: 'supply unavailable' }, { ok: true }]);
+test('supply order listing rejects backend errors and request creation requires a confirmed document number', async () => {
+	const requests = captureResponses([{ ok: false, error: 'supply unavailable' }, { ok: true, name: 'MAT-MR-2026-00104' }, { ok: true }]);
 	const lines = [{ productId: 17, itemName: 'Товар', qty: 2, note: 'Срочно' }];
 
 	await assert.rejects(fetchSupplyOrders(), /supply unavailable/);
@@ -67,7 +67,11 @@ test('supply order listing rejects backend errors and request creation preserves
 		toStore: 'Основной склад',
 		deadline: '2026-08-20',
 		note: 'Для сделки',
-	}), '');
+	}), 'MAT-MR-2026-00104');
+	await assert.rejects(createDealSupplyRequest(91, lines, {
+		toStore: 'Основной склад',
+		deadline: '2026-08-20',
+	}), /сервер не подтвердил создание/);
 	assert.deepEqual(requests, [
 		{
 			url: '/api/supply/orders',
@@ -78,6 +82,13 @@ test('supply order listing rejects backend errors and request creation preserves
 			body: {
 				domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, lines,
 				toStore: 'Основной склад', deadline: '2026-08-20', note: 'Для сделки',
+			},
+		},
+		{
+			url: '/api/supply/request',
+			body: {
+				domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, lines,
+				toStore: 'Основной склад', deadline: '2026-08-20',
 			},
 		},
 	]);

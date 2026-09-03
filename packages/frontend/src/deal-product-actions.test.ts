@@ -21,6 +21,7 @@ Object.defineProperty(globalThis, 'window', {
 });
 
 const { addProductsToDeal, createQuickSale, searchDealProducts } = await import('./b24.js');
+const { createDealSupplyOrderActions } = await import('./deal-supply-order-actions.js');
 
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
@@ -145,4 +146,60 @@ test('supply selection ignores stopped requests and never duplicates an uncovere
 	assert.deepEqual(result.rows.map((row) => row.id), [first.id]);
 	assert.equal(result.availableByRow.get(first.id), 2);
 	assert.equal(result.availableByRow.has(second.id), false);
+});
+
+function supplyOrderActions(overrides: { deadline?: string; onReload?: () => Promise<void>; onNotice?: (notice: { kind: 'ok' | 'err'; text: string } | null) => void } = {}) {
+	const row = supplyRow('row-17', 17, 1);
+	let formError: string | null = null;
+	const actions = createDealSupplyOrderActions({
+		dealId: 91,
+		supplyGoods: [row],
+		supplyBusy: false,
+		busy: false,
+		hasPendingDrafts: false,
+		supplyNotes: {},
+		supplyQty: { [row.id]: '1' },
+		supplyToStore: 'Основной склад',
+		supplyDeadline: overrides.deadline ?? '',
+		supplyOrderNote: '',
+		remaining: () => 1,
+		onReload: overrides.onReload ?? (async () => {}),
+		setSupplyBusy: () => {},
+		setShowSupplyOrder: () => {},
+		setSupplyNotes: () => {},
+		setSupplyQty: () => {},
+		setSupplyToStore: () => {},
+		setSupplyDeadline: () => {},
+		setSupplyOrderNote: () => {},
+		setSupplyFormError: (value) => { formError = value; },
+		setSelected: () => {},
+		setNotice: overrides.onNotice ?? (() => {}),
+	});
+	return { actions, formError: () => formError };
+}
+
+test('supply order submit explains a missing deadline instead of silently doing nothing', async () => {
+	globalThis.fetch = (async () => { throw new Error('request must not be sent'); }) as typeof fetch;
+	const scenario = supplyOrderActions();
+
+	await scenario.actions.doCreateSupply();
+
+	assert.equal(scenario.formError(), 'Укажите крайнюю дату поставки.');
+});
+
+test('supply order success names the document confirmed by the server', async () => {
+	const requests = captureResponses([{ ok: true, name: 'MAT-MR-2026-00104' }]);
+	const notices: Array<{ kind: 'ok' | 'err'; text: string } | null> = [];
+	let reloads = 0;
+	const scenario = supplyOrderActions({
+		deadline: '2099-09-04',
+		onReload: async () => { reloads += 1; },
+		onNotice: (value) => { notices.push(value); },
+	});
+
+	await scenario.actions.doCreateSupply();
+
+	assert.equal(reloads, 1);
+	assert.match(notices.at(-1)?.text ?? '', /MAT-MR-2026-00104/);
+	assert.equal(requests[0]?.url, '/api/supply/request');
 });

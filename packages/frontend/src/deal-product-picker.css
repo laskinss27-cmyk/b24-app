@@ -161,10 +161,10 @@
 .deal-supply-order-destination {
 	margin: 0 2px 10px;
 	padding: 9px 11px;
-	border: 1px solid #bdd8c6;
+	border: 1px solid #cdd8e6;
 	border-radius: 6px;
-	background: #f0f9f3;
-	color: #245c36;
+	background: #f4f7fb;
+	color: #435269;
 	font-size: 13px;
 }
 .deal-supply-order-destination.is-empty {

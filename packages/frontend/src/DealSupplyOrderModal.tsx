@@ -58,7 +58,9 @@ export function DealSupplyOrderModal({
 					<label className="wide"><span>Общий комментарий</span><textarea rows={2} maxLength={500} value={orderNote} disabled={busy} placeholder="Комментарий ко всему заказу" onChange={(event) => onOrderNoteChange(event.target.value)} /></label>
 				</div>
 				<div className={`deal-supply-order-destination${toStore ? '' : ' is-empty'}`}>
-					{toStore ? <>Заказ будет доставлен на склад <b>{toStore}</b>.</> : 'Выберите конечный склад вручную — он не берётся из отмеченных строк.'}
+					{toStore
+						? <>Конечный склад: <b>{toStore}</b>. Заявка будет создана только после нажатия кнопки ниже.</>
+						: 'Выберите конечный склад вручную — он не берётся из отмеченных строк.'}
 				</div>
 				{formError && <div className="deal-supply-order-error">{formError}</div>}
 				<div className="deal-supply-order-lines">
@@ -86,7 +88,7 @@ export function DealSupplyOrderModal({
 				</div>
 				<footer>
 					<button type="button" disabled={busy} onClick={onClose}>Отмена</button>
-					<button className="primary" type="button" disabled={busy || !toStore || !deadline} onClick={onSubmit}>{busy ? 'Создаю…' : 'Создать заказ'}</button>
+					<button className="primary" type="button" disabled={busy} onClick={onSubmit}>{busy ? 'Создаю…' : 'Создать заказ'}</button>
 				</footer>
 			</section>
 		</div>

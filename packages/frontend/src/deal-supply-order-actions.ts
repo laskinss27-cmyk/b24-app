@@ -89,7 +89,7 @@ export function createDealSupplyOrderActions({
 		setNotice(null);
 		try {
 			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)!, note: String(supplyNotes[row.id] ?? '').trim() }));
-			await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, ...(supplyOrderNote.trim() ? { note: supplyOrderNote.trim() } : {}) });
+			const requestName = await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, ...(supplyOrderNote.trim() ? { note: supplyOrderNote.trim() } : {}) });
 			setSelected({});
 			setSupplyNotes({});
 			setSupplyQty({});
@@ -98,7 +98,7 @@ export function createDealSupplyOrderActions({
 			setSupplyOrderNote('');
 			setSupplyFormError(null);
 			setShowSupplyOrder(false);
-			setNotice({ kind: 'ok', text: `Заказ сформирован: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')} · ${supplyToStore} · до ${supplyDeadline}.` });
+			setNotice({ kind: 'ok', text: `Заявка ${requestName} создана: ${lines.length} ${plural(lines.length, 'позиция', 'позиции', 'позиций')} · ${supplyToStore} · до ${supplyDeadline}.` });
 			await onReload();
 		} catch (err) {
 			setNotice({ kind: 'err', text: `⛔ ${String(err instanceof Error ? err.message : err)}` });

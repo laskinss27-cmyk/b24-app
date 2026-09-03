@@ -68,8 +68,8 @@ export async function createDealSupplyRequest(dealId: number, lines: Array<{ pro
 		body: JSON.stringify({ ...bx24Auth(), dealId, lines, ...options }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
-	if (!json.ok) throw new Error(json.error ?? 'не удалось создать заявку в снабжение');
-	return json.name ?? '';
+	if (!res.ok || !json.ok || !json.name) throw new Error(json.error ?? 'сервер не подтвердил создание заявки в снабжение');
+	return json.name;
 }
 
 export async function updateSupplyOrderNote(requestName: string, note: string): Promise<string> {
