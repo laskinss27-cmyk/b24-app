@@ -55,6 +55,7 @@ export async function readErpCatalogMirrorSnapshot(erp: ErpClient, now = new Dat
 			productStatus: identity.status,
 			description: technicalDescription(row['description']) ? '' : String(row['description'] ?? '').trim(),
 			contentSummary: content?.summary ?? '',
+			contentPresent: content !== undefined,
 			filterCategory: String(row['b24_filter_category'] ?? '').trim(),
 			imagePath: String(row['image'] ?? '').trim(),
 			imageSource: String(row['image'] ?? '').trim() ? 'erpnext' : 'none',

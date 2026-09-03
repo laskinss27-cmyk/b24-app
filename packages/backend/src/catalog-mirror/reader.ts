@@ -22,7 +22,7 @@ const CHECKPOINT_QUERY = `
 
 const PRODUCTS_QUERY = `
 	SELECT item_code, bitrix_iblock_id, bitrix_section_id, item_name, is_stock_item, is_marketplace_bundle, article, model, brand,
-		section_name, product_status, description, content_summary, filter_category,
+		section_name, product_status, description, content_summary, content_present, filter_category,
 		image_path, image_source, marketplace_old_id,
 		DATE_FORMAT(source_modified_at, '%Y-%m-%d %H:%i:%s.%f') AS source_modified_at,
 		LOWER(HEX(source_hash)) AS source_hash
@@ -174,6 +174,7 @@ export async function readLatestCatalogMirrorPlan(pool: CatalogMirrorReadPool): 
 			productStatus: string(row, 'product_status'),
 			description: string(row, 'description'),
 			contentSummary: string(row, 'content_summary'),
+			contentPresent: boolean(row, 'content_present'),
 			filterCategory: string(row, 'filter_category'),
 			imagePath: string(row, 'image_path'),
 			imageSource: oneOf(row, 'image_source', ['none', 'erpnext', 'bitrix'] as const),

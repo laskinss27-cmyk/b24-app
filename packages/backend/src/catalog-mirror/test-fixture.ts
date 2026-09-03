@@ -24,6 +24,7 @@ export function catalogMirrorFixture(): CatalogMirrorSnapshot {
 			productStatus: '',
 			description: 'Описание',
 			contentSummary: 'Коротко',
+			contentPresent: true,
 			filterCategory: 'Мониторы',
 			imagePath: '/files/monitor.jpg',
 			imageSource: 'erpnext',

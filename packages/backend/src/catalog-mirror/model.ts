@@ -19,6 +19,7 @@ export interface CatalogMirrorProduct {
 	productStatus: string;
 	description: string;
 	contentSummary: string;
+	contentPresent: boolean;
 	filterCategory: string;
 	imagePath: string;
 	imageSource: 'none' | 'erpnext' | 'bitrix';

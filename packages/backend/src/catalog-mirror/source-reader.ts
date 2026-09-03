@@ -30,12 +30,12 @@ export function mergeCatalogMirrorMetadata(
 		if (!known) continue;
 		product.bitrixIblockId = known.iblockId === 26 ? 26 : 24;
 		product.bitrixSectionId = Number.isSafeInteger(known.sectionId) && Number(known.sectionId) > 0 ? Number(known.sectionId) : null;
-		product.article ||= known.article?.trim() ?? '';
-		product.model ||= known.model?.trim() ?? '';
-		product.brand ||= known.manufacturer?.trim() ?? '';
-		product.sectionName ||= known.sectionName?.trim() ?? '';
-		product.productStatus ||= known.status?.trim() ?? '';
-		product.description ||= known.description?.trim() ?? '';
+		product.article ||= known.article ?? '';
+		product.model ||= known.model ?? '';
+		product.brand ||= known.manufacturer ?? '';
+		product.sectionName ||= known.sectionName ?? '';
+		product.productStatus ||= known.status ?? '';
+		product.description ||= known.description ?? '';
 		if (product.imageSource === 'none' && known.photoPath) {
 			product.imagePath = known.photoPath;
 			product.imageSource = 'bitrix';

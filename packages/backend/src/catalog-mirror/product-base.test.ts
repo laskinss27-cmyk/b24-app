@@ -20,3 +20,14 @@ test('SQL catalog mirror reconstructs the current catalog API contract', () => {
 	assert.equal(row.content?.attributes[0]?.label, 'Диагональ');
 	assert.equal(row.photoPath, '/api/inventory/erp-image?p=%2Ffiles%2Fmonitor.jpg');
 });
+
+test('SQL catalog mirror preserves an empty content object and derives a section id when Bitrix has none', () => {
+	const fixture = catalogMirrorFixture();
+	fixture.products[0]!.bitrixSectionId = null;
+	fixture.products[0]!.contentSummary = '';
+	fixture.products[0]!.contentPresent = true;
+	fixture.attributes = [];
+	const row = buildSqlProductBase(buildCatalogMirrorPlan(fixture)).data.rows[0]!;
+	assert.equal(typeof row.sectionId, 'number');
+	assert.deepEqual(row.content, { version: 1, summary: '', attributes: [] });
+});

@@ -1,6 +1,7 @@
 import type { CatalogProductContent } from '../catalog-content.js';
 import { coreStoreId } from '../erp/stock-catalog.js';
 import type { CatalogStore, CoreProductBaseRow } from '../routes/api-catalog-types.js';
+import { coreSectionId } from '../routes/api-catalog-value-helpers.js';
 import type { CatalogMirrorPlan } from './model.js';
 
 /** Converts the normalized SQL mirror into the existing catalog API contract. */
@@ -55,7 +56,7 @@ export function buildSqlProductBase(plan: CatalogMirrorPlan): {
 				booleanValue: attribute.booleanValue,
 				filterable: attribute.filterable,
 			}));
-		const content: CatalogProductContent | undefined = product.contentSummary || attributes.length
+		const content: CatalogProductContent | undefined = product.contentPresent
 			? { version: 1, summary: product.contentSummary, attributes }
 			: undefined;
 		return {
@@ -67,7 +68,7 @@ export function buildSqlProductBase(plan: CatalogMirrorPlan): {
 			article: product.article || undefined,
 			model: product.model || undefined,
 			manufacturer: product.brand || undefined,
-			sectionId: product.bitrixSectionId ?? undefined,
+			sectionId: product.bitrixSectionId ?? (sectionName ? coreSectionId(sectionName) : undefined),
 			sectionName,
 			status: product.productStatus || undefined,
 			description: product.description || undefined,

@@ -40,7 +40,7 @@ function productHash(row: CatalogMirrorProduct): string {
 	return sha256([
 		row.itemCode, row.bitrixIblockId, row.bitrixSectionId, row.itemName, row.isStockItem, row.isMarketplaceBundle,
 		row.article, row.model, row.brand, row.sectionName, row.productStatus,
-		row.description, row.contentSummary, row.filterCategory, row.imagePath, row.imageSource,
+		row.description, row.contentSummary, row.contentPresent, row.filterCategory, row.imagePath, row.imageSource,
 		row.marketplaceOldId, canonicalDateTime(row.sourceModifiedAt, `product ${row.itemCode} modified`),
 	]);
 }

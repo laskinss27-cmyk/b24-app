@@ -34,9 +34,9 @@ export interface CatalogMirrorWriteResult {
 const PRODUCT_UPSERT = `
 	INSERT INTO catalog_mirror_products (
 		item_code, bitrix_iblock_id, bitrix_section_id, item_name, is_stock_item, is_marketplace_bundle, article, model, brand,
-		section_name, product_status, description, content_summary, filter_category,
+		section_name, product_status, description, content_summary, content_present, filter_category,
 		image_path, image_source, marketplace_old_id, source_modified_at, observed_at, source_hash
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		bitrix_iblock_id = VALUES(bitrix_iblock_id),
 		bitrix_section_id = VALUES(bitrix_section_id),
@@ -50,6 +50,7 @@ const PRODUCT_UPSERT = `
 		product_status = VALUES(product_status),
 		description = VALUES(description),
 		content_summary = VALUES(content_summary),
+		content_present = VALUES(content_present),
 		filter_category = VALUES(filter_category),
 		image_path = VALUES(image_path),
 		image_source = VALUES(image_source),
@@ -188,7 +189,7 @@ export async function applyCatalogMirrorPlan(pool: CatalogMirrorWriterPool, plan
 		await runBatches(connection, PRODUCT_UPSERT, plan.products.map((row) => [
 			row.itemCode, row.bitrixIblockId, row.bitrixSectionId, row.itemName, row.isStockItem ? 1 : 0, row.isMarketplaceBundle ? 1 : 0,
 			row.article, row.model, row.brand, row.sectionName, row.productStatus,
-			row.description, row.contentSummary, row.filterCategory, row.imagePath, row.imageSource, row.marketplaceOldId,
+			row.description, row.contentSummary, row.contentPresent ? 1 : 0, row.filterCategory, row.imagePath, row.imageSource, row.marketplaceOldId,
 			sqlDateTime(row.sourceModifiedAt, `product ${row.itemCode} modified`), observedAt,
 			hashBuffer(row.sourceHash, `product ${row.itemCode} sourceHash`),
 		]));

@@ -34,7 +34,7 @@ function poolForPlan(incompleteProducts = false, corruptProduct = false): Catalo
 				item_name: corruptProduct ? `${row.itemName} повреждён` : row.itemName, is_stock_item: Number(row.isStockItem),
 				is_marketplace_bundle: Number(row.isMarketplaceBundle), article: row.article, model: row.model,
 				brand: row.brand, section_name: row.sectionName, product_status: row.productStatus,
-				description: row.description, content_summary: row.contentSummary, filter_category: row.filterCategory,
+				description: row.description, content_summary: row.contentSummary, content_present: Number(row.contentPresent), filter_category: row.filterCategory,
 				image_path: row.imagePath, image_source: row.imageSource, marketplace_old_id: row.marketplaceOldId,
 				source_modified_at: sqlTimestamp(row.sourceModifiedAt), source_hash: row.sourceHash,
 			}))) as T;
