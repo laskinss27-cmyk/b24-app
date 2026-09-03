@@ -8,6 +8,7 @@ import {
 	createMarketplaceReturnBatch,
 	createMarketplaceSale,
 	fetchCoreCatalogItems,
+	fetchErpRetailPrices,
 	listActiveStoreTitles,
 	listMarketplaceOperations,
 	listMarketplaceReturnSales,
@@ -336,6 +337,13 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			}
 			const source = await sourceProductIdentity(client, erp, sourceProductId);
 			const sourceItemName = source.name;
+			const sourceRetailPrice = (await fetchErpRetailPrices(erp, [sourceProductId])).get(sourceProductId);
+			if (!Number.isFinite(sourceRetailPrice) || Number(sourceRetailPrice) <= 0) {
+				return reply.code(400).send({
+					ok: false,
+					error: `у товара «${sourceItemName}» не указана розничная цена`,
+				});
+			}
 			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
 			const sourceQty = unitsPerBundle * bundleQty;
 			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }], app.reservationRuntime);
@@ -349,6 +357,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				sourceItemName,
 				bundleProductId,
 				bundleItemName,
+				sourceRetailPrice: Number(sourceRetailPrice),
 				unitsPerBundle,
 				bundleQty,
 				storeTitle,

@@ -9,7 +9,7 @@ import {
 	MARKETPLACE_TITLE_FIELD,
 	ensureMarketplaceFields,
 } from './marketplace-fields.js';
-import { ensureCoreItem } from './stock-catalog.js';
+import { ensureCoreItem, updateCoreCatalogPrices } from './stock-catalog.js';
 import { b24StoreTitle, erpContext, erpWarehouse } from './warehouse-context.js';
 
 export type MarketplaceOperationKind = 'sale' | 'bundle' | 'return' | 'writeoff' | 'receipt';
@@ -396,19 +396,22 @@ export async function createMarketplaceBundle(
 		sourceItemName: string;
 		bundleProductId: number;
 		bundleItemName: string;
+		sourceRetailPrice: number;
 		unitsPerBundle: number;
 		bundleQty: number;
 		storeTitle: string;
 		postingDate: string;
 	},
-): Promise<{ name: string; title: string; sourceQty: number }> {
+): Promise<{ name: string; title: string; sourceQty: number; bundleRetailPrice: number }> {
 	if (!Number.isInteger(args.sourceProductId) || args.sourceProductId <= 0) throw new Error('неверный исходный товар');
 	if (!Number.isInteger(args.bundleProductId) || args.bundleProductId <= 0) throw new Error('неверная позиция комплекта');
+	if (!Number.isFinite(args.sourceRetailPrice) || args.sourceRetailPrice <= 0) throw new Error('у исходного товара не указана розничная цена');
 	if (!Number.isInteger(args.unitsPerBundle) || args.unitsPerBundle < 2) throw new Error('в комплекте должно быть не меньше двух штук');
 	if (!Number.isInteger(args.bundleQty) || args.bundleQty < 1) throw new Error('количество комплектов должно быть целым и больше нуля');
 	const storeTitle = args.storeTitle.trim();
 	if (!storeTitle) throw new Error('не выбран склад комплектации');
 	const sourceQty = args.unitsPerBundle * args.bundleQty;
+	const bundleRetailPrice = Math.round(args.sourceRetailPrice * args.unitsPerBundle * 100) / 100;
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMarketplaceFields(erp);
@@ -423,6 +426,10 @@ export async function createMarketplaceBundle(
 	await erp.update('Item', String(args.bundleProductId), {
 		[MARKETPLACE_BUNDLE_SOURCE_FIELD]: String(args.sourceProductId),
 		[MARKETPLACE_BUNDLE_UNITS_FIELD]: args.unitsPerBundle,
+	});
+	await updateCoreCatalogPrices(erp, {
+		productId: args.bundleProductId,
+		retail: bundleRetailPrice,
 	});
 
 	const stock = await fetchErpStoreStock(erp, storeTitle);
@@ -462,7 +469,7 @@ export async function createMarketplaceBundle(
 		await erp.delete('Stock Entry', name).catch(() => undefined);
 		throw error;
 	}
-	return { name, title, sourceQty };
+	return { name, title, sourceQty, bundleRetailPrice };
 }
 
 /** All marketplace operations are tagged and therefore never mixed with ordinary deal documents. */
