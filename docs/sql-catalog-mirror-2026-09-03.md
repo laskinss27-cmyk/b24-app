@@ -124,3 +124,21 @@ ERPNext API read all returned HTTP `200`. `B24_APP_CATALOG_SQL_READ` remains
 unset, which is the fail-safe `off` default: no catalog request has switched to
 SQL, no scheduler was installed, and no backend deployment occurred in this
 foundation stage.
+
+After the final snapshot, the explicitly authorized backup job created
+`20260903_171824-b24_app-database.sql.gz` (`5,381,353` bytes, `35` table
+definitions), verified its gzip and SHA-256 pair, and verified both uploaded
+objects in the private Bitrix Disk folder (`dump_id=107382`,
+`checksum_id=107380`). Retention remained disabled, so no previous backup was
+removed. The dump restored only into the new isolated schema
+`b24_app_restore_20260903_171824`, which remains preserved. The restore matched
+the source charset/collation, all `35` table definitions, column signature
+`b75f71a640d55dabaf66c4c59863ce8c638ca25c99bb2a2befaca22053f8f57f`,
+index signature
+`5b6730cc868502cf9b22bc3416df5b733990bb33092818940f778c759744e9bd`,
+all `45` migration rows through `0045`, and every catalog table checksum. Three
+unrelated active tables changed after the dump while users continued working;
+the verifier reported those live changes separately and confirmed the source
+schema itself was untouched. Final catalog read-back still produced checkpoint
+`f7607b0737d0e3136574aad4b2e61e4083ffff65fc1bae21ede4744fc415b61e`,
+and all health/network/official-ERP checks remained green.
