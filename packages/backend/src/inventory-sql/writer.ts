@@ -16,8 +16,14 @@ function positiveSqlId(value: unknown, name: string): number {
 	return parsed;
 }
 
-function sqlDate(value: string | null): Date | null {
-	return value ? new Date(value) : null;
+function sqlDate(value: string | null): string | null {
+	if (!value) return null;
+	const parsed = new Date(value);
+	if (!Number.isFinite(parsed.getTime())) throw new Error('Invalid inventory timestamp');
+	// DATETIME has no timezone. Passing a JavaScript Date lets the MariaDB driver
+	// translate it through the host timezone, so an 08:00Z snapshot can come back
+	// as 11:00Z on a Moscow host. Store the already-canonical UTC wall time.
+	return parsed.toISOString().replace('T', ' ').replace('Z', '');
 }
 
 function storedTimestamp(value: unknown, name: string): string | null {
@@ -294,7 +300,7 @@ export async function applyInventorySqlBackfill(
 				erp_document_count, changed_inventory_count, unchanged_inventory_count
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, [
-			hashBuffer(plan.planHash), new Date(plan.observedAt), plan.sourceRecordCount,
+			hashBuffer(plan.planHash), sqlDate(plan.observedAt), plan.sourceRecordCount,
 			plan.counts.inventories, plan.counts.points, plan.counts.sections,
 			plan.counts.snapshotLines, plan.counts.countLines, plan.counts.resultLines,
 			plan.counts.erpDocuments, changedInventoryCount, unchangedInventoryCount,

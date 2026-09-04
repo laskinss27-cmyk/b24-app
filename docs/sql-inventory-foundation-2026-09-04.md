@@ -64,21 +64,30 @@ result rows, both new ERP adjustment documents, deterministic replay, malformed
 source blocking, immutable snapshot rejection, transaction boundaries and SQL
 read-back hash verification.
 
+An isolated MariaDB `11.8.8` tmpfs rehearsal applied all eight migrations and
+confirmed that a repeated migration run is a no-op. The real writer/read-back
+cycle preserved an active draft, explicit zero and a comment-only uncounted row;
+an exact replay was idempotent, a changed draft produced one new checkpoint, and
+a changed opening snapshot rolled back. The DML-only user was unable to execute
+`DELETE` or DDL. The rehearsal exposed and fixed two timezone conversions:
+`DATETIME` values are now written as explicit UTC wall time and the calendar-only
+deadline is read with `DATE_FORMAT`, so neither can drift on a Moscow host. The
+temporary database, user and container were removed after the successful run.
+
 ## Remaining production gates
 
-1. Run the migrations against a disposable MariaDB 11.8 instance and repeat them.
-2. Add a read-only owner diagnostic that reads all `ctv_inv` pages and emits only
+1. Add a read-only owner diagnostic that reads all `ctv_inv` pages and emits only
    counts, issue codes and hashes; never print full inventory payloads or OAuth.
-3. Create and verify a fresh `b24_app` backup and isolated restore.
-4. Apply `0057`-`0064` with the one-shot migrator and verify exact structure.
-5. Run a read-only live plan. Any unknown field or malformed record is resolved
+2. Create and verify a fresh `b24_app` backup and isolated restore.
+3. Apply `0057`-`0064` with the one-shot migrator and verify exact structure.
+4. Run a read-only live plan. Any unknown field or malformed record is resolved
    before granting a backfill writer.
-6. Apply the first exact plan with a temporary DML-only credential and prove SQL
+5. Apply the first exact plan with a temporary DML-only credential and prove SQL
    read-back parity. Repeat while employees continue counting.
-7. Deploy `shadow` read/dual-write code with the legacy Bitrix response unchanged.
-8. For the final cutover, ask users to close inventory tabs for a short window,
+6. Deploy `shadow` read/dual-write code with the legacy Bitrix response unchanged.
+7. For the final cutover, ask users to close inventory tabs for a short window,
    wait for autosave, apply the final delta, require zero differences, enable SQL
    primary, and ask users to reload.
 
-Until step 8, employees can continue counting normally and Bitrix remains the
+Until step 7, employees can continue counting normally and Bitrix remains the
 only source of truth.

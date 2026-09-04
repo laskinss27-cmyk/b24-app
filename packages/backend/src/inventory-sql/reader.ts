@@ -64,7 +64,8 @@ function pointStatus(value: unknown): InventorySqlPoint['status'] {
 export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<InventorySqlRecord[]> {
 	const [recordRows, sectionRows, pointRows, snapshotRows, countRows, resultRows, documentRows] = await Promise.all([
 		pool.query<QueryRow[]>(`
-			SELECT id, bitrix_external_id, display_name, inventory_status, deadline,
+			SELECT id, bitrix_external_id, display_name, inventory_status,
+				DATE_FORMAT(deadline, '%Y-%m-%d') AS deadline,
 				created_by_id,
 				DATE_FORMAT(source_created_at, '%Y-%m-%d %H:%i:%s.%f') AS source_created_at,
 				DATE_FORMAT(stock_snapshot_at, '%Y-%m-%d %H:%i:%s.%f') AS stock_snapshot_at,
