@@ -38,6 +38,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 3 сентября [нормализованное verified-чтение перемещений](sql-transfer-verified-read-2026-09-03.md) развёрнуто в `d25c0f4`. Реальный owner-authenticated gate последовательно прошёл `shadow`, затем `verified`: Bitrix/SQL `191/191`, `0` canonical differences; в `verified` ответ взят из SQL. При mismatch/error read adapter автоматически возвращает Bitrix. Запись остаётся `Bitrix primary + SQL shadow`, поэтому это ещё не полный отказ от JSON.
 
+4 сентября после свежего отдельного backup и двух fail-closed preflight-проверок [перемещения переключены на SQL-first](sql-transfer-primary-write-foundation-2026-09-03.md). Старый identity gap исправлен детерминированным one-shot backfill; затем актуальный owner-verified план добавил только три недостающие revision и дал точную parity `196/196`, `0` differences. Readiness-canary выявила отсутствующий `SELECT` allocator и не затронула production; после добавления только этого grant повторная canary прошла. Production image `b24-app:621df91` работает с `B24_APP_TRANSFER_SQL_READ=primary` и `B24_APP_TRANSFER_SQL_WRITE=primary`; Bitrix JSON сохранён как compatibility mirror, outbox пуст, rollback-контейнер сохранён.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |
@@ -49,7 +51,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 | складские проводки | ERPNext | `Delivery Note`, `Purchase Receipt`, `Stock Entry`, `Stock Reconciliation` | истинный остаток меняет только проведённый документ |
 | заявка снаба | ERPNext | `Material Request` и её строки; связь со сделкой в custom field | прогресс вычисляется повторным объединением нескольких реестров |
 | заказ поставщику и приёмка | ERPNext | `Purchase Order` и `Purchase Receipt`; custom fields заявки/ключа | связь частично выводится из полей и строк |
-| перемещения приложения | SQL verified-read после live-проверки Bitrix; запись пока Bitrix primary | migrations `0023`–`0031`: append-only revisions/lines/history/corrections без SQL JSON; runtime shadow writer активен; проводки — ERPNext API | каждое чтение пока зависит от Bitrix для parity/fallback; primary write всё ещё JSON |
+| перемещения приложения | `b24_app` SQL primary для чтения и записи | migrations `0023`–`0037`: append-only revisions/lines/history/corrections, idempotency commands, public-ID allocator и outbox без SQL JSON; Bitrix остаётся compatibility mirror; проводки — ERPNext API | доставка mirror зависит от Bitrix, но ошибка Bitrix остаётся в recoverable outbox и не отменяет SQL-документ |
 | ручные заявки на перемещение/снаб | Битрикс24 | `ctv_tr_requests.DETAIL_TEXT`, ссылки на transfer/task | JSON без локальных ограничений ссылочной целостности |
 | инвентаризация | Битрикс24 + ERPNext | `ctv_inv.DETAIL_TEXT`: документ, точки и замороженный snapshot; итоговые документы — ERPNext | вся инвентаризация обновляется одной JSON-записью |
 | ремонты | Битрикс24 + ERPNext | `ctv_repairs.DETAIL_TEXT`: workflow, история, deal/task/file refs и имена ERP-документов; физическое движение — ERPNext | JSON и повторные entity reads |

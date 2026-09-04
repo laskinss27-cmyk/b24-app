@@ -90,7 +90,7 @@ user и контейнер после теста удаляются.
 1. сделать новый внешний backup/read-back и restore drill отдельной базы
    `b24_app`;
 2. применить только `0035`-`0037` one-shot migrator-ом;
-3. расширить права только `b24_app_transfer_runtime`: `INSERT` allocator,
+3. расширить права только `b24_app_transfer_runtime`: `SELECT/INSERT` allocator,
    `SELECT/INSERT/UPDATE` commands и outbox, `UPDATE` legacy mirror link;
 4. сначала развернуть код без смены текущих `shadow/verified` флагов и
    подтвердить live parity;
@@ -98,3 +98,41 @@ user и контейнер после теста удаляются.
    mirror пуста либо успешно восстанавливается;
 6. только затем отдельной командой включить согласованную пару
    `WRITE=primary`, `READ=primary`, сохранив старые Bitrix JSON-записи.
+
+## Production source switch — 4 сентября 2026
+
+После явного разрешения создан отдельный dump
+`20260904_084512-b24_app-database.sql.gz` размером `5 382 681` байт. Проверки
+gzip/checksum, внешний read-back с Bitrix Disk и наличие `35` определений таблиц
+успешны; retention в этом ручном проходе был выключен, поэтому старые копии не
+удалялись.
+
+Первый live parity gate выявил одну старую запись без `public_id` и fail-closed
+остановил переключение. Детерминированный identity backfill с hash
+`bf7809b699d685bc8e06849a3e56347b7fa99f4ebeade9ea33ede6c7fdaf1916`
+назначил единственный отсутствующий ID; повторный dry-run дал `toAssign=0`.
+Следующая сверка обнаружила две новые записи Bitrix, отсутствовавшие в SQL, и
+одно изменённое состояние. Полный owner-verified план
+`3611bbaa4b6d11c71a20c5882f5c9cff20cd26a345dc4f0a731fb14d783e7dd4`
+атомарно создал ровно `3` revision и оставил `193` неизменными. Итоговая
+сверка: `196/196`, `0` differences; outbox и command table перед switch пусты.
+
+Первая `primary/primary` canary корректно остановилась на readiness `503`:
+у `b24_app_transfer_runtime` отсутствовал `SELECT` на
+`stock_transfer_public_ids`, хотя `INSERT` уже был выдан. Добавлено только это
+право. Повторный probe подтвердил доступ к records, allocator, commands и
+outbox; все остальные grants сохранены без расширения.
+
+Тот же проверенный image `b24-app:621df91` затем прошёл отдельную canary и был
+config-only переключён на `B24_APP_TRANSFER_SQL_READ=primary` и
+`B24_APP_TRANSFER_SQL_WRITE=primary`. Предыдущий рабочий контейнер сохранён как
+`b24-backend-prev-before-transfer-primary-20260904-091744`. Bitrix entity и все
+старые JSON payload сохранены как compatibility mirror; физического удаления
+SQL-строк или legacy-данных не выполнялось.
+
+Независимый post-check подтвердил: internal/public health `200`, readiness
+`database/reservations/transferSqlWriter=up`, официальный ERPNext read `200`,
+`RestartCount=0`, `unless-stopped`, `/srv/b24-state:/app/state`, локальный порт
+`127.0.0.1:3000`, сеть `erpnext_frappe_network`, transfer parity `196/196` с
+нулём differences и пустой outbox. Каталог остался в `primary`, его отдельный
+двухминутный sync job продолжил успешные no-op проходы на `5 149` товарах.
