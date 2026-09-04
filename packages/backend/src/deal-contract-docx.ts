@@ -153,6 +153,7 @@ export async function buildContractDocx(data: {
 		BALANCE_WORDS: moneyWords(balance),
 		VAT_RATE: String(vatRate),
 		SUPPLY_PREPAYMENT_PERCENT: String(supplyPrepaymentPercent),
+		SUPPLY_BALANCE_PERCENT: String(100 - supplyPrepaymentPercent),
 		SUPPLY_DELIVERY_DURATION: contractWorkDuration(supplyDeliveryDays, 'calendar'),
 	};
 	for (const [token, value] of Object.entries(values)) xml = replaceToken(xml, token, value);
