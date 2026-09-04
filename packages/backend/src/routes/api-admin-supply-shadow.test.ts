@@ -39,6 +39,7 @@ function config(mode: 'off' | 'on'): Config {
 		supplyShadowCompare: mode,
 		supplySqlRead: 'off',
 		transferSqlRead: 'off',
+		transferRequestSqlRead: 'off',
 		nodeEnv: 'test',
 	};
 }

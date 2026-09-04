@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { TRANSFER_REQUESTS_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
-import { loadTransferRequest } from './transfer-request-storage.js';
+import { deleteTransferRequestData, loadTransferRequest } from './transfer-request-storage.js';
 import { deleteTransferData, loadTransfers } from './transfer-storage.js';
 import { canDeleteTransferDocuments, currentUser } from './transfer-user-access.js';
 
@@ -67,9 +66,9 @@ export function registerTransferDeleteRoute(
 			if (root.supplyRequestKey.startsWith('transfer-request:')) {
 				const requestId = Number(root.supplyRequestKey.slice('transfer-request:'.length));
 				if (Number.isInteger(requestId) && requestId > 0) {
-					const request = await loadTransferRequest(client, requestId);
+					const request = await loadTransferRequest(app, client, requestId);
 					if (request && (request.transferId === rootId || request.transferId === doc.id)) {
-						await client.call('entity.item.delete', { ENTITY: TRANSFER_REQUESTS_ENTITY, ID: requestId });
+						await deleteTransferRequestData(app, client, requestId, request.name);
 						deletedRequestId = requestId;
 					}
 				}

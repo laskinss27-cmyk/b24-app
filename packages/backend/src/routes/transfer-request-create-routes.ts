@@ -42,7 +42,7 @@ export function registerTransferRequestCreateRoutes(
 			if (!id) throw new Error('entity.item.add не вернул id');
 			const name = `Заказ на перемещение #${id}: ${fromStore} → ${toStore}`;
 			const request = { id, name, ...data };
-			await saveTransferRequest(client, request);
+			await saveTransferRequest(app, client, request);
 			await createTransferRequestTask(app, client, request, me);
 			app.log.info({ id, fromStore, toStore, lines: lines.length }, '[api/transfer-requests/create] ok');
 			return { ok: true, request };
@@ -81,7 +81,7 @@ export function registerTransferRequestCreateRoutes(
 			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
 			if (!id) throw new Error('entity.item.add не вернул id');
 			const request = { id, name: `Заявка снабжению #${id}: ${toStore}`, ...data };
-			await saveTransferRequest(client, request);
+			await saveTransferRequest(app, client, request);
 			await createTransferRequestTask(app, client, request, me);
 			app.log.info({ id, toStore, lines: lines.length }, '[api/transfer-requests/create-supply] ok');
 			return { ok: true, request };

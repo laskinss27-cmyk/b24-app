@@ -31,6 +31,7 @@ const mobileConfig: Config = {
 	supplyShadowCompare: 'off',
 	supplySqlRead: 'off',
 	transferSqlRead: 'off',
+	transferRequestSqlRead: 'off',
 	appClientId: 'local.test',
 	appClientSecret: 'secret',
 	nodeEnv: 'test',

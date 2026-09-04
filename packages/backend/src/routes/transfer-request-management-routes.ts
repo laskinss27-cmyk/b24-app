@@ -34,7 +34,7 @@ export function registerTransferRequestManagementRoutes(
 		await ensureTransferRequestsEntity(client);
 		try {
 			const me = await currentUser(client);
-			const all = await loadTransferRequests(client);
+			const all = await loadTransferRequests(app, client);
 			const canViewAll = appPermission(req, 'transfers.view_all', me.isSupply);
 			const canManage = appPermission(req, 'transfers.manage_requests', me.isSupply);
 			const requests = canViewAll ? all : all.filter((request) => request.createdById === me.id);
@@ -53,14 +53,14 @@ export function registerTransferRequestManagementRoutes(
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		await ensureTransferRequestsEntity(client);
 		try {
-			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
+			const [request, me] = await Promise.all([loadTransferRequest(app, client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
 			if (!appPermission(req, 'transfers.cancel_own_request', me.isSupply || request.createdById === me.id)) {
 				return reply.code(403).send({ ok: false, error: 'можно отменить только свою заявку' });
 			}
 			if (request.status !== 'pending') return reply.code(409).send({ ok: false, error: 'заявка уже обработана' });
 			const canceled = { ...request, status: 'canceled' as const, canceledAt: new Date().toISOString(), canceledById: me.id, canceledByName: me.name };
-			await saveTransferRequest(client, canceled);
+			await saveTransferRequest(app, client, canceled);
 			return { ok: true, request: canceled };
 		} catch (err) {
 			app.log.error({ id }, `[api/transfer-requests/cancel] failed — ${errInfo(err)}`);
@@ -81,7 +81,7 @@ export function registerTransferRequestManagementRoutes(
 		try {
 			await ensureTransferRequestsEntity(client);
 			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
-			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
+			const [request, me] = await Promise.all([loadTransferRequest(app, client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
 			if (!appPermission(req, 'transfers.manage_requests', me.isSupply)) {
 				return reply.code(403).send({ ok: false, error: 'создать перемещение по заявке может только снабжение' });
@@ -120,7 +120,7 @@ export function registerTransferRequestManagementRoutes(
 				convertedByName: me.name,
 				transferId: transfer.id,
 			};
-			try { await saveTransferRequest(client, converted); }
+			try { await saveTransferRequest(app, client, converted); }
 			catch (error) {
 				await deleteTransferData(app, client, transfer.id, transfer.name).catch(() => undefined);
 				throw error;

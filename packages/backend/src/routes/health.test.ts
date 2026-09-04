@@ -18,7 +18,8 @@ test('process health keeps its existing response contract', async () => {
 		appOAuthVault: 'off',
 		supplyShadowCompare: 'off',
 		supplySqlRead: 'off',
-		transferSqlRead: 'off',
+	transferSqlRead: 'off',
+	transferRequestSqlRead: 'off',
 		nodeEnv: 'test',
 	};
 	const app = Fastify();

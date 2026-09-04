@@ -79,6 +79,10 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0043_create_catalog_mirror_stocks.sql',
 		'0044_expand_catalog_attribute_label.sql',
 		'0045_add_catalog_mirror_content_presence.sql',
+		'0046_create_stock_transfer_request_records.sql',
+		'0047_create_stock_transfer_request_revisions.sql',
+		'0048_create_stock_transfer_request_revision_lines.sql',
+		'0049_create_stock_transfer_request_backfill_checkpoints.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -138,6 +142,15 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 	assert.equal(expandedCatalogLabel.split(';').filter((statement) => statement.trim()).length, 1);
 	assert.match(expandedCatalogLabel, /MODIFY COLUMN attribute_label TEXT NOT NULL/);
 	assert.doesNotMatch(expandedCatalogLabel, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP)\b/i);
+	for (const migration of migrations.slice(45, 49)) {
+		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS stock_transfer_request_[a-z_]+ \(/);
+		assert.equal(migration.sql.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.doesNotMatch(migration.sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration.sql, /\bJSON\b/i);
+		assert.match(migration.sql, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+		const identifiers = [...migration.sql.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
+		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
+	}
 });
 
 test('SQL schemas preserve workflow links and Tilda external identity', async () => {
@@ -331,4 +344,23 @@ test('catalog mirror schema is normalized, checkpointed and payload-free', async
 	assert.match(contentPresence, /content_present TINYINT\(1\) NOT NULL DEFAULT 0/);
 	assert.match(contentPresence, /content_present IN \(0, 1\)/);
 	assert.doesNotMatch([checkpoints, products, attributes, prices, warehouses, stocks, expandedLabel, contentPresence].join('\n'), /\bJSON\b/i);
+});
+
+test('transfer request mirror schema is append-only and payload-free', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const records = byName.get('0046_create_stock_transfer_request_records.sql')!;
+	const revisions = byName.get('0047_create_stock_transfer_request_revisions.sql')!;
+	const lines = byName.get('0048_create_stock_transfer_request_revision_lines.sql')!;
+	const checkpoints = byName.get('0049_create_stock_transfer_request_backfill_checkpoints.sql')!;
+
+	assert.match(records, /UNIQUE KEY uq_stock_transfer_request_records_bitrix \(bitrix_external_id\)/);
+	assert.match(records, /last_state_hash BINARY\(32\) NULL/);
+	assert.match(revisions, /UNIQUE KEY uq_stock_transfer_request_revisions_number \(request_id, revision_no\)/);
+	assert.match(revisions, /request_kind IN \('transfer', 'supply'\)/);
+	assert.match(revisions, /request_status IN \('pending', 'converted', 'canceled'\)/);
+	assert.match(lines, /PRIMARY KEY \(revision_id, line_kind, line_ordinal\)/);
+	assert.match(lines, /line_kind IN \('transfer', 'supply'\)/);
+	assert.match(checkpoints, /UNIQUE KEY uq_stock_transfer_request_backfill_hash \(plan_hash\)/);
+	assert.doesNotMatch([records, revisions, lines, checkpoints].join('\n'), /\bJSON\b/i);
 });

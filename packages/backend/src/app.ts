@@ -48,6 +48,7 @@ import { createOwnerOAuthVault, type OwnerOAuthVault } from './b24/owner-oauth-v
 import type { ReservationRuntime } from './reservations/runtime.js';
 import { registerApiReservationsRoute } from './routes/api-reservations.js';
 import type { TransferSqlWriteRuntime } from './transfers/sql-runtime.js';
+import type { TransferRequestSqlWriteRuntime } from './transfers/request-sql-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -63,10 +64,11 @@ export interface AppOptions {
 	database?: DatabaseRuntime;
 	reservations?: ReservationRuntime;
 	transferSqlWriter?: TransferSqlWriteRuntime;
+	transferRequestSqlWriter?: TransferRequestSqlWriteRuntime;
 	ownerOAuthVault?: OwnerOAuthVault | null;
 }
 
-export async function buildApp({ config, database, reservations, transferSqlWriter, ownerOAuthVault = createOwnerOAuthVault(config) }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ config, database, reservations, transferSqlWriter, transferRequestSqlWriter, ownerOAuthVault = createOwnerOAuthVault(config) }: AppOptions): Promise<FastifyInstance> {
 	const app = Fastify({
 		// Фото ремонтов едут data-URL'ами в JSON (превью ужимается на клиенте), поэтому поднимаем
 		// лимит тела с дефолтных 1МБ. Документы (Word/Excel/PDF) грузятся на Диск Б24 ссылкой
@@ -115,6 +117,7 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	app.decorate('databaseRuntime', database ?? null);
 	app.decorate('reservationRuntime', reservations ?? null);
 	app.decorate('transferSqlWriter', transferSqlWriter ?? null);
+	app.decorate('transferRequestSqlWriter', transferRequestSqlWriter ?? null);
 	app.decorate('ownerOAuthVault', ownerOAuthVault);
 	app.decorate('frontendDist', FRONTEND_DIST);
 	app.decorate('readFrontendIndex', async () => {
@@ -129,10 +132,11 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	registerOperationLog(app);
 
 	registerHealthRoute(app);
-	registerReadinessRoute(app, database, reservations, transferSqlWriter?.enabled ? transferSqlWriter : undefined);
+	registerReadinessRoute(app, database, reservations, transferSqlWriter?.enabled ? transferSqlWriter : undefined, transferRequestSqlWriter?.enabled ? transferRequestSqlWriter : undefined);
 	if (database) app.addHook('onClose', async () => database.close());
 	if (reservations) app.addHook('onClose', async () => reservations.close());
 	if (transferSqlWriter) app.addHook('onClose', async () => transferSqlWriter.close());
+	if (transferRequestSqlWriter) app.addHook('onClose', async () => transferRequestSqlWriter.close());
 	registerInstallRoute(app);
 	registerUninstallRoute(app);
 	registerPlacementDealTabRoute(app);
@@ -178,6 +182,7 @@ declare module 'fastify' {
 		ownerOAuthVault: OwnerOAuthVault | null;
 		reservationRuntime: ReservationRuntime | null;
 		transferSqlWriter: TransferSqlWriteRuntime | null;
+		transferRequestSqlWriter: TransferRequestSqlWriteRuntime | null;
 		frontendDist: string;
 		readFrontendIndex: () => Promise<string | null>;
 	}

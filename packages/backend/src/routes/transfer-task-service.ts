@@ -44,7 +44,7 @@ export async function createTransferRequestTask(
 		});
 		if (result.taskId) {
 			request.taskId = result.taskId;
-			await saveTransferRequest(client, request);
+			await saveTransferRequest(app, client, request);
 		} else {
 			app.log.warn({ requestId: request.id, error: result.error }, '[transfer-requests] supply task was not created');
 		}

@@ -3,6 +3,8 @@ import type { DatabaseConfig } from './config.js';
 import { readLatestSupplyMirrorSnapshot, type StoredSupplyMirrorSnapshot } from './supply-mirror-reader.js';
 import { readCurrentSqlTransfer, readCurrentSqlTransfers } from '../transfers/sql-reader.js';
 import type { StoredTransfer } from '../transfers/model.js';
+import type { StoredTransferRequest } from '../transfers/request-model.js';
+import { readCurrentSqlTransferRequest, readCurrentSqlTransferRequests } from '../transfers/request-sql-reader.js';
 import { readLatestCatalogMirrorPlan } from '../catalog-mirror/reader.js';
 import type { CatalogMirrorPlan } from '../catalog-mirror/model.js';
 
@@ -12,6 +14,8 @@ export interface DatabaseRuntime {
 	readLatestSupplyMirrorSnapshot(): Promise<StoredSupplyMirrorSnapshot | null>;
 	readCurrentTransfer(externalId: number): Promise<StoredTransfer | null>;
 	readCurrentTransfers(): Promise<StoredTransfer[]>;
+	readCurrentTransferRequest?(externalId: number): Promise<StoredTransferRequest | null>;
+	readCurrentTransferRequests?(): Promise<StoredTransferRequest[]>;
 	readLatestCatalogMirrorPlan?(): Promise<CatalogMirrorPlan | null>;
 	close(): Promise<void>;
 }
@@ -39,6 +43,8 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 			async readLatestSupplyMirrorSnapshot() { return null; },
 			async readCurrentTransfer() { return null; },
 			async readCurrentTransfers() { return []; },
+			async readCurrentTransferRequest() { return null; },
+			async readCurrentTransferRequests() { return []; },
 			async readLatestCatalogMirrorPlan() { return null; },
 			async close() {},
 		};
@@ -58,6 +64,12 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 		},
 		async readCurrentTransfers() {
 			return readCurrentSqlTransfers(pool);
+		},
+		async readCurrentTransferRequest(externalId) {
+			return readCurrentSqlTransferRequest(pool, externalId);
+		},
+		async readCurrentTransferRequests() {
+			return readCurrentSqlTransferRequests(pool);
 		},
 		async readLatestCatalogMirrorPlan() {
 			return readLatestCatalogMirrorPlan(pool);

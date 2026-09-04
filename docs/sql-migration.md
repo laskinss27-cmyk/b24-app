@@ -40,6 +40,8 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 
 4 сентября после свежего отдельного backup и двух fail-closed preflight-проверок [перемещения переключены на SQL-first](sql-transfer-primary-write-foundation-2026-09-03.md). Старый identity gap исправлен детерминированным one-shot backfill; затем актуальный owner-verified план добавил только три недостающие revision и дал точную parity `196/196`, `0` differences. Readiness-canary выявила отсутствующий `SELECT` allocator и не затронула production; после добавления только этого grant повторная canary прошла. Production image `b24-app:621df91` работает с `B24_APP_TRANSFER_SQL_READ=primary` и `B24_APP_TRANSFER_SQL_WRITE=primary`; Bitrix JSON сохранён как compatibility mirror, outbox пуст, rollback-контейнер сохранён.
 
+Для ручных заявок `ctv_tr_requests` подготовлен отдельный [локальный mirror/verified-read foundation](sql-transfer-request-mirror-foundation-2026-09-04.md): migrations `0046`–`0049`, append-only нормализованные revisions/lines, fail-closed checkpointed backfill, полная пагинация Bitrix и режимы `WRITE=shadow`, `READ=shadow|verified`. Режима `primary` намеренно нет; production schema, data, grants и flags пока не изменялись.
+
 ## Текущая source-of-truth matrix
 
 | Область | Текущий источник правды | Физическое хранение и связи | Текущий риск |
@@ -52,7 +54,7 @@ Read-only [аудит четырёх stale revisions](sql-supply-stale-request-a
 | заявка снаба | ERPNext | `Material Request` и её строки; связь со сделкой в custom field | прогресс вычисляется повторным объединением нескольких реестров |
 | заказ поставщику и приёмка | ERPNext | `Purchase Order` и `Purchase Receipt`; custom fields заявки/ключа | связь частично выводится из полей и строк |
 | перемещения приложения | `b24_app` SQL primary для чтения и записи | migrations `0023`–`0037`: append-only revisions/lines/history/corrections, idempotency commands, public-ID allocator и outbox без SQL JSON; Bitrix остаётся compatibility mirror; проводки — ERPNext API | доставка mirror зависит от Bitrix, но ошибка Bitrix остаётся в recoverable outbox и не отменяет SQL-документ |
-| ручные заявки на перемещение/снаб | Битрикс24 | `ctv_tr_requests.DETAIL_TEXT`, ссылки на transfer/task | JSON без локальных ограничений ссылочной целостности |
+| ручные заявки на перемещение/снаб | Битрикс24; SQL mirror подготовлен локально, не развёрнут | `ctv_tr_requests.DETAIL_TEXT`; migrations `0046`–`0049` нормализуют identity, append-only revisions/lines и ссылки на transfer/task без JSON | до production backfill и устойчивой parity Bitrix остаётся единственным источником |
 | инвентаризация | Битрикс24 + ERPNext | `ctv_inv.DETAIL_TEXT`: документ, точки и замороженный snapshot; итоговые документы — ERPNext | вся инвентаризация обновляется одной JSON-записью |
 | ремонты | Битрикс24 + ERPNext | `ctv_repairs.DETAIL_TEXT`: workflow, история, deal/task/file refs и имена ERP-документов; физическое движение — ERPNext | JSON и повторные entity reads |
 | старые партии реализаций | Битрикс24 | `ctv_realize`, используется как legacy-память для сделок | legacy-зависимость сохраняется до отдельной миграции |
@@ -203,7 +205,8 @@ Production restore требует остановить записи прилож
 12. Идемпотентный mirror writer/checkpoint подготовлен: focused `41/41`, backend `220/220`, общий typecheck и изолированный MariaDB 11.8 rehearsal успешны. Отдельный DML-only credential создан, `0005` применена one-shot runner, post-DDL backup/external read-back/restore parity успешны; writer source развёрнут без HTTP/startup вызова.
 13. Первый production mirror apply выполнен отдельным разрешённым one-shot process: свежий план имел 0 errors / 22 warnings, атомарная запись и точный no-op repeat подтверждены, graph/orphan checks успешны, post-apply backup/external read-back/restore parity точны. Runtime остался readiness-only, source switch не выполнялся.
 14. Owner OAuth vault, ручной shadow endpoint и первый refresh-cycle завершены: устаревший checkpoint дал объяснимый `mismatch`, новый mirror apply прошёл backup/restore, следующий compare дал точный `match` с 0 differences. До source switch нужны несколько независимых `match` во времени.
-15. Idempotency/events, затем по одному модулю: снаб, остальные workflow; сначала reads, потом writes.
+15. Для ручных заявок перемещения/снаба локально подготовлены migrations `0046`–`0049`, fail-closed backfill и `shadow|verified` read gate без режима primary. Следующий шаг — отдельный backup/restore, production DDL, backfill и накопление parity; только затем idempotency/outbox и SQL-primary writer.
+16. Остальные workflow переносить по одному модулю: сначала reads, потом writes.
 
 Отдельный Tilda mapping foundation применён 21 августа: migration `0006`, 177
 mapping rows, idempotent repeat, post-write backup/restore и свежий официальный
