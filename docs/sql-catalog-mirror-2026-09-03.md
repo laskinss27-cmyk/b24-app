@@ -219,3 +219,24 @@ authorized catalog request compared the future hybrid response at
 different products. Its cold shadow request took `9,849 ms` because shadow
 still constructs and returns the full legacy response in addition to checking
 SQL. `primary` was not enabled.
+
+## Hybrid primary cutover — 2026-09-04
+
+After explicit authorization, the same verified image `b24-app:621df91`
+passed a `primary` canary and was config-only switched to
+`B24_APP_CATALOG_SQL_READ=primary`. The immediately preceding working shadow
+container is preserved as
+`b24-backend-prev-before-catalog-primary-20260904`; no rollback container,
+backup or restore schema was removed.
+
+Independent post-cutover checks confirmed internal and public health, SQL
+readiness, the official ERPNext Item read, the `/srv/b24-state` mount,
+localhost-only port binding, restart policy, restart count `0`, membership in
+`erpnext_frappe_network`, absence of catalog-sync credentials from the backend
+environment, and the still-active two-minute mirror job. The first real
+authorized catalog request returned all `5,149` rows with
+`source=sql-live-stock`, did not invoke the core fallback, and completed its
+catalog build in `1,183 ms`. The preceding cold shadow build had taken
+`9,849 ms`; the observed first-request improvement was approximately `8.3x`
+while physical stock still came from the live ERPNext API and reservations
+were applied afterward.
