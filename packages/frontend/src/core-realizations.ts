@@ -67,6 +67,18 @@ export async function realizeCoreSubmit(dealId: number, names: string[]): Promis
 	return json.submitted;
 }
 
+/** Удалить непроведённые реализации этой сделки. Остатки и резервы не меняются. */
+export async function deleteCoreRealizationDrafts(dealId: number, names: string[]): Promise<string[]> {
+	const res = await fetch('/api/deal/realize-core', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), action: 'delete-draft', dealId, names }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; deleted?: string[] };
+	if (!json.ok || !json.deleted) throw new Error(json.error ?? 'не удалось удалить черновики реализации');
+	return json.deleted;
+}
+
 /** Возврат ОТ КЛИЕНТА: создать в ядре возвраты (Delivery Note is_return) по выбранным позициям. */
 export async function createDealReturn(dealId: number, note: string, lines: Array<{ productId: number; qty: number; store: string }>): Promise<string[]> {
 	const res = await fetch('/api/deal/realize-core', {

@@ -160,6 +160,7 @@ export {
 	addProductToDeal,
 	createDealReturn,
 	fetchDealRealizationsCore,
+	deleteCoreRealizationDrafts,
 	realizeCoreDraft,
 	realizeCoreSubmit,
 } from './core-realizations.js';

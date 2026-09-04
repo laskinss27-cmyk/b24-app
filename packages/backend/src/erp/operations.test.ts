@@ -40,6 +40,7 @@ import {
 	completeTransferFromTransit,
 	createClientReturns,
 	createRealizationDraft,
+	deleteRealizationDraft,
 	deleteInventoryRecoDraft,
 	deleteInventoryAdjustmentDraft,
 	deliverRepairUnit,
@@ -434,6 +435,22 @@ test('deal realization draft keeps product, service and explicit-submit payloads
 
 	await submitRealization(client, created.name);
 	assert.equal(erp.active().find((document) => document.name === created.name)?.docstatus, 1);
+});
+
+test('deal realization draft deletion is limited to an unsubmitted non-return document of the same deal', async () => {
+	const erp = new FakeErp([
+		{ name: 'DN-DRAFT', docstatus: 0, b24_deal_id: '73', items: [item('ROW-1', 101, 1, 125)] },
+		{ name: 'DN-SUBMITTED', docstatus: 1, b24_deal_id: '73', items: [item('ROW-2', 101, 1, 125)] },
+		{ name: 'DN-OTHER-DEAL', docstatus: 0, b24_deal_id: '74', items: [item('ROW-3', 101, 1, 125)] },
+		{ name: 'DN-RETURN', docstatus: 0, b24_deal_id: '73', is_return: 1, items: [item('ROW-4', 101, -1, 125)] },
+	]);
+	const client = erp.asClient();
+
+	await assert.rejects(deleteRealizationDraft(client, 73, 'DN-SUBMITTED'), /уже проведён или отменён/);
+	await assert.rejects(deleteRealizationDraft(client, 73, 'DN-OTHER-DEAL'), /не принадлежит сделке/);
+	await assert.rejects(deleteRealizationDraft(client, 73, 'DN-RETURN'), /является возвратом/);
+	await deleteRealizationDraft(client, 73, 'DN-DRAFT');
+	assert.equal(erp.active().some((document) => document.name === 'DN-DRAFT'), false);
 });
 
 test('client return keeps source row, segment, sale rate and remaining-quantity limit', async () => {

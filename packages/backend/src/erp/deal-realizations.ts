@@ -620,6 +620,26 @@ export async function submitRealization(erp: ErpClient, name: string): Promise<v
 	await erp.submit('Delivery Note', name);
 }
 
+/**
+ * Удалить только непроведённую обычную реализацию конкретной сделки.
+ * Повторная загрузка документа перед DELETE закрывает гонку с проведением и не даёт
+ * использовать маршрут для чужой сделки, возврата или любого другого Delivery Note.
+ */
+export async function deleteRealizationDraft(erp: ErpClient, dealId: number, name: string): Promise<void> {
+	const document = await erp.get<Record<string, unknown>>('Delivery Note', name);
+	if (!document) throw new Error(`черновик ${name} не найден`);
+	if (String(document[DEAL_FIELD] ?? '') !== String(dealId)) {
+		throw new Error(`черновик ${name} не принадлежит сделке №${dealId}`);
+	}
+	if (Number(document['is_return'] ?? 0) === 1) {
+		throw new Error(`документ ${name} является возвратом и не может быть удалён как черновик реализации`);
+	}
+	if (Number(document['docstatus'] ?? 0) !== 0) {
+		throw new Error(`документ ${name} уже проведён или отменён`);
+	}
+	await erp.delete('Delivery Note', name);
+}
+
 
 /**
  * Возврат ОТ КЛИЕНТА: Delivery Note с is_return — товар обратно на склад, сторно реализации.

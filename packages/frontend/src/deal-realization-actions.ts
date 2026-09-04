@@ -1,4 +1,4 @@
-import { realizeCoreDraft, realizeCoreSubmit, type RealizeCoreGroup } from './b24.js';
+import { deleteCoreRealizationDrafts, realizeCoreDraft, realizeCoreSubmit, type RealizeCoreGroup } from './b24.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
 type DealNotice = { kind: 'ok' | 'err'; text: string } | null;
@@ -106,5 +106,28 @@ export function createDealRealizationActions({
 		}
 	};
 
-	return { doDraft, doSubmit };
+	const doDeleteDrafts = async (): Promise<void> => {
+		if (dealId == null || busy || supplyBusy || !pendingDraftNames.length) return;
+		const documentList = pendingDraftNames.map((name) => `• ${name}`).join('\n');
+		const noun = pendingDraftNames.length === 1 ? 'черновик реализации' : `черновики реализации (${pendingDraftNames.length})`;
+		if (!window.confirm(`Удалить ${noun}?\n\n${documentList}\n\nСкладские остатки и резервы не изменятся.`)) return;
+		setBusy(true);
+		setNotice(null);
+		try {
+			const deleted = await deleteCoreRealizationDrafts(dealId, pendingDraftNames);
+			setDraftNames([]);
+			setNotice({ kind: 'ok', text: `Черновиков удалено: ${deleted.length}. Можно изменить состав и создать реализацию заново.` });
+			await onReload();
+		} catch (error) {
+			// Если ERPNext успел удалить часть пачки до внешней ошибки, перечитываем фактическое
+			// состояние и не держим исчезнувшие имена в локальном списке.
+			setDraftNames([]);
+			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
+			await onReload().catch(() => undefined);
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return { doDraft, doSubmit, doDeleteDrafts };
 }

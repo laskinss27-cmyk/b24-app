@@ -48,6 +48,7 @@ export {
 	REALIZATION_BASE_SEGMENT,
 	createClientReturns,
 	createRealizationDraft,
+	deleteRealizationDraft,
 	listDealRealizations,
 	submitRealization,
 	syncDealRealizationPrices,

@@ -11,6 +11,7 @@ Object.defineProperty(globalThis, 'window', {
 const {
 	addProductToDeal,
 	createDealReturn,
+	deleteCoreRealizationDrafts,
 	fetchDealRealizationsCore,
 	realizeCoreDraft,
 	realizeCoreSubmit,
@@ -37,7 +38,7 @@ test('core realization list rejects backend errors', async () => {
 	});
 });
 
-test('core realization draft and submit preserve actions and payloads', async () => {
+test('core realization draft, submit and delete preserve actions and payloads', async () => {
 	const groups = [{
 		storeTitle: 'Main',
 		lines: [{ productId: 42, qty: 2, rate: 1500, segmentId: 'base' }],
@@ -45,13 +46,16 @@ test('core realization draft and submit preserve actions and payloads', async ()
 	const requests = captureResponses([
 		{ ok: true, drafts: [{ name: 'DN-1', storeTitle: 'Main' }] },
 		{ ok: true, submitted: ['DN-1'] },
+		{ ok: true, deleted: ['DN-2'] },
 	]);
 
 	assert.deepEqual(await realizeCoreDraft(501, groups), [{ name: 'DN-1', storeTitle: 'Main' }]);
 	assert.deepEqual(await realizeCoreSubmit(501, ['DN-1']), ['DN-1']);
+	assert.deepEqual(await deleteCoreRealizationDrafts(501, ['DN-2']), ['DN-2']);
 	assert.deepEqual(requests.map((item) => item.body), [
 		{ domain: 'core.example', accessToken: 'core-token', action: 'draft', dealId: 501, groups },
 		{ domain: 'core.example', accessToken: 'core-token', action: 'submit', dealId: 501, names: ['DN-1'] },
+		{ domain: 'core.example', accessToken: 'core-token', action: 'delete-draft', dealId: 501, names: ['DN-2'] },
 	]);
 });
 

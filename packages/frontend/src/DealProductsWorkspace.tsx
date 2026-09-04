@@ -376,7 +376,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		setSelected,
 		setNotice,
 	});
-	const { doDraft, doSubmit } = createDealRealizationActions({
+	const { doDraft, doSubmit, doDeleteDrafts } = createDealRealizationActions({
 		dealId,
 		busy,
 		supplyBusy,
@@ -434,6 +434,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				canRequestRelease={dealReservations.canWrite && Boolean(dealReservations.open?.reservationId) && dealReservations.open?.releaseRequestStatus !== 'pending'}
 				notice={notice}
 				onRealize={() => void (hasPendingDrafts ? doSubmit() : doDraft())}
+				onDeleteDrafts={() => void doDeleteDrafts()}
 				onOrderSupply={openSupplyOrder}
 				onReserve={() => setShowReservation(true)}
 				onReleaseReservation={() => {

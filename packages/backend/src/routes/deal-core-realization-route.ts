@@ -3,11 +3,13 @@ import { B24ApiError, type B24Client } from '../b24/client.js';
 import { ensureTransfersEntity } from '../b24/placement.js';
 import { fetchServiceProductIds, setDealB24Service } from '../deal-product-catalog.js';
 import { ErpClient } from '../erp/client.js';
+import { DEAL_FIELD } from '../erp/erp-setup.js';
 import {
 	assertDealQuoteVariantSelected,
 	calculateDealPlanTotal,
 	createClientReturns,
 	createRealizationDraft,
+	deleteRealizationDraft,
 	fetchErpStocksFor,
 	listDealPlan,
 	listDealRealizations,
@@ -39,7 +41,8 @@ export function registerDealCoreRealizationRoute(
 	// РЕАЛИЗАЦИЯ В ЯДРЕ (Delivery Note) — «покрывало»: складской документ живёт в ERPNext, не в Б24.
 	// action='list': что уже реализовано по сделке (из ядра по b24_deal_id) — черновики + проведённые;
 	// action='draft': по каждому складу-группе создаём черновик Delivery Note (b24_deal_id, реальный склад);
-	// action='submit': проводим переданные черновики (docstatus 1) → остаток ядра реально списывается.
+	// action='submit': проводим переданные черновики (docstatus 1) → остаток ядра реально списывается;
+	// action='delete-draft': удаляем только проверенные черновики этой сделки, не затрагивая остатки.
 	// Один документ на склад (группировка на фронте). «День X» (синк перестаёт затирать) — отдельно.
 	app.post('/api/deal/realize-core', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; action?: unknown; groups?: unknown; names?: unknown; note?: unknown; lines?: unknown };
@@ -162,6 +165,40 @@ export function registerDealCoreRealizationRoute(
 				await recordRealizationEvent(app, req, { operation: 'return', dealId, documents: loggedDocuments });
 				return { ok: true, returns: names };
 			}
+			if (action === 'delete-draft') {
+				const dealId = Number(b.dealId);
+				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+				const names = [...new Set((Array.isArray(b.names) ? b.names : []).map(String).map((name) => name.trim()).filter(Boolean))];
+				if (!names.length) return reply.code(400).send({ ok: false, error: 'нет черновиков для удаления' });
+				// Удалять документы можно только из сделки, доступной текущему пользователю Битрикс24.
+				await client.call('crm.deal.get', { id: dealId });
+				const dealDocuments = await listDealRealizations(erp, dealId);
+				const allowedDrafts = new Set(dealDocuments
+					.filter((document) => !document.submitted && !document.isReturn)
+					.map((document) => document.name));
+				if (names.some((name) => !allowedDrafts.has(name))) {
+					throw new Error('один из документов не принадлежит этой сделке, является возвратом или уже проведён');
+				}
+				// Сначала проверяем всю пачку повторным чтением. DELETE начинается только если
+				// каждый документ по-прежнему является подходящим черновиком.
+				for (const name of names) {
+					const document = await erp.get<Record<string, unknown>>('Delivery Note', name);
+					if (!document
+						|| String(document[DEAL_FIELD] ?? '') !== String(dealId)
+						|| Number(document['is_return'] ?? 0) === 1
+						|| Number(document['docstatus'] ?? 0) !== 0) {
+						throw new Error(`черновик ${name} изменился; обнови сделку и повтори действие`);
+					}
+				}
+				for (const name of names) {
+					await deleteRealizationDraft(erp, dealId, name);
+					loggedDocuments.push(name);
+				}
+				await syncDealTechnicalFields(client, erp, dealId);
+				app.log.info({ dealId, deleted: names.length }, '[api/deal/realize-core] drafts deleted');
+				await recordRealizationEvent(app, req, { operation: 'delete_draft', dealId, documents: loggedDocuments });
+				return { ok: true, deleted: names };
+			}
 			if (action === 'submit') {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
@@ -203,8 +240,8 @@ export function registerDealCoreRealizationRoute(
 		} catch (err) {
 			const error = errInfo(err);
 			app.log.error({ action }, `[api/deal/realize-core] failed — ${error}`);
-			if ((action === 'draft' || action === 'submit' || action === 'return') && Number.isInteger(logDealId) && logDealId > 0) {
-				await recordRealizationEvent(app, req, { operation: action, dealId: logDealId, documents: loggedDocuments, error });
+			if ((action === 'draft' || action === 'delete-draft' || action === 'submit' || action === 'return') && Number.isInteger(logDealId) && logDealId > 0) {
+				await recordRealizationEvent(app, req, { operation: action === 'delete-draft' ? 'delete_draft' : action, dealId: logDealId, documents: loggedDocuments, error });
 			}
 			return reply.code(200).send({ ok: false, error });
 		}

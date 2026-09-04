@@ -31,6 +31,7 @@ export function DealRealizationBar({
 	canRequestRelease,
 	notice,
 	onRealize,
+	onDeleteDrafts,
 	onOrderSupply,
 	onReserve,
 	onReleaseReservation,
@@ -54,6 +55,7 @@ export function DealRealizationBar({
 	canRequestRelease: boolean;
 	notice: { kind: 'ok' | 'err'; text: string } | null;
 	onRealize: () => void;
+	onDeleteDrafts: () => void;
 	onOrderSupply: () => void;
 	onReserve: () => void;
 	onReleaseReservation: () => void;
@@ -89,6 +91,16 @@ export function DealRealizationBar({
 				>
 					{busy ? '…' : hasPendingDrafts ? '✓ Провести' : `Реализация${realizationDocumentCount ? ` (${realizationDocumentCount})` : ''}`}
 				</button>
+				{hasPendingDrafts && (
+					<button
+						type="button"
+						className="btn-delete-realization-drafts"
+						disabled={dev || busy || supplyBusy || pendingDraftCount === 0}
+						onClick={onDeleteDrafts}
+					>
+						{pendingDraftCount === 1 ? 'Удалить черновик' : `Удалить черновики (${pendingDraftCount})`}
+					</button>
+				)}
 				{!hasPendingDrafts && supplyGoodsCount > 0 && (
 					<button className="btn-order-supply" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={onOrderSupply}>{supplyBusy ? '…' : `Заказать (${supplyGoodsCount})`}</button>
 				)}
