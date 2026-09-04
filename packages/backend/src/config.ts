@@ -30,8 +30,8 @@ const ConfigSchema = z.object({
 	supplySqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
 	/** Transfer-card SQL read gate; primary is allowed only with the SQL-first writer. */
 	transferSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
-	/** Manual transfer/supply request SQL read gate; Bitrix remains authoritative in verified mode. */
-	transferRequestSqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
+	/** Manual transfer/supply request SQL read gate; primary is allowed only with the SQL-first writer. */
+	transferRequestSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 

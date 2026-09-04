@@ -35,9 +35,9 @@ function hash(row: QueryRow, field: string): string {
 	return value.toString('hex');
 }
 
-export async function readCurrentSqlTransferRequests(pool: TransferSqlPool, externalId?: number): Promise<StoredTransferRequest[]> {
+export async function readCurrentSqlTransferRequests(pool: TransferSqlPool, publicId?: number): Promise<StoredTransferRequest[]> {
 	const revisions = await pool.query<QueryRow[]>(`
-		SELECT rr.bitrix_external_id, rr.display_name, rr.last_state_hash,
+		SELECT rr.public_id, rr.bitrix_external_id, rr.display_name, rr.last_state_hash,
 			r.id AS revision_id, r.state_hash, r.request_kind, r.request_status,
 			r.from_store, r.to_store, r.note, r.source_created_at,
 			r.created_by_id, r.created_by_name, r.converted_at,
@@ -51,9 +51,9 @@ export async function readCurrentSqlTransferRequests(pool: TransferSqlPool, exte
 				WHERE latest.request_id = rr.id
 			)
 		WHERE rr.deleted_at IS NULL
-		${externalId == null ? '' : 'AND rr.bitrix_external_id = ?'}
-		ORDER BY rr.bitrix_external_id DESC
-	`, externalId == null ? [] : [externalId]);
+		${publicId == null ? '' : 'AND rr.public_id = ?'}
+		ORDER BY rr.public_id DESC
+	`, publicId == null ? [] : [publicId]);
 	if (!revisions.length) return [];
 	const revisionIds = revisions.map((row) => row['revision_id']);
 	const placeholders = revisionIds.map(() => '?').join(', ');
@@ -89,7 +89,7 @@ export async function readCurrentSqlTransferRequests(pool: TransferSqlPool, exte
 	return revisions.map((row) => {
 		const revisionId = String(row['revision_id']);
 		const request: StoredTransferRequest = {
-			id: positiveInteger(row, 'bitrix_external_id'),
+			id: positiveInteger(row, 'public_id'),
 			name: text(row, 'display_name'),
 			kind: text(row, 'request_kind') as StoredTransferRequest['kind'],
 			fromStore: text(row, 'from_store'),

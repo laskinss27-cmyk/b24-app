@@ -26,9 +26,10 @@ export async function listTransfers(dealId?: number, period?: { from?: string; t
 
 /** Заказ менеджера на перемещение: информационный документ без резерва и движений. */
 export async function createTransferRequest(input: { fromStore: string; toStore: string; note?: string; lines: TransferLineDto[] }): Promise<TransferRequestDoc> {
+	const idempotencyKey = newIdempotencyKey('transfer-request');
 	const res = await fetch('/api/transfer-requests/create', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...input }),
+		body: JSON.stringify({ ...bx24Auth(), ...input, idempotencyKey, createdAt: new Date().toISOString() }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc };
 	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось создать заказ на перемещение');
@@ -36,9 +37,10 @@ export async function createTransferRequest(input: { fromStore: string; toStore:
 }
 
 export async function createSupplyTtRequest(input: { toStore: string; note?: string; lines: SupplyRequestLineDto[] }): Promise<TransferRequestDoc> {
+	const idempotencyKey = newIdempotencyKey('supply-request');
 	const res = await fetch('/api/transfer-requests/create-supply', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...input }),
+		body: JSON.stringify({ ...bx24Auth(), ...input, idempotencyKey, createdAt: new Date().toISOString() }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; request?: TransferRequestDoc };
 	if (!json.ok || !json.request) throw new Error(json.error ?? 'не удалось создать заявку снабжению');

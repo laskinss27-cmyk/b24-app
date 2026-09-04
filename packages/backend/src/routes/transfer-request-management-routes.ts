@@ -31,7 +31,7 @@ export function registerTransferRequestManagementRoutes(
 		const b = (req.body ?? {}) as AuthBody;
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		await ensureTransferRequestsEntity(client);
+		if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
 		try {
 			const me = await currentUser(client);
 			const all = await loadTransferRequests(app, client);
@@ -51,7 +51,7 @@ export function registerTransferRequestManagementRoutes(
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
-		await ensureTransferRequestsEntity(client);
+		if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
 		try {
 			const [request, me] = await Promise.all([loadTransferRequest(app, client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
@@ -79,7 +79,7 @@ export function registerTransferRequestManagementRoutes(
 		operationLocks.add(lockKey);
 		let createdTransferId = 0;
 		try {
-			await ensureTransferRequestsEntity(client);
+			if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
 			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 			const [request, me] = await Promise.all([loadTransferRequest(app, client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });

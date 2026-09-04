@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { ensureTransferRequestsEntity, TRANSFER_REQUESTS_ENTITY } from '../b24/placement.js';
+import { ensureTransferRequestsEntity } from '../b24/placement.js';
 import { normalizeTransferLines } from '../transfers/model.js';
 import { newSupplyRequestData, newTransferRequestData, type SupplyRequestLine } from '../transfers/request-model.js';
-import { saveTransferRequest } from './transfer-request-storage.js';
+import { createTransferRequestData, loadTransferRequest, saveTransferRequest } from './transfer-request-storage.js';
 import { createTransferRequestTask } from './transfer-task-service.js';
 import { currentUser } from './transfer-user-access.js';
 
@@ -29,17 +29,24 @@ export function registerTransferRequestCreateRoutes(
 		const fromStore = String(b['fromStore'] ?? '').trim();
 		const toStore = String(b['toStore'] ?? '').trim();
 		const note = String(b['note'] ?? '').trim().slice(0, 500);
+		const idempotencyKey = String(b['idempotencyKey'] ?? '').trim();
+		const suppliedCreatedAt = String(b['createdAt'] ?? '').trim();
+		const createdAt = Number.isFinite(new Date(suppliedCreatedAt).getTime()) ? new Date(suppliedCreatedAt).toISOString() : new Date().toISOString();
 		const lines = normalizeTransferLines(b['lines']).filter((line) => line.qty > 0);
 		if (!fromStore || !toStore || fromStore === toStore) return reply.code(400).send({ ok: false, error: 'нужны разные склады «откуда» и «куда»' });
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'добавь хотя бы одну позицию' });
-		await ensureTransferRequestsEntity(client);
+		if (app.transferRequestSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание заявки после обновления страницы' });
+		if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
 		try {
 			const me = await currentUser(client);
-			const data = newTransferRequestData({ fromStore, toStore, lines, ...(note ? { note } : {}), createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name });
+			const data = newTransferRequestData({ fromStore, toStore, lines, ...(note ? { note } : {}), createdAt, createdById: me.id, createdByName: me.name });
 			const draftName = `Заказ на перемещение: ${fromStore} → ${toStore}`;
-			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: draftName, DETAIL_TEXT: JSON.stringify(data) });
-			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-			if (!id) throw new Error('entity.item.add не вернул id');
+			const created = await createTransferRequestData(app, client, draftName, data, idempotencyKey || undefined);
+			const id = created.id;
+			if (created.alreadyApplied) {
+				const existing = await loadTransferRequest(app, client, id);
+				if (existing?.taskId) return { ok: true, request: existing };
+			}
 			const name = `Заказ на перемещение #${id}: ${fromStore} → ${toStore}`;
 			const request = { id, name, ...data };
 			await saveTransferRequest(app, client, request);
@@ -58,6 +65,9 @@ export function registerTransferRequestCreateRoutes(
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const toStore = String(b['toStore'] ?? '').trim();
 		const note = String(b['note'] ?? '').trim().slice(0, 500);
+		const idempotencyKey = String(b['idempotencyKey'] ?? '').trim();
+		const suppliedCreatedAt = String(b['createdAt'] ?? '').trim();
+		const createdAt = Number.isFinite(new Date(suppliedCreatedAt).getTime()) ? new Date(suppliedCreatedAt).toISOString() : new Date().toISOString();
 		const rawLines = Array.isArray(b['lines']) ? b['lines'] as Array<Record<string, unknown>> : [];
 		const lines: SupplyRequestLine[] = rawLines.map((line) => {
 			const productId = Number(line['productId']);
@@ -72,14 +82,18 @@ export function registerTransferRequestCreateRoutes(
 		}).filter((line) => line.qty > 0 && (line.productId || line.name));
 		if (!toStore) return reply.code(400).send({ ok: false, error: 'нужно выбрать склад' });
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'добавь хотя бы одну позицию' });
-		await ensureTransferRequestsEntity(client);
+		if (app.transferRequestSqlWriter?.mode === 'primary' && !idempotencyKey) return reply.code(400).send({ ok: false, error: 'повтори создание заявки после обновления страницы' });
+		if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
 		try {
 			const me = await currentUser(client);
-			const data = newSupplyRequestData({ toStore, lines, ...(note ? { note } : {}), createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name });
+			const data = newSupplyRequestData({ toStore, lines, ...(note ? { note } : {}), createdAt, createdById: me.id, createdByName: me.name });
 			const draftName = `Заявка снабжению: ${toStore}`;
-			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: TRANSFER_REQUESTS_ENTITY, NAME: draftName, DETAIL_TEXT: JSON.stringify(data) });
-			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-			if (!id) throw new Error('entity.item.add не вернул id');
+			const created = await createTransferRequestData(app, client, draftName, data, idempotencyKey || undefined);
+			const id = created.id;
+			if (created.alreadyApplied) {
+				const existing = await loadTransferRequest(app, client, id);
+				if (existing?.taskId) return { ok: true, request: existing };
+			}
 			const request = { id, name: `Заявка снабжению #${id}: ${toStore}`, ...data };
 			await saveTransferRequest(app, client, request);
 			await createTransferRequestTask(app, client, request, me);

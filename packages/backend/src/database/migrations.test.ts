@@ -83,6 +83,13 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0047_create_stock_transfer_request_revisions.sql',
 		'0048_create_stock_transfer_request_revision_lines.sql',
 		'0049_create_stock_transfer_request_backfill_checkpoints.sql',
+		'0050_add_stock_transfer_request_public_id.sql',
+		'0051_create_stock_transfer_request_public_ids.sql',
+		'0052_create_stock_transfer_request_identity_checkpoints.sql',
+		'0053_make_stock_transfer_request_bitrix_identity_optional.sql',
+		'0054_create_stock_transfer_request_commands.sql',
+		'0055_create_stock_transfer_request_bitrix_outbox.sql',
+		'0056_allow_stock_transfer_request_sql_native_source.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -363,4 +370,28 @@ test('transfer request mirror schema is append-only and payload-free', async () 
 	assert.match(lines, /line_kind IN \('transfer', 'supply'\)/);
 	assert.match(checkpoints, /UNIQUE KEY uq_stock_transfer_request_backfill_hash \(plan_hash\)/);
 	assert.doesNotMatch([records, revisions, lines, checkpoints].join('\n'), /\bJSON\b/i);
+});
+
+test('transfer request SQL-first foundation preserves identity and keeps the outbox payload-free', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const publicId = byName.get('0050_add_stock_transfer_request_public_id.sql')!;
+	const allocator = byName.get('0051_create_stock_transfer_request_public_ids.sql')!;
+	const checkpoints = byName.get('0052_create_stock_transfer_request_identity_checkpoints.sql')!;
+	const optionalBitrix = byName.get('0053_make_stock_transfer_request_bitrix_identity_optional.sql')!;
+	const commands = byName.get('0054_create_stock_transfer_request_commands.sql')!;
+	const outbox = byName.get('0055_create_stock_transfer_request_bitrix_outbox.sql')!;
+	const nativeSource = byName.get('0056_allow_stock_transfer_request_sql_native_source.sql')!;
+	assert.match(publicId, /ADD COLUMN public_id BIGINT UNSIGNED NULL/);
+	assert.match(publicId, /UNIQUE KEY uq_stock_transfer_request_records_public_id \(public_id\)/);
+	assert.match(allocator, /public_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT/);
+	assert.match(allocator, /UNIQUE KEY uq_stock_transfer_request_public_ids_legacy \(legacy_bitrix_external_id\)/);
+	assert.match(checkpoints, /UNIQUE KEY uq_stock_transfer_request_identity_hash \(plan_hash\)/);
+	assert.match(optionalBitrix, /MODIFY COLUMN bitrix_external_id BIGINT UNSIGNED NULL/);
+	assert.match(commands, /UNIQUE KEY uq_stock_transfer_request_commands_key \(idempotency_key\)/);
+	assert.match(commands, /command_kind IN \('create', 'update', 'delete'\)/);
+	assert.match(outbox, /UNIQUE KEY uq_stock_transfer_request_outbox_revision \(revision_id, operation_kind\)/);
+	assert.match(outbox, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
+	assert.match(nativeSource, /'sql_native'/);
+	assert.doesNotMatch([publicId, allocator, checkpoints, optionalBitrix, commands, outbox, nativeSource].join('\n'), /\bJSON\b/i);
 });

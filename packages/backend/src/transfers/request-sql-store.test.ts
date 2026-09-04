@@ -40,7 +40,8 @@ test('transfer request writer stores one append-only revision and normalized lin
 	const batches: unknown[][][] = [];
 	const connection: TransferSqlConnection = {
 		async query<T>(sql: string): Promise<T> {
-			if (sql.includes('SELECT id, last_state_hash')) return [{ id: 8, last_state_hash: null }] as T;
+			if (sql.includes('SELECT public_id, legacy_bitrix_external_id')) return [{ public_id: 17, legacy_bitrix_external_id: 17 }] as T;
+			if (sql.includes('SELECT id, public_id, last_state_hash')) return [{ id: 8, public_id: 17, last_state_hash: null }] as T;
 			if (sql.includes('SELECT id, revision_no, state_hash')) return [] as T;
 			if (sql.includes('INSERT INTO stock_transfer_request_revisions')) return { insertId: 13 } as T;
 			if (sql.includes('UPDATE stock_transfer_request_records')) return { affectedRows: 1 } as T;
@@ -64,7 +65,7 @@ test('SQL reader reconstructs the canonical request and verifies its hash', asyn
 		async getConnection() { throw new Error('not used'); },
 		async query<T>(sql: string): Promise<T> {
 			if (sql.includes('FROM stock_transfer_request_records')) return [{
-				bitrix_external_id: 17, display_name: value.name, last_state_hash: stateHash, revision_id: 13, state_hash: stateHash,
+				public_id: 17, bitrix_external_id: 17, display_name: value.name, last_state_hash: stateHash, revision_id: 13, state_hash: stateHash,
 				request_kind: value.kind, request_status: value.status, from_store: value.fromStore, to_store: value.toStore,
 				note: value.note, source_created_at: new Date(value.createdAt), created_by_id: value.createdById, created_by_name: value.createdByName,
 				converted_at: null, converted_by_id: '', converted_by_name: '', transfer_public_id: null, task_id: 900,

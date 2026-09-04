@@ -10,7 +10,14 @@ import type { StoredTransferRequest } from './request-model.js';
 import { applyTransferRequestBackfill, buildTransferRequestBackfillPlan } from './request-sql-backfill.js';
 import { compareTransferRequestSqlParity } from './request-sql-compare.js';
 import { readCurrentSqlTransferRequests } from './request-sql-reader.js';
-import { markTransferRequestSqlDeleted, writeTransferRequestSqlRevision } from './request-sql-store.js';
+import {
+	createNativeTransferRequestSql,
+	deleteNativeTransferRequestSql,
+	markTransferRequestSqlDeleted,
+	readPendingTransferRequestBitrixMirrors,
+	updateNativeTransferRequestSql,
+	writeTransferRequestSqlRevision,
+} from './request-sql-store.js';
 import type { TransferSqlPool } from './sql-store.js';
 
 const enabled = process.env['B24_TRANSFER_REQUEST_TEST_MARIADB'] === '1';
@@ -47,12 +54,16 @@ test('real MariaDB transfer request mirror is normalized, append-only and DML-on
 		for (const filename of [
 			'0046_create_stock_transfer_request_records.sql', '0047_create_stock_transfer_request_revisions.sql',
 			'0048_create_stock_transfer_request_revision_lines.sql', '0049_create_stock_transfer_request_backfill_checkpoints.sql',
+			'0050_add_stock_transfer_request_public_id.sql', '0051_create_stock_transfer_request_public_ids.sql',
+			'0052_create_stock_transfer_request_identity_checkpoints.sql', '0053_make_stock_transfer_request_bitrix_identity_optional.sql',
+			'0054_create_stock_transfer_request_commands.sql', '0055_create_stock_transfer_request_bitrix_outbox.sql',
+			'0056_allow_stock_transfer_request_sql_native_source.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalDirectory, filename));
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 4);
+		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 11);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalDirectory), []);
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${writerUser}'@'%'`);
@@ -74,6 +85,21 @@ test('real MariaDB transfer request mirror is normalized, append-only and DML-on
 		await writeTransferRequestSqlRevision(sqlPool, { externalId: id, name, data, sourceKind: 'repair' });
 		assert.equal((await readCurrentSqlTransferRequests(sqlPool)).length, 1);
 		assert.equal(await count(schemaPool, 'stock_transfer_request_revisions'), 2);
+		const nativeData = { ...data, createdAt: '2026-09-04T10:00:00.000Z', taskId: null };
+		const native = await createNativeTransferRequestSql(sqlPool, { idempotencyKey: 'integration:request:create', name: 'Новая заявка', data: nativeData });
+		const repeated = await createNativeTransferRequestSql(sqlPool, { idempotencyKey: 'integration:request:create', name: 'Новая заявка', data: nativeData });
+		assert.equal(native.publicId, 22);
+		assert.equal(repeated.publicId, native.publicId);
+		assert.equal(repeated.alreadyApplied, true);
+		const nativeUpdate = await updateNativeTransferRequestSql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'integration:request:update', name: `Заявка снабжению #${native.publicId}`,
+			data: { ...nativeData, note: 'SQL primary' },
+		});
+		assert.equal(nativeUpdate.revisionNo, 2);
+		assert.deepEqual((await readPendingTransferRequestBitrixMirrors(sqlPool)).map((entry) => entry.publicId), [native.publicId]);
+		const deleted = await deleteNativeTransferRequestSql(sqlPool, { publicId: native.publicId, idempotencyKey: 'integration:request:delete', name: `Заявка снабжению #${native.publicId}` });
+		assert.equal(deleted.alreadyApplied, false);
+		assert.equal((await readPendingTransferRequestBitrixMirrors(sqlPool))[0]?.operationKind, 'delete');
 		await assert.rejects(() => writerPool!.query('DELETE FROM stock_transfer_request_records WHERE id = -1'), /(?:denied|command)/i);
 		await assert.rejects(() => writerPool!.query('CREATE TABLE forbidden_ddl (id INT NOT NULL)'), /(?:denied|command)/i);
 	} finally {

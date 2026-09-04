@@ -14,12 +14,14 @@ test('transfer request SQL writer is opt-in and reuses only the isolated transfe
 	assert.equal(loadTransferRequestSqlWriteConfig(base).mode, 'shadow');
 	assert.throws(() => loadTransferRequestSqlWriteConfig({ ...base, B24_APP_DB_MODE: 'off' }), /DB_MODE=readiness/);
 	assert.throws(() => loadTransferRequestSqlWriteConfig({ ...base, B24_APP_TRANSFER_DB_USER: 'read_only' }), /separate identity/);
-	assert.throws(() => loadTransferRequestSqlWriteConfig({ ...base, B24_APP_TRANSFER_REQUEST_SQL_WRITE: 'primary' }), /off or shadow/);
+	assert.throws(() => loadTransferRequestSqlWriteConfig({ ...base, B24_APP_TRANSFER_REQUEST_SQL_WRITE: 'primary' }), /SQL_READ=primary/);
+	assert.equal(loadTransferRequestSqlWriteConfig({ ...base, B24_APP_TRANSFER_REQUEST_SQL_WRITE: 'primary', B24_APP_TRANSFER_REQUEST_SQL_READ: 'primary' }).mode, 'primary');
 });
 
 test('transfer request SQL reads are opt-in and reject unknown modes', () => {
 	assert.equal(loadConfig({}).transferRequestSqlRead, 'off');
 	assert.equal(loadConfig({ B24_APP_TRANSFER_REQUEST_SQL_READ: 'shadow' }).transferRequestSqlRead, 'shadow');
 	assert.equal(loadConfig({ B24_APP_TRANSFER_REQUEST_SQL_READ: 'verified' }).transferRequestSqlRead, 'verified');
-	assert.throws(() => loadConfig({ B24_APP_TRANSFER_REQUEST_SQL_READ: 'primary' }), /Bad config/);
+	assert.equal(loadConfig({ B24_APP_TRANSFER_REQUEST_SQL_READ: 'primary' }).transferRequestSqlRead, 'primary');
+	assert.throws(() => loadConfig({ B24_APP_TRANSFER_REQUEST_SQL_READ: 'other' }), /Bad config/);
 });
