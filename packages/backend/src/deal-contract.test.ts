@@ -177,6 +177,7 @@ test('all contract templates are connected and expose only their required fields
 		})),
 		[
 			{ id: 'universal_work', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true, usesSupplyTerms: false },
+			{ id: 'supply_shelly', available: true, usesObjectAddress: false, usesObjectName: false, usesWorkDuration: false, usesSupplyTerms: true },
 			{ id: 'supply', available: true, usesObjectAddress: false, usesObjectName: false, usesWorkDuration: false, usesSupplyTerms: true },
 			{ id: 'design', available: true, usesObjectAddress: true, usesObjectName: true, usesWorkDuration: false, usesSupplyTerms: false },
 			{ id: 'smart_home', available: true, usesObjectAddress: true, usesObjectName: false, usesWorkDuration: true, usesSupplyTerms: false },
@@ -216,8 +217,36 @@ test('supply specification uses selected prepayment, delivery term and product u
 	if (rels) assert.doesNotMatch(rels, /mailto:buh@umdim\.ru/);
 });
 
+test('new Shelly supply contract is generated from the supplied legal template', async () => {
+	const file = await buildContractDocx({
+		templateId: 'supply_shelly',
+		contractNumber: '904',
+		contractDate: '«4» сентября 2026 г.',
+		company,
+		customer: corporateCustomer,
+		objectAddress: '',
+		objectName: '',
+		workDuration: 14,
+		workDurationUnit: 'calendar',
+		supplyPrepaymentPercent: 70,
+		supplyDeliveryDays: 60,
+		lines: [{ name: 'Реле Shelly Pro 4PM', price: 9_900, quantity: 500, total: 4_950_000, unit: 'шт' }],
+	});
+	const zip = await JSZip.loadAsync(file);
+	const xml = await zip.file('word/document.xml')?.async('string');
+	assert.ok(xml);
+	const text = plainDocumentText(xml);
+	assert.doesNotMatch(text, /\{\{[A-Z_]+\}\}/);
+	assert.match(text, /ДОГОВОР ПОСТАВКИ № 904/);
+	assert.match(text, /14\. АДРЕСА, РЕКВИЗИТЫ И ПОДПИСИ СТОРОН/);
+	assert.match(text, /Предоплата в размере 70% составляет 3[\s ]465[\s ]000,00/);
+	assert.match(text, /60 \(шестьдесят\) календарных дней/);
+	assert.match(text, /Реле Shelly Pro 4PM/);
+	assert.doesNotMatch(text, /Параллакс Поволжье|Чернов Евгений Николаевич|№ 457|«3» сентября 2026 г\./);
+});
+
 test('new contract templates replace sample parties, dates, numbers and object data', async () => {
-	for (const templateId of ['supply', 'design', 'smart_home'] as const) {
+	for (const templateId of ['supply_shelly', 'supply', 'design', 'smart_home'] as const) {
 		const file = await buildContractDocx({
 			templateId,
 			contractNumber: '901',
@@ -321,7 +350,7 @@ test('contract headers, annexes, emails and acts consistently use the selected l
 			`${template.id}: customer company full name`,
 		);
 		assert.doesNotMatch(text, /buh@umdim\.ru/, `${template.id}: another legal entity email`);
-		if (template.id === 'universal_work' || template.id === 'supply') {
+		if (template.id === 'universal_work' || template.usesSupplyTerms) {
 			assert.match(text, /buh@homelogicsoft\.com/, `${template.id}: selected legal entity email`);
 		}
 		const expectedReference = expectedReferences[template.id];

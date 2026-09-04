@@ -17,8 +17,19 @@ export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
 		usesSupplyTerms: false,
 	},
 	{
+		id: 'supply_shelly',
+		title: 'Договор поставки Shelly',
+		available: true,
+		ourRole: 'Поставщик',
+		customerRole: 'Покупатель',
+		usesObjectAddress: false,
+		usesObjectName: false,
+		usesWorkDuration: false,
+		usesSupplyTerms: true,
+	},
+	{
 		id: 'supply',
-		title: 'Договор поставки (Shelly)',
+		title: 'Договор поставки Shelly (белый)',
 		available: true,
 		ourRole: 'Поставщик',
 		customerRole: 'Покупатель',
@@ -53,6 +64,7 @@ export const CONTRACT_TEMPLATES: readonly ContractTemplateInfo[] = [
 
 export const CONTRACT_TEMPLATE_PATHS: Record<ContractTemplateId, string> = {
 	universal_work: resolve(ASSETS_PATH, 'contract-template.docx'),
+	supply_shelly: resolve(ASSETS_PATH, 'contract-supply-shelly.docx'),
 	supply: resolve(ASSETS_PATH, 'contract-supply.docx'),
 	design: resolve(ASSETS_PATH, 'contract-design.docx'),
 	smart_home: resolve(ASSETS_PATH, 'contract-smart-home.docx'),
@@ -60,6 +72,7 @@ export const CONTRACT_TEMPLATE_PATHS: Record<ContractTemplateId, string> = {
 
 export const CONTRACT_FILENAME_TITLES: Record<ContractTemplateId, string> = {
 	universal_work: 'Договор подряда',
+	supply_shelly: 'Договор поставки',
 	supply: 'Договор поставки',
 	design: 'Договор на проектирование',
 	smart_home: 'Договор подряда',
@@ -67,6 +80,7 @@ export const CONTRACT_FILENAME_TITLES: Record<ContractTemplateId, string> = {
 
 export const CONTRACT_REFERENCE_TITLES: Record<ContractTemplateId, string> = {
 	universal_work: 'Договору подряда',
+	supply_shelly: 'Договору поставки',
 	supply: 'Договору поставки',
 	design: 'Договору на выполнение проектных работ',
 	smart_home: 'Договору подряда',

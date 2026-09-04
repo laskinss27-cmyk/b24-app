@@ -119,7 +119,7 @@ export async function buildContractDocx(data: {
 	const total = data.lines.reduce((sum, line) => sum + line.total, 0);
 	const supplyPrepaymentPercent = data.supplyPrepaymentPercent ?? 80;
 	const supplyDeliveryDays = data.supplyDeliveryDays ?? 35;
-	const advance = data.templateId === 'supply'
+	const advance = template.usesSupplyTerms
 		? Math.round(total * supplyPrepaymentPercent) / 100
 		: total / 2;
 	const balance = total - advance;
