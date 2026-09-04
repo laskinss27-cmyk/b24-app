@@ -111,3 +111,21 @@ commands/outbox tables, `17/17` public identities и сохранённый chec
 `b24-app:613c177`, restart `0`, `B24_APP_TRANSFER_REQUEST_SQL_WRITE=shadow`,
 `B24_APP_TRANSFER_REQUEST_SQL_READ=verified`; internal/public health,
 официальный ERPNext read и `erpnext_frappe_network` успешны.
+
+После отдельного разрешения накопленная линейная история была опубликована
+обычным fast-forward `origin/main` с `89ae23c` до `c7602a2`, без force и без
+удаления файлов. Production checkout независимо подтвердил тот же commit и
+чистый build context; два существующих untracked day-x cleanup script были
+сохранены и не входят в Docker `COPY`.
+
+Image `b24-app:c7602a2` собран из точного commit. Production switch сохранил
+предыдущий `b24-app:613c177` как exited rollback container
+`b24-backend-prev-before-c7602a2` с exit `0`. Новый backend работает с restart
+`0`, `unless-stopped`, `/srv/b24-state:/app/state`, портом
+`127.0.0.1:3000:8080` и обязательной сетью `erpnext_frappe_network`. Флаги
+остались `shadow/verified`, migration credentials в backend env отсутствуют.
+Internal/public health, readiness и официальный ERPNext read прошли как в
+deploy-скрипте, так и независимым post-check. Первый health во время запуска
+получил connection reset и штатно прошёл на следующем retry; startup-логи после
+этого содержат только успешные HTTP `200`, включая реальный update
+инвентаризации. SQL-primary source switch не выполнялся.
