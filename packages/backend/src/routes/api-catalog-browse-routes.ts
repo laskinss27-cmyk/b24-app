@@ -14,6 +14,7 @@ import { loadCatalogMirrorReadMode } from '../catalog-mirror/read-config.js';
 import { buildSqlProductBase } from '../catalog-mirror/product-base.js';
 import { compareCatalogMirrorBases } from '../catalog-mirror/compare.js';
 import type { CatalogMirrorPlan } from '../catalog-mirror/model.js';
+import { applyLiveCatalogStock, liveCatalogStockFromBase, readLiveCatalogStock } from '../catalog-mirror/live-stock.js';
 
 type BuiltCatalogBase = ReturnType<typeof buildSqlProductBase>;
 let sqlBaseCache: { snapshotHash: string; expires: number; value: BuiltCatalogBase } | null = null;
@@ -26,6 +27,20 @@ export function cachedSqlProductBase(plan: CatalogMirrorPlan, force: boolean, no
 	const value = buildSqlProductBase(plan);
 	sqlBaseCache = { snapshotHash: plan.snapshotHash, expires: now + SQL_BASE_CACHE_TTL_MS, value };
 	return { value: structuredClone(value), cached: false };
+}
+
+export async function readCachedSqlProductBase(
+	readPlan: () => Promise<CatalogMirrorPlan | null>,
+	force: boolean,
+	now: number,
+): Promise<{ value: BuiltCatalogBase; cached: boolean }> {
+	const current = sqlBaseCache;
+	if (!force && current && current.expires > now) {
+		return { value: structuredClone(current.value), cached: true };
+	}
+	const plan = await readPlan();
+	if (!plan) throw new Error('SQL catalog mirror has no complete checkpoint');
+	return cachedSqlProductBase(plan, force, now);
 }
 
 export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
@@ -73,6 +88,11 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 		try {
 			const erp = ErpClient.fromEnv();
 			if (!erp) throw new Error('ядро склада не подключено (ERPNEXT_URL)');
+			const readSqlBase = (): Promise<{ value: BuiltCatalogBase; cached: boolean }> => {
+				const reader = app.databaseRuntime?.readLatestCatalogMirrorPlan;
+				if (!reader) return Promise.reject(new Error('SQL catalog mirror reader is unavailable'));
+				return readCachedSqlProductBase(() => reader.call(app.databaseRuntime), body.force === true, now);
+			};
 			let liveMetadataCached = !body.force && Boolean(hit && hit.expires > now);
 			const buildLive = async (): Promise<BuiltCatalogBase> => {
 				let metadata: ProductBaseData | null = liveMetadataCached && hit ? hit.data : null;
@@ -91,15 +111,16 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 
 			let built: BuiltCatalogBase;
 			let cached = liveMetadataCached;
-			let source: 'core' | 'sql' | 'core-fallback' = 'core';
+			let source: 'core' | 'sql-live-stock' | 'core-fallback' = 'core';
 			if (sqlReadMode === 'primary') {
 				try {
-					const plan = await app.databaseRuntime?.readLatestCatalogMirrorPlan?.();
-					if (!plan) throw new Error('SQL catalog mirror has no complete checkpoint');
-					const sqlBase = cachedSqlProductBase(plan, body.force === true, now);
-					built = sqlBase.value;
+					const [sqlBase, liveStock] = await Promise.all([
+						readSqlBase(),
+						readLiveCatalogStock(erp),
+					]);
+					built = applyLiveCatalogStock(sqlBase.value, liveStock);
 					cached = sqlBase.cached;
-					source = 'sql';
+					source = 'sql-live-stock';
 				} catch (error) {
 					app.log.warn(`[api/catalog/browse] SQL-каталог недоступен, используется ядро: ${errInfo(error)}`);
 					built = await buildLive();
@@ -107,18 +128,19 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 					source = 'core-fallback';
 				}
 			} else {
-				const sqlPlanPromise = sqlReadMode === 'shadow'
-					? app.databaseRuntime?.readLatestCatalogMirrorPlan?.().catch((error) => {
+				const sqlBasePromise = sqlReadMode === 'shadow'
+					? readSqlBase().catch((error) => {
 						app.log.warn(`[api/catalog/browse] SQL shadow недоступен: ${errInfo(error)}`);
 						return null;
 					})
 					: undefined;
 				built = await buildLive();
 				cached = liveMetadataCached;
-				if (sqlPlanPromise) {
-					const plan = await sqlPlanPromise;
-					if (plan) {
-						const comparison = compareCatalogMirrorBases(built, buildSqlProductBase(plan));
+				if (sqlBasePromise) {
+					const sqlBase = await sqlBasePromise;
+					if (sqlBase) {
+						const hybrid = applyLiveCatalogStock(sqlBase.value, liveCatalogStockFromBase(built));
+						const comparison = compareCatalogMirrorBases(built, hybrid);
 						app.log[comparison.match ? 'info' : 'warn'](comparison, '[api/catalog/browse] SQL catalog shadow comparison');
 					}
 				}
