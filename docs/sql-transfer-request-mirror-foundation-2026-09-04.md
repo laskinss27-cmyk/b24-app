@@ -137,10 +137,23 @@ owner-authenticated runtime-запрос списка вернул `16` заяв
 `responseSource=legacy`. OAuth использован только в памяти сервера и не
 печатался/не сохранялся.
 
-Первые health probes сразу после обоих container switch дважды опередили HTTP
+Первые health probes сразу после container switch опережали HTTP
 listener и получили transient reset/empty reply; встроенные retries прошли,
 rollback не потребовался. Независимые post-checks после запуска зелёные.
 
-Текущий этап остаётся Bitrix-primary. Для следующего переключения на
-`READ=verified` нужны реальные shadow revisions и повторная parity во времени.
-SQL-primary для ручных заявок не реализован и не разрешён этим rollout.
+Поскольку новых рабочих ревизий в текущий день не ожидалось, отдельным
+разрешением выполнен config-only switch `READ=verified` при неизменном
+`WRITE=shadow`. Предыдущий shadow-read контейнер сохранён как
+`b24-backend-prev-before-request-verified-20260904`. Повторный обычный
+owner-authenticated запрос дал `16/16`, `0` differences и
+`responseSource=sql`. Финальный post-check подтвердил internal/public health,
+readiness со всеми SQL writer checks `up`, официальный ERPNext read,
+`erpnext_frappe_network`, restart count `0`, неизменные counts
+`16 records / 16 revisions / 31 lines / 1 checkpoint` и отсутствие SQL-ошибок
+заявок в журнале.
+
+Текущий этап остаётся Bitrix-primary для записи и обязательной live-проверки:
+`verified` на каждом чтении сначала загружает Bitrix и автоматически возвращает
+его ответ при mismatch/error. SQL-primary writer для ручных заявок не
+реализован и не разрешён этим rollout. Следующий этап начинается только после
+наблюдения реального update/cancel/convert через shadow writer.
