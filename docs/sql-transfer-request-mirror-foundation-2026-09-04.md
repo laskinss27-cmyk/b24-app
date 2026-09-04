@@ -89,3 +89,58 @@ Apply выполняется одной транзакцией под MariaDB ad
    `READ=verified`.
 7. Только после доказанной эксплуатации зеркала проектировать отдельный
    SQL-primary writer с idempotency/outbox. Старые Bitrix payload не удалять.
+
+## Production mirror rollout — 4 сентября 2026
+
+Перед DDL штатный job с выключенным retention создал дамп
+`20260904_100624-b24_app-database.sql.gz` размером `5 383 856` байт и
+`35` table definitions. Локальные gzip/checksum и обратное чтение из закрытой
+папки Bitrix Disk прошли; IDs копий `107584/107582`. Этот же файл восстановлен
+только в `b24_app_restore_20260904_100624`, где подтверждены те же 35 таблиц;
+production schema не изменилась. Проверочная БД сохранена.
+
+One-shot migrator image `b24-app:1ab2977` применил ровно `0046`–`0049` и
+остановился. Постоянный `b24_app_runtime` получил только `SELECT` на records,
+revisions и lines. Существующий отдельный `b24_app_transfer_runtime` получил
+`SELECT/INSERT/UPDATE` на records и `SELECT/INSERT` на revisions/lines.
+`DELETE`, DDL и доступ runtime-ролей к checkpoint не выдавались.
+
+Новый image сначала развёрнут с `REQUEST_SQL_READ=off` и
+`REQUEST_SQL_WRITE=off`. Canary и независимый post-check подтвердили internal
+и public health, readiness, официальный ERPNext read, `/srv/b24-state`, порт
+`127.0.0.1:3000`, `unless-stopped`, restart count `0` и сеть
+`erpnext_frappe_network`. Предыдущий image `b24-app:621df91` сохранён как
+`b24-backend-prev-before-1ab2977`.
+
+Owner-verified dry-run полностью прочитал `16` записей `ctv_tr_requests` и дал
+готовый план
+`ae89e56023aa18a11bb4b1902432c171804b375ac1b7cb2a70f09bf3e86f020e`.
+Перед apply отдельный post-DDL backup
+`20260904_101921-b24_app-database.sql.gz` (`39` tables) прошёл внешний read-back
+с IDs `107596/107594` и restore drill в сохранённую
+`b24_app_restore_20260904_101921`.
+
+Exact-hash apply одной транзакцией создал `16` records/revisions и `31` line,
+записал один checkpoint и завершился точной parity. Повтор того же плана вернул
+`alreadyApplied=true` и снова подтвердил parity, не создав дублей. Post-backfill
+backup `20260904_102218-b24_app-database.sql.gz` (`39` tables) прошёл внешний
+read-back с IDs `107606/107604` и restore drill в сохранённую
+`b24_app_restore_20260904_102218`. Ни один старый backup не удалялся.
+
+После отдельного canary тот же image config-only переключён на
+`B24_APP_TRANSFER_REQUEST_SQL_READ=shadow` и
+`B24_APP_TRANSFER_REQUEST_SQL_WRITE=shadow`. Контейнер с обоими флагами `off`
+сохранён как `b24-backend-prev-before-request-shadow-20260904-1023`.
+Readiness отдельно показывает `transferRequestSqlWriter=up`. Один обычный
+owner-authenticated runtime-запрос списка вернул `16` заявок; журнал сравнения:
+`legacyCount=16`, `sqlCount=16`, `matches=true`, `0` differences,
+`responseSource=legacy`. OAuth использован только в памяти сервера и не
+печатался/не сохранялся.
+
+Первые health probes сразу после обоих container switch дважды опередили HTTP
+listener и получили transient reset/empty reply; встроенные retries прошли,
+rollback не потребовался. Независимые post-checks после запуска зелёные.
+
+Текущий этап остаётся Bitrix-primary. Для следующего переключения на
+`READ=verified` нужны реальные shadow revisions и повторная parity во времени.
+SQL-primary для ручных заявок не реализован и не разрешён этим rollout.
