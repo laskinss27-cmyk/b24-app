@@ -66,7 +66,7 @@ compatibility mirror. Создание Bitrix-задачи остаётся от
 3. dry-run `transfer-requests:identity-backfill`, затем apply только с точным
    SHA-256 плана и повторный no-op/parity check;
 4. применить `0053`–`0056` и выдать runtime только необходимые grants:
-   `SELECT/INSERT` allocator, `SELECT/INSERT/UPDATE` commands/outbox,
+   `SELECT/INSERT/UPDATE` allocator, `SELECT/INSERT/UPDATE` commands/outbox,
    `SELECT/INSERT/UPDATE` records и `SELECT/INSERT` revisions/lines;
 5. развернуть код с текущими `shadow/verified`, проверить readiness, public и
    internal health, официальный ERPNext read, сеть и live parity;
@@ -74,3 +74,39 @@ compatibility mirror. Создание Bitrix-задачи остаётся от
    container и Bitrix fallback;
 7. проверить create/update/cancel, отсутствие дублей и пустую либо успешно
    восстанавливаемую outbox.
+
+## Production foundation 4 сентября 2026
+
+Перед DDL backup `20260904_135925-b24_app-database.sql.gz` прошёл локальную
+checksum/gzip-проверку, внешний Bitrix Disk read-back (`dump_id=107734`,
+`checksum_id=107732`) при выключенном retention и isolated restore drill. Затем
+one-shot migrator применил ровно `0050`–`0052`; runtime остался
+`shadow/verified`.
+
+Post-DDL backup `20260904_142101-b24_app-database.sql.gz` прошёл restore drill и
+внешний read-back (`dump_id=107754`, `checksum_id=107752`). Детерминированный
+dry-run получил `17` записей, `17` назначений и plan hash
+`6b6a6ee44812b23d9630b9e15c4f11535ad4f64c6fe434bdc3910d25318378f2`.
+Отдельно разрешённый DML-only apply назначил все `17` public ID, сохранив
+равенство legacy Bitrix ID, и записал один checkpoint. Повторный dry-run дал
+`toAssign=0` с тем же hash. Post-backfill backup
+`20260904_142656-b24_app-database.sql.gz` прошёл restore drill и внешний
+read-back (`dump_id=107758`, `checksum_id=107756`) без retention.
+
+Следующий one-shot migrator применил ровно `0053`–`0056`. Независимый аудит
+подтвердил `56` migration rows, nullable Bitrix identity, две пустые
+commands/outbox tables, `17/17` public identities и сохранённый checkpoint.
+Существующему `b24_app_transfer_runtime` добавлены только table-level права:
+`SELECT/INSERT/UPDATE` на allocator, commands, outbox и records, а также
+`SELECT/INSERT` на revisions/lines. Schema/global privileges и
+`DELETE/CREATE/ALTER/DROP` отсутствуют; фактический runtime probe подтвердил
+разрешённые нулевые DML и отказ `DELETE`. Пароль не менялся.
+
+Финальный локальный backup `20260904_144306-b24_app-database.sql.gz` восстановлен
+в `b24_app_restore_20260904_144306`: все `43` таблицы, schema/migration
+signatures и `39` стабильных table checksums совпали; четыре живые таблицы
+изменились уже после снимка без изменения числа строк. Его внешний read-back
+остаётся отдельным gate. Рабочий backend не перезапускался: image
+`b24-app:613c177`, restart `0`, `B24_APP_TRANSFER_REQUEST_SQL_WRITE=shadow`,
+`B24_APP_TRANSFER_REQUEST_SQL_READ=verified`; internal/public health,
+официальный ERPNext read и `erpnext_frappe_network` успешны.
