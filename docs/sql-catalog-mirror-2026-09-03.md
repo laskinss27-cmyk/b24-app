@@ -43,6 +43,13 @@ DDL, `DELETE`, ERPNext database access, or privileges on other `b24_app` domain
 tables. Credentials remain in a root-only operator secret file and are not part
 of the permanent backend environment.
 
+The reviewed host wrapper is `scripts/catalog-sync-job.sh`. It requires an
+immutable image tag and an absolute root-owned mode-`0600`/`0400` env file,
+uses a host `flock`, has a five-minute timeout, joins
+`erpnext_frappe_network`, and runs an ephemeral container. The production cron
+entry must pin both values explicitly; changing the backend image does not
+silently change the sync runner.
+
 ## Read gates
 
 `B24_APP_CATALOG_SQL_READ` defaults to `off`:
@@ -142,3 +149,41 @@ the verifier reported those live changes separately and confirmed the source
 schema itself was untouched. Final catalog read-back still produced checkpoint
 `f7607b0737d0e3136574aad4b2e61e4083ffff65fc1bae21ede4744fc415b61e`,
 and all health/network/official-ERP checks remained green.
+
+## Production shadow rollout — 2026-09-04
+
+The untouched overnight checkpoint still contained all `5,149` products and
+`11` warehouses, with no missing or extra identity, but six products differed
+from the current official sources. This confirmed that a recurring refresh was
+required before shadow observation. The rollout candidate passed all `403`
+backend tests, workspace typecheck and production frontend/backend builds. A
+Git archive containing exactly commit `4e0b8f0` was transferred with SHA-256
+`c10ccdae6db395542421b87b8e57545f4b116e748fde6f1aea773f133e390e17`
+and built as immutable image `b24-app:4e0b8f0`.
+
+The image first passed a read-only-state canary and was deployed with an
+explicit `B24_APP_CATALOG_SQL_READ=off`. The prior `b24-app:d4404dc` container
+is preserved as `b24-backend-prev-before-4e0b8f0`. Independent checks confirmed
+internal/public health, readiness, official ERPNext read, port, state mount,
+restart policy, restart count `0`, and `erpnext_frappe_network`. The permanent
+backend environment contains no catalog-sync credential.
+
+The reviewed `scripts/catalog-sync-job.sh` was installed root-only as
+`/root/sync/b24-app-catalog-sync-job.sh`. Cron runs it every two minutes with
+the pinned image `b24-app:4e0b8f0` and root-only
+`/root/b24-app-secrets/catalog-sync.env`; the previous crontab is preserved in
+the rollout staging directory. Existing ERPNext backup, `b24_app` backup and
+Tilda synchronization entries were retained. The first manual refresh produced
+checkpoint `df3f73bd1617aeeda926a49fde5174b5a0a9acfb88a91c11c4a452fac1f78fe2`
+with `5,149` products, `38,708` attributes, `6,786` prices, `11` warehouses and
+`3,560` stock rows. Scheduled runs at `07:50:01Z` and `07:52:02Z` independently
+completed as idempotent no-ops with the same hash and counts.
+
+The same image then passed a second canary and was config-only redeployed with
+`B24_APP_CATALOG_SQL_READ=shadow`. Its immediately preceding `off` container is
+preserved as `b24-backend-prev-before-catalog-shadow-20260904-0751`; the older
+image rollback is also preserved. Final independent source comparison reported
+`5,149/5,149` products, `11/11` warehouses, and zero missing, extra or different
+products. Health, readiness, official ERPNext read, network, state, port and
+restart count remained green. Shadow mode still serves the existing live
+ERPNext/Bitrix response; `primary` was not enabled.
