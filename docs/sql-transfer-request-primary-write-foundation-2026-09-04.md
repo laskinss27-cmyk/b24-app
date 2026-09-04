@@ -129,3 +129,47 @@ deploy-скрипте, так и независимым post-check. Первый
 получил connection reset и штатно прошёл на следующем retry; startup-логи после
 этого содержат только успешные HTTP `200`, включая реальный update
 инвентаризации. SQL-primary source switch не выполнялся.
+
+## Production source switch 4 сентября 2026
+
+Перед переключением реальное owner-authenticated чтение снова подтвердило
+точный verified parity `17/17`, `0` differences и SQL response. Параллельный
+аудит выявил не дефект заявок, а старый недостающий grant уже работающих
+SQL-primary перемещений: runtime не мог выполнить `UPDATE` только в
+`stock_transfer_public_ids`, поэтому `24` Bitrix mirror events оставались
+pending. Остатки и ERPNext-документы эта очередь не меняет.
+
+Перед исправлением создан локальный root-only backup
+`20260904_152646-b24_app-database.sql.gz` размером `5 407 195` байт. Checksum и
+gzip прошли; dump успешно восстановлен в сохранённую изолированную schema
+`b24_app_restore_20260904_152646` с `43` таблицами, `56` migrations,
+transfer identity `198|198|196`, pending outbox `24` и request domain
+`17|17|17|0|0`. Внешняя загрузка этого дополнительного dump не выполнялась,
+retention и удаление старых копий не запускались.
+
+После отдельного разрешения пользователю `b24_app_transfer_runtime` добавлен
+ровно `UPDATE` на `b24_app.stock_transfer_public_ids`. Пароль, schema/global
+privileges и остальные grants не менялись. Обычное открытие списка перемещений
+через свежий `BX24.getAuth()` штатно обработало очередь: `24 delivered`,
+`0 pending`, все `198/198` SQL-перемещений получили Bitrix identity.
+
+Request runtime probe повторно подтвердил `SELECT/INSERT/UPDATE`, запрет
+`DELETE` и отсутствие фактических zero-row mutations. Отдельный canary на image
+`b24-app:c7602a2` с `B24_APP_TRANSFER_REQUEST_SQL_READ=primary` и
+`B24_APP_TRANSFER_REQUEST_SQL_WRITE=primary` работал без публичного порта, с
+read-only `/app/state` и обязательной сетью `erpnext_frappe_network`.
+Readiness видел `transferRequestSqlWriter=up`; internal health и официальный
+ERPNext read прошли, restart count остался `0`. Canary затем удалён.
+
+После отдельного разрешения production backend config-only переключён на
+request `primary/primary`. Предыдущий рабочий `verified/shadow` контейнер
+сохранён остановленным как
+`b24-backend-prev-before-request-primary-20260904-153958`; image не менялся.
+Независимый post-check подтвердил internal/public health, readiness,
+официальный ERPNext read, restart `0`, `unless-stopped`, bind mount
+`/srv/b24-state:/app/state`, порт `127.0.0.1:3000`, сеть
+`erpnext_frappe_network`, request domain `17|17|17|1|0|0` и transfer domain
+`198|198|198|0`. Migration credentials в backend env отсутствуют. Bitrix JSON
+и все старые записи сохранены как compatibility mirror; данные не удалялись.
+Первый post-switch create/update/cancel остаётся отдельной live-проверкой и не
+эмулировался искусственной production-записью.
