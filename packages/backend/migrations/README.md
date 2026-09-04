@@ -95,3 +95,14 @@ applied checksum of `0040`.
 `0045` records whether ERPNext contained a structured catalog-content object,
 including the valid empty object. This preserves exact read parity without
 storing a JSON payload.
+
+`0057`-`0064` are the disabled SQL foundation for inventory records, catalog
+sections, warehouse points, immutable opening snapshots, entered counts and
+comments, submitted discrepancy rows, ERP document references, and guarded
+backfill checkpoints. No table contains JSON. Blank product rows are represented
+by the absence of a count row; a comment-only row has a nullable fact quantity
+and therefore cannot become an accidental zero. Frozen snapshot rows are never
+updated or deleted by the writer. Mutable child rows use an `is_present`
+tombstone instead of `DELETE`, so a least-privilege backfill can apply complete
+states atomically. These migrations do not run a backfill, grant credentials,
+deploy routes, or switch inventory reads and writes.

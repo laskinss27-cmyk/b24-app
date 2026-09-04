@@ -90,6 +90,14 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0054_create_stock_transfer_request_commands.sql',
 		'0055_create_stock_transfer_request_bitrix_outbox.sql',
 		'0056_allow_stock_transfer_request_sql_native_source.sql',
+		'0057_create_inventory_records.sql',
+		'0058_create_inventory_sections.sql',
+		'0059_create_inventory_points.sql',
+		'0060_create_inventory_snapshot_lines.sql',
+		'0061_create_inventory_count_lines.sql',
+		'0062_create_inventory_result_lines.sql',
+		'0063_create_inventory_erp_documents.sql',
+		'0064_create_inventory_backfill_checkpoints.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -394,4 +402,44 @@ test('transfer request SQL-first foundation preserves identity and keeps the out
 	assert.match(outbox, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
 	assert.match(nativeSource, /'sql_native'/);
 	assert.doesNotMatch([publicId, allocator, checkpoints, optionalBitrix, commands, outbox, nativeSource].join('\n'), /\bJSON\b/i);
+});
+
+test('inventory foundation preserves active drafts and frozen snapshots without JSON', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const records = byName.get('0057_create_inventory_records.sql')!;
+	const sections = byName.get('0058_create_inventory_sections.sql')!;
+	const points = byName.get('0059_create_inventory_points.sql')!;
+	const snapshots = byName.get('0060_create_inventory_snapshot_lines.sql')!;
+	const counts = byName.get('0061_create_inventory_count_lines.sql')!;
+	const results = byName.get('0062_create_inventory_result_lines.sql')!;
+	const documents = byName.get('0063_create_inventory_erp_documents.sql')!;
+	const checkpoints = byName.get('0064_create_inventory_backfill_checkpoints.sql')!;
+
+	for (const migration of [records, sections, points, snapshots, counts, results, documents, checkpoints]) {
+		assert.match(migration, /^CREATE TABLE IF NOT EXISTS inventory_[a-z_]+ \(/);
+		assert.equal(migration.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.doesNotMatch(migration, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration, /\bJSON\b/i);
+		assert.match(migration, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+		const identifiers = [...migration.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
+		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
+	}
+	assert.match(records, /UNIQUE KEY uq_inventory_records_bitrix \(bitrix_external_id\)/);
+	assert.match(records, /last_state_hash BINARY\(32\) NULL/);
+	assert.match(sections, /PRIMARY KEY \(inventory_id, section_id\)/);
+	assert.match(sections, /is_present TINYINT\(1\) NOT NULL DEFAULT 1/);
+	assert.match(points, /UNIQUE KEY uq_inventory_points_store \(inventory_id, store_id\)/);
+	assert.match(points, /draft_session_id VARCHAR\(80\).*draft_sequence BIGINT UNSIGNED/s);
+	assert.match(points, /snapshot_version = 1 AND snapshot_captured_at IS NOT NULL/);
+	assert.match(snapshots, /PRIMARY KEY \(point_id, product_id\)/);
+	assert.match(snapshots, /book_qty DECIMAL\(21, 9\) NOT NULL/);
+	assert.match(counts, /fact_qty DECIMAL\(21, 9\) NULL/);
+	assert.match(counts, /is_present = 0 OR fact_qty IS NOT NULL OR CHAR_LENGTH\(line_comment\) > 0/);
+	assert.match(results, /ABS\(\(fact_qty - book_qty\) - difference_qty\) < 0\.000000001/);
+	assert.match(results, /PRIMARY KEY \(point_id, product_id\)/);
+	assert.match(documents, /document_kind IN \('legacy_reconciliation', 'issue', 'receipt'\)/);
+	assert.match(documents, /erp_doctype = 'Stock Reconciliation'/);
+	assert.match(checkpoints, /UNIQUE KEY uq_inventory_backfill_checkpoints_hash \(plan_hash\)/);
+	assert.match(checkpoints, /changed_inventory_count \+ unchanged_inventory_count = inventory_count/);
 });

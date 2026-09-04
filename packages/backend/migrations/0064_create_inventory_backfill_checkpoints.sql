@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS inventory_backfill_checkpoints (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    plan_hash BINARY(32) NOT NULL,
+    observed_at DATETIME(6) NOT NULL,
+    source_record_count INT UNSIGNED NOT NULL,
+    inventory_count INT UNSIGNED NOT NULL,
+    point_count INT UNSIGNED NOT NULL,
+    section_count INT UNSIGNED NOT NULL,
+    snapshot_line_count INT UNSIGNED NOT NULL,
+    count_line_count INT UNSIGNED NOT NULL,
+    result_line_count INT UNSIGNED NOT NULL,
+    erp_document_count INT UNSIGNED NOT NULL,
+    changed_inventory_count INT UNSIGNED NOT NULL,
+    unchanged_inventory_count INT UNSIGNED NOT NULL,
+    applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_inventory_backfill_checkpoints_hash (plan_hash),
+    CONSTRAINT chk_inventory_backfill_source CHECK (source_record_count = inventory_count),
+    CONSTRAINT chk_inventory_backfill_apply CHECK (changed_inventory_count + unchanged_inventory_count = inventory_count)
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

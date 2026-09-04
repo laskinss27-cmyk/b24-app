@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS inventory_records (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    bitrix_external_id BIGINT UNSIGNED NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    inventory_status VARCHAR(16) CHARACTER SET ascii NOT NULL,
+    deadline DATE NULL,
+    created_by_id VARCHAR(191) NOT NULL,
+    source_created_at DATETIME(6) NULL,
+    stock_snapshot_at DATETIME(6) NULL,
+    last_state_hash BINARY(32) NULL,
+    deleted_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_inventory_records_bitrix (bitrix_external_id),
+    KEY ix_inventory_records_status (inventory_status, source_created_at),
+    KEY ix_inventory_records_deleted (deleted_at),
+    CONSTRAINT chk_inventory_records_external CHECK (bitrix_external_id > 0),
+    CONSTRAINT chk_inventory_records_name CHECK (CHAR_LENGTH(display_name) > 0),
+    CONSTRAINT chk_inventory_records_status CHECK (inventory_status IN ('active', 'closed'))
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
