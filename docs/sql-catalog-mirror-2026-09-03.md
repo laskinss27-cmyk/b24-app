@@ -187,3 +187,35 @@ image rollback is also preserved. Final independent source comparison reported
 products. Health, readiness, official ERPNext read, network, state, port and
 restart count remained green. Shadow mode still serves the existing live
 ERPNext/Bitrix response; `primary` was not enabled.
+
+## Hybrid live-stock shadow — 2026-09-04
+
+The first real shadow observations showed that a full two-minute SQL snapshot
+can temporarily differ only because ERPNext stock moved after the snapshot.
+The read candidate was therefore narrowed: product identity, content,
+attributes and prices come from the normalized SQL checkpoint, while active
+warehouses and physical quantities are fetched live through the official
+ERPNext API on every request. The existing reservation overlay is applied only
+after that live stock projection. A 30-second process cache avoids rereading
+and reconstructing all normalized catalog tables for concurrent catalog opens;
+it never caches the live ERPNext quantities or a deal's reservation overlay.
+
+The candidate passed all `405` backend tests, the workspace typecheck and the
+production build. The exact commit `621df91` archive had SHA-256
+`ece0a7cb78e222c771182ea216d5182133bae4cb9c481e676f7c36325f37f062`
+and was built as immutable image `b24-app:621df91`. A read-only-state canary
+returned HTTP `200` for health, readiness and an official ERPNext Item read.
+Production remained in `B24_APP_CATALOG_SQL_READ=shadow`; the previous
+`b24-app:4e0b8f0` container is preserved as
+`b24-backend-prev-before-621df91`.
+
+Independent post-deploy verification confirmed the image, restart policy,
+restart count `0`, `/srv/b24-state` mount, localhost port binding,
+`erpnext_frappe_network`, internal/public health, readiness, official ERPNext
+read and absence of the catalog-sync credential from the backend environment.
+The two-minute pinned sync job remained present and healthy. The first real
+authorized catalog request compared the future hybrid response at
+`5,149/5,149` products and `11/11` warehouses with zero missing, extra or
+different products. Its cold shadow request took `9,849 ms` because shadow
+still constructs and returns the full legacy response in addition to checking
+SQL. `primary` was not enabled.
