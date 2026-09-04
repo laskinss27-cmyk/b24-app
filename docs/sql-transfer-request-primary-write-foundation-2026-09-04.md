@@ -102,11 +102,12 @@ commands/outbox tables, `17/17` public identities и сохранённый chec
 `DELETE/CREATE/ALTER/DROP` отсутствуют; фактический runtime probe подтвердил
 разрешённые нулевые DML и отказ `DELETE`. Пароль не менялся.
 
-Финальный локальный backup `20260904_144306-b24_app-database.sql.gz` восстановлен
-в `b24_app_restore_20260904_144306`: все `43` таблицы, schema/migration
-signatures и `39` стабильных table checksums совпали; четыре живые таблицы
-изменились уже после снимка без изменения числа строк. Его внешний read-back
-остаётся отдельным gate. Рабочий backend не перезапускался: image
+Финальный backup `20260904_144306-b24_app-database.sql.gz` восстановлен в
+`b24_app_restore_20260904_144306`: все `43` таблицы, schema/migration signatures
+и `39` стабильных table checksums совпали; четыре живые таблицы изменились уже
+после снимка без изменения числа строк. Внешний Bitrix Disk read-back прошёл
+успешно (`dump_id=107768`, `checksum_id=107766`) при выключенном retention.
+Рабочий backend не перезапускался: image
 `b24-app:613c177`, restart `0`, `B24_APP_TRANSFER_REQUEST_SQL_WRITE=shadow`,
 `B24_APP_TRANSFER_REQUEST_SQL_READ=verified`; internal/public health,
 официальный ERPNext read и `erpnext_frappe_network` успешны.
