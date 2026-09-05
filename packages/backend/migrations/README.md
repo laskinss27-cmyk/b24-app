@@ -106,3 +106,11 @@ updated or deleted by the writer. Mutable child rows use an `is_present`
 tombstone instead of `DELETE`, so a least-privilege backfill can apply complete
 states atomically. These migrations do not run a backfill, grant credentials,
 deploy routes, or switch inventory reads and writes.
+
+`0068`-`0071` add the disabled public-identity foundation required before
+inventory writes can become SQL-first. The migrations add a nullable stable
+public number, an allocator preserving every legacy Bitrix number, a guarded
+identity checkpoint, and only then make the compatibility Bitrix id nullable.
+They contain DDL only: they do not assign identities, allocate a native number,
+change the runtime flags, or write/delete any inventory document. Assignment is
+a separate dry-run/hash/apply operation through `inventories:identity-backfill`.

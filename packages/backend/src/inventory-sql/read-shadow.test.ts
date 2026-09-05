@@ -146,6 +146,16 @@ test('verified mode serves a reversible SQL reconstruction only after exact pari
 	assert.deepEqual(Object.keys(point['erpDocs'] as Record<string, unknown>), ['issue', 'receipt']);
 });
 
+test('Bitrix compatibility marker preserves a SQL-native public inventory number', () => {
+	const source = item();
+	const detail = JSON.parse(String(source['DETAIL_TEXT'])) as Record<string, unknown>;
+	detail['sqlPublicId'] = 84;
+	source['DETAIL_TEXT'] = JSON.stringify(detail);
+	const parsed = parseInventoryBitrixItem(source);
+	assert.deepEqual(parsed.issues, []);
+	assert.equal(parsed.inventory?.bitrixExternalId, 84);
+});
+
 test('verified mismatch returns the original Bitrix objects unchanged', async () => {
 	const source = item(2);
 	const resolution = await resolveInventorySqlRead('verified', database(async () => normalized(item(1))), [source], '2026-09-05T09:00:00.000Z');

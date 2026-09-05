@@ -101,6 +101,10 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0065_allow_inventory_root_section.sql',
 		'0066_add_inventory_result_book_at.sql',
 		'0067_allow_legacy_inventory_result_counts.sql',
+		'0068_add_inventory_public_id.sql',
+		'0069_create_inventory_public_ids.sql',
+		'0070_create_inventory_identity_checkpoints.sql',
+		'0071_make_inventory_bitrix_identity_optional.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -456,4 +460,24 @@ test('inventory foundation preserves active drafts and frozen snapshots without 
 	assert.match(resultBookAt, /ADD COLUMN result_book_at DATETIME\(6\) NULL/);
 	assert.match(legacyResultCounts, /result_counted <= result_total AND result_discrepancies <= result_total/);
 	assert.doesNotMatch(legacyResultCounts, /result_discrepancies <= result_counted/);
+});
+
+test('inventory public identity foundation preserves legacy numbers without runtime activation', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const publicId = byName.get('0068_add_inventory_public_id.sql')!;
+	const allocator = byName.get('0069_create_inventory_public_ids.sql')!;
+	const checkpoints = byName.get('0070_create_inventory_identity_checkpoints.sql')!;
+	const optionalBitrix = byName.get('0071_make_inventory_bitrix_identity_optional.sql')!;
+
+	assert.match(publicId, /ADD COLUMN public_id BIGINT UNSIGNED NULL/);
+	assert.match(publicId, /UNIQUE KEY uq_inventory_records_public_id \(public_id\)/);
+	assert.doesNotMatch(publicId, /MODIFY COLUMN bitrix_external_id/);
+	assert.match(allocator, /public_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT/);
+	assert.match(allocator, /UNIQUE KEY uq_inventory_public_ids_legacy \(legacy_bitrix_external_id\)/);
+	assert.match(checkpoints, /UNIQUE KEY uq_inventory_identity_checkpoints_hash \(plan_hash\)/);
+	assert.match(checkpoints, /assigned_record_count <= source_record_count/);
+	assert.match(optionalBitrix, /MODIFY COLUMN bitrix_external_id BIGINT UNSIGNED NULL/);
+	assert.match(optionalBitrix, /bitrix_external_id IS NULL OR bitrix_external_id > 0/);
+	assert.doesNotMatch([publicId, allocator, checkpoints, optionalBitrix].join('\n'), /\bJSON\b/i);
 });

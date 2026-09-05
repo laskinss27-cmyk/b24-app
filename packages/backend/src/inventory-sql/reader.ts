@@ -70,7 +70,7 @@ function pointStatus(value: unknown): InventorySqlPoint['status'] {
 export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<InventorySqlRecord[]> {
 	const [recordRows, sectionRows, pointRows, snapshotRows, countRows, resultRows, documentRows] = await Promise.all([
 		pool.query<QueryRow[]>(`
-			SELECT id, bitrix_external_id, display_name, inventory_status,
+			SELECT id, COALESCE(public_id, bitrix_external_id) AS public_id, bitrix_external_id, display_name, inventory_status,
 				DATE_FORMAT(deadline, '%Y-%m-%d') AS deadline,
 				created_by_id,
 				DATE_FORMAT(source_created_at, '%Y-%m-%d %H:%i:%s.%f') AS source_created_at,
@@ -78,7 +78,7 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 				last_state_hash
 			FROM inventory_records
 			WHERE deleted_at IS NULL
-			ORDER BY bitrix_external_id
+			ORDER BY COALESCE(public_id, bitrix_external_id)
 		`),
 		pool.query<QueryRow[]>(`
 			SELECT inventory_id, section_id, section_ordinal
@@ -228,7 +228,7 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 		const status = String(row['inventory_status']);
 		if (status !== 'active' && status !== 'closed') throw new Error(`Invalid inventory status ${status}`);
 		const state: InventorySqlRecordState = {
-			bitrixExternalId: positiveInteger(row['bitrix_external_id'], 'inventory Bitrix id'),
+			bitrixExternalId: positiveInteger(row['public_id'], 'inventory public id'),
 			displayName: String(row['display_name'] ?? ''),
 			status,
 			deadline: dateOnly(row['deadline']),

@@ -31,7 +31,7 @@ test('SQL reader reconstructs an active inventory and verifies its deterministic
 	const state = fixtureState();
 	let call = 0;
 	const rows: Array<Array<Record<string, unknown>>> = [
-		[{ id: 100, bitrix_external_id: 42, display_name: state.displayName, inventory_status: 'active', deadline: '2026-09-05', created_by_id: '1', source_created_at: new Date(state.sourceCreatedAt!), stock_snapshot_at: new Date(state.stockSnapshotAt!), last_state_hash: Buffer.from(inventorySqlStateHash(state), 'hex') }],
+		[{ id: 100, public_id: 42, bitrix_external_id: 42, display_name: state.displayName, inventory_status: 'active', deadline: '2026-09-05', created_by_id: '1', source_created_at: new Date(state.sourceCreatedAt!), stock_snapshot_at: new Date(state.stockSnapshotAt!), last_state_hash: Buffer.from(inventorySqlStateHash(state), 'hex') }],
 		[{ inventory_id: 100, section_id: 7, section_ordinal: 1 }],
 		[{ id: 200, inventory_id: 100, point_ordinal: 1, store_id: -100, store_name: 'Склад', point_status: 'in_progress', responsible_id: '2', responsible_name: 'Менеджер', started_at: null, submitted_at: null, act_at: null, snapshot_version: 1, snapshot_captured_at: new Date('2026-09-04T08:00:00Z'), snapshot_migrated_at: null, draft_updated_at: null, draft_updated_by_id: '', draft_updated_by_name: '', draft_session_id: 's1', draft_sequence: 2, result_total: null, result_counted: null, result_discrepancies: null, result_book_at: null }],
 		[{ point_id: 200, product_id: 10, book_qty: '3.000000000' }],
@@ -49,7 +49,7 @@ test('SQL reader fails closed when normalized rows do not match the stored state
 	const state = fixtureState();
 	let call = 0;
 	const rows: Array<Array<Record<string, unknown>>> = [
-		[{ id: 100, bitrix_external_id: 42, display_name: state.displayName, inventory_status: 'active', deadline: '2026-09-05', created_by_id: '1', source_created_at: new Date(state.sourceCreatedAt!), stock_snapshot_at: new Date(state.stockSnapshotAt!), last_state_hash: Buffer.alloc(32) }],
+		[{ id: 100, public_id: 42, bitrix_external_id: 42, display_name: state.displayName, inventory_status: 'active', deadline: '2026-09-05', created_by_id: '1', source_created_at: new Date(state.sourceCreatedAt!), stock_snapshot_at: new Date(state.stockSnapshotAt!), last_state_hash: Buffer.alloc(32) }],
 		[{ inventory_id: 100, section_id: 7, section_ordinal: 1 }],
 		[{ id: 200, inventory_id: 100, point_ordinal: 1, store_id: -100, store_name: 'Склад', point_status: 'in_progress', responsible_id: '2', responsible_name: 'Менеджер', started_at: null, submitted_at: null, act_at: null, snapshot_version: 1, snapshot_captured_at: new Date('2026-09-04T08:00:00Z'), snapshot_migrated_at: null, draft_updated_at: null, draft_updated_by_id: '', draft_updated_by_name: '', draft_session_id: 's1', draft_sequence: 2, result_total: null, result_counted: null, result_discrepancies: null, result_book_at: null }],
 		[{ point_id: 200, product_id: 10, book_qty: 3 }],

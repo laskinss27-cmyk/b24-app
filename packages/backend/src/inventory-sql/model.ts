@@ -350,18 +350,18 @@ export function inventorySqlStateHash(state: InventorySqlRecordState): string {
 
 export function parseInventoryBitrixItem(item: Record<string, unknown>): { inventory: InventorySqlRecord | null; issues: InventorySqlIssue[] } {
 	const issues: InventorySqlIssue[] = [];
-	const bitrixExternalId = Number(item['ID']);
 	const identity = `ctv_inv:${String(item['ID'] ?? '')}`;
-	if (!Number.isSafeInteger(bitrixExternalId) || bitrixExternalId <= 0) issue(issues, 'invalid_external_id', identity, 'Bitrix inventory id must be positive');
-	const displayName = limitedText(item['NAME'], 255, `${identity}.NAME`, issues, true);
 	let data: Record<string, unknown> | null = null;
 	try { data = record(item['DETAIL_TEXT'] ? JSON.parse(String(item['DETAIL_TEXT'])) : {}); }
 	catch { issue(issues, 'invalid_json', identity, 'DETAIL_TEXT contains invalid JSON'); }
+	const bitrixExternalId = Number(data?.['sqlPublicId'] ?? item['ID']);
+	if (!Number.isSafeInteger(bitrixExternalId) || bitrixExternalId <= 0) issue(issues, 'invalid_external_id', identity, 'Inventory public id must be positive');
+	const displayName = limitedText(item['NAME'], 255, `${identity}.NAME`, issues, true);
 	if (!data) {
 		issue(issues, 'invalid_payload', identity, 'DETAIL_TEXT must contain an object');
 		return { inventory: null, issues };
 	}
-	unknownKeys(data, ['status', 'deadline', 'points', 'createdById', 'createdAt', 'stockSnapshotAt', 'sectionIds'], identity, issues);
+	unknownKeys(data, ['status', 'deadline', 'points', 'createdById', 'createdAt', 'stockSnapshotAt', 'sectionIds', 'sqlPublicId'], identity, issues);
 	const rawStatus = String(data['status'] ?? 'active');
 	if (rawStatus !== 'active' && rawStatus !== 'closed') issue(issues, 'invalid_inventory_status', identity, `Unsupported status: ${rawStatus}`);
 	const deadlineSource = String(data['deadline'] ?? '').trim();
