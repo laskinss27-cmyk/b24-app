@@ -167,3 +167,29 @@ check confirmed production still has migrations through `0064` and zero rows in
 all eight inventory tables. Backend image, restart count, required network,
 public health and readiness remained unchanged and healthy. Production
 `0065`-`0066` and any inventory backfill remain separately gated.
+
+## Production compatibility DDL — 5 September 2026
+
+The separately authorized compatibility step began with backup
+`20260905_034613-b24_app-database.sql.gz` (`5,409,788` bytes, `51` table
+definitions). Checksum/gzip and external read-back passed with
+`dump_id=107800`, `checksum_id=107798`, and retention disabled. Restore drill
+`b24_app_restore_20260905_034613` reproduced all `51` tables without changing
+the source.
+
+The exact `ff4a225` diagnostic image was reused only as a one-shot migrator on
+`erpnext_frappe_network`. It applied exactly `0065` and `0066`; the repeated
+runner returned `No pending migrations`. Production now has `66` migration rows.
+Stored checksums match the committed files, the root section check is
+`section_id >= 0`, and nullable `inventory_points.result_book_at DATETIME(6)` is
+present. All eight inventory tables and the checkpoint table remain empty.
+
+Post-DDL backup `20260905_034750-b24_app-database.sql.gz` (`5,409,827` bytes,
+`51` table definitions) passed checksum/gzip and external read-back with
+`dump_id=107804`, `checksum_id=107802`, and retention disabled. Restore drill
+`b24_app_restore_20260905_034750` reproduced all tables. Source and restore have
+identical inventory column, index and constraint signatures and the same full
+migration signature. Production remains on `b24-app:b755998`, restart `0`, with
+the required network; internal/public health, readiness and official ERPNext
+read are HTTP `200`. No inventory backfill, runtime deploy or source switch was
+performed, and no backup, restore schema, staging or image was deleted.
