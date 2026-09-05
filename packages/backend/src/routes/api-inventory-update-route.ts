@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
+import { ensureInventoryEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { coreStoreId, fetchErpStoreStockFull, listActiveStoreTitles } from '../erp/operations.js';
 import { captureInventoryPointSnapshots, inventorySnapshotQuantities, normalizeInventorySubmission } from '../inventory-stock-snapshot.js';
@@ -7,7 +7,7 @@ import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-h
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
-import { updateInventoryData } from './inventory-storage.js';
+import { loadInventoryItems, updateInventoryData } from './inventory-storage.js';
 
 export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/update', async (req, reply) => {
@@ -33,7 +33,7 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 		await ensureInventoryEntity(client);
 		return withInventoryUpdateLock(b.inventoryId, async () => {
 			try {
-				const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
+				const items = await loadInventoryItems(app, client, 'update');
 				const item = (items ?? []).find((it) => String(it['ID']) === String(b.inventoryId));
 				if (!item) return reply.code(200).send({ ok: false, error: 'инвентаризация не найдена' });
 

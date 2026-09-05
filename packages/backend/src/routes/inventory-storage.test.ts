@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
+import type { DatabaseRuntime } from '../database/runtime.js';
+import { buildInventorySqlBackfillPlan } from '../inventory-sql/backfill-plan.js';
 import type { InventorySqlWriteRuntime } from '../inventory-sql/runtime.js';
-import { createInventoryData, deleteInventoryData, updateInventoryData } from './inventory-storage.js';
+import { createInventoryData, deleteInventoryData, loadInventoryItems, updateInventoryData } from './inventory-storage.js';
 
 function data(): Record<string, unknown> {
 	return {
@@ -78,4 +80,35 @@ test('inventory delete tombstones SQL only after Bitrix succeeds', async () => {
 	const failedClient = { async call() { failedTrace.push('bitrix:failed'); throw new Error('Bitrix down'); } } as unknown as B24Client;
 	await assert.rejects(() => deleteInventoryData(app(failedTrace), failedClient, 42), /Bitrix down/);
 	assert.deepEqual(failedTrace, ['bitrix:failed']);
+});
+
+test('inventory shadow read returns the complete Bitrix objects even when SQL differs', async () => {
+	const bitrixItem = {
+		ID: '42', NAME: 'Ревизия', CREATED_BY: '1', DATE_CREATE: '2026-09-05T08:00:00Z', DETAIL_TEXT: JSON.stringify(data()),
+	};
+	const sqlData = data();
+	((sqlData['points'] as Array<Record<string, unknown>>)[0]!['draft'] as Record<string, unknown>)['10'] = 1;
+	const sqlItem = { ...bitrixItem, DETAIL_TEXT: JSON.stringify(sqlData) };
+	const sqlRecords = buildInventorySqlBackfillPlan({
+		observedAt: '2026-09-05T09:00:00Z', sourceComplete: true, sourceRecordCount: 1, items: [sqlItem],
+	}).inventories;
+	const trace: string[] = [];
+	const readApp = {
+		config: { inventorySqlRead: 'shadow' },
+		databaseRuntime: { mode: 'readiness', async readInventoryRecords() { trace.push('sql-read'); return sqlRecords; } } as DatabaseRuntime,
+		log: {
+			info(values: Record<string, unknown>) { trace.push(`info:${String(values['status'])}`); },
+			warn(values: Record<string, unknown>) { trace.push(`warn:${String(values['status'])}`); },
+		},
+	} as unknown as FastifyInstance;
+	const client = {
+		async callWithMeta(method: string) {
+			trace.push(`bitrix:${method}`);
+			return { result: [bitrixItem], next: null };
+		},
+	} as unknown as B24Client;
+
+	const loaded = await loadInventoryItems(readApp, client, 'list');
+	assert.strictEqual(loaded[0], bitrixItem);
+	assert.deepEqual(trace, ['bitrix:entity.item.get', 'sql-read', 'warn:mismatch']);
 });

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
+import { ensureInventoryEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	coreStoreId,
@@ -13,6 +13,7 @@ import { loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { inventoryStatusForPoints } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
+import { loadInventoryItems } from './inventory-storage.js';
 
 export function isSafePublicErpFilePath(value: string): boolean {
 	return /^\/files\/[^/\\\u0000-\u001f\u007f]{1,255}$/u.test(value);
@@ -34,7 +35,7 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 
 		const ent = await ensureInventoryEntity(client);
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
+			const items = await loadInventoryItems(app, client, 'list');
 			const inventories = (items ?? []).map((it) => {
 				let parsed: Record<string, unknown> = {};
 				try {
@@ -74,7 +75,7 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 			let source: 'snapshot' | 'core' = 'core';
 			let core: Awaited<ReturnType<typeof fetchErpStoreStockFull>>;
 			if (b.inventoryId) {
-				const loaded = await loadInventoryPoint(client, b.inventoryId, Number(b.storeId));
+				const loaded = await loadInventoryPoint(app, client, b.inventoryId, Number(b.storeId));
 				const quantities = inventorySnapshotQuantities(loaded.pt);
 				if (loaded.data['stockSnapshotAt'] && !quantities) throw new Error('снимок остатков точки повреждён');
 				if (quantities) {

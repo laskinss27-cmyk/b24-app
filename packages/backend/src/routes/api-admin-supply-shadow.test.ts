@@ -40,6 +40,7 @@ function config(mode: 'off' | 'on'): Config {
 		supplySqlRead: 'off',
 		transferSqlRead: 'off',
 		transferRequestSqlRead: 'off',
+		inventorySqlRead: 'off',
 		nodeEnv: 'test',
 	};
 }

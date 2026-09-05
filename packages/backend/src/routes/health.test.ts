@@ -21,6 +21,7 @@ test('process health keeps its existing response contract', async () => {
 		supplySqlRead: 'off',
 	transferSqlRead: 'off',
 	transferRequestSqlRead: 'off',
+		inventorySqlRead: 'off',
 		nodeEnv: 'test',
 	};
 	const app = Fastify();

@@ -58,7 +58,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
-			const { pt } = await loadInventoryPoint(client, body.inventoryId, Number(body.storeId));
+			const { pt } = await loadInventoryPoint(app, client, body.inventoryId, Number(body.storeId));
 			if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документы ядра — только по сверенной точке' });
 			const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
 			app.log.info({ storeId: body.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
@@ -86,7 +86,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
 			const saved = await withInventoryUpdateLock(body.inventoryId, async () => {
-				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
+				const loaded = await loadInventoryPoint(app, client, body.inventoryId!, Number(body.storeId));
 				if (String(loaded.pt['status']) !== 'reconciled') throw new Error('документы ядра — только по сверенной точке');
 
 				const legacy = legacyInventoryDocument(loaded.pt);
@@ -174,10 +174,10 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
-			const pointBeforeSubmit = await loadInventoryPoint(client, body.inventoryId, Number(body.storeId));
+			const pointBeforeSubmit = await loadInventoryPoint(app, client, body.inventoryId, Number(body.storeId));
 			const storeTitle = String(pointBeforeSubmit.pt['storeName'] ?? pointBeforeSubmit.pt['store'] ?? '').trim();
 			const completed = await withInventoryUpdateLock(body.inventoryId, async () => {
-				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
+				const loaded = await loadInventoryPoint(app, client, body.inventoryId!, Number(body.storeId));
 				const legacy = legacyInventoryDocument(loaded.pt);
 				if (legacy) {
 					const live = await erp.get('Stock Reconciliation', legacy.name);

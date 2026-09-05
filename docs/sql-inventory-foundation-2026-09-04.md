@@ -1,9 +1,8 @@
 # SQL inventory foundation — 2026-09-04
 
-Status: production schema and the first exact backfill are complete. SQL
-shadow-write code is prepared and verified locally, but its permanent
-credential has not been created and it has not been deployed or enabled.
-Bitrix remains authoritative; shadow reads and the source switch have not been
+Status: production schema, exact backfill and Bitrix-first SQL shadow writes are
+active. SQL shadow-read code is prepared and verified locally but has not been
+deployed or enabled. Bitrix remains authoritative; no source switch has been
 performed.
 
 ## Current source and safety problem
@@ -85,20 +84,19 @@ The read-only owner diagnostic, backup/restore gate, production DDL and first
 exact backfill are complete as recorded below. The remaining separately
 authorized steps are:
 
-1. Create the permanent inventory shadow-writer identity with only the required
-   table-level `SELECT`, `INSERT` and `UPDATE` grants. It receives neither DDL nor
-   `DELETE`, checkpoint access or credentials used by another subsystem.
-2. Deploy with `B24_APP_INVENTORY_SQL_WRITE=shadow`. Bitrix must commit first;
-   SQL failures are logged for parity repair and cannot report a false failure to
-   an employee after Bitrix has already saved the action.
-3. Re-run exact live parity while employees continue counting and investigate
-   every logged normalization/write gap.
-4. For the final cutover, ask users to close inventory tabs for a short window,
-   wait for autosave, apply the final delta, require zero differences, enable SQL
-   primary, and ask users to reload.
+1. Deploy the separately gated `B24_APP_INVENTORY_SQL_READ=shadow` observation.
+   It reads through the existing least-privilege read-only runtime identity and
+   must always return the complete Bitrix response to employees.
+2. Observe normal list, draft and reconciliation traffic and investigate every
+   mismatch, blocked normalization or SQL read failure.
+3. Design and verify a separate SQL-primary reader only after sustained parity;
+   no primary mode exists in the current inventory read gate.
+4. For any final cutover, ask users to close inventory tabs for a short window,
+   wait for autosave, apply a final guarded delta, require zero differences and
+   ask users to reload.
 
-Until step 4, employees can continue counting normally and Bitrix remains the
-only source of truth.
+Until a separately authorized source switch, employees can continue counting
+normally and Bitrix remains the only source of truth.
 
 ## Production DDL foundation — 5 September 2026
 
@@ -324,3 +322,23 @@ Bitrix remains authoritative and employee responses are still produced from the
 legacy path. This step did not enable SQL reads or primary mode, run another
 backfill, change ERPNext data, or delete any production data, backup, restore
 database or rollback container.
+
+## Local inventory SQL shadow reader — 5 September 2026
+
+The inventory runtime now accepts only
+`B24_APP_INVENTORY_SQL_READ=off|shadow`. There is deliberately no `verified` or
+`primary` value. In shadow mode, every inventory list, point load and update load
+first obtains the complete paginated Bitrix collection, normalizes that exact
+collection, reads the current normalized SQL state through the general
+least-privilege read-only runtime identity and records match/mismatch status.
+
+The comparison is observational only. Its report hard-codes
+`responseSource=bitrix` and `legacyResponsePreserved=true`; SQL mismatch,
+malformed legacy data, unavailable SQL and SQL exceptions cannot replace or fail
+the employee response. The route-level test verifies object identity of the
+returned Bitrix item during an SQL state-hash mismatch.
+
+Backend typecheck, focused inventory tests and the complete backend suite pass
+(`430/430`), and `git diff --check` passes. This local step did not deploy,
+restart production, change an environment flag, read production data, switch a
+source or mutate Bitrix, SQL or ERPNext.
