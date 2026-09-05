@@ -114,3 +114,10 @@ identity checkpoint, and only then make the compatibility Bitrix id nullable.
 They contain DDL only: they do not assign identities, allocate a native number,
 change the runtime flags, or write/delete any inventory document. Assignment is
 a separate dry-run/hash/apply operation through `inventories:identity-backfill`.
+
+`0072`-`0074` add the disabled SQL-first write journal, idempotency commands,
+and a recoverable Bitrix compatibility outbox. The outbox stores identifiers
+and delivery state only; the normalized inventory tables remain the sole state
+payload and no JSON column is introduced. These migrations do not switch a
+runtime flag, enqueue existing inventories, grant credentials, or contact
+Bitrix. SQL-first writes require inventory reads to already be `primary`.

@@ -33,7 +33,8 @@ class RecordingConnection implements TransferSqlConnection {
 		this.queries.push(compact);
 		if (compact.startsWith('SELECT GET_LOCK')) return [{ acquired: 1 }] as T;
 		if (compact.startsWith('SELECT changed_inventory_count')) return [] as T;
-		if (compact.startsWith('SELECT id, last_state_hash')) {
+		if (compact.startsWith('SELECT public_id, legacy_bitrix_external_id')) return [{ public_id: 42, legacy_bitrix_external_id: 42 }] as T;
+		if (compact.startsWith('SELECT id, public_id, bitrix_external_id, last_state_hash')) {
 			this.recordSelectCount += 1;
 			return (this.recordSelectCount === 1 ? [] : [{ id: 100, last_state_hash: null, stock_snapshot_at: null }]) as T;
 		}

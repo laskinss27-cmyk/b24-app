@@ -27,6 +27,15 @@ function runtime(trace: string[], failure?: Error): InventorySqlWriteRuntime {
 			if (failure) throw failure;
 			return { changed: true };
 		},
+		async createNative() { throw new Error('unused'); },
+		async updateNative() { throw new Error('unused'); },
+		async deleteNative() { throw new Error('unused'); },
+		async pendingMirrors() { return []; },
+		async claimMirror() { throw new Error('unused'); },
+		async bitrixExternalId() { return null; },
+		async markMirrorDelivered() { throw new Error('unused'); },
+		async markDeleteDelivered() { throw new Error('unused'); },
+		async recordMirrorFailure() { throw new Error('unused'); },
 		async markDeleted(input) {
 			trace.push(`sql-delete:${input.externalId}`);
 			if (failure) throw failure;
@@ -81,6 +90,33 @@ test('inventory delete tombstones SQL only after Bitrix succeeds', async () => {
 	const failedClient = { async call() { failedTrace.push('bitrix:failed'); throw new Error('Bitrix down'); } } as unknown as B24Client;
 	await assert.rejects(() => deleteInventoryData(app(failedTrace), failedClient, 42), /Bitrix down/);
 	assert.deepEqual(failedTrace, ['bitrix:failed']);
+});
+
+test('inventory SQL-primary create commits before a recoverable Bitrix mirror failure', async () => {
+	const trace: string[] = [];
+	const primary = {
+		...runtime(trace), mode: 'primary' as const,
+		async createNative() {
+			trace.push('sql-create');
+			return { publicId: 84, mutationId: 7, mutationNo: 1, stateHash: '1'.repeat(64), alreadyCurrent: false, alreadyApplied: false };
+		},
+		async pendingMirrors() { return []; },
+		async claimMirror() { trace.push('sql-claim'); return true; },
+		async bitrixExternalId() { return null; },
+		async recordMirrorFailure() { trace.push('sql-pending'); },
+	} satisfies InventorySqlWriteRuntime;
+	const primaryApp = {
+		inventorySqlWriter: primary,
+		log: { warn() {}, debug() {}, info() {} },
+	} as unknown as FastifyInstance;
+	const client = {
+		async callWithMeta() { trace.push('bitrix-list'); throw new Error('Bitrix down'); },
+	} as unknown as B24Client;
+	const result = await createInventoryData(primaryApp, client, {
+		name: 'Ревизия', data: data(), createdById: '1', createdAt: '2026-09-05T08:00:00Z', idempotencyKey: 'inventory-create:test',
+	});
+	assert.deepEqual(result, { id: 84, alreadyApplied: false });
+	assert.deepEqual(trace, ['sql-create', 'sql-claim', 'bitrix-list', 'sql-pending']);
 });
 
 test('inventory shadow read returns the complete Bitrix objects even when SQL differs', async () => {

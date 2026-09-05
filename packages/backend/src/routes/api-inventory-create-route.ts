@@ -9,7 +9,7 @@ import { createInventoryData } from './inventory-storage.js';
 
 export function registerInventoryCreateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/create', async (req, reply) => {
-		const b = (req.body ?? {}) as InventoryAuthBody & { title?: string; points?: unknown; createdById?: string; deadline?: string; notifyUserIds?: unknown; sectionIds?: unknown };
+		const b = (req.body ?? {}) as InventoryAuthBody & { title?: string; points?: unknown; createdById?: string; deadline?: string; notifyUserIds?: unknown; sectionIds?: unknown; idempotencyKey?: string };
 		const client = inventoryClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		if (!b.title || !Array.isArray(b.points) || !b.points.length) {
@@ -29,14 +29,15 @@ export function registerInventoryCreateRoute(app: FastifyInstance): void {
 				loadStock: (storeTitle) => fetchErpStoreStockFull(erp, storeTitle),
 			});
 			const data = { status: 'active', deadline: b.deadline ?? '', points, createdById: b.createdById ?? '', createdAt: capturedAt, stockSnapshotAt: capturedAt, sectionIds };
-			await createInventoryData(app, client, {
+			const created = await createInventoryData(app, client, {
 				name: b.title,
 				data,
 				...(b.createdById ? { createdById: b.createdById } : {}),
 				createdAt: capturedAt,
+				...(b.idempotencyKey ? { idempotencyKey: b.idempotencyKey } : {}),
 			});
 
-			if (b.createdById) {
+			if (b.createdById && !created.alreadyApplied) {
 				const responsible = String(b.createdById);
 				let accomplices: number[] = [];
 				if (app.config.inventoryNotify === 'on' && Array.isArray(b.notifyUserIds)) {
@@ -62,7 +63,7 @@ export function registerInventoryCreateRoute(app: FastifyInstance): void {
 			}
 
 			app.log.info({ points: points.length, snapshotLines: points.reduce((sum, point) => sum + (((point['stockSnapshot'] as { lines?: unknown[] } | undefined)?.lines?.length) ?? 0), 0) }, '[api/inventory/create] ok');
-			return { ok: true };
+			return { ok: true, inventoryId: created.id, alreadyApplied: created.alreadyApplied };
 		} catch (err) {
 			app.log.error({}, `[api/inventory/create] failed — ${inventoryErrorInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: inventoryErrorInfo(err) });

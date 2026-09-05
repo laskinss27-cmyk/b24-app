@@ -8,12 +8,12 @@ import { registerInventoryUpdateRoute } from './api-inventory-update-route.js';
 export { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 
 /**
- * API инвентаризации для фронта. Фронтовый BX24 ВИСНЕТ на entity.* — поэтому
- * все операции с хранилищем (entity) делаем здесь, серверным B24Client (чистый
- * JSON, app-контекст). Фронт шлёт сюда свой BX24-токен (BX24.getAuth) + домен.
+ * API инвентаризации для фронта. Фронт шлёт сюда свой BX24-токен
+ * (BX24.getAuth) + домен; backend пишет нормализованный SQL либо совместимое
+ * Bitrix-хранилище согласно явному runtime gate.
  *
- * Эндпоинты read/write только в нашей сущности ctv_inv; токен — самого юзера,
- * поэтому права Битрикса соблюдаются. Домен сверяем с порталом (allowlist).
+ * Bitrix-зеркало всегда вызывается токеном самого пользователя. Домен сверяем
+ * с порталом (allowlist), а SQL writer использует отдельную узкую identity.
  */
 export function registerApiInventoryRoute(app: FastifyInstance): void {
 	registerInventoryReadRoutes(app);

@@ -117,8 +117,9 @@ export async function createInventory(
 	createdById: string,
 	notifyUserIds: string[],
 	sectionIds: number[],
+	idempotencyKey?: string,
 ): Promise<void> {
-	const json = await postInventoryApi('/api/inventory/create', { title, points, deadline, createdById, notifyUserIds, sectionIds });
+	const json = await postInventoryApi('/api/inventory/create', { title, points, deadline, createdById, notifyUserIds, sectionIds, idempotencyKey });
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить');
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { getContext, type B24Context } from './b24-context.js';
 import {
@@ -125,6 +125,9 @@ export function InventoryHome(): JSX.Element {
 	const [deadlineError, setDeadlineError] = useState(false);
 	const [createError, setCreateError] = useState<string | null>(null);
 	const [storageWarn, setStorageWarn] = useState<string | null>(null);
+	const createCommandKey = useRef<string | null>(null);
+
+	useEffect(() => { createCommandKey.current = null; }, [picked, deadline, notify, pickedSections]);
 
 	const [counting, setCounting] = useState<Counting | null>(null);
 	const [actionErr, setActionErr] = useState<string | null>(null);
@@ -341,9 +344,11 @@ export function InventoryHome(): JSX.Element {
 					...prev,
 				]);
 			} else {
-				await withTimeout(createInventory(INV_TITLE, points, deadline, me.id, notify, pickedSections), 15000, 'create');
+				createCommandKey.current ??= crypto.randomUUID();
+				await withTimeout(createInventory(INV_TITLE, points, deadline, me.id, notify, pickedSections, createCommandKey.current), 15000, 'create');
 				setInventories(await withTimeout(listInventories(), 20000, 'list'));
 			}
+			createCommandKey.current = null;
 			setCreating(false);
 			setPicked({});
 			setDeadline('');

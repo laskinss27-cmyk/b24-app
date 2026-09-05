@@ -1,12 +1,17 @@
 import mariadb, { type Pool } from 'mariadb';
 import type { TransferSqlPool } from '../transfers/sql-store.js';
 import type { InventorySqlRecord } from './model.js';
-import { markInventorySqlDeleted, writeInventorySqlRecord } from './writer.js';
+import {
+	claimInventoryBitrixMirror, createNativeInventorySql, deleteNativeInventorySql,
+	markInventoryBitrixDeleteDelivered, markInventoryBitrixMirrorDelivered, markInventorySqlDeleted,
+	readInventoryBitrixExternalId, readPendingInventoryBitrixMirrors, recordInventoryBitrixMirrorFailure,
+	updateNativeInventorySql, writeInventorySqlRecord, type PendingInventoryBitrixMirror,
+} from './writer.js';
 
 export type InventorySqlWriteConfig =
 	| { mode: 'off' }
 	| {
-		mode: 'shadow';
+		mode: 'shadow' | 'primary';
 		host: string;
 		port: number;
 		database: string;
@@ -20,6 +25,15 @@ export interface InventorySqlWriteRuntime {
 	readonly mode: InventorySqlWriteConfig['mode'];
 	readonly enabled: boolean;
 	write(inventory: InventorySqlRecord): ReturnType<typeof writeInventorySqlRecord>;
+	createNative(input: { idempotencyKey: string; name: string; data: Record<string, unknown>; createdById?: string; createdAt?: string }): ReturnType<typeof createNativeInventorySql>;
+	updateNative(input: { publicId: number; idempotencyKey: string; name: string; data: Record<string, unknown>; createdById?: string; createdAt?: string }): ReturnType<typeof updateNativeInventorySql>;
+	deleteNative(input: { publicId: number; idempotencyKey: string }): ReturnType<typeof deleteNativeInventorySql>;
+	pendingMirrors(limit?: number): Promise<PendingInventoryBitrixMirror[]>;
+	claimMirror(input: { publicId: number; mutationId: number; operationKind: 'upsert' | 'delete'; leaseToken: string }): Promise<boolean>;
+	bitrixExternalId(publicId: number): Promise<number | null>;
+	markMirrorDelivered(input: { publicId: number; mutationId: number; bitrixExternalId: number; leaseToken: string }): Promise<void>;
+	markDeleteDelivered(input: { publicId: number; mutationId: number; leaseToken: string }): Promise<void>;
+	recordMirrorFailure(input: { publicId: number; mutationId: number; operationKind: 'upsert' | 'delete'; leaseToken: string; error: string }): Promise<void>;
 	markDeleted(input: { externalId: number; deletedAt?: Date }): ReturnType<typeof markInventorySqlDeleted>;
 	ping(): Promise<void>;
 	close(): Promise<void>;
@@ -27,7 +41,7 @@ export interface InventorySqlWriteRuntime {
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
 	const value = String(env[name] ?? '').trim();
-	if (!value) throw new Error(`${name} is required when inventory SQL shadow writes are enabled`);
+	if (!value) throw new Error(`${name} is required when inventory SQL writes are enabled`);
 	return value;
 }
 
@@ -40,9 +54,9 @@ function positiveInteger(value: unknown, fallback: number, max: number, name: st
 export function loadInventorySqlWriteConfig(env: NodeJS.ProcessEnv = process.env): InventorySqlWriteConfig {
 	const mode = String(env['B24_APP_INVENTORY_SQL_WRITE'] ?? 'off').trim();
 	if (mode === 'off') return { mode: 'off' };
-	if (mode !== 'shadow') throw new Error('B24_APP_INVENTORY_SQL_WRITE must be off or shadow');
+	if (mode !== 'shadow' && mode !== 'primary') throw new Error('B24_APP_INVENTORY_SQL_WRITE must be off, shadow or primary');
 	if (String(env['B24_APP_DB_MODE'] ?? 'off').trim() !== 'readiness') {
-		throw new Error('B24_APP_DB_MODE=readiness is required for inventory SQL shadow writes');
+		throw new Error('B24_APP_DB_MODE=readiness is required for inventory SQL writes');
 	}
 	const user = required(env, 'B24_APP_INVENTORY_DB_USER');
 	const forbidden = [
@@ -51,6 +65,9 @@ export function loadInventorySqlWriteConfig(env: NodeJS.ProcessEnv = process.env
 		env['B24_APP_CATALOG_SYNC_DB_USER'],
 	].map((value) => String(value ?? '').trim()).filter(Boolean);
 	if (forbidden.includes(user)) throw new Error('Inventory SQL writer database user must be a separate identity');
+	if (mode === 'primary' && String(env['B24_APP_INVENTORY_SQL_READ'] ?? 'off').trim() !== 'primary') {
+		throw new Error('B24_APP_INVENTORY_SQL_READ=primary is required for SQL-first inventory writes');
+	}
 	return {
 		mode,
 		host: required(env, 'B24_APP_DB_HOST'),
@@ -72,6 +89,15 @@ export function createInventorySqlWriteRuntime(config: InventorySqlWriteConfig):
 		mode: 'off',
 		enabled: false,
 		async write() { throw disabledError(); },
+		async createNative() { throw disabledError(); },
+		async updateNative() { throw disabledError(); },
+		async deleteNative() { throw disabledError(); },
+		async pendingMirrors() { throw disabledError(); },
+		async claimMirror() { throw disabledError(); },
+		async bitrixExternalId() { throw disabledError(); },
+		async markMirrorDelivered() { throw disabledError(); },
+		async markDeleteDelivered() { throw disabledError(); },
+		async recordMirrorFailure() { throw disabledError(); },
 		async markDeleted() { throw disabledError(); },
 		async ping() {},
 		async close() {},
@@ -90,15 +116,29 @@ export function createInventorySqlWriteRuntime(config: InventorySqlWriteConfig):
 	});
 	const sqlPool = pool as unknown as TransferSqlPool;
 	return {
-		mode: 'shadow',
+		mode: config.mode,
 		enabled: true,
 		write(inventory) { return writeInventorySqlRecord(sqlPool, inventory); },
+		createNative(input) { return createNativeInventorySql(sqlPool, input); },
+		updateNative(input) { return updateNativeInventorySql(sqlPool, input); },
+		deleteNative(input) { return deleteNativeInventorySql(sqlPool, input); },
+		pendingMirrors(limit) { return readPendingInventoryBitrixMirrors(sqlPool, limit); },
+		claimMirror(input) { return claimInventoryBitrixMirror(sqlPool, input); },
+		bitrixExternalId(publicId) { return readInventoryBitrixExternalId(sqlPool, publicId); },
+		markMirrorDelivered(input) { return markInventoryBitrixMirrorDelivered(sqlPool, input); },
+		markDeleteDelivered(input) { return markInventoryBitrixDeleteDelivered(sqlPool, input); },
+		recordMirrorFailure(input) { return recordInventoryBitrixMirrorFailure(sqlPool, input); },
 		markDeleted(input) { return markInventorySqlDeleted(sqlPool, input); },
 		async ping() {
 			await Promise.all([
 				pool.query('SELECT 1 AS ok'),
 				pool.query('SELECT bitrix_external_id FROM inventory_records LIMIT 0'),
 				pool.query('SELECT inventory_id FROM inventory_points LIMIT 0'),
+				...(config.mode === 'primary' ? [
+					pool.query('SELECT mutation_no FROM inventory_mutations LIMIT 0'),
+					pool.query('SELECT idempotency_key FROM inventory_commands LIMIT 0'),
+					pool.query('SELECT status FROM inventory_bitrix_outbox LIMIT 0'),
+				] : []),
 			]);
 		},
 		async close() { await pool.end(); },

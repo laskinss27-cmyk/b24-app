@@ -16,7 +16,8 @@ const base: NodeJS.ProcessEnv = {
 test('inventory SQL shadow writer is opt-in and uses a separate bounded identity', () => {
 	assert.deepEqual(loadInventorySqlWriteConfig({}), { mode: 'off' });
 	assert.throws(() => loadInventorySqlWriteConfig({ ...base, B24_APP_DB_MODE: 'off' }), /DB_MODE=readiness/);
-	assert.throws(() => loadInventorySqlWriteConfig({ ...base, B24_APP_INVENTORY_SQL_WRITE: 'primary' }), /off or shadow/);
+	assert.throws(() => loadInventorySqlWriteConfig({ ...base, B24_APP_INVENTORY_SQL_WRITE: 'primary' }), /SQL_READ=primary/);
+	assert.equal(loadInventorySqlWriteConfig({ ...base, B24_APP_INVENTORY_SQL_WRITE: 'primary', B24_APP_INVENTORY_SQL_READ: 'primary' }).mode, 'primary');
 	assert.throws(() => loadInventorySqlWriteConfig({ ...base, B24_APP_INVENTORY_DB_USER: 'runtime_reader' }), /separate identity/);
 	assert.throws(() => loadInventorySqlWriteConfig({ ...base, B24_APP_BACKFILL_DB_USER: 'inventory_writer' }), /separate identity/);
 	assert.deepEqual(loadInventorySqlWriteConfig(base), {

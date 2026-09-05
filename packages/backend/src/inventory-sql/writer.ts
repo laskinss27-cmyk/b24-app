@@ -1,10 +1,29 @@
+import { createHash } from 'node:crypto';
+import { supplyMirrorCanonicalJson } from '../database/supply-backfill-plan.js';
 import type { TransferSqlConnection, TransferSqlPool } from '../transfers/sql-store.js';
 import type { InventorySqlBackfillPlan } from './backfill-plan.js';
-import type { InventorySqlPoint, InventorySqlRecord, InventorySqlSnapshotLine } from './model.js';
+import { normalizeInventorySqlState, type InventorySqlPoint, type InventorySqlRecord, type InventorySqlSnapshotLine } from './model.js';
 
 type QueryRow = Record<string, unknown>;
 type SqlResult = { affectedRows?: number; insertId?: bigint | number | string };
 const INVENTORY_WRITE_LOCK = 'b24_app_inventory_write';
+
+export interface WriteNativeInventoryResult {
+	publicId: number;
+	mutationId: number;
+	mutationNo: number;
+	stateHash: string;
+	alreadyCurrent: boolean;
+	alreadyApplied: boolean;
+}
+
+export interface PendingInventoryBitrixMirror {
+	publicId: number;
+	bitrixExternalId: number | null;
+	mutationId: number;
+	attemptCount: number;
+	operationKind: 'upsert' | 'delete';
+}
 
 function hashBuffer(hash: string): Buffer {
 	if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid inventory hash');
@@ -58,38 +77,59 @@ export function assertFrozenInventorySnapshot(
 	}
 }
 
-async function lockInventoryRecord(connection: TransferSqlConnection, inventory: InventorySqlRecord): Promise<QueryRow> {
+async function lockInventoryRecord(
+	connection: TransferSqlConnection,
+	inventory: InventorySqlRecord,
+	bitrixExternalId: number | null = inventory.bitrixExternalId,
+): Promise<QueryRow> {
+	await connection.query(`
+		INSERT IGNORE INTO inventory_public_ids (public_id, legacy_bitrix_external_id)
+		VALUES (?, ?)
+	`, [inventory.bitrixExternalId, bitrixExternalId]);
+	const allocations = await connection.query<QueryRow[]>(`
+		SELECT public_id, legacy_bitrix_external_id FROM inventory_public_ids
+		WHERE public_id = ? OR (? IS NOT NULL AND legacy_bitrix_external_id = ?) FOR UPDATE
+	`, [inventory.bitrixExternalId, bitrixExternalId, bitrixExternalId]);
+	if (allocations.length !== 1
+		|| Number(allocations[0]!['public_id']) !== inventory.bitrixExternalId
+		|| (bitrixExternalId != null && Number(allocations[0]!['legacy_bitrix_external_id']) !== bitrixExternalId)) {
+		throw new Error(`Inventory ${inventory.bitrixExternalId} conflicts with the SQL public-id allocator`);
+	}
 	let rows = await connection.query<QueryRow[]>(`
-		SELECT id, last_state_hash,
+		SELECT id, public_id, bitrix_external_id, last_state_hash,
 			DATE_FORMAT(stock_snapshot_at, '%Y-%m-%d %H:%i:%s.%f') AS stock_snapshot_at
 		FROM inventory_records
-		WHERE bitrix_external_id = ?
+		WHERE public_id = ? OR (? IS NOT NULL AND bitrix_external_id = ?)
 		FOR UPDATE
-	`, [inventory.bitrixExternalId]);
+	`, [inventory.bitrixExternalId, bitrixExternalId, bitrixExternalId]);
 	if (rows.length > 1) throw new Error(`Inventory ${inventory.bitrixExternalId} identity is duplicated`);
+	if (rows.length && Number(rows[0]!['public_id']) !== inventory.bitrixExternalId) {
+		throw new Error(`Inventory ${inventory.bitrixExternalId} SQL public identity differs from its record`);
+	}
 	if (rows.length && storedTimestamp(rows[0]!['stock_snapshot_at'], 'inventory stock snapshot timestamp')
 		&& storedTimestamp(rows[0]!['stock_snapshot_at'], 'inventory stock snapshot timestamp') !== inventory.stockSnapshotAt) {
 		throw new Error(`Inventory ${inventory.bitrixExternalId} opening snapshot timestamp changed`);
 	}
 	await connection.query(`
 		INSERT INTO inventory_records (
-			bitrix_external_id, display_name, inventory_status, deadline, created_by_id,
+			public_id, bitrix_external_id, display_name, inventory_status, deadline, created_by_id,
 			source_created_at, stock_snapshot_at, last_state_hash, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
 		ON DUPLICATE KEY UPDATE
+			public_id = COALESCE(public_id, VALUES(public_id)),
 			display_name = VALUES(display_name), inventory_status = VALUES(inventory_status),
 			deadline = VALUES(deadline), created_by_id = VALUES(created_by_id),
 			source_created_at = VALUES(source_created_at), stock_snapshot_at = VALUES(stock_snapshot_at),
 			deleted_at = NULL
 	`, [
-		inventory.bitrixExternalId, inventory.displayName, inventory.status, inventory.deadline,
+		inventory.bitrixExternalId, bitrixExternalId, inventory.displayName, inventory.status, inventory.deadline,
 		inventory.createdById, sqlDate(inventory.sourceCreatedAt), sqlDate(inventory.stockSnapshotAt),
 	]);
 	if (!rows.length) rows = await connection.query<QueryRow[]>(`
-		SELECT id, last_state_hash,
+		SELECT id, public_id, bitrix_external_id, last_state_hash,
 			DATE_FORMAT(stock_snapshot_at, '%Y-%m-%d %H:%i:%s.%f') AS stock_snapshot_at
 		FROM inventory_records
-		WHERE bitrix_external_id = ?
+		WHERE public_id = ?
 		FOR UPDATE
 	`, [inventory.bitrixExternalId]);
 	if (rows.length !== 1) throw new Error(`Inventory ${inventory.bitrixExternalId} identity row was not locked`);
@@ -240,8 +280,8 @@ async function upsertPointLines(connection: TransferSqlConnection, pointId: numb
 	]));
 }
 
-async function writeInventory(connection: TransferSqlConnection, inventory: InventorySqlRecord): Promise<boolean> {
-	const locked = await lockInventoryRecord(connection, inventory);
+async function writeInventory(connection: TransferSqlConnection, inventory: InventorySqlRecord, bitrixExternalId?: number | null): Promise<boolean> {
+	const locked = await lockInventoryRecord(connection, inventory, bitrixExternalId);
 	const inventoryId = positiveSqlId(locked['id'], 'inventory record id');
 	if (Buffer.isBuffer(locked['last_state_hash']) && locked['last_state_hash'].equals(hashBuffer(inventory.stateHash))) return false;
 	await tombstoneInventoryChildren(connection, inventoryId);
@@ -313,6 +353,367 @@ export async function markInventorySqlDeleted(
 		if (Number(result.affectedRows ?? 0) !== 1) throw new Error(`Inventory ${input.externalId} SQL tombstone failed`);
 		return { alreadyDeleted: false };
 	});
+}
+
+type NativeInventoryCommandKind = 'create' | 'update' | 'delete';
+
+function bounded(value: unknown, max: number, name: string): string {
+	const text = String(value ?? '');
+	if (text.length > max) throw new Error(`${name} exceeds ${max} characters`);
+	return text;
+}
+
+function nativeIdempotencyKey(value: unknown): string {
+	const key = bounded(value, 191, 'inventory idempotency key').trim();
+	if (!key || !/^[\x21-\x7e]+$/.test(key)) throw new Error('Invalid inventory idempotency key');
+	return key;
+}
+
+function requestHash(value: unknown): string {
+	return createHash('sha256').update(supplyMirrorCanonicalJson(value)).digest('hex');
+}
+
+async function lockNativeCommand(
+	connection: TransferSqlConnection,
+	key: string,
+	kind: NativeInventoryCommandKind,
+	hash: string,
+): Promise<QueryRow> {
+	await connection.query(`
+		INSERT IGNORE INTO inventory_commands (idempotency_key, command_kind, request_hash)
+		VALUES (?, ?, ?)
+	`, [key, kind, hashBuffer(hash)]);
+	const rows = await connection.query<QueryRow[]>(`
+		SELECT id, command_kind, request_hash, inventory_id, mutation_id, completed_at
+		FROM inventory_commands WHERE idempotency_key = ? FOR UPDATE
+	`, [key]);
+	if (rows.length !== 1) throw new Error('Inventory idempotency command was not locked');
+	const row = rows[0]!;
+	if (String(row['command_kind']) !== kind || !Buffer.isBuffer(row['request_hash']) || !row['request_hash'].equals(hashBuffer(hash))) {
+		throw new Error(`Inventory idempotency key ${key} was already used for another command`);
+	}
+	const complete = row['inventory_id'] != null && row['mutation_id'] != null && row['completed_at'] != null;
+	const empty = row['inventory_id'] == null && row['mutation_id'] == null && row['completed_at'] == null;
+	if (!complete && !empty) throw new Error(`Inventory idempotency command ${key} has an incomplete result`);
+	return row;
+}
+
+async function completedCommandResult(connection: TransferSqlConnection, command: QueryRow): Promise<WriteNativeInventoryResult | null> {
+	if (command['inventory_id'] == null) return null;
+	const rows = await connection.query<QueryRow[]>(`
+		SELECT record.public_id, mutation.id AS mutation_id, mutation.mutation_no, mutation.state_hash,
+			record.last_state_hash
+		FROM inventory_records record
+		JOIN inventory_mutations mutation ON mutation.id = ? AND mutation.inventory_id = record.id
+		WHERE record.id = ? FOR UPDATE
+	`, [command['mutation_id'], command['inventory_id']]);
+	if (rows.length !== 1) throw new Error('Inventory idempotency result is missing');
+	return {
+		publicId: positiveSqlId(rows[0]!['public_id'], 'inventory public id'),
+		mutationId: positiveSqlId(rows[0]!['mutation_id'], 'inventory mutation id'),
+		mutationNo: positiveSqlId(rows[0]!['mutation_no'], 'inventory mutation number'),
+		stateHash: Buffer.isBuffer(rows[0]!['state_hash']) ? rows[0]!['state_hash'].toString('hex') : '',
+		alreadyCurrent: Buffer.isBuffer(rows[0]!['last_state_hash']) && Buffer.isBuffer(rows[0]!['state_hash'])
+			&& rows[0]!['last_state_hash'].equals(rows[0]!['state_hash']),
+		alreadyApplied: true,
+	};
+}
+
+async function appendMutation(
+	connection: TransferSqlConnection,
+	inventoryId: number,
+	operationKind: 'upsert' | 'delete',
+	stateHash: string,
+): Promise<{ mutationId: number; mutationNo: number }> {
+	const latest = await connection.query<QueryRow[]>(`
+		SELECT mutation_no FROM inventory_mutations
+		WHERE inventory_id = ? ORDER BY mutation_no DESC LIMIT 1 FOR UPDATE
+	`, [inventoryId]);
+	const mutationNo = (latest.length ? Number(latest[0]!['mutation_no']) : 0) + 1;
+	const inserted = await connection.query<SqlResult>(`
+		INSERT INTO inventory_mutations (inventory_id, mutation_no, operation_kind, state_hash)
+		VALUES (?, ?, ?, ?)
+	`, [inventoryId, mutationNo, operationKind, hashBuffer(stateHash)]);
+	return { mutationId: positiveSqlId(inserted.insertId, 'inventory mutation insert id'), mutationNo };
+}
+
+async function enqueueMirror(
+	connection: TransferSqlConnection,
+	inventoryId: number,
+	mutationId: number,
+	operationKind: 'upsert' | 'delete',
+): Promise<void> {
+	if (operationKind === 'upsert') {
+		await connection.query(`
+			UPDATE inventory_bitrix_outbox SET status = 'superseded', lease_token = NULL,
+				locked_until = NULL, completed_at = CURRENT_TIMESTAMP(6), last_error = 'superseded by newer mutation'
+			WHERE inventory_id = ? AND operation_kind = 'upsert' AND mutation_id < ? AND (
+				status = 'pending' OR (status = 'processing' AND locked_until <= CURRENT_TIMESTAMP(6))
+			)
+		`, [inventoryId, mutationId]);
+	}
+	await connection.query(`
+		INSERT INTO inventory_bitrix_outbox (inventory_id, mutation_id, operation_kind)
+		VALUES (?, ?, ?)
+	`, [inventoryId, mutationId, operationKind]);
+}
+
+async function completeCommand(
+	connection: TransferSqlConnection,
+	commandId: unknown,
+	inventoryId: number,
+	mutationId: number,
+): Promise<void> {
+	const updated = await connection.query<SqlResult>(`
+		UPDATE inventory_commands SET inventory_id = ?, mutation_id = ?, completed_at = CURRENT_TIMESTAMP(6)
+		WHERE id = ? AND inventory_id IS NULL AND mutation_id IS NULL AND completed_at IS NULL
+	`, [inventoryId, mutationId, commandId]);
+	if (Number(updated.affectedRows ?? 0) !== 1) throw new Error('Inventory idempotency command completion failed');
+}
+
+async function nativeUpsert(
+	connection: TransferSqlConnection,
+	input: { publicId: number; idempotencyKey: string; name: string; data: Record<string, unknown>; createdById?: string; createdAt?: string },
+	kind: 'create' | 'update',
+	commandHash: string,
+): Promise<WriteNativeInventoryResult> {
+	const command = await lockNativeCommand(connection, input.idempotencyKey, kind, commandHash);
+	const completed = await completedCommandResult(connection, command);
+	if (completed) {
+		if (completed.publicId !== input.publicId) throw new Error(`Inventory idempotency key ${input.idempotencyKey} belongs to another document`);
+		return completed;
+	}
+	const existing = await connection.query<QueryRow[]>(`
+		SELECT id, bitrix_external_id, deleted_at FROM inventory_records WHERE public_id = ? FOR UPDATE
+	`, [input.publicId]);
+	if (kind === 'create' && existing.length) throw new Error(`Inventory #${input.publicId} already exists`);
+	if (kind === 'update' && (existing.length !== 1 || existing[0]!['deleted_at'] != null)) throw new Error(`Inventory #${input.publicId} was not found in SQL`);
+	const inventory = normalizeInventorySqlState(input);
+	const bitrixExternalId = existing.length && existing[0]!['bitrix_external_id'] != null
+		? positiveSqlId(existing[0]!['bitrix_external_id'], 'inventory Bitrix id')
+		: null;
+	const changed = await writeInventory(connection, inventory, bitrixExternalId);
+	const records = await connection.query<QueryRow[]>('SELECT id FROM inventory_records WHERE public_id = ? FOR UPDATE', [input.publicId]);
+	if (records.length !== 1) throw new Error(`Inventory #${input.publicId} SQL record is missing`);
+	const inventoryId = positiveSqlId(records[0]!['id'], 'inventory record id');
+	const mutation = await appendMutation(connection, inventoryId, 'upsert', inventory.stateHash);
+	await enqueueMirror(connection, inventoryId, mutation.mutationId, 'upsert');
+	await completeCommand(connection, command['id'], inventoryId, mutation.mutationId);
+	return { publicId: input.publicId, ...mutation, stateHash: inventory.stateHash, alreadyCurrent: !changed, alreadyApplied: false };
+}
+
+export async function createNativeInventorySql(
+	pool: TransferSqlPool,
+	input: { idempotencyKey: string; name: string; data: Record<string, unknown>; createdById?: string; createdAt?: string },
+): Promise<WriteNativeInventoryResult> {
+	const key = nativeIdempotencyKey(input.idempotencyKey);
+	const stablePoints = Array.isArray(input.data['points'])
+		? input.data['points'].map((raw) => {
+			const point = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+			return {
+				storeId: point['storeId'], storeName: point['storeName'], responsibleId: point['responsibleId'],
+				responsibleName: point['responsibleName'], status: point['status'],
+			};
+		})
+		: [];
+	const hash = requestHash({
+		command: 'create', name: input.name, status: input.data['status'], deadline: input.data['deadline'],
+		createdById: input.createdById ?? input.data['createdById'] ?? '', sectionIds: input.data['sectionIds'] ?? [], points: stablePoints,
+	});
+	return withInventorySqlWriteLock(pool, async (connection) => {
+		const existingCommand = await lockNativeCommand(connection, key, 'create', hash);
+		const completed = await completedCommandResult(connection, existingCommand);
+		if (completed) return completed;
+		const allocated = await connection.query<SqlResult>('INSERT INTO inventory_public_ids (legacy_bitrix_external_id) VALUES (NULL)');
+		const publicId = positiveSqlId(allocated.insertId, 'inventory public id');
+		// nativeUpsert locks the same command row and completes it in this transaction.
+		return nativeUpsert(connection, { ...input, publicId, idempotencyKey: key }, 'create', hash);
+	});
+}
+
+export async function updateNativeInventorySql(
+	pool: TransferSqlPool,
+	input: { publicId: number; idempotencyKey: string; name: string; data: Record<string, unknown>; createdById?: string; createdAt?: string },
+): Promise<WriteNativeInventoryResult> {
+	const publicId = positiveSqlId(input.publicId, 'inventory public id');
+	const key = nativeIdempotencyKey(input.idempotencyKey);
+	const inventory = normalizeInventorySqlState({ ...input, publicId });
+	return withInventorySqlWriteLock(pool, (connection) => nativeUpsert(
+		connection, { ...input, publicId, idempotencyKey: key }, 'update', inventory.stateHash,
+	));
+}
+
+export async function deleteNativeInventorySql(
+	pool: TransferSqlPool,
+	input: { publicId: number; idempotencyKey: string },
+): Promise<WriteNativeInventoryResult> {
+	const publicId = positiveSqlId(input.publicId, 'inventory public id');
+	const key = nativeIdempotencyKey(input.idempotencyKey);
+	const hash = requestHash({ command: 'delete', publicId });
+	return withInventorySqlWriteLock(pool, async (connection) => {
+		const command = await lockNativeCommand(connection, key, 'delete', hash);
+		const completed = await completedCommandResult(connection, command);
+		if (completed) return completed;
+		const rows = await connection.query<QueryRow[]>(`
+			SELECT id, last_state_hash, deleted_at FROM inventory_records WHERE public_id = ? FOR UPDATE
+		`, [publicId]);
+		if (rows.length !== 1 || !Buffer.isBuffer(rows[0]!['last_state_hash'])) throw new Error(`Inventory #${publicId} was not found in SQL`);
+		const inventoryId = positiveSqlId(rows[0]!['id'], 'inventory record id');
+		const stateHash = rows[0]!['last_state_hash'].toString('hex');
+		await connection.query('UPDATE inventory_records SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP(6)) WHERE id = ?', [inventoryId]);
+		await connection.query(`
+			UPDATE inventory_bitrix_outbox SET status = 'superseded', lease_token = NULL, locked_until = NULL,
+				completed_at = CURRENT_TIMESTAMP(6), last_error = 'superseded by delete'
+			WHERE inventory_id = ? AND operation_kind = 'upsert' AND (
+				status = 'pending' OR (status = 'processing' AND locked_until <= CURRENT_TIMESTAMP(6))
+			)
+		`, [inventoryId]);
+		const mutation = await appendMutation(connection, inventoryId, 'delete', stateHash);
+		await enqueueMirror(connection, inventoryId, mutation.mutationId, 'delete');
+		await completeCommand(connection, command['id'], inventoryId, mutation.mutationId);
+		return { publicId, ...mutation, stateHash, alreadyCurrent: true, alreadyApplied: false };
+	});
+}
+
+function mirrorLeaseToken(value: unknown): string {
+	const token = bounded(value, 36, 'inventory mirror lease token').trim();
+	if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(token)) {
+		throw new Error('Invalid inventory mirror lease token');
+	}
+	return token;
+}
+
+export async function readPendingInventoryBitrixMirrors(pool: TransferSqlPool, limit = 20): Promise<PendingInventoryBitrixMirror[]> {
+	const safeLimit = Math.min(Math.max(positiveSqlId(limit, 'inventory outbox limit'), 1), 100);
+	const rows = await pool.query<QueryRow[]>(`
+		SELECT record.public_id, record.bitrix_external_id, outbox.operation_kind,
+			MAX(outbox.mutation_id) AS mutation_id, MAX(outbox.attempt_count) AS attempt_count
+		FROM inventory_bitrix_outbox outbox
+		JOIN inventory_records record ON record.id = outbox.inventory_id
+		WHERE ((outbox.status = 'pending' AND outbox.available_at <= CURRENT_TIMESTAMP(6))
+			OR (outbox.status = 'processing' AND outbox.locked_until <= CURRENT_TIMESTAMP(6)))
+			AND ((outbox.operation_kind = 'upsert' AND record.deleted_at IS NULL) OR outbox.operation_kind = 'delete')
+		GROUP BY record.id, record.public_id, record.bitrix_external_id, outbox.operation_kind
+		ORDER BY MIN(outbox.id) LIMIT ${safeLimit}
+	`);
+	return rows.map((row) => ({
+		publicId: positiveSqlId(row['public_id'], 'inventory public id'),
+		bitrixExternalId: row['bitrix_external_id'] == null ? null : positiveSqlId(row['bitrix_external_id'], 'inventory Bitrix id'),
+		mutationId: positiveSqlId(row['mutation_id'], 'inventory mutation id'),
+		attemptCount: Number(row['attempt_count'] ?? 0),
+		operationKind: String(row['operation_kind']) === 'delete' ? 'delete' : 'upsert',
+	}));
+}
+
+export async function claimInventoryBitrixMirror(
+	pool: TransferSqlPool,
+	input: { publicId: number; mutationId: number; operationKind: 'upsert' | 'delete'; leaseToken: string },
+): Promise<boolean> {
+	const publicId = positiveSqlId(input.publicId, 'inventory public id');
+	const mutationId = positiveSqlId(input.mutationId, 'inventory mutation id');
+	const leaseToken = mirrorLeaseToken(input.leaseToken);
+	return withInventorySqlWriteLock(pool, async (connection) => {
+		const records = await connection.query<QueryRow[]>(`
+			SELECT id FROM inventory_records WHERE public_id = ? AND (? = 'delete' OR deleted_at IS NULL) FOR UPDATE
+		`, [publicId, input.operationKind]);
+		if (records.length !== 1) throw new Error(`Inventory #${publicId} was not found for Bitrix mirroring`);
+		const inventoryId = positiveSqlId(records[0]!['id'], 'inventory record id');
+		const active = await connection.query<QueryRow[]>(`
+			SELECT id FROM inventory_bitrix_outbox WHERE inventory_id = ? AND status = 'processing'
+				AND locked_until > CURRENT_TIMESTAMP(6) LIMIT 1 FOR UPDATE
+		`, [inventoryId]);
+		if (active.length) return false;
+		const claimed = await connection.query<SqlResult>(`
+			UPDATE inventory_bitrix_outbox SET status = 'processing', lease_token = ?,
+				locked_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 60 SECOND)
+			WHERE inventory_id = ? AND operation_kind = ? AND mutation_id <= ? AND (
+				(status = 'pending' AND available_at <= CURRENT_TIMESTAMP(6))
+				OR (status = 'processing' AND locked_until <= CURRENT_TIMESTAMP(6))
+			)
+		`, [leaseToken, inventoryId, input.operationKind, mutationId]);
+		return Number(claimed.affectedRows ?? 0) > 0;
+	});
+}
+
+export async function readInventoryBitrixExternalId(pool: TransferSqlPool, publicIdInput: number): Promise<number | null> {
+	const publicId = positiveSqlId(publicIdInput, 'inventory public id');
+	const rows = await pool.query<QueryRow[]>('SELECT bitrix_external_id FROM inventory_records WHERE public_id = ?', [publicId]);
+	if (!rows.length) return null;
+	if (rows.length !== 1) throw new Error(`Inventory #${publicId} identity is ambiguous`);
+	return rows[0]!['bitrix_external_id'] == null ? null : positiveSqlId(rows[0]!['bitrix_external_id'], 'inventory Bitrix id');
+}
+
+export async function recordInventoryBitrixMirrorFailure(
+	pool: TransferSqlPool,
+	input: { publicId: number; mutationId: number; operationKind: 'upsert' | 'delete'; leaseToken: string; error: string },
+): Promise<void> {
+	const leaseToken = mirrorLeaseToken(input.leaseToken);
+	await pool.query(`
+		UPDATE inventory_bitrix_outbox outbox
+		JOIN inventory_records record ON record.id = outbox.inventory_id
+		SET outbox.attempt_count = outbox.attempt_count + 1, outbox.last_attempt_at = CURRENT_TIMESTAMP(6),
+			outbox.available_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL LEAST(300, POW(2, LEAST(outbox.attempt_count, 8))) SECOND),
+			outbox.last_error = ?, outbox.status = 'pending', outbox.lease_token = NULL, outbox.locked_until = NULL
+		WHERE record.public_id = ? AND outbox.operation_kind = ? AND outbox.status = 'processing'
+			AND outbox.lease_token = ? AND outbox.mutation_id <= ?
+	`, [bounded(input.error, 1000, 'inventory mirror error'), positiveSqlId(input.publicId, 'inventory public id'),
+		input.operationKind, leaseToken, positiveSqlId(input.mutationId, 'inventory mutation id')]);
+}
+
+export async function markInventoryBitrixMirrorDelivered(
+	pool: TransferSqlPool,
+	input: { publicId: number; mutationId: number; bitrixExternalId: number; leaseToken: string },
+): Promise<void> {
+	const publicId = positiveSqlId(input.publicId, 'inventory public id');
+	const mutationId = positiveSqlId(input.mutationId, 'inventory mutation id');
+	const bitrixExternalId = positiveSqlId(input.bitrixExternalId, 'inventory Bitrix id');
+	const leaseToken = mirrorLeaseToken(input.leaseToken);
+	await withInventorySqlWriteLock(pool, async (connection) => {
+		const claims = await connection.query<QueryRow[]>(`
+			SELECT outbox.id FROM inventory_bitrix_outbox outbox
+			JOIN inventory_records record ON record.id = outbox.inventory_id
+			WHERE record.public_id = ? AND outbox.operation_kind = 'upsert' AND outbox.status = 'processing'
+				AND outbox.lease_token = ? AND outbox.mutation_id <= ? FOR UPDATE
+		`, [publicId, leaseToken, mutationId]);
+		if (!claims.length) return;
+		const allocations = await connection.query<QueryRow[]>(`
+			SELECT legacy_bitrix_external_id FROM inventory_public_ids WHERE public_id = ? FOR UPDATE
+		`, [publicId]);
+		if (allocations.length !== 1) throw new Error(`Inventory #${publicId} allocator row is missing`);
+		const legacy = allocations[0]!['legacy_bitrix_external_id'];
+		if (legacy != null && Number(legacy) !== bitrixExternalId) throw new Error(`Inventory #${publicId} already has another Bitrix mirror`);
+		await connection.query('UPDATE inventory_public_ids SET legacy_bitrix_external_id = ? WHERE public_id = ?', [bitrixExternalId, publicId]);
+		const records = await connection.query<QueryRow[]>('SELECT bitrix_external_id FROM inventory_records WHERE public_id = ? FOR UPDATE', [publicId]);
+		if (records.length !== 1) throw new Error(`Inventory #${publicId} record is missing`);
+		const current = records[0]!['bitrix_external_id'];
+		if (current != null && Number(current) !== bitrixExternalId) throw new Error(`Inventory #${publicId} already points to another Bitrix mirror`);
+		await connection.query('UPDATE inventory_records SET bitrix_external_id = ? WHERE public_id = ?', [bitrixExternalId, publicId]);
+		await connection.query(`
+			UPDATE inventory_bitrix_outbox outbox
+			JOIN inventory_records record ON record.id = outbox.inventory_id
+			SET outbox.status = 'delivered', outbox.attempt_count = outbox.attempt_count + 1,
+				outbox.last_attempt_at = CURRENT_TIMESTAMP(6), outbox.lease_token = NULL, outbox.locked_until = NULL,
+				outbox.completed_at = CURRENT_TIMESTAMP(6), outbox.last_error = ''
+			WHERE record.public_id = ? AND outbox.operation_kind = 'upsert' AND outbox.status = 'processing'
+				AND outbox.lease_token = ? AND outbox.mutation_id <= ?
+		`, [publicId, leaseToken, mutationId]);
+	});
+}
+
+export async function markInventoryBitrixDeleteDelivered(
+	pool: TransferSqlPool,
+	input: { publicId: number; mutationId: number; leaseToken: string },
+): Promise<void> {
+	await pool.query(`
+		UPDATE inventory_bitrix_outbox outbox
+		JOIN inventory_records record ON record.id = outbox.inventory_id
+		SET outbox.status = 'delivered', outbox.attempt_count = outbox.attempt_count + 1,
+			outbox.last_attempt_at = CURRENT_TIMESTAMP(6), outbox.lease_token = NULL, outbox.locked_until = NULL,
+			outbox.completed_at = CURRENT_TIMESTAMP(6), outbox.last_error = ''
+		WHERE record.public_id = ? AND outbox.operation_kind = 'delete' AND outbox.status = 'processing'
+			AND outbox.lease_token = ? AND outbox.mutation_id <= ?
+	`, [positiveSqlId(input.publicId, 'inventory public id'), mirrorLeaseToken(input.leaseToken),
+		positiveSqlId(input.mutationId, 'inventory mutation id')]);
 }
 
 export async function applyInventorySqlBackfill(

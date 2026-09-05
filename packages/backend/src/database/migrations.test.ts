@@ -105,6 +105,9 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0069_create_inventory_public_ids.sql',
 		'0070_create_inventory_identity_checkpoints.sql',
 		'0071_make_inventory_bitrix_identity_optional.sql',
+		'0072_create_inventory_mutations.sql',
+		'0073_create_inventory_commands.sql',
+		'0074_create_inventory_bitrix_outbox.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -480,4 +483,21 @@ test('inventory public identity foundation preserves legacy numbers without runt
 	assert.match(optionalBitrix, /MODIFY COLUMN bitrix_external_id BIGINT UNSIGNED NULL/);
 	assert.match(optionalBitrix, /bitrix_external_id IS NULL OR bitrix_external_id > 0/);
 	assert.doesNotMatch([publicId, allocator, checkpoints, optionalBitrix].join('\n'), /\bJSON\b/i);
+});
+
+test('inventory SQL-first journal and outbox are normalized and append-only', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const sql = [
+		byName.get('0072_create_inventory_mutations.sql')!,
+		byName.get('0073_create_inventory_commands.sql')!,
+		byName.get('0074_create_inventory_bitrix_outbox.sql')!,
+	].join('\n');
+	assert.match(sql, /inventory_mutations/);
+	assert.match(sql, /inventory_commands/);
+	assert.match(sql, /inventory_bitrix_outbox/);
+	assert.match(sql, /idempotency_key/);
+	assert.match(sql, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
+	assert.doesNotMatch(sql, /\bJSON\b/i);
+	assert.doesNotMatch(sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|TRUNCATE|GRANT)\b/im);
 });

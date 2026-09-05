@@ -10,7 +10,12 @@ import type { TransferSqlPool } from '../transfers/sql-store.js';
 import { buildInventorySqlBackfillPlan } from './backfill-plan.js';
 import { compareInventorySqlParity } from './compare.js';
 import { readInventorySqlRecords } from './reader.js';
-import { applyInventorySqlBackfill, markInventorySqlDeleted, writeInventorySqlRecord } from './writer.js';
+import {
+	applyInventorySqlBackfill, claimInventoryBitrixMirror, createNativeInventorySql,
+	deleteNativeInventorySql, markInventoryBitrixDeleteDelivered, markInventoryBitrixMirrorDelivered,
+	markInventorySqlDeleted, readInventoryBitrixExternalId, readPendingInventoryBitrixMirrors,
+	updateNativeInventorySql, writeInventorySqlRecord,
+} from './writer.js';
 
 const enabled = process.env['B24_INVENTORY_TEST_MARIADB'] === '1';
 const database = 'b24_inventory_rehearsal';
@@ -53,13 +58,16 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 			'0061_create_inventory_count_lines.sql', '0062_create_inventory_result_lines.sql',
 			'0063_create_inventory_erp_documents.sql', '0064_create_inventory_backfill_checkpoints.sql',
 			'0065_allow_inventory_root_section.sql', '0066_add_inventory_result_book_at.sql',
-			'0067_allow_legacy_inventory_result_counts.sql',
+			'0067_allow_legacy_inventory_result_counts.sql', '0068_add_inventory_public_id.sql',
+			'0069_create_inventory_public_ids.sql', '0070_create_inventory_identity_checkpoints.sql',
+			'0071_make_inventory_bitrix_identity_optional.sql', '0072_create_inventory_mutations.sql',
+			'0073_create_inventory_commands.sql', '0074_create_inventory_bitrix_outbox.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalDirectory, filename));
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 11);
+		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 18);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalDirectory), []);
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${writerUser}'@'%'`);
@@ -108,6 +116,53 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 		assert.deepEqual(await readInventorySqlRecords(sqlPool), []);
 		assert.deepEqual(await writeInventorySqlRecord(sqlPool, legacy.inventories[0]!), { changed: false });
 		assert.equal(compareInventorySqlParity(legacy.inventories, await readInventorySqlRecords(sqlPool)).matches, true);
+
+		const nativeData = JSON.parse(String(sourceItem()['DETAIL_TEXT'])) as Record<string, unknown>;
+		const native = await createNativeInventorySql(sqlPool, {
+			idempotencyKey: 'inventory:create:integration', name: 'SQL ревизия', data: nativeData,
+			createdById: '1858', createdAt: '2026-09-05T08:00:00Z',
+		});
+		const nativeRepeated = await createNativeInventorySql(sqlPool, {
+			idempotencyKey: 'inventory:create:integration', name: 'SQL ревизия', data: nativeData,
+			createdById: '1858', createdAt: '2026-09-05T09:00:00Z',
+		});
+		assert.equal(nativeRepeated.publicId, native.publicId);
+		assert.equal(nativeRepeated.alreadyApplied, true);
+		await assert.rejects(() => createNativeInventorySql(sqlPool, {
+			idempotencyKey: 'inventory:create:integration', name: 'Другая ревизия', data: nativeData,
+		}), /another command/);
+		const updatedData = structuredClone(nativeData);
+		((updatedData['points'] as Array<Record<string, unknown>>)[0]!['draft'] as Record<string, unknown>)['11962'] = 1;
+		const updated = await updateNativeInventorySql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'inventory:update:integration', name: 'SQL ревизия', data: updatedData,
+			createdById: '1858', createdAt: '2026-09-05T08:00:00Z',
+		});
+		assert.equal(updated.mutationNo, 2);
+		const pending = await readPendingInventoryBitrixMirrors(sqlPool);
+		assert.equal(pending.length, 1);
+		assert.equal(pending[0]?.mutationId, updated.mutationId);
+		const upsertLease = '123e4567-e89b-42d3-a456-426614174000';
+		assert.equal(await claimInventoryBitrixMirror(sqlPool, {
+			publicId: native.publicId, mutationId: updated.mutationId, operationKind: 'upsert', leaseToken: upsertLease,
+		}), true);
+		await markInventoryBitrixMirrorDelivered(sqlPool, {
+			publicId: native.publicId, mutationId: updated.mutationId, bitrixExternalId: 900, leaseToken: upsertLease,
+		});
+		assert.equal(await readInventoryBitrixExternalId(sqlPool, native.publicId), 900);
+		const deleted = await deleteNativeInventorySql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'inventory:delete:integration',
+		});
+		assert.equal(deleted.mutationNo, 3);
+		assert.equal((await deleteNativeInventorySql(sqlPool, {
+			publicId: native.publicId, idempotencyKey: 'inventory:delete:integration',
+		})).alreadyApplied, true);
+		const deleteLease = '223e4567-e89b-42d3-a456-426614174000';
+		assert.equal(await claimInventoryBitrixMirror(sqlPool, {
+			publicId: native.publicId, mutationId: deleted.mutationId, operationKind: 'delete', leaseToken: deleteLease,
+		}), true);
+		await markInventoryBitrixDeleteDelivered(sqlPool, {
+			publicId: native.publicId, mutationId: deleted.mutationId, leaseToken: deleteLease,
+		});
 		await assert.rejects(() => writerPool!.query('DELETE FROM inventory_records WHERE id = -1'), /(?:denied|command)/i);
 		await assert.rejects(() => writerPool!.query('CREATE TABLE forbidden_ddl (id INT NOT NULL)'), /(?:denied|command)/i);
 	} finally {

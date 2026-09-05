@@ -525,6 +525,20 @@ Commit `aeeaebf` развёрнут как `b24-app:aeeaebf` с
 inventory shadow-write нет. Bitrix остаётся источником правды; SQL reads,
 primary mode и новый backfill не включались.
 
+SQL-first запись инвентаризаций включается только отдельным производственным
+шагом после миграций `0072`-`0074`, свежего backup/restore drill и выдачи
+существующему `b24_app_inventory_runtime` точечных `SELECT/INSERT/UPDATE` на
+`inventory_public_ids`, `inventory_mutations`, `inventory_commands` и
+`inventory_bitrix_outbox`. Сначала подтверждается повторная полная parity
+текущих Bitrix/SQL записей и отсутствие неназначенных `public_id`; затем один
+deploy меняет только `B24_APP_INVENTORY_SQL_WRITE=primary`, сохраняя
+`B24_APP_INVENTORY_SQL_READ=primary`. После переключения проверяются internal и
+public health, readiness, официальный ERP read, сеть `erpnext_frappe_network`,
+создание одной тестовой ревизии, повтор того же idempotency key, её SQL-чтение и
+доставка Bitrix-зеркала. Любая ошибка до переключения оставляет `shadow`; после
+переключения rollback возвращает предыдущий контейнер и `WRITE=shadow`, не
+удаляя SQL-команды, мутации, outbox, backup или restore-schema.
+
 ## Восстановление ERPNext
 
 Восстановление перезаписывает рабочую БД. Перед началом:

@@ -42,7 +42,7 @@ test('inventory listing and creation preserve fallbacks and complete payload', a
 	const requests = captureResponses([{ ok: true }, { ok: true }]);
 
 	assert.deepEqual(await listInventories(), []);
-	await createInventory('August', points, '2026-08-31', '1', ['1', '986'], [4, 5]);
+	await createInventory('August', points, '2026-08-31', '1', ['1', '986'], [4, 5], 'inventory-create:test-key');
 	assert.deepEqual(requests, [
 		{ url: '/api/inventory/list', body: { domain: 'inventory.example', accessToken: 'inventory-token' } },
 		{
@@ -50,6 +50,7 @@ test('inventory listing and creation preserve fallbacks and complete payload', a
 			body: {
 				domain: 'inventory.example', accessToken: 'inventory-token', title: 'August', points,
 				deadline: '2026-08-31', createdById: '1', notifyUserIds: ['1', '986'], sectionIds: [4, 5],
+				idempotencyKey: 'inventory-create:test-key',
 			},
 		},
 	]);

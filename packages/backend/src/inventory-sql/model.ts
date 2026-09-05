@@ -407,3 +407,24 @@ export function parseInventoryBitrixItem(item: Record<string, unknown>): { inven
 	issues.sort((left, right) => `${left.code}:${left.identity}`.localeCompare(`${right.code}:${right.identity}`, 'en'));
 	return { inventory: { ...state, stateHash: inventorySqlStateHash(state) }, issues };
 }
+
+export function normalizeInventorySqlState(input: {
+	publicId: number;
+	name: string;
+	data: Record<string, unknown>;
+	createdById?: string;
+	createdAt?: string;
+}): InventorySqlRecord {
+	const parsed = parseInventoryBitrixItem({
+		ID: input.publicId,
+		NAME: input.name,
+		CREATED_BY: input.createdById ?? '',
+		DATE_CREATE: input.createdAt ?? null,
+		DETAIL_TEXT: JSON.stringify({ ...input.data, sqlPublicId: input.publicId }),
+	});
+	if (!parsed.inventory || parsed.issues.length) {
+		const summary = parsed.issues.slice(0, 8).map((entry) => `${entry.code}:${entry.identity}`).join(', ');
+		throw new Error(`Inventory SQL normalization blocked${summary ? `: ${summary}` : ''}`);
+	}
+	return parsed.inventory;
+}
