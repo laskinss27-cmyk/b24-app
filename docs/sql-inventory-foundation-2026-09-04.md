@@ -153,4 +153,17 @@ now preserve both values. Focused tests pass `23/23`, backend typecheck passes,
 and a fresh disposable MariaDB `11.8.8` rehearsal applied all ten inventory
 migrations, exercised writer/read-back and rejected snapshot drift successfully.
 The temporary local MariaDB container was removed. Production migrations
-`0065`-`0066`, a second live dry-run and any data backfill remain unperformed.
+`0065`-`0066` and any data backfill remained unperformed at that stage.
+
+Commit `ff4a225` was explicitly published to the same feature branch. A new
+isolated image `b24-app:inventory-diagnostic-ff4a225` was built from that exact
+commit without replacing the production backend. The second owner-authenticated
+dry-run read the current complete source and succeeded with the same cardinality
+(`10` inventories, `10` points, `2,507` snapshots, `1,682` count rows, `370`
+results and `7` ERP documents), zero issues, `ready=true` and plan hash
+`10b4a9826eba4e165167f377842fd5fd969d49242279c366738b7a302c3d5e06`.
+It ran without `--apply` and without migration/backfill credentials. A final
+check confirmed production still has migrations through `0064` and zero rows in
+all eight inventory tables. Backend image, restart count, required network,
+public health and readiness remained unchanged and healthy. Production
+`0065`-`0066` and any inventory backfill remain separately gated.
