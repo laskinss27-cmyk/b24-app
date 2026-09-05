@@ -68,7 +68,7 @@ export function loadTransferRequestSqlWriteConfig(env: NodeJS.ProcessEnv = proce
 	const user = required(env, 'B24_APP_TRANSFER_DB_USER');
 	const forbidden = [
 		env['B24_APP_DB_USER'], env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER'],
-		env['B24_APP_TILDA_DB_USER'], env['B24_APP_RESERVATION_DB_USER'],
+		env['B24_APP_TILDA_DB_USER'], env['B24_APP_RESERVATION_DB_USER'], env['B24_APP_INVENTORY_DB_USER'],
 	].map((value) => String(value ?? '').trim()).filter(Boolean);
 	if (forbidden.includes(user)) throw new Error('Transfer request SQL writer database user must be a separate identity');
 	if (mode === 'primary' && String(env['B24_APP_TRANSFER_REQUEST_SQL_READ'] ?? 'off').trim() !== 'primary') {

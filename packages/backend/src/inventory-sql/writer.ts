@@ -4,6 +4,7 @@ import type { InventorySqlPoint, InventorySqlRecord, InventorySqlSnapshotLine } 
 
 type QueryRow = Record<string, unknown>;
 type SqlResult = { affectedRows?: number; insertId?: bigint | number | string };
+const INVENTORY_WRITE_LOCK = 'b24_app_inventory_write';
 
 function hashBuffer(hash: string): Buffer {
 	if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid inventory hash');
@@ -257,6 +258,63 @@ async function writeInventory(connection: TransferSqlConnection, inventory: Inve
 	return true;
 }
 
+async function withInventorySqlWriteLock<T>(
+	pool: TransferSqlPool,
+	action: (connection: TransferSqlConnection) => Promise<T>,
+): Promise<T> {
+	const connection = await pool.getConnection();
+	let transaction = false;
+	let locked = false;
+	try {
+		const lockRows = await connection.query<QueryRow[]>('SELECT GET_LOCK(?, 10) AS acquired', [INVENTORY_WRITE_LOCK]);
+		if (Number(lockRows[0]?.['acquired']) !== 1) throw new Error('Could not acquire inventory SQL write lock');
+		locked = true;
+		await connection.beginTransaction();
+		transaction = true;
+		const result = await action(connection);
+		await connection.commit();
+		transaction = false;
+		return result;
+	} catch (error) {
+		if (transaction) await connection.rollback().catch(() => undefined);
+		throw error;
+	} finally {
+		if (locked) await connection.query('SELECT RELEASE_LOCK(?) AS released', [INVENTORY_WRITE_LOCK]).catch(() => undefined);
+		await connection.release();
+	}
+}
+
+export async function writeInventorySqlRecord(
+	pool: TransferSqlPool,
+	inventory: InventorySqlRecord,
+): Promise<{ changed: boolean }> {
+	return withInventorySqlWriteLock(pool, async (connection) => ({ changed: await writeInventory(connection, inventory) }));
+}
+
+export async function markInventorySqlDeleted(
+	pool: TransferSqlPool,
+	input: { externalId: number; deletedAt?: Date },
+): Promise<{ alreadyDeleted: boolean }> {
+	if (!Number.isSafeInteger(input.externalId) || input.externalId <= 0) throw new Error('Invalid inventory external id');
+	return withInventorySqlWriteLock(pool, async (connection) => {
+		const rows = await connection.query<QueryRow[]>(`
+			SELECT id, deleted_at
+			FROM inventory_records
+			WHERE bitrix_external_id = ?
+			FOR UPDATE
+		`, [input.externalId]);
+		if (rows.length !== 1) throw new Error(`Inventory ${input.externalId} SQL row is missing or duplicated`);
+		if (rows[0]!['deleted_at'] != null) return { alreadyDeleted: true };
+		const result = await connection.query<SqlResult>(`
+			UPDATE inventory_records
+			SET deleted_at = ?
+			WHERE id = ? AND deleted_at IS NULL
+		`, [sqlDate((input.deletedAt ?? new Date()).toISOString()), positiveSqlId(rows[0]!['id'], 'inventory record id')]);
+		if (Number(result.affectedRows ?? 0) !== 1) throw new Error(`Inventory ${input.externalId} SQL tombstone failed`);
+		return { alreadyDeleted: false };
+	});
+}
+
 export async function applyInventorySqlBackfill(
 	pool: TransferSqlPool,
 	plan: InventorySqlBackfillPlan,
@@ -264,15 +322,7 @@ export async function applyInventorySqlBackfill(
 ): Promise<{ alreadyApplied: boolean; changedInventoryCount: number; unchangedInventoryCount: number }> {
 	if (!plan.readyToApply || plan.issues.length) throw new Error('Inventory backfill plan is blocked');
 	if (plan.planHash !== expectedPlanHash) throw new Error('Inventory backfill checkpoint does not match the approved plan');
-	const connection = await pool.getConnection();
-	let transaction = false;
-	let locked = false;
-	try {
-		const lockRows = await connection.query<QueryRow[]>('SELECT GET_LOCK(?, 10) AS acquired', ['b24_app_inventory_backfill']);
-		if (Number(lockRows[0]?.['acquired']) !== 1) throw new Error('Could not acquire inventory backfill lock');
-		locked = true;
-		await connection.beginTransaction();
-		transaction = true;
+	return withInventorySqlWriteLock(pool, async (connection) => {
 		const existing = await connection.query<QueryRow[]>(`
 			SELECT changed_inventory_count, unchanged_inventory_count
 			FROM inventory_backfill_checkpoints
@@ -280,8 +330,6 @@ export async function applyInventorySqlBackfill(
 			FOR UPDATE
 		`, [hashBuffer(plan.planHash)]);
 		if (existing.length) {
-			await connection.rollback();
-			transaction = false;
 			return {
 				alreadyApplied: true,
 				changedInventoryCount: Number(existing[0]!['changed_inventory_count']),
@@ -306,14 +354,6 @@ export async function applyInventorySqlBackfill(
 			plan.counts.snapshotLines, plan.counts.countLines, plan.counts.resultLines,
 			plan.counts.erpDocuments, changedInventoryCount, unchangedInventoryCount,
 		]);
-		await connection.commit();
-		transaction = false;
 		return { alreadyApplied: false, changedInventoryCount, unchangedInventoryCount };
-	} catch (error) {
-		if (transaction) await connection.rollback().catch(() => undefined);
-		throw error;
-	} finally {
-		if (locked) await connection.query('SELECT RELEASE_LOCK(?) AS released', ['b24_app_inventory_backfill']).catch(() => undefined);
-		await connection.release();
-	}
+	});
 }

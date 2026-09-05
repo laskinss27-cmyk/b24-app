@@ -35,7 +35,7 @@ export function loadReservationConfig(env: NodeJS.ProcessEnv = process.env): Res
 	const user = mode === 'active' ? required(env, 'B24_APP_RESERVATION_DB_USER') : runtimeUser;
 	const password = mode === 'active' ? required(env, 'B24_APP_RESERVATION_DB_PASSWORD') : required(env, 'B24_APP_DB_PASSWORD');
 	if (mode === 'active') {
-		const forbidden = [runtimeUser, env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER'], env['B24_APP_TILDA_DB_USER']]
+		const forbidden = [runtimeUser, env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER'], env['B24_APP_TILDA_DB_USER'], env['B24_APP_INVENTORY_DB_USER']]
 			.map((value) => String(value ?? '').trim())
 			.filter(Boolean);
 		if (forbidden.includes(user)) throw new Error('Reservation runtime database user must be a separate identity');

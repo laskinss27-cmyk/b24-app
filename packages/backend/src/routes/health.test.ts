@@ -5,6 +5,7 @@ import type { Config } from '../config.js';
 import type { DatabaseRuntime } from '../database/runtime.js';
 import type { ReservationRuntime } from '../reservations/runtime.js';
 import type { TransferSqlWriteRuntime } from '../transfers/sql-runtime.js';
+import type { InventorySqlWriteRuntime } from '../inventory-sql/runtime.js';
 import { registerHealthRoute, registerReadinessRoute } from './health.js';
 
 test('process health keeps its existing response contract', async () => {
@@ -107,6 +108,25 @@ test('readiness fails explicitly when the transfer shadow writer cannot reach SQ
 	assert.deepEqual(response.json(), {
 		ok: false,
 		checks: { database: { status: 'disabled' }, transferSqlWriter: { status: 'down' } },
+	});
+	await app.close();
+});
+
+test('readiness probes the inventory shadow writer without changing health', async () => {
+	const inventorySqlWriter: InventorySqlWriteRuntime = {
+		mode: 'shadow', enabled: true,
+		async write() { throw new Error('unused'); },
+		async markDeleted() { throw new Error('unused'); },
+		async ping() { throw new Error('secret connection details'); },
+		async close() {},
+	};
+	const app = Fastify();
+	registerReadinessRoute(app, undefined, undefined, undefined, undefined, inventorySqlWriter);
+	const response = await app.inject({ method: 'GET', url: '/ready' });
+	assert.equal(response.statusCode, 503);
+	assert.deepEqual(response.json(), {
+		ok: false,
+		checks: { database: { status: 'disabled' }, inventorySqlWriter: { status: 'down' } },
 	});
 	await app.close();
 });

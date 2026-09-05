@@ -10,7 +10,7 @@ import type { TransferSqlPool } from '../transfers/sql-store.js';
 import { buildInventorySqlBackfillPlan } from './backfill-plan.js';
 import { compareInventorySqlParity } from './compare.js';
 import { readInventorySqlRecords } from './reader.js';
-import { applyInventorySqlBackfill } from './writer.js';
+import { applyInventorySqlBackfill, markInventorySqlDeleted, writeInventorySqlRecord } from './writer.js';
 
 const enabled = process.env['B24_INVENTORY_TEST_MARIADB'] === '1';
 const database = 'b24_inventory_rehearsal';
@@ -102,6 +102,11 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 		const legacy = plan(legacyItem, '2026-09-04T10:15:00Z');
 		assert.equal(legacy.readyToApply, true);
 		assert.equal((await applyInventorySqlBackfill(sqlPool, legacy, legacy.planHash)).changedInventoryCount, 1);
+		assert.equal(compareInventorySqlParity(legacy.inventories, await readInventorySqlRecords(sqlPool)).matches, true);
+		assert.deepEqual(await markInventorySqlDeleted(sqlPool, { externalId: 21664, deletedAt: new Date('2026-09-04T10:20:00Z') }), { alreadyDeleted: false });
+		assert.deepEqual(await markInventorySqlDeleted(sqlPool, { externalId: 21664, deletedAt: new Date('2026-09-04T10:21:00Z') }), { alreadyDeleted: true });
+		assert.deepEqual(await readInventorySqlRecords(sqlPool), []);
+		assert.deepEqual(await writeInventorySqlRecord(sqlPool, legacy.inventories[0]!), { changed: false });
 		assert.equal(compareInventorySqlParity(legacy.inventories, await readInventorySqlRecords(sqlPool)).matches, true);
 		await assert.rejects(() => writerPool!.query('DELETE FROM inventory_records WHERE id = -1'), /(?:denied|command)/i);
 		await assert.rejects(() => writerPool!.query('CREATE TABLE forbidden_ddl (id INT NOT NULL)'), /(?:denied|command)/i);

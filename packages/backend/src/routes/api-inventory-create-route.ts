@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
+import { ensureInventoryEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { coreStoreId, fetchErpStoreStockFull, listActiveStoreTitles } from '../erp/operations.js';
 import { captureInventoryPointSnapshots } from '../inventory-stock-snapshot.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
+import { createInventoryData } from './inventory-storage.js';
 
 export function registerInventoryCreateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/create', async (req, reply) => {
@@ -27,10 +28,12 @@ export function registerInventoryCreateRoute(app: FastifyInstance): void {
 				storeIdForTitle: coreStoreId,
 				loadStock: (storeTitle) => fetchErpStoreStockFull(erp, storeTitle),
 			});
-			await client.call('entity.item.add', {
-				ENTITY: INVENTORY_ENTITY,
-				NAME: b.title,
-				DETAIL_TEXT: JSON.stringify({ status: 'active', deadline: b.deadline ?? '', points, createdById: b.createdById ?? '', createdAt: capturedAt, stockSnapshotAt: capturedAt, sectionIds }),
+			const data = { status: 'active', deadline: b.deadline ?? '', points, createdById: b.createdById ?? '', createdAt: capturedAt, stockSnapshotAt: capturedAt, sectionIds };
+			await createInventoryData(app, client, {
+				name: b.title,
+				data,
+				...(b.createdById ? { createdById: b.createdById } : {}),
+				createdAt: capturedAt,
 			});
 
 			if (b.createdById) {

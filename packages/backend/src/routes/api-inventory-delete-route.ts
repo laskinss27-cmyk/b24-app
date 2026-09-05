@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { INVENTORY_ENTITY } from '../b24/placement.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
+import { deleteInventoryData } from './inventory-storage.js';
 
 export function registerInventoryDeleteRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/delete', async (req, reply) => {
@@ -11,7 +11,7 @@ export function registerInventoryDeleteRoute(app: FastifyInstance): void {
 		if (!b.inventoryId) return reply.code(400).send({ ok: false, error: 'inventoryId required' });
 
 		try {
-			await client.call('entity.item.delete', { ENTITY: INVENTORY_ENTITY, ID: b.inventoryId });
+			await deleteInventoryData(app, client, b.inventoryId);
 			app.log.info({ id: b.inventoryId }, '[api/inventory/delete] ok');
 			return { ok: true };
 		} catch (err) {

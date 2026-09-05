@@ -7,6 +7,7 @@ import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-h
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
+import { updateInventoryData } from './inventory-storage.js';
 
 export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/update', async (req, reply) => {
@@ -150,11 +151,11 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 
 				data['points'] = points;
 				synchronizeInventoryStatus(data, points);
-				await client.call('entity.item.update', {
-					ENTITY: INVENTORY_ENTITY,
-					ID: b.inventoryId,
-					NAME: item['NAME'],
-					DETAIL_TEXT: JSON.stringify(data),
+				await updateInventoryData(app, client, {
+					id: b.inventoryId!,
+					name: item['NAME'],
+					data,
+					sourceItem: item,
 				});
 				app.log.info({ action: b.action, storeId: b.storeId }, '[api/inventory/update] ok');
 				return { ok: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };

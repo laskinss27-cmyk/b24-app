@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	createInventoryAdjustmentDraft,
@@ -24,21 +23,23 @@ import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 import { ReservationService } from '../reservations/service.js';
+import { updateInventoryData } from './inventory-storage.js';
 
 function draftRecord(name: string, lines: number, savedAt: string): InventoryDocumentRecord {
 	return { name, status: 'draft', lines, savedAt };
 }
 
 async function updateInventoryItem(
+	app: FastifyInstance,
 	client: ReturnType<typeof inventoryClientFrom> & {},
 	loaded: Awaited<ReturnType<typeof loadInventoryPoint>>,
 ): Promise<void> {
 	loaded.data['points'] = loaded.points;
-	await client.call('entity.item.update', {
-		ENTITY: INVENTORY_ENTITY,
-		ID: loaded.item['ID'],
-		NAME: loaded.item['NAME'],
-		DETAIL_TEXT: JSON.stringify(loaded.data),
+	await updateInventoryData(app, client, {
+		id: String(loaded.item['ID']),
+		name: loaded.item['NAME'],
+		data: loaded.data,
+		sourceItem: loaded.item,
 	});
 }
 
@@ -104,7 +105,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					});
 					const legacyDoc = draftRecord(created.name, lines.length, new Date().toISOString());
 					loaded.pt['erpDoc'] = legacyDoc;
-					await updateInventoryItem(client, loaded);
+					await updateInventoryItem(app, client, loaded);
 					return { docs: {}, legacyDoc, lines: lines.length };
 				}
 
@@ -150,7 +151,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 						documents.receipt = draftRecord(created.name, receiptLines.length, savedAt);
 					}
 					loaded.pt['erpDocs'] = documents;
-					await updateInventoryItem(client, loaded);
+					await updateInventoryItem(app, client, loaded);
 				} catch (error) {
 					for (const name of createdNames) await deleteInventoryAdjustmentDraft(erp, name).catch(() => undefined);
 					throw error;
@@ -186,7 +187,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					legacy.submittedAt = new Date().toISOString();
 					loaded.pt['erpDoc'] = legacy;
 					const inventoryStatus = synchronizeInventoryStatus(loaded.data, loaded.points);
-					await updateInventoryItem(client, loaded);
+					await updateInventoryItem(app, client, loaded);
 					return { docs: {}, legacyDoc: legacy, inventoryStatus };
 				}
 
@@ -196,10 +197,10 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					loaded.pt['erpDocs'] = currentDocuments;
 					// Сохраняем каждый успешный шаг: при ошибке второго документа повтор продолжит с него.
 					synchronizeInventoryStatus(loaded.data, loaded.points);
-					await updateInventoryItem(client, loaded);
+						await updateInventoryItem(app, client, loaded);
 				});
 				const inventoryStatus = synchronizeInventoryStatus(loaded.data, loaded.points);
-				await updateInventoryItem(client, loaded);
+				await updateInventoryItem(app, client, loaded);
 				return { docs: documents, legacyDoc: null, inventoryStatus };
 			});
 			if (storeTitle && app.reservationRuntime?.canWrite) {

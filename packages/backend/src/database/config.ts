@@ -58,6 +58,7 @@ export function loadBackfillDatabaseConfig(env: NodeJS.ProcessEnv = process.env)
 	if (!user || !password) throw new Error('Separate B24_APP_BACKFILL_DB_USER/PASSWORD are required');
 	if (user === runtime.user) throw new Error('Backfill database user must differ from runtime user');
 	if (user === String(env['B24_APP_MIGRATION_DB_USER'] ?? '').trim()) throw new Error('Backfill database user must differ from migration user');
+	if (user === String(env['B24_APP_INVENTORY_DB_USER'] ?? '').trim()) throw new Error('Backfill database user must differ from inventory writer');
 	return { ...runtime, user, password };
 }
 
@@ -70,7 +71,7 @@ export function loadTildaSyncDatabaseConfig(env: NodeJS.ProcessEnv = process.env
 	if (!user || !password) throw new Error('Separate B24_APP_TILDA_DB_USER/PASSWORD are required');
 	const runtimeUser = String(env['B24_APP_DB_USER'] ?? '').trim();
 	if (!runtimeUser) throw new Error('B24_APP_DB_USER is required to verify the separate Tilda sync identity');
-	const forbiddenUsers = [runtimeUser, env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER']]
+	const forbiddenUsers = [runtimeUser, env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER'], env['B24_APP_INVENTORY_DB_USER']]
 		.map((value) => String(value ?? '').trim())
 		.filter(Boolean);
 	if (forbiddenUsers.includes(user)) throw new Error('Tilda sync database user must be separate');

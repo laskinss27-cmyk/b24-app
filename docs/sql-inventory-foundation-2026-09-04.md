@@ -1,7 +1,10 @@
 # SQL inventory foundation — 2026-09-04
 
-Status: local foundation only. Production DDL, credentials, backfill, deploy,
-shadow reads, dual writes, and source switch have not been performed.
+Status: production schema and the first exact backfill are complete. SQL
+shadow-write code is prepared and verified locally, but its permanent
+credential has not been created and it has not been deployed or enabled.
+Bitrix remains authoritative; shadow reads and the source switch have not been
+performed.
 
 ## Current source and safety problem
 
@@ -78,15 +81,18 @@ temporary database, user and container were removed after the successful run.
 
 ## Remaining production gates
 
-The read-only owner diagnostic, backup/restore gate and production DDL are now
-prepared or completed as recorded below. The remaining separately authorized
-steps are:
+The read-only owner diagnostic, backup/restore gate, production DDL and first
+exact backfill are complete as recorded below. The remaining separately
+authorized steps are:
 
-1. Run a read-only live plan. Any unknown field or malformed record is resolved
-   before granting a backfill writer.
-2. Apply the first exact plan with a temporary DML-only credential and prove SQL
-   read-back parity. Repeat while employees continue counting.
-3. Deploy `shadow` read/dual-write code with the legacy Bitrix response unchanged.
+1. Create the permanent inventory shadow-writer identity with only the required
+   table-level `SELECT`, `INSERT` and `UPDATE` grants. It receives neither DDL nor
+   `DELETE`, checkpoint access or credentials used by another subsystem.
+2. Deploy with `B24_APP_INVENTORY_SQL_WRITE=shadow`. Bitrix must commit first;
+   SQL failures are logged for parity repair and cannot report a false failure to
+   an employee after Bitrix has already saved the action.
+3. Re-run exact live parity while employees continue counting and investigate
+   every logged normalization/write gap.
 4. For the final cutover, ask users to close inventory tabs for a short window,
    wait for autosave, apply the final delta, require zero differences, enable SQL
    primary, and ask users to reload.
@@ -244,3 +250,33 @@ count `0`, and a member of `erpnext_frappe_network`. Internal and public health,
 readiness and an official ERPNext API read are HTTP `200`. No deploy, inventory
 SQL read/write activation or source switch occurred; Bitrix remains the live
 inventory source.
+
+## Local inventory shadow writer — 5 September 2026
+
+The runtime now supports only `B24_APP_INVENTORY_SQL_WRITE=off|shadow`; it has no
+SQL-primary setting. `shadow` additionally requires `B24_APP_DB_MODE=readiness`
+and a dedicated `B24_APP_INVENTORY_DB_USER` identity that is rejected if it is
+reused by the general runtime, migration, backfill, Tilda, reservations,
+transfers or catalog sync.
+
+Every inventory create, ordinary draft/status update, ERP document state update
+and delete now follows the same Bitrix-first storage adapter. A successful
+Bitrix mutation is mirrored in one guarded SQL transaction. SQL normalization or
+write failure is logged but cannot make an already completed employee action
+look unsuccessful. A Bitrix failure never reaches SQL. Deletion is represented
+only by `inventory_records.deleted_at`; no child or parent SQL row is physically
+deleted. A later valid write revives that tombstone while preserving the frozen
+opening snapshot.
+
+The single-record writer and the manual backfill share the same MariaDB advisory
+lock, so an operator backfill cannot race a browser autosave. Existing snapshot
+timestamp, product set and opening quantities remain immutable and fail closed
+on drift. Readiness reports and checks the dedicated writer when it is enabled.
+
+The complete backend test suite passes `429/429`; workspace typecheck and diff
+validation pass. A disposable MariaDB `11.8` run executed the real migrations,
+write/read-back, idempotent replay, snapshot-drift rollback, soft deletion and
+tombstone revival. Its DML-only user was denied both `DELETE` and DDL, and the
+temporary container was removed. No production credential, environment flag,
+container replacement, deploy, SQL read activation or source switch was made by
+this local step.

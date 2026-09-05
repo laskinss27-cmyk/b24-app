@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TransferSqlConnection, TransferSqlPool } from '../transfers/sql-store.js';
 import { buildInventorySqlBackfillPlan } from './backfill-plan.js';
-import { applyInventorySqlBackfill, assertFrozenInventorySnapshot } from './writer.js';
+import { applyInventorySqlBackfill, assertFrozenInventorySnapshot, markInventorySqlDeleted, writeInventorySqlRecord } from './writer.js';
 
 function sourceItem(): Record<string, unknown> {
 	return {
@@ -75,6 +75,38 @@ test('inventory backfill writes one atomic normalized snapshot without DELETE st
 	assert.ok(connection.queries.some((sql) => sql.startsWith('UPDATE inventory_count_lines line')));
 	assert.ok(connection.queries.some((sql) => sql.startsWith('INSERT INTO inventory_backfill_checkpoints')));
 	assert.deepEqual(connection.batches.map((entry) => entry.rows.length), [1, 2, 2]);
+});
+
+test('inventory shadow writes one record atomically without creating a backfill checkpoint', async () => {
+	const plan = buildInventorySqlBackfillPlan({
+		observedAt: '2026-09-04T10:00:00Z', sourceComplete: true, sourceRecordCount: 1, items: [sourceItem()],
+	});
+	const connection = new RecordingConnection();
+	const pool: TransferSqlPool = { getConnection: async () => connection, query: async <T>() => [] as T };
+	assert.deepEqual(await writeInventorySqlRecord(pool, plan.inventories[0]!), { changed: true });
+	assert.equal(connection.committed, true);
+	assert.equal(connection.queries.some((sql) => sql.includes('inventory_backfill_checkpoints')), false);
+	assert.equal(connection.queries.some((sql) => /\bDELETE\b/i.test(sql)), false);
+});
+
+test('inventory shadow deletion is a soft tombstone in one transaction', async () => {
+	class DeleteConnection extends RecordingConnection {
+		override async query<T = unknown>(sql: string): Promise<T> {
+			const compact = sql.replace(/\s+/g, ' ').trim();
+			this.queries.push(compact);
+			if (compact.startsWith('SELECT GET_LOCK')) return [{ acquired: 1 }] as T;
+			if (compact.startsWith('SELECT id, deleted_at')) return [{ id: 100, deleted_at: null }] as T;
+			if (compact.startsWith('UPDATE inventory_records SET deleted_at')) return { affectedRows: 1 } as T;
+			if (compact.startsWith('SELECT RELEASE_LOCK')) return [{ released: 1 }] as T;
+			return { affectedRows: 1 } as T;
+		}
+	}
+	const connection = new DeleteConnection();
+	const pool: TransferSqlPool = { getConnection: async () => connection, query: async <T>() => [] as T };
+	assert.deepEqual(await markInventorySqlDeleted(pool, { externalId: 42, deletedAt: new Date('2026-09-05T08:00:00Z') }), { alreadyDeleted: false });
+	assert.equal(connection.committed, true);
+	assert.ok(connection.queries.some((sql) => sql.startsWith('UPDATE inventory_records SET deleted_at')));
+	assert.equal(connection.queries.some((sql) => /^DELETE\b/i.test(sql)), false);
 });
 
 test('frozen inventory snapshots can repeat exactly but can never drift', () => {
