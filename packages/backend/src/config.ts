@@ -32,8 +32,8 @@ const ConfigSchema = z.object({
 	transferSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
 	/** Manual transfer/supply request SQL read gate; primary is allowed only with the SQL-first writer. */
 	transferRequestSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
-	/** Inventory SQL observation; shadow always preserves the complete Bitrix response. */
-	inventorySqlRead: z.enum(['off', 'shadow']).default('off'),
+	/** Inventory SQL gate; verified serves SQL only after exact live Bitrix parity. */
+	inventorySqlRead: z.enum(['off', 'shadow', 'verified']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 

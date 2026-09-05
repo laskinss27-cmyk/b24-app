@@ -3,7 +3,7 @@ import type { B24Client } from '../b24/client.js';
 import { listAllEntityItems } from '../b24/entity-items.js';
 import { INVENTORY_ENTITY } from '../b24/placement.js';
 import { parseInventoryBitrixItem } from '../inventory-sql/model.js';
-import { observeInventorySqlReadShadow } from '../inventory-sql/read-shadow.js';
+import { resolveInventorySqlRead } from '../inventory-sql/read-shadow.js';
 
 export async function loadInventoryItems(
 	app: FastifyInstance,
@@ -12,7 +12,8 @@ export async function loadInventoryItems(
 ): Promise<Record<string, unknown>[]> {
 	const items = await listAllEntityItems(client, INVENTORY_ENTITY, { ID: 'DESC' });
 	if (app.config.inventorySqlRead === 'off') return items;
-	const report = await observeInventorySqlReadShadow(app.config.inventorySqlRead, app.databaseRuntime, items);
+	const resolution = await resolveInventorySqlRead(app.config.inventorySqlRead, app.databaseRuntime, items);
+	const report = resolution.report;
 	const details = {
 		mode: app.config.inventorySqlRead,
 		scope,
@@ -26,7 +27,7 @@ export async function loadInventoryItems(
 	};
 	if (report.status === 'match') app.log.info(details, '[inventory/sql-read] compared');
 	else app.log.warn(details, '[inventory/sql-read] Bitrix response preserved');
-	return items;
+	return resolution.items;
 }
 
 function addedExternalId(value: unknown): number | null {
