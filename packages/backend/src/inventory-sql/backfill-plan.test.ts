@@ -61,6 +61,7 @@ test('submitted result and both split ERP documents survive normalization', () =
 	const point = (data['points'] as Array<Record<string, unknown>>)[0]!;
 	point['status'] = 'reconciled';
 	point['submittedAt'] = '2026-09-04T09:00:00.000Z';
+	point['resultBookAt'] = '2026-09-04T08:59:00.000Z';
 	point['result'] = {
 		total: 2,
 		counted: 2,
@@ -79,6 +80,7 @@ test('submitted result and both split ERP documents survive normalization', () =
 	assert.deepEqual(parsed.issues, []);
 	const normalized = parsed.inventory!.points[0]!;
 	assert.equal(normalized.resultLines.length, 2);
+	assert.equal(normalized.resultBookAt, '2026-09-04T08:59:00.000Z');
 	assert.deepEqual(normalized.erpDocuments.map((document) => [document.kind, document.erpDoctype, document.status]), [
 		['issue', 'Stock Entry', 'submitted'],
 		['receipt', 'Stock Entry', 'draft'],
@@ -115,4 +117,14 @@ test('unknown legacy fields fail closed instead of being silently discarded', ()
 	item['DETAIL_TEXT'] = JSON.stringify(data);
 	const parsed = parseInventoryBitrixItem(item);
 	assert.ok(parsed.issues.some((entry) => entry.code === 'unknown_field' && entry.identity.endsWith('.mysteryValue')));
+});
+
+test('root catalog section zero is preserved as an explicit legacy scope', () => {
+	const item = activeInventoryItem();
+	const data = JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown>;
+	data['sectionIds'] = [0];
+	item['DETAIL_TEXT'] = JSON.stringify(data);
+	const parsed = parseInventoryBitrixItem(item);
+	assert.deepEqual(parsed.issues, []);
+	assert.deepEqual(parsed.inventory?.sectionIds, [0]);
 });

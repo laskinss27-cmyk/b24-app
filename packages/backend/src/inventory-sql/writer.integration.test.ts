@@ -52,12 +52,13 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 			'0059_create_inventory_points.sql', '0060_create_inventory_snapshot_lines.sql',
 			'0061_create_inventory_count_lines.sql', '0062_create_inventory_result_lines.sql',
 			'0063_create_inventory_erp_documents.sql', '0064_create_inventory_backfill_checkpoints.sql',
+			'0065_allow_inventory_root_section.sql', '0066_add_inventory_result_book_at.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalDirectory, filename));
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 8);
+		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 10);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalDirectory), []);
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${writerUser}'@'%'`);

@@ -150,8 +150,8 @@ async function lockPoint(connection: TransferSqlConnection, inventoryId: number,
 			snapshot_version, snapshot_captured_at, snapshot_migrated_at,
 			draft_updated_at, draft_updated_by_id, draft_updated_by_name,
 			draft_session_id, draft_sequence,
-			result_total, result_counted, result_discrepancies, is_present
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+			result_total, result_counted, result_discrepancies, result_book_at, is_present
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 		ON DUPLICATE KEY UPDATE
 			point_ordinal = VALUES(point_ordinal), store_name = VALUES(store_name), point_status = VALUES(point_status),
 			responsible_id = VALUES(responsible_id), responsible_name = VALUES(responsible_name),
@@ -161,7 +161,7 @@ async function lockPoint(connection: TransferSqlConnection, inventoryId: number,
 			draft_updated_by_id = VALUES(draft_updated_by_id), draft_updated_by_name = VALUES(draft_updated_by_name),
 			draft_session_id = VALUES(draft_session_id), draft_sequence = VALUES(draft_sequence),
 			result_total = VALUES(result_total), result_counted = VALUES(result_counted),
-			result_discrepancies = VALUES(result_discrepancies), is_present = 1
+			result_discrepancies = VALUES(result_discrepancies), result_book_at = VALUES(result_book_at), is_present = 1
 	`, [
 		inventoryId, point.ordinal, point.storeId, point.storeName, point.status,
 		point.responsibleId, point.responsibleName, sqlDate(point.startedAt), sqlDate(point.submittedAt), sqlDate(point.actAt),
@@ -169,6 +169,7 @@ async function lockPoint(connection: TransferSqlConnection, inventoryId: number,
 		sqlDate(point.draftUpdatedAt), point.draftUpdatedById, point.draftUpdatedByName,
 		point.draftSessionId, point.draftSequence,
 		point.resultTotal, point.resultCounted, point.resultDiscrepancies,
+		sqlDate(point.resultBookAt),
 	]);
 	if (!rows.length) rows = await connection.query<QueryRow[]>(`
 		SELECT id, snapshot_version,

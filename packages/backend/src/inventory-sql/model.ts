@@ -63,6 +63,7 @@ export interface InventorySqlPoint {
 	resultTotal: number | null;
 	resultCounted: number | null;
 	resultDiscrepancies: number | null;
+	resultBookAt: string | null;
 	snapshotLines: InventorySqlSnapshotLine[];
 	countLines: InventorySqlCountLine[];
 	resultLines: InventorySqlResultLine[];
@@ -184,7 +185,7 @@ function parsePoint(raw: unknown, ordinal: number, inventoryIdentity: string, is
 	unknownKeys(value, [
 		'storeId', 'storeName', 'store', 'responsibleId', 'responsibleName', 'status', 'startedAt', 'submittedAt', 'actAt',
 		'result', 'draft', 'comments', 'stockSnapshot', 'stockSnapshotMigratedAt', 'draftUpdatedAt', 'draftUpdatedById',
-		'draftUpdatedByName', 'draftSessionId', 'draftSequence', 'erpDoc', 'erpDocs',
+		'draftUpdatedByName', 'draftSessionId', 'draftSequence', 'resultBookAt', 'erpDoc', 'erpDocs',
 	], identity, issues);
 	const storeId = Number(value['storeId']);
 	if (!Number.isSafeInteger(storeId) || storeId === 0) issue(issues, 'invalid_store_id', identity, `Invalid store id: ${String(value['storeId'])}`);
@@ -334,6 +335,7 @@ function parsePoint(raw: unknown, ordinal: number, inventoryIdentity: string, is
 		resultTotal,
 		resultCounted,
 		resultDiscrepancies,
+		resultBookAt: timestamp(value['resultBookAt'], `${identity}.resultBookAt`, issues),
 		snapshotLines,
 		countLines,
 		resultLines,
@@ -371,7 +373,7 @@ export function parseInventoryBitrixItem(item: Record<string, unknown>): { inven
 		const seen = new Set<number>();
 		for (const [index, rawSectionId] of rawSections.entries()) {
 			const sectionId = Number(rawSectionId);
-			if (!Number.isSafeInteger(sectionId) || sectionId <= 0) { issue(issues, 'invalid_section_id', `${identity}.section:${index + 1}`, 'Section id must be positive'); continue; }
+			if (!Number.isSafeInteger(sectionId) || sectionId < 0) { issue(issues, 'invalid_section_id', `${identity}.section:${index + 1}`, 'Section id must be non-negative'); continue; }
 			if (seen.has(sectionId)) issue(issues, 'duplicate_section_id', `${identity}.section:${sectionId}`, 'Section id is duplicated');
 			seen.add(sectionId);
 			sectionIds.push(sectionId);

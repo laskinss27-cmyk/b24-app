@@ -22,6 +22,12 @@ function optionalInteger(value: unknown, name: string): number | null {
 	return parsed;
 }
 
+function nonNegativeInteger(value: unknown, name: string): number {
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`Invalid ${name}`);
+	return parsed;
+}
+
 function quantity(value: unknown, name: string): number {
 	const parsed = Number(value);
 	if (!Number.isFinite(parsed)) throw new Error(`Invalid ${name}`);
@@ -91,7 +97,8 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 				DATE_FORMAT(snapshot_migrated_at, '%Y-%m-%d %H:%i:%s.%f') AS snapshot_migrated_at,
 				DATE_FORMAT(draft_updated_at, '%Y-%m-%d %H:%i:%s.%f') AS draft_updated_at,
 				draft_updated_by_id, draft_updated_by_name,
-				draft_session_id, draft_sequence, result_total, result_counted, result_discrepancies
+				draft_session_id, draft_sequence, result_total, result_counted, result_discrepancies,
+				DATE_FORMAT(result_book_at, '%Y-%m-%d %H:%i:%s.%f') AS result_book_at
 			FROM inventory_points
 			WHERE is_present = 1
 			ORDER BY inventory_id, point_ordinal
@@ -132,7 +139,7 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 	const sectionsByInventory = new Map<number, number[]>();
 	for (const row of sectionRows) {
 		const inventoryId = positiveInteger(row['inventory_id'], 'inventory section record id');
-		const sectionId = positiveInteger(row['section_id'], 'inventory section id');
+		const sectionId = nonNegativeInteger(row['section_id'], 'inventory section id');
 		const sections = sectionsByInventory.get(inventoryId) ?? [];
 		sections.push(sectionId);
 		sectionsByInventory.set(inventoryId, sections);
@@ -165,6 +172,7 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 			resultTotal: optionalInteger(row['result_total'], 'inventory result total'),
 			resultCounted: optionalInteger(row['result_counted'], 'inventory result counted'),
 			resultDiscrepancies: optionalInteger(row['result_discrepancies'], 'inventory result discrepancies'),
+			resultBookAt: timestamp(row['result_book_at'], 'inventory result book_at'),
 			snapshotLines: [], countLines: [], resultLines: [], erpDocuments: [],
 		};
 		pointById.set(pointId, point);

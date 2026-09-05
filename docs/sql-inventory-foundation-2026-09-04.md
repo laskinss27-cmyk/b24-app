@@ -26,7 +26,9 @@ The SQL cutover must preserve unfinished inventories exactly:
 
 ## Normalized schema
 
-Migrations `0057`-`0064` define eight tables:
+Migrations `0057`-`0064` define eight tables. Forward compatibility migrations
+`0065`-`0066` preserve the root catalog scope (`sectionIds: [0]`) and the legacy
+result calculation timestamp (`resultBookAt`) found by the first live dry-run:
 
 1. `inventory_records` — Bitrix identity, title, lifecycle status, deadline,
    creator, opening time and deterministic current-state hash.
@@ -123,3 +125,32 @@ returned HTTP `200`. No inventory data was copied, no SQL reader/writer was
 enabled, and Bitrix remains the inventory source of truth. The two isolated
 restore databases and root-only migration staging were intentionally preserved;
 nothing was deleted.
+
+## First production read-only plan — 5 September 2026
+
+Branch `codex/inventory-sql-foundation` was published without merging into
+`main`. A separate diagnostic image was built from exact commit `3c644ab`; it
+was never started as `b24-backend`. The owner-authenticated dry-run first called
+`user.current`, loaded every `ctv_inv` page and had no SQL write credential or
+`--apply` argument.
+
+The source contained `10` inventories, `10` points, `2,507` frozen snapshot
+lines, `1,682` count/comment lines, `370` result lines and `7` ERP document
+references. The fail-closed plan correctly refused to apply with seven schema
+compatibility issues and hash
+`c96920cd7fed0351ef0f8befca5ea141479694567de2c7b4590d45c370ddbcd3`:
+
+- six inventories contain the API-supported root catalog section id `0`;
+- inventory `21066` contains `resultBookAt`, created by the temporary movement
+  compensation logic in commit `15ad6ef` and left as historical evidence when
+  that logic was removed in commit `0f4df64`.
+
+No inventory row or SQL row was written. Local forward migrations
+`0065_allow_inventory_root_section.sql` and
+`0066_add_inventory_result_book_at.sql` address these exact findings without
+changing the already-applied migrations. The normalized parser/reader/writer
+now preserve both values. Focused tests pass `23/23`, backend typecheck passes,
+and a fresh disposable MariaDB `11.8.8` rehearsal applied all ten inventory
+migrations, exercised writer/read-back and rejected snapshot drift successfully.
+The temporary local MariaDB container was removed. Production migrations
+`0065`-`0066`, a second live dry-run and any data backfill remain unperformed.

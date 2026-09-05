@@ -98,6 +98,8 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0062_create_inventory_result_lines.sql',
 		'0063_create_inventory_erp_documents.sql',
 		'0064_create_inventory_backfill_checkpoints.sql',
+		'0065_allow_inventory_root_section.sql',
+		'0066_add_inventory_result_book_at.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -442,4 +444,12 @@ test('inventory foundation preserves active drafts and frozen snapshots without 
 	assert.match(documents, /erp_doctype = 'Stock Reconciliation'/);
 	assert.match(checkpoints, /UNIQUE KEY uq_inventory_backfill_checkpoints_hash \(plan_hash\)/);
 	assert.match(checkpoints, /changed_inventory_count \+ unchanged_inventory_count = inventory_count/);
+	const rootSection = byName.get('0065_allow_inventory_root_section.sql')!;
+	const resultBookAt = byName.get('0066_add_inventory_result_book_at.sql')!;
+	for (const migration of [rootSection, resultBookAt]) {
+		assert.equal(migration.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.doesNotMatch(migration, /^\s*(?:INSERT|UPDATE|DELETE|DROP TABLE|TRUNCATE|GRANT)\b/im);
+	}
+	assert.match(rootSection, /CHECK \(section_id >= 0\)/);
+	assert.match(resultBookAt, /ADD COLUMN result_book_at DATETIME\(6\) NULL/);
 });
