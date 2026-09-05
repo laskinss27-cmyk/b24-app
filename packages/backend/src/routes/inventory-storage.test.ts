@@ -142,3 +142,40 @@ test('inventory verified read returns SQL only after exact live parity', async (
 	assert.equal(parseInventoryBitrixItem(loaded[0]!).inventory?.stateHash, sqlRecords[0]?.stateHash);
 	assert.deepEqual(trace, ['bitrix:entity.item.get', 'sql-read', 'info:match:sql']);
 });
+
+test('inventory primary read never loads Bitrix JSON', async () => {
+	const bitrixItem = {
+		ID: '42', NAME: 'Ревизия', CREATED_BY: '1', DATE_CREATE: '2026-09-05T08:00:00Z', DETAIL_TEXT: JSON.stringify(data()),
+	};
+	const sqlRecords = buildInventorySqlBackfillPlan({
+		observedAt: '2026-09-05T09:00:00Z', sourceComplete: true, sourceRecordCount: 1, items: [bitrixItem],
+	}).inventories;
+	const trace: string[] = [];
+	const readApp = {
+		config: { inventorySqlRead: 'primary' },
+		databaseRuntime: { mode: 'readiness', async readInventoryRecords() { trace.push('sql-read'); return sqlRecords; } } as DatabaseRuntime,
+		log: { info(values: Record<string, unknown>) { trace.push(`info:${String(values['status'])}:${String(values['responseSource'])}`); } },
+	} as unknown as FastifyInstance;
+	const client = {
+		async callWithMeta() { trace.push('bitrix-read'); throw new Error('Bitrix must not be read'); },
+	} as unknown as B24Client;
+
+	const loaded = await loadInventoryItems(readApp, client, 'list');
+	assert.equal(parseInventoryBitrixItem(loaded[0]!).inventory?.stateHash, sqlRecords[0]?.stateHash);
+	assert.deepEqual(trace, ['sql-read', 'info:primary:sql']);
+});
+
+test('inventory primary read exposes SQL failure without falling back to Bitrix', async () => {
+	const trace: string[] = [];
+	const readApp = {
+		config: { inventorySqlRead: 'primary' },
+		databaseRuntime: { mode: 'readiness', async readInventoryRecords() { trace.push('sql-read'); throw new Error('SQL down'); } } as unknown as DatabaseRuntime,
+		log: { info() {} },
+	} as unknown as FastifyInstance;
+	const client = {
+		async callWithMeta() { trace.push('bitrix-read'); return { result: [], next: null }; },
+	} as unknown as B24Client;
+
+	await assert.rejects(() => loadInventoryItems(readApp, client, 'list'), /SQL down/);
+	assert.deepEqual(trace, ['sql-read']);
+});

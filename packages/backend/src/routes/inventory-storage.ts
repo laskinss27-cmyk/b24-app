@@ -3,13 +3,25 @@ import type { B24Client } from '../b24/client.js';
 import { listAllEntityItems } from '../b24/entity-items.js';
 import { INVENTORY_ENTITY } from '../b24/placement.js';
 import { parseInventoryBitrixItem } from '../inventory-sql/model.js';
-import { resolveInventorySqlRead } from '../inventory-sql/read-shadow.js';
+import { readPrimaryInventorySqlItems, resolveInventorySqlRead } from '../inventory-sql/read-shadow.js';
 
 export async function loadInventoryItems(
 	app: FastifyInstance,
 	client: B24Client,
 	scope: 'list' | 'update' | 'point',
 ): Promise<Record<string, unknown>[]> {
+	if (app.config.inventorySqlRead === 'primary') {
+		const items = await readPrimaryInventorySqlItems(app.databaseRuntime);
+		app.log.info({
+			mode: 'primary',
+			scope,
+			status: 'primary',
+			bitrixCount: null,
+			sqlCount: items.length,
+			responseSource: 'sql',
+		}, '[inventory/sql-read] primary');
+		return items;
+	}
 	const items = await listAllEntityItems(client, INVENTORY_ENTITY, { ID: 'DESC' });
 	if (app.config.inventorySqlRead === 'off') return items;
 	const resolution = await resolveInventorySqlRead(app.config.inventorySqlRead, app.databaseRuntime, items);

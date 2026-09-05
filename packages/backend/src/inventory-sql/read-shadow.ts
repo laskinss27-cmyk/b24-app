@@ -3,7 +3,7 @@ import { buildInventorySqlBackfillPlan } from './backfill-plan.js';
 import { compareInventorySqlParity } from './compare.js';
 import type { InventorySqlErpDocument, InventorySqlPoint, InventorySqlRecord } from './model.js';
 
-export type InventorySqlReadMode = 'off' | 'shadow' | 'verified';
+export type InventorySqlReadMode = 'off' | 'shadow' | 'verified' | 'primary';
 export type InventorySqlReadShadowStatus = 'disabled' | 'match' | 'mismatch' | 'plan_blocked' | 'unavailable' | 'error';
 
 export interface InventorySqlReadShadowReport {
@@ -109,6 +109,18 @@ export function inventorySqlRecordToBitrixItem(inventory: InventorySqlRecord): R
 	};
 }
 
+export async function readPrimaryInventorySqlItems(
+	database: DatabaseRuntime | null | undefined,
+): Promise<Record<string, unknown>[]> {
+	if (!database || database.mode !== 'readiness' || !database.readInventoryRecords) {
+		throw new Error('Inventory primary SQL reader is unavailable');
+	}
+	const stored = await database.readInventoryRecords();
+	return [...stored]
+		.sort((left, right) => right.bitrixExternalId - left.bitrixExternalId)
+		.map(inventorySqlRecordToBitrixItem);
+}
+
 function baseReport(bitrixCount: number): InventorySqlReadShadowReport {
 	return {
 		status: 'disabled',
@@ -128,6 +140,9 @@ export async function resolveInventorySqlRead(
 	bitrixItems: Record<string, unknown>[],
 	observedAt = new Date().toISOString(),
 ): Promise<InventorySqlReadResolution> {
+	if (mode === 'primary') {
+		throw new Error('Primary inventory reads do not accept a Bitrix source');
+	}
 	const base = baseReport(bitrixItems.length);
 	if (mode === 'off') return { report: base, items: bitrixItems };
 	if (!database || database.mode !== 'readiness' || !database.readInventoryRecords) {

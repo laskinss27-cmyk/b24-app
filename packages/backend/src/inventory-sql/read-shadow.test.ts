@@ -4,7 +4,7 @@ import { loadConfig } from '../config.js';
 import type { DatabaseRuntime } from '../database/runtime.js';
 import { buildInventorySqlBackfillPlan } from './backfill-plan.js';
 import { parseInventoryBitrixItem } from './model.js';
-import { observeInventorySqlReadShadow, resolveInventorySqlRead } from './read-shadow.js';
+import { observeInventorySqlReadShadow, readPrimaryInventorySqlItems, resolveInventorySqlRead } from './read-shadow.js';
 
 function item(factQty = 2): Record<string, unknown> {
 	return {
@@ -71,12 +71,33 @@ function database(read: NonNullable<DatabaseRuntime['readInventoryRecords']>): D
 	return { mode: 'readiness', readInventoryRecords: read } as DatabaseRuntime;
 }
 
-test('inventory SQL read gate defaults off, accepts guarded modes and rejects primary', (t) => {
+test('inventory SQL read gate defaults off and accepts guarded modes', () => {
 	assert.equal(loadConfig({}).inventorySqlRead, 'off');
 	assert.equal(loadConfig({ B24_APP_INVENTORY_SQL_READ: 'shadow' }).inventorySqlRead, 'shadow');
 	assert.equal(loadConfig({ B24_APP_INVENTORY_SQL_READ: 'verified' }).inventorySqlRead, 'verified');
-	t.mock.method(console, 'error', () => {});
-	assert.throws(() => loadConfig({ B24_APP_INVENTORY_SQL_READ: 'primary' }), /Bad config/);
+	assert.equal(loadConfig({ B24_APP_INVENTORY_SQL_READ: 'primary' }).inventorySqlRead, 'primary');
+});
+
+test('primary mode reconstructs SQL records in descending external id order', async () => {
+	const first = normalized(item())[0]!;
+	const secondSource = item();
+	secondSource['ID'] = '84';
+	const second = normalized(secondSource)[0]!;
+	const items = await readPrimaryInventorySqlItems(database(async () => [first, second]));
+	assert.deepEqual(items.map((entry) => entry['ID']), ['84', '42']);
+	for (const entry of items) {
+		const parsed = parseInventoryBitrixItem(entry);
+		assert.deepEqual(parsed.issues, []);
+		assert.equal(parsed.inventory?.stateHash, Number(entry['ID']) === 84 ? second.stateHash : first.stateHash);
+	}
+});
+
+test('primary mode fails closed when SQL is unavailable', async () => {
+	await assert.rejects(() => readPrimaryInventorySqlItems(null), /reader is unavailable/);
+	await assert.rejects(
+		() => readPrimaryInventorySqlItems(database(async () => { throw new Error('SQL down'); })),
+		/SQL down/,
+	);
 });
 
 test('off mode does not touch SQL and explicitly preserves the Bitrix response', async () => {
