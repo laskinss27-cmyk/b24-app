@@ -193,3 +193,54 @@ migration signature. Production remains on `b24-app:b755998`, restart `0`, with
 the required network; internal/public health, readiness and official ERPNext
 read are HTTP `200`. No inventory backfill, runtime deploy or source switch was
 performed, and no backup, restore schema, staging or image was deleted.
+
+## First production inventory backfill — 5 September 2026
+
+The explicitly authorized exact plan remained stable at
+`10b4a9826eba4e165167f377842fd5fd969d49242279c366738b7a302c3d5e06`.
+Before the first authoritative write, backup
+`20260905_035349-b24_app-database.sql.gz` (`5,409,822` bytes, `51` table
+definitions) passed checksum/gzip and external read-back with `dump_id=107808`
+and `checksum_id=107806`; retention was disabled. Restore drill
+`b24_app_restore_20260905_035349` reproduced all `51` tables and left the source
+unchanged.
+
+The first transaction exposed an overly strict SQL check and rolled back in
+full: production counts remained `0|0|0|0|0|0|0|0`. Historical reconciled
+inventories `20688` and `21098` were created under older UI semantics and have
+respectively `82/29/53` and `80/31/49` for total/counted/discrepancies. Their
+discrepancy lines are valid preserved evidence, but can exceed the old counted
+field. No source data was changed to fit the schema.
+
+Forward migration `0067_allow_legacy_inventory_result_counts.sql` changes only
+the check to require both counted and discrepancies to be no greater than
+total. The parser also rejects discrepancies greater than total. Focused tests
+passed `24/24`, the complete backend suite passed `422/422`, workspace typecheck
+passed, and a disposable MariaDB `11.8.8` rehearsal preserved the legacy case
+with exact writer/read-back parity. Commit `0b5400a` was used to build isolated
+image `b24-app:inventory-diagnostic-0b5400a`; the production backend was not
+replaced. The one-shot migrator applied only `0067`; its repeat returned
+`No pending migrations`, bringing production to `67` migration rows.
+
+The exact guarded backfill then reread every Bitrix inventory page and called
+`user.current` before SQL. The source hash was still the approved value and the
+single transaction completed with `changed=10`, `unchanged=0`, `parity=match`.
+An immediate exact repeat returned `alreadyApplied=true` with parity still
+matching. Independent SQL checks found `10` inventories, `10` points, `606`
+sections, `2,507` snapshot lines, `1,682` count/comment lines, `370` result
+lines, `7` ERP document references and one checkpoint. All six orphan checks
+are zero, and the two historical result counters and line counts are unchanged.
+
+Post-backfill backup `20260905_041531-b24_app-database.sql.gz` (`5,447,651`
+bytes, `51` table definitions) passed checksum/gzip and external read-back with
+`dump_id=107812`, `checksum_id=107810`; retention remained disabled. Restore
+drill `b24_app_restore_20260905_041531` reproduced all tables. Each of the eight
+inventory table checksums matches between source and restore, as do exact
+inventory column, index and check-constraint signatures and the complete
+migration signature. The restore database was intentionally preserved.
+
+The runtime remains `b24-app:b755998`, `B24_APP_DB_MODE=readiness`, restart
+count `0`, and a member of `erpnext_frappe_network`. Internal and public health,
+readiness and an official ERPNext API read are HTTP `200`. No deploy, inventory
+SQL read/write activation or source switch occurred; Bitrix remains the live
+inventory source.
