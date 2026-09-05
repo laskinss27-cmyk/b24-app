@@ -76,18 +76,50 @@ temporary database, user and container were removed after the successful run.
 
 ## Remaining production gates
 
-1. Add a read-only owner diagnostic that reads all `ctv_inv` pages and emits only
-   counts, issue codes and hashes; never print full inventory payloads or OAuth.
-2. Create and verify a fresh `b24_app` backup and isolated restore.
-3. Apply `0057`-`0064` with the one-shot migrator and verify exact structure.
-4. Run a read-only live plan. Any unknown field or malformed record is resolved
+The read-only owner diagnostic, backup/restore gate and production DDL are now
+prepared or completed as recorded below. The remaining separately authorized
+steps are:
+
+1. Run a read-only live plan. Any unknown field or malformed record is resolved
    before granting a backfill writer.
-5. Apply the first exact plan with a temporary DML-only credential and prove SQL
+2. Apply the first exact plan with a temporary DML-only credential and prove SQL
    read-back parity. Repeat while employees continue counting.
-6. Deploy `shadow` read/dual-write code with the legacy Bitrix response unchanged.
-7. For the final cutover, ask users to close inventory tabs for a short window,
+3. Deploy `shadow` read/dual-write code with the legacy Bitrix response unchanged.
+4. For the final cutover, ask users to close inventory tabs for a short window,
    wait for autosave, apply the final delta, require zero differences, enable SQL
    primary, and ask users to reload.
 
-Until step 7, employees can continue counting normally and Bitrix remains the
+Until step 4, employees can continue counting normally and Bitrix remains the
 only source of truth.
+
+## Production DDL foundation — 5 September 2026
+
+The explicitly authorized production step created a pre-DDL backup
+`20260905_031730-b24_app-database.sql.gz` (`5,407,352` bytes, `43` table
+definitions). Checksum/gzip validation and external Bitrix Disk read-back passed
+with `dump_id=107792` and `checksum_id=107790`; retention was disabled. Restore
+drill `b24_app_restore_20260905_031730` reproduced all `43` tables while the
+source database remained unchanged.
+
+The one-shot migrator used the existing root-only migration credential and the
+required `erpnext_frappe_network`. It applied exactly `0057`-`0064`; a second
+run returned `No pending migrations`. The stored migration checksums equal the
+locally rehearsed files. Production now contains `64` migration rows and eight
+empty inventory tables with `85` columns, `41` index rows, `6` foreign keys and
+`30` checks. All eight tables are InnoDB with `utf8mb4_unicode_ci` and their row
+counts are `0|0|0|0|0|0|0|0`.
+
+Post-DDL backup `20260905_032023-b24_app-database.sql.gz` (`5,409,790` bytes,
+`51` table definitions) passed local verification and external read-back with
+`dump_id=107796` and `checksum_id=107794`; retention was again disabled. Restore
+drill `b24_app_restore_20260905_032023` reproduced all `51` tables. Source and
+restore have identical inventory column, index and constraint signatures, the
+same full migration signature, and zero rows in all inventory tables.
+
+The backend was not restarted or reconfigured and remains on
+`b24-app:b755998`, restart count `0`, with the required Docker network. Internal
+and public health, readiness and an official read-only ERPNext API request all
+returned HTTP `200`. No inventory data was copied, no SQL reader/writer was
+enabled, and Bitrix remains the inventory source of truth. The two isolated
+restore databases and root-only migration staging were intentionally preserved;
+nothing was deleted.
