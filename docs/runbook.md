@@ -499,6 +499,32 @@ scheduled cycle вернул `no_op`, 144 stock targets и 136 price targets. Ba
 предыдущего crontab:
 `/root/b24-app-ops/crontab.before-enable-tilda-a146a81-20260903`.
 
+### SQL shadow-write инвентаризаций, 2026-09-05
+
+Перед включением выполнен backup
+`20260905_045636-b24_app-database.sql.gz` (`5,447,652` bytes, `51` tables),
+внешний read-back (`dump_id=107816`, `checksum_id=107814`) и сохранённый restore
+`b24_app_restore_20260905_045636`. Все `51` table checksums совпали. Отдельный
+`b24_app_inventory_runtime` получил только точечные `SELECT/INSERT/UPDATE` на
+семь рабочих таблиц инвентаризации, без `DELETE`, DDL, schema privileges и
+доступа к checkpoint; root-only secret files имеют mode `0600`.
+
+Commit `aeeaebf` развёрнут как `b24-app:aeeaebf` с
+`B24_APP_INVENTORY_SQL_WRITE=shadow`. Canary и production подтвердили internal
+и public health/readiness, `inventorySqlWriter=up`, официальный ERP read,
+`erpnext_frappe_network`, `/srv/b24-state:/app/state`, локальный порт, policy
+`unless-stopped` и restart `0`. Rollback
+`b24-backend-prev-before-aeeaebf` сохраняет `b24-app:b755998`.
+
+После отдельного явного разрешения owner OAuth vault штатно ротирован без
+вывода токенов; envelope остался root-owned mode `0600`. Полная read-only
+сверка Bitrix и SQL подтвердила неизменный plan hash
+`10b4a9826eba4e165167f377842fd5fd969d49242279c366738b7a302c3d5e06`, точное
+совпадение `10` inventories / `10` points / `606` sections / `2,507` snapshots /
+`1,682` counts / `370` results / `7` ERP docs и `0` differences. Ошибок
+inventory shadow-write нет. Bitrix остаётся источником правды; SQL reads,
+primary mode и новый backfill не включались.
+
 ## Восстановление ERPNext
 
 Восстановление перезаписывает рабочую БД. Перед началом:

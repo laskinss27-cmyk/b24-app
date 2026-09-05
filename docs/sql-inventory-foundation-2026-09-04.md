@@ -280,3 +280,47 @@ tombstone revival. Its DML-only user was denied both `DELETE` and DDL, and the
 temporary container was removed. No production credential, environment flag,
 container replacement, deploy, SQL read activation or source switch was made by
 this local step.
+
+## Production inventory shadow writer — 5 September 2026
+
+Before enabling runtime writes, backup
+`20260905_045636-b24_app-database.sql.gz` (`5,447,652` bytes, `51` table
+definitions) passed gzip/checksum and Bitrix Disk read-back with
+`dump_id=107816` and `checksum_id=107814`; retention was disabled. Restore drill
+`b24_app_restore_20260905_045636` was intentionally preserved. All `51` source
+and restore table checksums and schema settings match. Inventory cardinalities
+were unchanged at `10|606|10|2507|1682|370|7|1` for records, sections, points,
+snapshots, counts, results, ERP documents and checkpoints.
+
+Permanent user `b24_app_inventory_runtime` has exactly `20` table privileges
+and zero schema privileges. It has `SELECT/INSERT/UPDATE` on records, sections,
+points, count lines, result lines and ERP documents, and only `SELECT/INSERT` on
+immutable snapshot lines. It has no checkpoint access, `DELETE` or DDL. Its env
+and client option files are root-owned mode `0600`; the generated password was
+never printed, copied to Git or placed in shell history. Login, a live inventory
+read and the advisory lock were verified from `erpnext_frappe_network`; the
+subsequent full parity reader exercised all seven tables successfully.
+
+Exact commit `aeeaebf` was built and passed a canary with internal health,
+readiness (`database=up`, `inventorySqlWriter=up`) and official ERPNext read all
+at HTTP `200`. Production now runs `b24-app:aeeaebf` with
+`B24_APP_INVENTORY_SQL_WRITE=shadow`, restart count `0`, `unless-stopped`,
+`/srv/b24-state:/app/state`, `127.0.0.1:3000` and the required network. Internal
+and public health/readiness and ERPNext read passed independently. The previous
+`b24-app:b755998` remains stopped as
+`b24-backend-prev-before-aeeaebf` for rollback.
+
+The first parity attempt deliberately mounted state read-only and stopped on
+`EROFS` when the expired owner OAuth session required rotation; it made no
+Bitrix or SQL data change. After separate explicit authorization, the running
+backend rotated the encrypted vault atomically. The envelope remains root-owned
+mode `0600`, and no token was exposed. A complete owner-verified read then found
+the same source plan hash
+`10b4a9826eba4e165167f377842fd5fd969d49242279c366738b7a302c3d5e06`:
+all `10` inventories and every normalized child count match SQL, with zero
+differences. Shadow-write failure count since deployment is zero.
+
+Bitrix remains authoritative and employee responses are still produced from the
+legacy path. This step did not enable SQL reads or primary mode, run another
+backfill, change ERPNext data, or delete any production data, backup, restore
+database or rollback container.
