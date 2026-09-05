@@ -87,6 +87,27 @@ test('submitted result and both split ERP documents survive normalization', () =
 	]);
 });
 
+test('legacy results may contain more discrepancy lines than rows marked counted', () => {
+	const item = activeInventoryItem();
+	const data = JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown>;
+	const point = (data['points'] as Array<Record<string, unknown>>)[0]!;
+	point['status'] = 'reconciled';
+	point['result'] = {
+		total: 3,
+		counted: 1,
+		discrepancies: 2,
+		lines: [
+			{ productId: 11962, name: 'Монтажная коробка', book: 3, fact: 2, diff: -1 },
+			{ productId: 13017, name: 'Монитор', book: 2, fact: 0, diff: -2 },
+		],
+	};
+	item['DETAIL_TEXT'] = JSON.stringify(data);
+	const parsed = parseInventoryBitrixItem(item);
+	assert.deepEqual(parsed.issues, []);
+	assert.equal(parsed.inventory?.points[0]?.resultCounted, 1);
+	assert.equal(parsed.inventory?.points[0]?.resultDiscrepancies, 2);
+});
+
 test('backfill plan is deterministic and blocks malformed or incomplete sources', () => {
 	const first = buildInventorySqlBackfillPlan({
 		observedAt: '2026-09-04T10:00:00.000Z', sourceComplete: true, sourceRecordCount: 1, items: [activeInventoryItem()],

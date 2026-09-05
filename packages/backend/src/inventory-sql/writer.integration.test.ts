@@ -53,12 +53,13 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 			'0061_create_inventory_count_lines.sql', '0062_create_inventory_result_lines.sql',
 			'0063_create_inventory_erp_documents.sql', '0064_create_inventory_backfill_checkpoints.sql',
 			'0065_allow_inventory_root_section.sql', '0066_add_inventory_result_book_at.sql',
+			'0067_allow_legacy_inventory_result_counts.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalDirectory, filename));
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 10);
+		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 11);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalDirectory), []);
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${writerUser}'@'%'`);
@@ -83,6 +84,25 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 			/Frozen inventory snapshot changed/,
 		);
 		assert.equal(compareInventorySqlParity(changed.inventories, await readInventorySqlRecords(sqlPool)).matches, true);
+
+		const legacyItem = sourceItem(2);
+		const legacyData = JSON.parse(String(legacyItem['DETAIL_TEXT'])) as Record<string, unknown>;
+		const legacyPoint = (legacyData['points'] as Array<Record<string, unknown>>)[0]!;
+		legacyPoint['status'] = 'reconciled';
+		legacyPoint['result'] = {
+			total: 3,
+			counted: 1,
+			discrepancies: 2,
+			lines: [
+				{ productId: 11962, name: 'Коробка', book: 3, fact: 2, diff: -1 },
+				{ productId: 13017, name: 'Монитор', book: 2, fact: 0, diff: -2 },
+			],
+		};
+		legacyItem['DETAIL_TEXT'] = JSON.stringify(legacyData);
+		const legacy = plan(legacyItem, '2026-09-04T10:15:00Z');
+		assert.equal(legacy.readyToApply, true);
+		assert.equal((await applyInventorySqlBackfill(sqlPool, legacy, legacy.planHash)).changedInventoryCount, 1);
+		assert.equal(compareInventorySqlParity(legacy.inventories, await readInventorySqlRecords(sqlPool)).matches, true);
 		await assert.rejects(() => writerPool!.query('DELETE FROM inventory_records WHERE id = -1'), /(?:denied|command)/i);
 		await assert.rejects(() => writerPool!.query('CREATE TABLE forbidden_ddl (id INT NOT NULL)'), /(?:denied|command)/i);
 	} finally {

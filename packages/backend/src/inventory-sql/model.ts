@@ -257,6 +257,7 @@ function parsePoint(raw: unknown, ordinal: number, inventoryIdentity: string, is
 			resultCounted = nonNegativeInteger(result['counted'], `${identity}.result.counted`, issues);
 			resultDiscrepancies = nonNegativeInteger(result['discrepancies'], `${identity}.result.discrepancies`, issues);
 			if (resultTotal != null && resultCounted != null && resultCounted > resultTotal) issue(issues, 'invalid_result_totals', identity, 'Counted exceeds total');
+			if (resultTotal != null && resultDiscrepancies != null && resultDiscrepancies > resultTotal) issue(issues, 'invalid_result_totals', identity, 'Discrepancies exceed total');
 			if (!Array.isArray(result['lines'])) issue(issues, 'invalid_result_lines', identity, 'Result lines must be an array');
 			else {
 				const seen = new Set<number>();
