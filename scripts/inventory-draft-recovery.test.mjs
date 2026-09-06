@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { readRecoverySnapshot, mountRecoveryPage } from '../packages/frontend/public/inventory-draft-recovery.mjs';
+import { readRecoverySnapshot, mountRecoveryPage, bindRecoveryPage } from '../packages/frontend/public/inventory-draft-recovery.mjs';
 
 const key = 'b24-app:inventory-draft:v1:21648:-1865999992:count';
 const origin = 'https://recovery.example';
@@ -56,6 +56,25 @@ test('empty storage offers no misleading empty download', () => {
   const b = browser(null); mountRecoveryPage(b.win, b.doc);
   assert.equal(b.doc.getElementById('export').hidden, true);
   assert.match(b.doc.getElementById('status').textContent, /не найдена/);
+});
+test('initial page touches neither storage nor file APIs; explicit click reads only once after a paint delay', () => {
+  const b = browser(); let scheduled; let files = 0;
+  b.win.setTimeout = (fn, delay) => { assert(delay >= 100); scheduled = fn; };
+  b.win.navigator = { share() {}, canShare() { throw Error('Must not probe sharing before export click'); } };
+  b.win.File = class extends File { constructor(...args) { super(...args); files++; } };
+  bindRecoveryPage(b.win, b.doc);
+  assert.equal(b.reads(), 0); assert.equal(files, 0);
+  assert.equal(b.doc.getElementById('start').hidden, false);
+  b.doc.getElementById('start').handlers.click();
+  assert.equal(b.reads(), 0); assert.match(b.doc.getElementById('status').textContent, /Читаем/);
+  scheduled(); assert.equal(b.reads(), 2); assert.equal(files, 1);
+  b.doc.getElementById('start').handlers.click(); assert.equal(b.reads(), 2);
+});
+test('unsupported file sharing gives a visible download fallback', async () => {
+  const b = browser(); let shared = false;
+  b.win.navigator = { canShare: () => false, share: () => { shared = true; } };
+  mountRecoveryPage(b.win, b.doc); await b.doc.getElementById('share').handlers.click();
+  assert.equal(shared, false); assert.match(b.doc.getElementById('action-status').textContent, /не поддерживает/);
 });
 test('file sharing cancellation and unavailable File API keep a manual recovery path', async () => {
   const b = browser(); b.win.navigator = { canShare: () => true, share: async () => { throw { name: 'AbortError' }; } };

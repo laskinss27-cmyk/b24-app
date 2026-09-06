@@ -9,6 +9,9 @@ The recovery page does not import the application, initialize Bitrix authenticat
 call inventory endpoints, modify localStorage or restore any production records.
 Its CSP blocks network API connections. Only two exact count/act keys are read.
 
+Version 2 paints the static page first and reads storage only after the explicit
+"Найти черновик" button, with a short paint delay and a visible error fallback.
+File-sharing capability checks happen only after the explicit share button.
 The first read is frozen in memory and exported as a JSON file. Each entry retains
 the original storage string, including pending:false, unknown fields and damaged
 JSON. Displayed counts are advisory; the raw string is the recovery evidence.

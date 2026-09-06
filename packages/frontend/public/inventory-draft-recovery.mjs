@@ -77,10 +77,15 @@ export function mountRecoveryPage(win, doc) {
     el('action-status').textContent = 'Создать файл не удалось. Ниже можно скопировать текст целиком.';
   }
   try {
-    if (file && typeof win.navigator.share === 'function' && win.navigator.canShare?.({ files: [file] })) {
+    if (file && typeof win.navigator.share === 'function') {
       el('share').hidden = false;
       el('share').addEventListener('click', async () => {
         try {
+          // Safari file capability checks are deferred to an explicit export gesture.
+          if (typeof win.navigator.canShare === 'function' && !win.navigator.canShare({ files: [file] })) {
+            el('action-status').textContent = 'Safari не поддерживает отправку этого файла. Нажмите «Скачать файл» или скопируйте текст ниже.';
+            return;
+          }
           await win.navigator.share({ files: [file], title: 'Черновик ревизии Богатырского' });
           el('action-status').textContent = 'Меню отправки закрыто. Проверьте, что файл сохранён или дошёл получателю.';
         } catch (error) {
@@ -94,4 +99,23 @@ export function mountRecoveryPage(win, doc) {
   return snapshot;
 }
 
-if (typeof window !== 'undefined' && typeof document !== 'undefined') mountRecoveryPage(window, document);
+export function bindRecoveryPage(win, doc) {
+  const start = doc.getElementById('start');
+  const status = doc.getElementById('status');
+  let started = false;
+  start.hidden = false;
+  status.textContent = 'Страница готова. Нажмите «Найти черновик». До нажатия данные не читаются.';
+  start.addEventListener('click', () => {
+    if (started) return;
+    started = true;
+    start.disabled = true;
+    status.textContent = 'Читаем локальную копию Safari… Если надпись не меняется, пришлите скрин. Данные не удаляются.';
+    // Let Safari paint the page/status before touching synchronous browser storage.
+    win.setTimeout(() => {
+      try { mountRecoveryPage(win, doc); }
+      catch { status.textContent = 'Не удалось прочитать или подготовить копию. Не очищайте Safari; пришлите скрин этой страницы.'; }
+    }, 150);
+  });
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') bindRecoveryPage(window, document);
