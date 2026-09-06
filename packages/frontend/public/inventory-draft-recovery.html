@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>Выгрузить черновик — Богатырский</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f7fb; color: #15283f; font: 17px/1.5 system-ui, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 24px 18px 48px; }
+    h1 { font-size: 26px; line-height: 1.2; margin: 0 0 12px; }
+    h2 { font-size: 19px; margin: 0 0 8px; }
+    p { margin: 10px 0; }
+    .card { background: white; border: 1px solid #d7e0ec; border-radius: 12px; padding: 18px; margin: 20px 0; overflow-wrap: anywhere; }
+    .muted { color: #53657b; font-size: 15px; }
+    .notice { border-left: 4px solid #b67a12; padding-left: 12px; }
+    button, .button { display: block; width: 100%; min-height: 48px; border: 1px solid #1962a5; border-radius: 8px; padding: 12px; margin: 12px 0; background: #1962a5; color: white; font: inherit; text-align: center; text-decoration: none; cursor: pointer; }
+    .secondary { background: white; color: #1962a5; }
+    [hidden] { display: none !important; }
+    button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px solid #bc7900; outline-offset: 3px; }
+    textarea { width: 100%; min-height: 240px; font-size: 16px; margin-top: 12px; }
+    summary { cursor: pointer; padding: 12px 0; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Выгрузить черновик</h1>
+  <p>Максидом Богатырский 15 · ревизия №21648</p>
+  <p class="notice">Откройте эту ссылку в том же Safari и профиле, где считали. Старую вкладку ревизии оставьте открытой, не обновляйте её.</p>
+  <p class="muted">Здесь нет входа в Битрикс и автосохранения. Страница только читает локальную копию этой ревизии. Ничего не удаляет, не меняет и автоматически никуда не отправляет.</p>
+  <section class="card" aria-labelledby="result-title">
+    <h2 id="result-title">Проверка на этом устройстве</h2>
+    <p id="status" role="status">Читаем локальную копию…</p>
+    <div id="records"></div>
+    <div id="export" hidden>
+      <p>Сначала сохраните файл или отправьте его ответственному за восстановление. Он содержит введённые количества и комментарии.</p>
+      <button id="share" type="button" hidden>Поделиться файлом</button>
+      <a id="download" class="button secondary" hidden>Скачать файл</a>
+      <p id="action-status" role="status" class="muted"></p>
+      <details>
+        <summary>Если файл не получается сохранить</summary>
+        <label for="raw">Можно выделить весь текст, скопировать и отправить его ответственному.</label>
+        <textarea id="raw" readonly spellcheck="false" autocapitalize="off"></textarea>
+        <button id="select" type="button" class="secondary">Выделить весь текст</button>
+      </details>
+    </div>
+  </section>
+  <p class="muted">Надпись «копия не найдена» не доказывает потерю: данные могли остаться в другой вкладке, профиле, частном режиме или на другом адресе приложения. В таком случае пришлите скрин этой страницы, ничего не очищайте.</p>
+  <noscript>Для чтения локального черновика нужен JavaScript. Не очищайте данные Safari; пришлите скрин этого сообщения.</noscript>
+</main>
+<script type="module" src="/inventory-draft-recovery.mjs"></script>
+</body>
+</html>
