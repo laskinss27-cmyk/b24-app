@@ -10,8 +10,10 @@
 
 После аудита пользователь разрешил реализацию: пакет подготовлен локально
 в ветке `codex/remaining-state-sql`, результаты и режимы описаны ниже.
-Production SQL DDL/DML, переключение источников, деплой, коммит, push и удаление
-данных в рамках этого пакета пока не выполнялись.
+Первоначально пакет оставался локальным. После явного разрешения пользователя
+на полный цикл выполнены commit/push, backup/restore, миграции, backfill и
+production-переключение. Итог и контрольные отметки приведены в конце.
+Production-данные, существующие backup/restore и rollback-контейнеры не удалялись.
 Стандартная owner-vault авторизация допускает техническое обновление OAuth;
 business API ограничены `user.current`, `entity.item.get`, `app.option.get`.
 Секреты, тексты договоров, персональные настройки и содержимое записей
@@ -341,3 +343,71 @@ Compare выполняет только чтение; recover доставляе
 Для воспроизведения SQL-rehearsal используются только loopback и отдельный
 контейнер с тестовым паролем. Integration test создаёт случайные тестовые schema
 и user, затем убирает именно их; к production он не подключается.
+
+## Production: завершённый цикл 6 сентября 2026
+
+Пользователь явно разрешил завершение реализации, тесты, commit/push, deploy и
+повторные проверки. Код опубликован как fa6f78d в codex/remaining-state-sql;
+работающий image — b24-app:fa6f78d. Серверный checkout с существующими
+посторонними файлами не менялся: image собран из отдельного git archive.
+
+### Сохранность и перенос
+
+- До DDL: полный b24_app backup 20260906_041523, 64 таблицы,
+  Bitrix Disk dump/checksum IDs 107904/107902.
+- После DDL: 20260906_042653, 93 таблицы, IDs 107908/107906.
+- После backfill: 20260906_043041, 93 таблицы, IDs 107912/107910.
+- Все три архива прошли gzip/SHA-256 и внешний read-back. Restore-схемы с
+  соответствующими timestamps сохранены. Последняя схема точно совпала с
+  архивом по всем полным INSERT-выражениям и структуре; data hash:
+  59814ee2e74aa5cbc7ff02ef38a8de42d093d3601f9db4dc2715a49d64b66478.
+  Плановые изменения живого каталога/резервов после backup отмечались отдельно,
+  а не выдавались за расхождение восстановленного архива.
+- Эффективный /srv/b24-state целиком сохранён в root-only архив и извлечён в
+  отдельную копию; каждый файл проверен SHA-256. Дополнительно защищённым
+  export сохранены ctv_realize и только contract-sequence app options.
+  Эти файлы, включая OAuth vault, не публиковались в Git или выводе.
+- Миграции 0084–0112 применены отдельной migration identity: всего 112
+  migration records. Backfill выполнила отдельная DML-only identity.
+- Точный plan hash:
+  f9e3e6688b07d8e5c3b70f90ae9f13ea60598821a340556edd388b4f57c0bb78.
+  Перенесены 13 коллекций, 12 manifests DOCX и 2 external realization identities.
+  Повтор того же плана вернул applied=false; сверки — matches=true,
+  differences=[]. Один checkpoint и шесть module gates.
+
+### Работающий режим и проверки
+
+Все шесть B24_APP_*_STATE_SQL флагов этого пакета — primary.
+Переключение прошло через shadow и verified. После остановки verified
+контейнера и до запуска primary повторена полная parity, чтобы старый allocator
+не выдавал номера параллельно. SQL хранит бизнес-значения нормализованно;
+compatibility JSON/Bitrix-копии пока сохраняются для отката, DOCX остаются файлами.
+
+b24_app_remaining_runtime имеет 58 записей табличных privileges:
+SELECT/INSERT и ограниченный UPDATE; глобально только USAGE, schema grants,
+DELETE/DDL и checkpoint access отсутствуют. Новый секрет хранится root:root
+0600. Старые пароли не менялись; migration/backfill credentials не попадали в
+постоянный backend env. b24_app_remaining_backfill после завершения заблокирован
+через ACCOUNT LOCK, не удалён.
+
+После deploy:
+
+- Internal/public health, readiness всех включённых SQL-модулей и официальный
+  ERPNext API read успешны; erpnext_frappe_network подтверждена inspect.
+- Все 13 коллекций прочитаны в primary с callback, запрещающим legacy-read,
+  и совпали с источником. Все 12 DOCX прошли проверку; pending mirrors 0.
+- Авторизованные настоящие HTTP endpoints: матрицы 200 (2 шаблона),
+  журнал 200 (500 событий в выбранном окне), личные отчёты 200 (0),
+  список договоров одной сделки 200 (1). OAuth оставался только в памяти.
+- Повторный локальный пакет: 16/16 SQL tests и 50/50 contract/log/report/
+  migration/health tests. До deploy полный backend 438/438, frontend 135/135,
+  workspace typecheck и production build успешны.
+- Финальная проверка 04:33 UTC: restart count 0, ошибок уровня error и
+  предупреждений state-sql 0, повторная parity без отличий.
+
+Сохранены три rollback-контейнера:
+b24-backend-prev-remaining-{shadow,verified,primary}-fa6f78d.
+Бэкапы, restore-схемы и root-only evidence находятся на сервере; ни один из них
+не удалён. При откате сначала проверить/доставить pending compatibility copies,
+остановить текущий allocator и только затем вернуть предыдущий контейнер;
+SQL-версии, счётчики и документы не удалять.
