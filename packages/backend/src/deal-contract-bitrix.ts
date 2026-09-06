@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { remainingRuntime } from './remaining-sql/runtime.js';
 import { B24Client } from './b24/client.js';
 import {
 	allocatePersistentContractNumber,
@@ -93,12 +94,13 @@ export async function allocateContractNumber(
 	client: B24Client,
 	company: ContractParty,
 	requested: string,
+	command?: { idempotencyKey: string; requestHash: string },
 ): Promise<string> {
 	const inn = clean(company.requisite?.['RQ_INN']);
 	const key = inn ? `contract_seq_inn_${inn}` : `contract_seq_${company.id}`;
 	const legacyKey = `contract_seq_${company.id}`;
 	const startingNumber = contractNumberStartByInn(inn);
-	const options = await client.call<Record<string, unknown>>('app.option.get', {});
+	const options = remainingRuntime()?.modes.sequences === 'primary' ? {} : await client.call<Record<string, unknown>>('app.option.get', {});
 	const configuredValues = [options[key], options[legacyKey]]
 		.map(Number)
 		.filter(Number.isFinite);
@@ -109,5 +111,7 @@ export async function allocateContractNumber(
 		baseline,
 		previousKeys: key === legacyKey ? [] : [legacyKey],
 		requested,
+		...command,
+		baselineValues: Object.fromEntries(Object.entries(options).filter(([key]) => key.startsWith('contract_seq_')).map(([key,value]) => [key,Number(value)])),
 	});
 }

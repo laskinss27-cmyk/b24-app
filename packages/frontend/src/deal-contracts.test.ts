@@ -98,8 +98,18 @@ test('contract generation preserves complete input payload and document response
 	assert.deepEqual(await createDealContract(input), documentRow);
 	assert.deepEqual(requests[0], {
 		url: '/api/contracts/generate',
-		body: { domain: 'contracts.example', accessToken: 'contracts-token', ...input },
+		body: { domain: 'contracts.example', accessToken: 'contracts-token', ...input, idempotencyKey: requests[0]!.body['idempotencyKey'] },
 	});
+	assert.match(String(requests[0]!.body['idempotencyKey']), /^[0-9a-f-]{36}$/);
+});
+
+test('contract retries reuse the key until success; a new generation gets a fresh key',async()=> {
+	const input={dealId:502,companyId:7,templateId:'supply' as const,customerKind:'company' as const,contractDate:'2026-09-06',objectAddress:'',objectName:'',workDuration:14,workDurationUnit:'working' as const,supplyPrepaymentPercent:80,supplyDeliveryDays:35};
+	const requests=captureResponses([jsonResponse({ok:false,error:'retry'}),jsonResponse({ok:true,document:documentRow}),jsonResponse({ok:true,document:documentRow})]);
+	await assert.rejects(()=>createDealContract(input),/retry/);
+	await createDealContract(input);await createDealContract(input);
+	assert.equal(requests[0]!.body['idempotencyKey'],requests[1]!.body['idempotencyKey']);
+	assert.notEqual(requests[1]!.body['idempotencyKey'],requests[2]!.body['idempotencyKey']);
 });
 
 test('contract file reading and download preserve binary endpoint and stored filename', async () => {

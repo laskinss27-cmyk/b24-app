@@ -86,6 +86,7 @@ export async function fetchDealContracts(dealId: number): Promise<StoredDealCont
 	return json.documents;
 }
 
+const pendingContractKeys = new Map<string,string>();
 export async function createDealContract(input: {
 	dealId: number;
 	companyId: number;
@@ -99,15 +100,19 @@ export async function createDealContract(input: {
 	supplyPrepaymentPercent: number;
 	supplyDeliveryDays: number;
 }): Promise<StoredDealContractDocument> {
+	const fingerprint = JSON.stringify(input);
+	const idempotencyKey = pendingContractKeys.get(fingerprint) ?? crypto.randomUUID();
+	pendingContractKeys.set(fingerprint,idempotencyKey);
 	const res = await fetch('/api/contracts/generate', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...input }),
+		body: JSON.stringify({ ...bx24Auth(), ...input, idempotencyKey }),
 	});
 	const json = (await res.json()) as { ok?: boolean; error?: string; document?: StoredDealContractDocument };
 	if (!res.ok || !json.ok || !json.document) {
 		throw new Error(json.error ?? `не удалось сформировать договор (HTTP ${res.status})`);
 	}
+	pendingContractKeys.delete(fingerprint);
 	return json.document;
 }
 

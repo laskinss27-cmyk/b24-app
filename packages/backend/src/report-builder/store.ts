@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { StateBridge } from '../remaining-sql/runtime.js';
 import { ReportDefinitionSchema, validateReportDefinition, type ReportDefinition, type SavedReport } from './model.js';
 
 const SavedReportSchema = z.object({
@@ -12,7 +13,7 @@ const SavedReportSchema = z.object({
 	updatedAt: z.string().datetime(),
 }).strict();
 
-const StoreFileSchema = z.object({
+export const ReportStoreFileSchema = z.object({
 	version: z.literal(1),
 	reports: z.array(SavedReportSchema).max(200),
 }).strict();
@@ -27,6 +28,7 @@ export interface SaveReportInput {
 }
 
 export class ReportBuilderStore {
+	private readonly sql = new StateBridge<SavedReport[]>('reports');
 	private readonly queues = new Map<string, Promise<unknown>>();
 
 	constructor(private readonly root = join(process.env['B24_STATE_DIR'] ?? '/app/state', 'report-builder')) {}
@@ -36,10 +38,13 @@ export class ReportBuilderStore {
 		return join(this.root, `${ownerId}.json`);
 	}
 
-	private async read(ownerId: string): Promise<SavedReport[]> {
+	private read(ownerId: string): Promise<SavedReport[]> { return this.sql.read(ownerId, () => this.readLegacy(ownerId)); }
+	private write(ownerId: string, value: SavedReport[]): Promise<void> { return this.sql.write(ownerId, value, rows => this.writeLegacy(ownerId, rows)); }
+	async recoverMirror(ownerId: string) { return this.sql.recover(ownerId, rows => this.writeLegacy(ownerId, rows)); }
+	private async readLegacy(ownerId: string): Promise<SavedReport[]> {
 		try {
 			const raw = JSON.parse(await readFile(this.ownerPath(ownerId), 'utf8')) as unknown;
-			const parsed = StoreFileSchema.safeParse(raw);
+			const parsed = ReportStoreFileSchema.safeParse(raw);
 			if (!parsed.success) throw new Error('файл личных отчётов повреждён и не будет перезаписан автоматически');
 			return parsed.data.reports;
 		} catch (error) {
@@ -48,7 +53,7 @@ export class ReportBuilderStore {
 		}
 	}
 
-	private async write(ownerId: string, reports: SavedReport[]): Promise<void> {
+	private async writeLegacy(ownerId: string, reports: SavedReport[]): Promise<void> {
 		await mkdir(this.root, { recursive: true });
 		const target = this.ownerPath(ownerId);
 		const temporary = `${target}.${randomUUID()}.tmp`;
@@ -65,7 +70,7 @@ export class ReportBuilderStore {
 
 	private async queued<T>(ownerId: string, task: () => Promise<T>): Promise<T> {
 		const previous = this.queues.get(ownerId) ?? Promise.resolve();
-		const current = previous.catch(() => undefined).then(task);
+		const current = previous.catch(() => undefined).then(() => this.sql.mutate(ownerId, task));
 		this.queues.set(ownerId, current);
 		try {
 			return await current;
@@ -93,7 +98,7 @@ export class ReportBuilderStore {
 				if (input.expectedUpdatedAt && input.expectedUpdatedAt !== current.updatedAt) {
 					throw new ReportStoreConflictError('отчёт уже изменён в другом окне — откройте его заново');
 				}
-				const updated: SavedReport = { ...current, name, definition, updatedAt: now };
+				const updated: SavedReport = { ...current, name, definition, updatedAt: new Date(Math.max(Date.now(),Date.parse(current.updatedAt)+1)).toISOString() };
 				reports[index] = updated;
 				await this.write(ownerId, reports);
 				return updated;

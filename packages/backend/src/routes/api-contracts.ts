@@ -76,6 +76,7 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 
 	app.post('/api/contracts/generate', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & {
+			idempotencyKey?: unknown;
 			dealId?: unknown;
 			companyId?: unknown;
 			templateId?: unknown;
@@ -118,6 +119,7 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 		}
 		try {
 			const result = await generateDealContract(client, dealId, {
+				...(typeof body.idempotencyKey === 'string' ? { idempotencyKey: body.idempotencyKey } : {}),
 				companyId,
 				templateId: templateId as 'universal_work' | 'supply' | 'design' | 'smart_home',
 				customerKind: customerKind as 'company' | 'ip' | 'person',

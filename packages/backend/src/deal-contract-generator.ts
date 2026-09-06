@@ -16,7 +16,10 @@ import {
 	contractPartyAsKind,
 	contractVatRate,
 } from './deal-contract-parties.js';
-import { saveDealContractDocument } from './deal-contract-storage.js';
+import { saveDealContractDocument, listDealContractDocumentsReadOnly, readDealContractDocument } from './deal-contract-storage.js';
+import { findContractCommand } from './deal-contract-numbering.js';
+import { remainingRuntime } from './remaining-sql/runtime.js';
+import { contentHash } from './remaining-sql/codec.js';
 import { CONTRACT_TEMPLATES } from './deal-contract-templates.js';
 import { contractDateText } from './deal-contract-text.js';
 import type { ContractGenerateInput, StoredDealContractDocument } from './deal-contract-types.js';
@@ -35,6 +38,19 @@ export async function generateDealContract(
 	document: StoredDealContractDocument;
 }> {
 	const context = await getContractContext(client, dealId);
+	const primary = remainingRuntime()?.modes.contracts === 'primary';
+	const { idempotencyKey, ...request } = input;
+	const requestHash = contentHash({dealId,input:request});
+	if (primary && (!idempotencyKey || !/^[a-zA-Z0-9:_-]{16,160}$/.test(idempotencyKey))) throw new Error('Обновите страницу договора: нужен ключ повторного запроса');
+	let command = primary ? await findContractCommand(idempotencyKey!,requestHash) : null;
+	if (command) {
+		const previous = (await listDealContractDocumentsReadOnly(dealId)).find(row => row.id === command!.documentId);
+		if (previous) {
+			const stored = await readDealContractDocument(dealId,previous.id);
+			await syncContractDeal(client,stored.document);
+			return { file:stored.file, filename:stored.document.filename, contractNumber:stored.document.contractNumber, document:stored.document };
+		}
+	}
 	const company = context.ownCompanies.find((item) => item.id === input.companyId);
 	if (!company) throw new Error('выбранная наша компания не найдена в Битрикс24');
 	if (company.missing.length) throw new Error(`у нашей компании не заполнено: ${company.missing.join(', ')}`);
@@ -66,8 +82,9 @@ export async function generateDealContract(
 	if (!lines.length) throw new Error(template.id === 'supply'
 		? 'в сделке нет товаров для спецификации'
 		: 'в сделке нет товаров или работ для сметы');
-	const contractNumber = await allocateContractNumber(client, company, '');
-	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : new Date().toISOString().slice(0, 10);
+	const contractNumber = await allocateContractNumber(client, company, '', primary ? {idempotencyKey:idempotencyKey!,requestHash} : undefined);
+	if (primary) command = await findContractCommand(idempotencyKey!,requestHash);
+	const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(input.contractDate) ? input.contractDate : (command?.createdAt ?? new Date().toISOString()).slice(0, 10);
 	const contractDate = contractDateText(dateIso);
 	const file = await buildContractDocx({
 		templateId: input.templateId,
@@ -84,19 +101,9 @@ export async function generateDealContract(
 		lines,
 	});
 	const vatRate = contractVatRate(company);
-	await client.call('crm.deal.update', {
-		id: dealId,
-		fields: {
-			MYCOMPANY_ID: company.id,
-			[CONTRACT_NUMBER_FIELD]: contractNumber,
-			[CONTRACT_COMPANY_FIELD]: String(company.id),
-			[CONTRACT_VAT_FIELD]: String(vatRate),
-			[CONTRACT_DATE_FIELD]: dateIso,
-		},
-	});
 	const filename = contractFilename(input.templateId, contractNumber, dateIso, company);
 	const document: StoredDealContractDocument = {
-		id: randomUUID(),
+		id: command?.documentId ?? randomUUID(),
 		dealId,
 		contractNumber,
 		templateId: input.templateId,
@@ -106,16 +113,25 @@ export async function generateDealContract(
 		customerName: customer.shortName || customer.fullName || customer.title,
 		contractDate,
 		contractDateIso: dateIso,
-		createdAt: new Date().toISOString(),
+		createdAt: command?.createdAt ?? new Date().toISOString(),
 		filename,
 		vatRate,
 		total: lines.reduce((sum, line) => sum + line.total, 0),
 	};
+	if (!primary) await syncContractDeal(client,document);
 	await saveDealContractDocument(document, file);
+	if (primary) await syncContractDeal(client,document);
 	return {
 		file,
 		filename,
 		contractNumber,
 		document,
 	};
+}
+
+async function syncContractDeal(client: B24Client, document: StoredDealContractDocument) {
+	await client.call('crm.deal.update', {id:document.dealId,fields:{
+		MYCOMPANY_ID:document.companyId, [CONTRACT_NUMBER_FIELD]:document.contractNumber,
+		[CONTRACT_COMPANY_FIELD]:String(document.companyId), [CONTRACT_VAT_FIELD]:String(document.vatRate), [CONTRACT_DATE_FIELD]:document.contractDateIso,
+	}});
 }

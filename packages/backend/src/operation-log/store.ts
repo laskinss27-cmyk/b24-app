@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { OperationLogEvent, OperationLogListFilter } from './model.js';
 import { isOperationLogEvent } from './model.js';
+import { StateBridge } from '../remaining-sql/runtime.js';
 
 export interface OperationLogStoreOptions {
 	filePath: string;
@@ -14,6 +15,7 @@ function normalizeLimit(value: number | undefined): number {
 }
 
 export class OperationLogStore {
+	private readonly sql = new StateBridge<OperationLogEvent[]>('log');
 	private readonly filePath: string;
 	private readonly maxEntries: number;
 	private queue: Promise<void> = Promise.resolve();
@@ -24,13 +26,18 @@ export class OperationLogStore {
 	}
 
 	async append(event: OperationLogEvent): Promise<void> {
+		if (this.sql.mode === 'primary') {
+			await this.sql.mutate('global', () => this.sql.write('global', [event], rows => this.replaceLegacy(rows.slice(-this.maxEntries))));
+			return;
+		}
 		const write = async (): Promise<void> => {
 			const events = await this.readAll();
 			events.push(event);
 			const kept = events.slice(-this.maxEntries);
 			await this.replace(kept);
 		};
-		this.queue = this.queue.then(write, write);
+		const mutate = () => this.sql.mutate('global', write);
+		this.queue = this.queue.then(mutate, mutate);
 		await this.queue;
 	}
 
@@ -44,7 +51,10 @@ export class OperationLogStore {
 			.reverse();
 	}
 
-	private async readAll(): Promise<OperationLogEvent[]> {
+	private readAll(): Promise<OperationLogEvent[]> { return this.sql.read('global', () => this.readLegacy()); }
+	private replace(value: OperationLogEvent[]): Promise<void> { return this.sql.write('global', value, rows => this.replaceLegacy(rows)); }
+	async recoverMirror() { return this.sql.recover('global', rows => this.replaceLegacy(rows.slice(-this.maxEntries))); }
+	private async readLegacy(): Promise<OperationLogEvent[]> {
 		let raw: string;
 		try {
 			raw = await readFile(this.filePath, 'utf8');
@@ -63,7 +73,7 @@ export class OperationLogStore {
 		});
 	}
 
-	private async replace(events: OperationLogEvent[]): Promise<void> {
+	private async replaceLegacy(events: OperationLogEvent[]): Promise<void> {
 		await mkdir(dirname(this.filePath), { recursive: true });
 		const temporary = `${this.filePath}.${process.pid}.tmp`;
 		const content = events.map((event) => JSON.stringify(event)).join('\n');

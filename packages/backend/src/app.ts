@@ -51,6 +51,7 @@ import type { TransferSqlWriteRuntime } from './transfers/sql-runtime.js';
 import type { TransferRequestSqlWriteRuntime } from './transfers/request-sql-runtime.js';
 import type { InventorySqlWriteRuntime } from './inventory-sql/runtime.js';
 import type { RepairSqlWriteRuntime } from './repair-sql/runtime.js';
+import { remainingRuntime, closeRemainingRuntime } from './remaining-sql/runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -138,7 +139,9 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	registerOperationLog(app);
 
 	registerHealthRoute(app);
-	registerReadinessRoute(app, database, reservations, transferSqlWriter?.enabled ? transferSqlWriter : undefined, transferRequestSqlWriter?.enabled ? transferRequestSqlWriter : undefined, inventorySqlWriter?.enabled ? inventorySqlWriter : undefined, repairSqlWriter?.enabled ? repairSqlWriter : undefined);
+	const remaining = remainingRuntime();
+	registerReadinessRoute(app, database, reservations, transferSqlWriter?.enabled ? transferSqlWriter : undefined, transferRequestSqlWriter?.enabled ? transferRequestSqlWriter : undefined, inventorySqlWriter?.enabled ? inventorySqlWriter : undefined, repairSqlWriter?.enabled ? repairSqlWriter : undefined, remaining ?? undefined);
+	if (remaining) { await remaining.ping(); app.addHook('onClose',closeRemainingRuntime); }
 	if (database) app.addHook('onClose', async () => database.close());
 	if (reservations) app.addHook('onClose', async () => reservations.close());
 	if (transferSqlWriter) app.addHook('onClose', async () => transferSqlWriter.close());

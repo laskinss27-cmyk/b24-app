@@ -33,6 +33,7 @@ export function registerReadinessRoute(
 	transferRequestSqlWriter?: TransferRequestSqlWriteRuntime,
 	inventorySqlWriter?: InventorySqlWriteRuntime,
 	repairSqlWriter?: RepairSqlWriteRuntime,
+	remaining?: { ping(): Promise<void> },
 ): void {
 	app.get('/ready', async (_request, reply) => {
 		const checks: Record<string, { status: 'disabled' | 'up' | 'down' }> = {
@@ -44,6 +45,10 @@ export function registerReadinessRoute(
 		if (inventorySqlWriter) checks['inventorySqlWriter'] = { status: inventorySqlWriter.enabled ? 'up' : 'disabled' };
 		if (repairSqlWriter) checks['repairSqlWriter'] = { status: repairSqlWriter.enabled ? 'up' : 'disabled' };
 		let ok = true;
+		if (remaining) {
+			try { await remaining.ping(); checks['remainingSql']={status:'up'}; }
+			catch { checks['remainingSql']={status:'down'}; ok=false; }
+		}
 		if (database && database.mode !== 'off') {
 			try { await database.ping(); } catch { checks['database'] = { status: 'down' }; ok = false; }
 		}

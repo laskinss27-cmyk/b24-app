@@ -59,6 +59,7 @@ export interface ContractContext {
 }
 
 export interface ContractGenerateInput {
+	idempotencyKey?: string;
 	companyId: number;
 	templateId: ContractTemplateId;
 	customerKind: ContractPartyKind;

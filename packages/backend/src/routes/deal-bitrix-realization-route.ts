@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { ensureRealizeEntity, REALIZE_ENTITY } from '../b24/placement.js';
+import { ensureRealizeEntity } from '../b24/placement.js';
+import { saveRealizationMemory } from '../remaining-sql/realizations.js';
+import { remainingRuntime } from '../remaining-sql/runtime.js';
 import { loadDealOrderInfo } from '../deal-order-info.js';
 
 interface AuthBody {
@@ -168,12 +170,8 @@ export function registerDealBitrixRealizationRoute(app: FastifyInstance, clientF
 			for (const it of items) if (it.storeId > 0) stores[String(it.rowId)] = { storeId: it.storeId, storeName: it.storeName };
 			if (Object.keys(stores).length) {
 				try {
-					await ensureRealizeEntity(client);
-					await client.call('entity.item.add', {
-						ENTITY: REALIZE_ENTITY,
-						NAME: `ship_${shipmentId}`,
-						DETAIL_TEXT: JSON.stringify({ dealId, orderId, shipmentId, stores }),
-					});
+					if (remainingRuntime()?.modes.realizations !== 'primary') await ensureRealizeEntity(client);
+					await saveRealizationMemory(client,{dealId,orderId,shipmentId,stores});
 					step('склады партии записаны в память приложения');
 				} catch (err) {
 					app.log.warn({ shipmentId }, `[api/deal/realize] память складов не записалась (не критично) — ${errInfo(err)}`);

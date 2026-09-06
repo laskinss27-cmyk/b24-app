@@ -1,0 +1,23 @@
+CREATE TABLE app_contract_documents (
+  snapshot_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  node_no INT UNSIGNED NOT NULL,
+  parent_no INT UNSIGNED NOT NULL,
+  ordinal_no INT UNSIGNED NOT NULL,
+  f_id LONGTEXT NOT NULL,
+  f_deal_id DOUBLE NOT NULL,
+  f_contract_number LONGTEXT NOT NULL,
+  f_template_id LONGTEXT NOT NULL,
+  f_template_title LONGTEXT NOT NULL,
+  f_company_id DOUBLE NOT NULL,
+  f_company_name LONGTEXT NOT NULL,
+  f_customer_name LONGTEXT NOT NULL,
+  f_contract_date LONGTEXT NOT NULL,
+  f_contract_date_iso LONGTEXT NOT NULL,
+  f_created_at LONGTEXT NOT NULL,
+  f_filename LONGTEXT NOT NULL,
+  f_vat_rate DOUBLE NOT NULL,
+  f_total DOUBLE NOT NULL,
+  PRIMARY KEY (snapshot_id,node_no),
+  UNIQUE KEY ordered_child (snapshot_id,parent_no,ordinal_no),
+  FOREIGN KEY (snapshot_id) REFERENCES app_state_revisions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

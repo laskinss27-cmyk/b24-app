@@ -1,5 +1,6 @@
 import type { B24Client } from './b24/client.js';
-import { REALIZE_ENTITY } from './b24/placement.js';
+import { readRealizationMemory } from './remaining-sql/realizations.js';
+import { remainingRuntime } from './remaining-sql/runtime.js';
 import { ErpClient } from './erp/client.js';
 import { coreStoreId, listActiveStoreTitles } from './erp/operations.js';
 
@@ -112,10 +113,8 @@ export async function loadDealOrderInfo(client: B24Client, dealId: number): Prom
 	// Склады партий — из нашей памяти (entity): Битрикс склад черновика наружу не отдаёт.
 	if (info.shipments.length) {
 		try {
-			const mem = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REALIZE_ENTITY });
-			for (const m of mem ?? []) {
-				let data: { shipmentId?: number; stores?: Record<string, { storeName?: string }> };
-				try { data = JSON.parse(String(m['DETAIL_TEXT'] ?? '{}')) as typeof data; } catch { continue; }
+			const mem = await readRealizationMemory(client);
+			for (const data of mem) {
 				const part = info.shipments.find((s) => s.id === Number(data.shipmentId));
 				if (part && data.stores) {
 					part.stores = Object.fromEntries(
@@ -123,7 +122,10 @@ export async function loadDealOrderInfo(client: B24Client, dealId: number): Prom
 					);
 				}
 			}
-		} catch { /* памяти нет/не читается — партии просто без склада */ }
+		} catch (error) {
+			if (remainingRuntime()?.modes.realizations === 'primary') throw error;
+			/* Legacy: памяти нет/не читается — партии без склада. */
+		}
 	}
 	return info;
 }

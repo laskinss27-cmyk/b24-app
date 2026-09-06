@@ -1,0 +1,20 @@
+CREATE TABLE app_operation_events (
+  snapshot_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  node_no INT UNSIGNED NOT NULL,
+  parent_no INT UNSIGNED NOT NULL,
+  ordinal_no INT UNSIGNED NOT NULL,
+  f_id LONGTEXT NOT NULL,
+  f_occurred_at LONGTEXT NOT NULL,
+  f_level LONGTEXT NOT NULL,
+  f_area LONGTEXT NOT NULL,
+  f_operation LONGTEXT NOT NULL,
+  f_outcome LONGTEXT NOT NULL,
+  f_summary LONGTEXT NOT NULL,
+  has_f_actor BOOLEAN NOT NULL CHECK (has_f_actor IN (0,1)),
+  has_f_deal BOOLEAN NOT NULL CHECK (has_f_deal IN (0,1)),
+  has_f_documents BOOLEAN NOT NULL CHECK (has_f_documents IN (0,1)),
+  has_f_details BOOLEAN NOT NULL CHECK (has_f_details IN (0,1)),
+  PRIMARY KEY (snapshot_id,node_no),
+  UNIQUE KEY ordered_child (snapshot_id,parent_no,ordinal_no),
+  FOREIGN KEY (snapshot_id) REFERENCES app_state_revisions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

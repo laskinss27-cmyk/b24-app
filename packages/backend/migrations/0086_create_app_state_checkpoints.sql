@@ -1,0 +1,5 @@
+CREATE TABLE app_state_checkpoints (
+ plan_hash CHAR(64) CHARACTER SET ascii NOT NULL PRIMARY KEY,
+ collection_count INT UNSIGNED NOT NULL,
+ applied_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB;

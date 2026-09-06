@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import { StateBridge } from './remaining-sql/runtime.js';
 
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const ActorSchema = z.object({
@@ -28,7 +29,7 @@ const TemplateSchema = z.object({
 	updatedAt: z.string().datetime(),
 	updatedBy: ActorSchema,
 }).strict();
-const FileSchema = z.object({ version: z.literal(1), templates: z.array(TemplateSchema).max(100) }).strict();
+export const MatrixFileSchema = z.object({ version: z.literal(1), templates: z.array(TemplateSchema).max(100) }).strict();
 
 export type AssortmentMatrixTemplateRow = z.infer<typeof TemplateRowSchema>;
 export type AssortmentMatrixTemplateActor = z.infer<typeof ActorSchema>;
@@ -48,13 +49,17 @@ export interface SaveAssortmentMatrixTemplateInput {
 export class AssortmentMatrixTemplateConflictError extends Error {}
 
 export class AssortmentMatrixTemplateStore {
+	private readonly sql = new StateBridge<AssortmentMatrixTemplate[]>('matrix');
 	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(private readonly filePath = join(process.env['B24_STATE_DIR'] ?? '/app/state', 'assortment-matrix', 'templates.json')) {}
 
-	private async read(): Promise<AssortmentMatrixTemplate[]> {
+	private read(): Promise<AssortmentMatrixTemplate[]> { return this.sql.read('global', () => this.readLegacy()); }
+	private write(value: AssortmentMatrixTemplate[]): Promise<void> { return this.sql.write('global', value, rows => this.writeLegacy(rows)); }
+	async recoverMirror() { return this.sql.recover('global', rows => this.writeLegacy(rows)); }
+	private async readLegacy(): Promise<AssortmentMatrixTemplate[]> {
 		try {
-			const parsed = FileSchema.safeParse(JSON.parse(await readFile(this.filePath, 'utf8')) as unknown);
+			const parsed = MatrixFileSchema.safeParse(JSON.parse(await readFile(this.filePath, 'utf8')) as unknown);
 			if (!parsed.success) throw new Error('файл шаблонов матрицы повреждён и не будет перезаписан автоматически');
 			return parsed.data.templates;
 		} catch (error) {
@@ -63,7 +68,7 @@ export class AssortmentMatrixTemplateStore {
 		}
 	}
 
-	private async write(templates: AssortmentMatrixTemplate[]): Promise<void> {
+	private async writeLegacy(templates: AssortmentMatrixTemplate[]): Promise<void> {
 		await mkdir(dirname(this.filePath), { recursive: true });
 		const temporary = `${this.filePath}.${randomUUID()}.tmp`;
 		await writeFile(temporary, `${JSON.stringify({ version: 1, templates }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -78,7 +83,7 @@ export class AssortmentMatrixTemplateStore {
 	}
 
 	private async queued<T>(task: () => Promise<T>): Promise<T> {
-		const current = this.queue.catch(() => undefined).then(task);
+		const current = this.queue.catch(() => undefined).then(() => this.sql.mutate('global', task));
 		this.queue = current;
 		try {
 			return await current;
@@ -120,7 +125,8 @@ export class AssortmentMatrixTemplateStore {
 				if (input.expectedUpdatedAt && input.expectedUpdatedAt !== current.updatedAt) {
 					throw new AssortmentMatrixTemplateConflictError('шаблон уже изменён другим пользователем — открой его заново');
 				}
-				const updated = TemplateSchema.parse({ ...current, name, from, to, selectedStores, salesScope: input.salesScope, rows, updatedAt: now, updatedBy: normalizedActor });
+				const updatedAt = new Date(Math.max(Date.now(),Date.parse(current.updatedAt)+1)).toISOString();
+				const updated = TemplateSchema.parse({ ...current, name, from, to, selectedStores, salesScope: input.salesScope, rows, updatedAt, updatedBy: normalizedActor });
 				templates[index] = updated;
 				await this.write(templates);
 				return updated;
