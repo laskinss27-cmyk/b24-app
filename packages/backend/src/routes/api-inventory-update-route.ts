@@ -8,6 +8,7 @@ import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 import { loadInventoryItems, updateInventoryData } from './inventory-storage.js';
+import { inventoryDraftSaveDecision } from './inventory-draft-save-guard.js';
 
 export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/update', async (req, reply) => {
@@ -50,6 +51,23 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 				const status = String(pt['status'] ?? 'idle');
 				const now = new Date().toISOString();
 				const meId = String(b.userId ?? '');
+				const comments = b.comments && typeof b.comments === 'object'
+					? Object.fromEntries(Object.entries(b.comments)
+						.filter(([productId, value]) => /^\d+$/.test(productId) && Number(productId) > 0 && typeof value === 'string')
+						.slice(0, 2000)
+						.map(([productId, value]) => [productId, String(value).trim().slice(0, 500)])
+						.filter(([, value]) => Boolean(value)))
+					: null;
+				if (b.action === 'saveDraft') {
+					const decision = inventoryDraftSaveDecision(pt, b, comments, data['status']);
+					if (decision.kind === 'reject') {
+						app.log.warn({ inventoryId: b.inventoryId, storeId: b.storeId, code: decision.code }, '[inventory/draft] rejected');
+						return { ok: false, error: decision.error, code: decision.code };
+					}
+					if (decision.kind === 'already_saved') {
+						return { ok: true, draftSaved: true, alreadySaved: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
+					}
+				}
 				// Active inventories created before snapshot support are frozen on their next write.
 				// Submitted history remains untouched and keeps the legacy reconciliation path.
 				if ((b.action === 'claim' || b.action === 'saveDraft') && !inventorySnapshotQuantities(pt)) {
@@ -68,13 +86,6 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 					pt = frozenPoint;
 					app.log.info({ inventoryId: b.inventoryId, storeId: b.storeId }, '[api/inventory/update] legacy stock snapshot captured');
 				}
-				const comments = b.comments && typeof b.comments === 'object'
-					? Object.fromEntries(Object.entries(b.comments)
-						.filter(([productId, value]) => /^\d+$/.test(productId) && Number(productId) > 0 && typeof value === 'string')
-						.slice(0, 2000)
-						.map(([productId, value]) => [productId, String(value).trim().slice(0, 500)])
-						.filter(([, value]) => Boolean(value)))
-					: null;
 
 				if (b.action === 'claim') {
 					if (status === 'submitted') return reply.code(200).send({ ok: false, error: 'точка уже отправлена' });
@@ -85,14 +96,6 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 				} else if (b.action === 'saveDraft') {
 					const sessionId = String(b.draftSessionId ?? '').trim().slice(0, 80);
 					const sequence = Number(b.draftSequence ?? 0);
-					const storedSessionId = String(pt['draftSessionId'] ?? '');
-					const storedSequence = Number(pt['draftSequence'] ?? 0);
-					if (sessionId && sessionId === storedSessionId && Number.isInteger(sequence) && sequence <= storedSequence) {
-						return { ok: true, ignored: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
-					}
-					if (status === 'submitted' || status === 'reconciled') {
-						return { ok: true, ignored: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
-					}
 					pt['draft'] = b.draft ?? {};
 					if (comments) pt['comments'] = comments;
 					pt['draftUpdatedAt'] = now;
@@ -157,10 +160,10 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 					data,
 					sourceItem: item,
 				});
-				app.log.info({ action: b.action, storeId: b.storeId }, '[api/inventory/update] ok');
-				return { ok: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
+				app.log.info({ action: b.action, inventoryId: b.inventoryId, storeId: b.storeId }, '[api/inventory/update] ok');
+				return { ok: true, ...(b.action === 'saveDraft' ? { draftSaved: true } : {}), draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
 			} catch (err) {
-				app.log.error({ action: b.action }, `[api/inventory/update] failed — ${inventoryErrorInfo(err)}`);
+				app.log.error({ action: b.action, inventoryId: b.inventoryId, storeId: b.storeId }, `[api/inventory/update] failed — ${inventoryErrorInfo(err)}`);
 				return reply.code(200).send({ ok: false, error: inventoryErrorInfo(err) });
 			}
 		});

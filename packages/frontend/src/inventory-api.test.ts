@@ -100,6 +100,15 @@ test('inventory deletion preserves authenticated endpoint payload', async () => 
 	});
 });
 
+test('ignored draft is never a successful save, including an older backend reply', async () => {
+	captureResponses([{ ok: true, ignored: true, draftUpdatedAt: '2026-09-04T11:43:17Z' }]);
+	await assert.rejects(saveDraftPoint('21648', -100, '1', { 42: 3 }, {}), /не подтвердил сохранение/);
+	captureResponses([{ ok: false, error: 'Черновик не сохранён: ревизия уже отправлена' }]);
+	await assert.rejects(saveDraftPoint('21648', -100, '1', { 42: 3 }, {}), /ревизия уже отправлена/);
+	captureResponses([{ ok: true, draftSaved: true, alreadySaved: true }]);
+	await assert.doesNotReject(saveDraftPoint('21648', -100, '1', { 42: 3 }, {}));
+});
+
 test('ERP inventory documents preserve preview fallbacks and save-submit endpoints', async () => {
 	const draft = {
 		issue: { name: 'STE-I', status: 'draft', lines: 1 },

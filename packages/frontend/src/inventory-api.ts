@@ -132,6 +132,9 @@ interface InventoryUpdateResponse {
 async function postInventoryUpdate(payload: Record<string, unknown>, keepalive = false): Promise<InventoryUpdateResponse> {
 	const json = await postInventoryApi<InventoryUpdateResponse>('/api/inventory/update', payload, keepalive);
 	if (!json.ok) throw new Error(json.error ?? 'не удалось обновить точку');
+	if (payload['action'] === 'saveDraft' && json.ignored === true) {
+		throw new Error('Сервер не подтвердил сохранение черновика. Не закрывайте вкладку и не обновляйте страницу; попросите ответственного проверить статус ревизии.');
+	}
 	return json;
 }
 

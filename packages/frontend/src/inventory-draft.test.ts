@@ -7,6 +7,7 @@ import {
 	enteredInventoryDifferences,
 	inventoryLineNeedsAttention,
 	inventoryDraftStorageKey,
+	inventoryCountReadOnlyReason,
 	readInventoryLocalDraft,
 	writeInventoryLocalDraft,
 } from './inventory-draft.js';
@@ -23,6 +24,14 @@ class MemoryStorage implements Storage {
 
 const localStorage = new MemoryStorage();
 Object.defineProperty(globalThis, 'window', { value: { localStorage }, configurable: true });
+
+test('mobile count does not reopen an already submitted point; explicitly reopened work remains available', () => {
+	assert.equal(inventoryCountReadOnlyReason('active', 'in_progress'), null);
+	assert.equal(inventoryCountReadOnlyReason('active', 'idle'), null);
+	assert.match(inventoryCountReadOnlyReason('active', 'submitted')!, /вернуть её в работу/);
+	assert.match(inventoryCountReadOnlyReason('active', 'reconciled')!, /вернуть её в работу/);
+	assert.match(inventoryCountReadOnlyReason('closed', 'in_progress')!, /закрыта/);
+});
 
 test('inventory draft survives a page reload until it is explicitly cleared', () => {
 	const key = inventoryDraftStorageKey('42', 17, 'count');

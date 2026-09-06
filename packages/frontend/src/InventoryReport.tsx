@@ -105,6 +105,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 	const [actionErr, setActionErr] = useState<string | null>(null);
 	const [syncState, setSyncState] = useState<'saved' | 'pending' | 'saving' | 'offline' | 'error'>(restoredLocal ? 'pending' : 'saved');
 	const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+	const [syncError, setSyncError] = useState<string | null>(null);
 	/** Вручную добавленные позиции (нет в остатках, физически есть) — учёт 0. */
 	const [added, setAdded] = useState<InvLine[]>([]);
 	const countsRef = useRef(counts);
@@ -157,11 +158,15 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 					});
 					if (mountedRef.current) {
 						setSyncState('saved');
+						setSyncError(null);
 						setLastSavedAt(new Date().toISOString());
 					}
 				}
 			} catch (error) {
-				if (mountedRef.current) setSyncState(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+				if (mountedRef.current) {
+					setSyncState(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+					setSyncError(error instanceof Error ? error.message : String(error));
+				}
 				if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
 				retryTimerRef.current = setTimeout(() => {
 					void flushLatestRef.current().catch(() => undefined);
@@ -404,7 +409,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 			: syncState === 'offline'
 				? 'Нет связи — изменения сохранены на устройстве и уйдут после восстановления интернета.'
 				: syncState === 'error'
-					? 'Сервер пока не принял черновик — он сохранён на устройстве, повторю автоматически.'
+					? (syncError ?? 'Сервер не подтвердил сохранение. Не закрывайте вкладку и не обновляйте страницу.')
 					: lastSavedAt
 						? `Черновик сохранён на сервере в ${new Date(lastSavedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
 						: 'Автосохранение включено.';

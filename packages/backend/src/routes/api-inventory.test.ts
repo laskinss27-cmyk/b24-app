@@ -12,6 +12,9 @@ import type { Config } from '../config.js';
 import { refreshAccessToken } from '../b24/oauth.js';
 import { registerMobileSessionAuthHook } from '../mobile-auth-hook.js';
 import { computeInventoryReconciliationLines } from './api-inventory-reconciliation-helpers.js';
+import { inventoryDraftSaveDecision } from './inventory-draft-save-guard.js';
+import { registerInventoryUpdateRoute } from './api-inventory-update-route.js';
+import { B24Client } from '../b24/client.js';
 import {
 	createInventoryStockSnapshot,
 	captureInventoryPointSnapshots,
@@ -38,6 +41,50 @@ const mobileConfig: Config = {
 	appClientSecret: 'secret',
 	nodeEnv: 'test',
 };
+
+test('draft acknowledgements reject closed points, stale versions and changed retries without mutating facts', () => {
+	const point = { status: 'in_progress', draft: { 42: 0 }, comments: { 42: 'сверено' }, draftSessionId: 'phone', draftSequence: 220 };
+	const request = { draft: { 42: 0 }, draftSessionId: 'phone', draftSequence: 220 };
+	const before = structuredClone(point);
+	assert.deepEqual(inventoryDraftSaveDecision(point, request, { 42: 'сверено' }, 'active'), { kind: 'already_saved' });
+	for (const status of ['submitted', 'reconciled', 'unknown']) {
+		assert.equal(inventoryDraftSaveDecision({ ...point, status }, request, {}, 'active').kind, 'reject');
+	}
+	assert.equal(inventoryDraftSaveDecision(point, request, {}, 'closed').kind, 'reject');
+	assert.equal(inventoryDraftSaveDecision(point, { ...request, draftSequence: 219 }, null, 'active').kind, 'reject');
+	assert.equal(inventoryDraftSaveDecision(point, { ...request, draft: { 42: 1 } }, null, 'active').kind, 'reject');
+	assert.equal(inventoryDraftSaveDecision(point, request, { 42: 'изменён' }, 'active').kind, 'reject');
+	assert.equal(inventoryDraftSaveDecision(point, { ...request, draftSequence: 221 }, {}, 'active').kind, 'write');
+	assert.equal(inventoryDraftSaveDecision(point, { draft: { 42: 1 } }, null, 'active').kind, 'write');
+	assert.deepEqual(point, before);
+});
+
+test('existing phone API receives an error for ignored saves; reopened point still saves and exact retry is safe', async (t) => {
+	let state: Record<string, unknown> = { status: 'active', points: [{ storeId: -100, status: 'submitted', draft: { 42: 2 } }] };
+	let writes = 0;
+	t.mock.method(B24Client.prototype, 'call', async (method: string, params: Record<string, unknown>) => {
+		if (method === 'entity.item.update') { writes++; state = JSON.parse(String(params['DETAIL_TEXT'])) as Record<string, unknown>; }
+		else assert.equal(method, 'entity.add');
+		return true;
+	});
+	t.mock.method(B24Client.prototype, 'callWithMeta', async (method: string) => {
+		assert.equal(method, 'entity.item.get');
+		return { result: [{ ID: '42', NAME: 'Ревизия', DETAIL_TEXT: JSON.stringify(state) }] };
+	});
+	const app = Fastify(); app.decorate('config', mobileConfig); registerInventoryUpdateRoute(app);
+	try {
+		const payload = { domain: mobileConfig.portalDomain, accessToken: 'test-only', inventoryId: '42', storeId: -100,
+			action: 'saveDraft', userId: '1', draft: { 42: 3, 43: 0 }, comments: {}, draftSessionId: 'phone', draftSequence: 221 };
+		const send = async (body = payload) => (await app.inject({ method: 'POST', url: '/api/inventory/update', payload: body })).json();
+		const rejected = await send(); assert.equal(rejected.ok, false); assert.equal(rejected.code, 'INVENTORY_DRAFT_LOCKED'); assert.equal(writes, 0);
+		state = { status: 'active', points: [{ storeId: -100, status: 'in_progress', draft: { 42: 2 },
+			stockSnapshot: { version: 1, capturedAt: '2026-09-04T10:00:00Z', lines: [[42, 3]] } }] };
+		const saved = await send(); assert.equal(saved.ok, true); assert.equal(saved.draftSaved, true); assert.equal(writes, 1);
+		assert.deepEqual((state['points'] as Array<Record<string, unknown>>)[0]?.['draft'], payload.draft);
+		const retry = await send(); assert.equal(retry.ok, true); assert.equal(retry.alreadySaved, true); assert.equal(retry.ignored, undefined); assert.equal(writes, 1);
+		assert.equal((await send({ ...payload, draftSequence: 220 })).ok, false); assert.equal(writes, 1);
+	} finally { await app.close(); }
+});
 
 test('ERP image proxy accepts real public filenames but rejects traversal and nested paths', () => {
 	assert.equal(isSafePublicErpFilePath('/files/images _23_.jpg'), true);
