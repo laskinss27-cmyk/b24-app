@@ -544,7 +544,7 @@ public health, readiness, официальный ERP read, сеть `erpnext_fra
 ### SQL ремонтов, подготовка 2026-09-06
 
 Нормализованный контур ремонтов описан в
-[sql-repairs-2026-09-06.md](sql-repairs-2026-09-06.md). Миграции `0075`–`0082`,
+[sql-repairs-2026-09-06.md](sql-repairs-2026-09-06.md). Миграции `0075`–`0083`,
 backfill, отдельный runtime-user и флаги `B24_APP_REPAIR_SQL_READ/WRITE`
 применяются на production только после явного разрешения и свежего полного
 backup/restore drill. Порядок переключения: `off` → `shadow` → `verified`

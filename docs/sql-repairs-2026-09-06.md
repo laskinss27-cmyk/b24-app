@@ -9,7 +9,11 @@ tables. Checkpoints, identities, idempotent commands, immutable mutations and a
 payload-free Bitrix compatibility outbox are separate tables; none contains a
 JSON column.
 
-Migrations `0075`–`0082` only create empty tables. The backfill is manual,
+Migrations `0075`–`0082` only create empty tables. Append-only migration `0083`
+expands `repair_media.media_url` to `MEDIUMTEXT`, because the current source
+stores some repair photos as embedded `data:` URLs (the production maximum
+observed on 6 September was 234,135 characters). The parser keeps a bounded
+4,000,000-character limit. The backfill is manual,
 checkpointed by an exact deterministic hash, runs under one advisory lock and
 fails closed for incomplete pagination, invalid JSON, unknown fields, duplicate
 identities or any value without a normalized destination. Runtime deletion is a
@@ -37,7 +41,7 @@ replacement, source switch or deploy was performed by this local step.
 ## Production sequence (requires an explicit command)
 
 1. Run the full `b24_app` backup, external read-back and preserved restore drill.
-2. Apply migrations `0075`–`0082` with the migration identity.
+2. Apply migrations `0075`–`0083` with the migration identity.
 3. Grant the one-shot backfill identity `SELECT/INSERT/UPDATE` only on the eight
    repair tables, then run the dry plan and apply only its exact printed hash.
 4. Create a permanent repair runtime identity with table-scoped

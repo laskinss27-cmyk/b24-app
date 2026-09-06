@@ -23,6 +23,8 @@ const TOP_LEVEL_FIELDS = [
 	'files', 'createdAt', 'createdById', 'createdByName', 'history', 'sqlPublicId',
 ] as const;
 
+const MAX_MEDIA_URL_CHARACTERS = 4_000_000;
+
 function object(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -88,7 +90,7 @@ function mediaRows(value: unknown, kind: 'photo' | 'file', identity: string, iss
 			return [];
 		}
 		checkUnknown(row, kind === 'photo' ? ['id', 'name', 'url'] : ['id', 'name', 'url', 'type'], `${identity}:${index}`, issues);
-		const url = text(row['url'], 8192, `${identity}:${index}.url`, issues);
+		const url = text(row['url'], MAX_MEDIA_URL_CHARACTERS, `${identity}:${index}.url`, issues);
 		if (!url) addIssue(issues, 'missing_media_url', `${identity}:${index}`, 'Media URL is empty');
 		const common = {
 			id: Number.isSafeInteger(Number(row['id'])) && Number(row['id']) >= 0 ? Number(row['id']) : 0,

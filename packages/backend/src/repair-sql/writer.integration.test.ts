@@ -63,13 +63,13 @@ test('real MariaDB backfills repairs without JSON or destructive writer privileg
 			'0075_create_repair_records.sql', '0076_create_repair_history.sql', '0077_create_repair_media.sql',
 			'0078_create_repair_backfill_checkpoints.sql', '0079_create_repair_mutations.sql',
 			'0080_create_repair_commands.sql', '0081_create_repair_bitrix_outbox.sql',
-			'0082_create_repair_identities.sql',
+			'0082_create_repair_identities.sql', '0083_expand_repair_media_url.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalDirectory, filename));
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 8);
+		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 9);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalDirectory), []);
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${writerUser}'@'%'`);
@@ -85,6 +85,14 @@ test('real MariaDB backfills repairs without JSON or destructive writer privileg
 			alreadyApplied: true, changedRecordCount: 0, unchangedRecordCount: 1,
 		});
 		assert.equal(compareRepairSqlParity(initial.records, await readRepairSqlRecords(sqlPool)).matches, true);
+		const embeddedSource = sourceItem({ history: 1, photos: 1 });
+		const embeddedDetail = JSON.parse(String(embeddedSource['DETAIL_TEXT'])) as Record<string, unknown>;
+		const embeddedPhoto = `data:image/jpeg;base64,${'a'.repeat(234_112)}`;
+		embeddedDetail['photos'] = [{ id: 0, name: 'photo.jpg', url: embeddedPhoto }];
+		embeddedSource['DETAIL_TEXT'] = JSON.stringify(embeddedDetail);
+		const embedded = plan(embeddedSource, '2026-09-06T08:01:00Z');
+		assert.equal((await applyRepairSqlBackfill(sqlPool, embedded, embedded.planHash)).changedRecordCount, 1);
+		assert.equal((await readRepairSqlRecords(sqlPool))[0]?.photos[0]?.url, embeddedPhoto);
 
 		const changed = plan(sourceItem({ history: 1, photos: 1, status: 'issued' }), '2026-09-06T08:05:00Z');
 		assert.equal((await applyRepairSqlBackfill(sqlPool, changed, changed.planHash)).changedRecordCount, 1);

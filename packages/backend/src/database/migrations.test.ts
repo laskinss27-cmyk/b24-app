@@ -116,6 +116,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0080_create_repair_commands.sql',
 		'0081_create_repair_bitrix_outbox.sql',
 		'0082_create_repair_identities.sql',
+		'0083_expand_repair_media_url.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -521,6 +522,7 @@ test('repair SQL foundation is normalized, soft-deleted and payload-free', async
 	const commands = byName.get('0080_create_repair_commands.sql')!;
 	const outbox = byName.get('0081_create_repair_bitrix_outbox.sql')!;
 	const identities = byName.get('0082_create_repair_identities.sql')!;
+	const expandedMedia = byName.get('0083_expand_repair_media_url.sql')!;
 	for (const migration of [records, history, media, checkpoints, mutations, commands, outbox, identities]) {
 		assert.equal(migration.split(';').filter((statement) => statement.trim()).length, 1);
 		assert.doesNotMatch(migration, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
@@ -544,4 +546,6 @@ test('repair SQL foundation is normalized, soft-deleted and payload-free', async
 	assert.match(outbox, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
 	assert.match(identities, /UNIQUE KEY uq_repair_identities_number \(repair_no\)/);
 	assert.match(identities, /UNIQUE KEY uq_repair_identities_command \(idempotency_key\)/);
+	assert.match(expandedMedia, /^ALTER TABLE repair_media\s+MODIFY media_url MEDIUMTEXT NOT NULL;\s*$/);
+	assert.doesNotMatch(expandedMedia, /\b(?:JSON|INSERT|UPDATE|DELETE|DROP|TRUNCATE|GRANT)\b/i);
 });

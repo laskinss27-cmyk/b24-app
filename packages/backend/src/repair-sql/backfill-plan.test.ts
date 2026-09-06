@@ -59,3 +59,14 @@ test('repair plan preserves a SQL public marker independently of Bitrix identity
 	assert.equal(plan.records[0]?.id, 42);
 	assert.equal(plan.records[0]?.bitrixExternalId, 900);
 });
+
+test('repair plan preserves embedded data photos within the MEDIUMTEXT safety limit', () => {
+	const source = item();
+	const detail = JSON.parse(String(source['DETAIL_TEXT'])) as Record<string, unknown>;
+	const embeddedPhoto = `data:image/jpeg;base64,${'a'.repeat(234_112)}`;
+	detail['photos'] = [{ id: 0, name: 'photo.jpg', url: embeddedPhoto }];
+	source['DETAIL_TEXT'] = JSON.stringify(detail);
+	const plan = buildRepairSqlBackfillPlan({ observedAt: '2026-09-06T08:00:00Z', sourceComplete: true, sourceRecordCount: 1, items: [source] });
+	assert.equal(plan.readyToApply, true);
+	assert.equal(plan.records[0]?.photos[0]?.url, embeddedPhoto);
+});
