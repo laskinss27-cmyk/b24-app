@@ -552,6 +552,20 @@ backup/restore drill. Порядок переключения: `off` → `shadow
 обязательны internal/public health, readiness, официальный ERP API и проверка
 сети `erpnext_frappe_network`; Bitrix-путь сохраняется как совместимое зеркало.
 
+6 сентября разрешённый цикл завершён на image `b24-app:b862f0b` с
+`B24_APP_REPAIR_SQL_READ=primary` и `B24_APP_REPAIR_SQL_WRITE=primary`.
+Миграции `0075`–`0083` применены; guarded backfill hash
+`3f91e2cce68459e282c632888f4782557bb1fb88ebec1e96f12b358d3b8cbf9f`
+дал `33/143/35/1/33/0/0/0` для records/history/media/checkpoints/identities/
+mutations/commands/outbox и точный no-op при повторе. Три owner-vault parity
+проверки дали `33/33`, differences `0`. Post-apply backup
+`20260906_013619-b24_app-database.sql.gz` прошёл внешний read-back и exact
+schema/data restore в сохранённую `b24_app_restore_20260906_013619`. Новый
+`b24_app_repair_runtime` имеет 21 точечное право на семь таблиц и 0
+разрушительных прав; secrets `0600 root:root`. Все health/readiness, официальный
+ERP read, `/srv/b24-state`, локальный порт, restart `0` и сеть прошли. Три
+stage rollback-контейнера, backups и restore-схемы сохранены.
+
 Восстановление перезаписывает рабочую БД. Перед началом:
 
 1. остановить пользовательские операции;

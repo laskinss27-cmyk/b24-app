@@ -38,6 +38,35 @@ database was removed.
 No production migration, credential, backfill, environment change, container
 replacement, source switch or deploy was performed by this local step.
 
+## Production result
+
+The explicitly authorized production cycle completed on 6 September. Safety
+backups `20260906_010848`, `20260906_011722` and post-backfill
+`20260906_013619` all passed gzip/checksum and external Bitrix Disk read-back
+with retention disabled. Each was restored into a separate preserved schema;
+the final `b24_app_restore_20260906_013619` matched the live source by exact
+schema and data hashes.
+
+Migrations `0075`–`0082` first created eight empty tables. The initial dry run
+correctly stopped because 22 current photo values were embedded `data:` URLs
+longer than the original 8,192-character guard (maximum 234,135). Commit
+`b862f0b` added and tested migration `0083`; the production column is now
+`MEDIUMTEXT`. The exact guarded plan
+`3f91e2cce68459e282c632888f4782557bb1fb88ebec1e96f12b358d3b8cbf9f`
+then wrote `33` records, `143` history rows, `35` media rows, `33` identities
+and one checkpoint. Its immediate replay was a no-op and three independent
+owner-vault comparisons reported `33/33`, zero differences and the same hash.
+
+The permanent `b24_app_repair_runtime` has exactly `SELECT/INSERT/UPDATE` on
+seven runtime repair tables, no checkpoint access, no `DELETE`, DDL, schema or
+global privileges. Its new password is only in root-owned mode `0600` secret
+files; existing passwords were not changed. Production moved through
+`shadow/shadow`, `verified/shadow` and finally `primary/primary`. The running
+image is `b24-app:b862f0b`; all internal/public health, readiness, official ERP
+API, state mount, local port, restart and `erpnext_frappe_network` checks passed.
+Three repair-stage rollback containers, all backups and all restore schemas are
+preserved.
+
 ## Production sequence (requires an explicit command)
 
 1. Run the full `b24_app` backup, external read-back and preserved restore drill.
