@@ -16,7 +16,7 @@ export function registerApiAdminRepairDiagnosticsRoute(app: FastifyInstance): vo
 			const query = typeof body.query === 'string' ? body.query.slice(0, 200) : '';
 			const requestedLimit = Number(body.limit);
 			const limit = Number.isFinite(requestedLimit) ? requestedLimit : 20;
-			return { ok: true, repairs: await searchAdminRepairs(client, query, limit) };
+			return { ok: true, repairs: await searchAdminRepairs(client, query, limit, app) };
 		} catch (error) {
 			app.log.error({ error: String(error) }, '[admin/repairs/search] failed');
 			return reply.code(500).send({ ok: false, error: 'Не удалось прочитать список ремонтов.' });
@@ -30,7 +30,7 @@ export function registerApiAdminRepairDiagnosticsRoute(app: FastifyInstance): vo
 		try {
 			const client = await adminOwnerClient(app, body);
 			if (!client) return reply.code(403).send({ ok: false, error: 'Админка доступна только владельцу приложения.' });
-			const diagnostic = await diagnoseAdminRepair(client, ErpClient.fromEnv(), repairId);
+			const diagnostic = await diagnoseAdminRepair(client, ErpClient.fromEnv(), repairId, app);
 			if (!diagnostic) return reply.code(404).send({ ok: false, error: 'Ремонт не найден.' });
 			return { ok: true, diagnostic };
 		} catch (error) {

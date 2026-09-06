@@ -34,6 +34,8 @@ const ConfigSchema = z.object({
 	transferRequestSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
 	/** Inventory SQL gate; primary reads the normalized store without loading Bitrix JSON. */
 	inventorySqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
+	/** Repair SQL observation; verified serves SQL only while every Bitrix record has exact parity. */
+	repairSqlRead: z.enum(['off', 'shadow', 'verified', 'primary']).default('off'),
 	nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
 });
 
@@ -60,6 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		transferSqlRead: env['B24_APP_TRANSFER_SQL_READ'],
 		transferRequestSqlRead: env['B24_APP_TRANSFER_REQUEST_SQL_READ'],
 		inventorySqlRead: env['B24_APP_INVENTORY_SQL_READ'],
+		repairSqlRead: env['B24_APP_REPAIR_SQL_READ'],
 		nodeEnv: env['NODE_ENV'],
 	});
 

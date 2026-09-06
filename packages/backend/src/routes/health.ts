@@ -4,6 +4,7 @@ import type { ReservationRuntime } from '../reservations/runtime.js';
 import type { TransferSqlWriteRuntime } from '../transfers/sql-runtime.js';
 import type { TransferRequestSqlWriteRuntime } from '../transfers/request-sql-runtime.js';
 import type { InventorySqlWriteRuntime } from '../inventory-sql/runtime.js';
+import type { RepairSqlWriteRuntime } from '../repair-sql/runtime.js';
 
 /**
  * GET /health — проверка, что приложение поднялось и прочитало конфигурацию.
@@ -31,6 +32,7 @@ export function registerReadinessRoute(
 	transferSqlWriter?: TransferSqlWriteRuntime,
 	transferRequestSqlWriter?: TransferRequestSqlWriteRuntime,
 	inventorySqlWriter?: InventorySqlWriteRuntime,
+	repairSqlWriter?: RepairSqlWriteRuntime,
 ): void {
 	app.get('/ready', async (_request, reply) => {
 		const checks: Record<string, { status: 'disabled' | 'up' | 'down' }> = {
@@ -40,6 +42,7 @@ export function registerReadinessRoute(
 		if (transferSqlWriter) checks['transferSqlWriter'] = { status: transferSqlWriter.enabled ? 'up' : 'disabled' };
 		if (transferRequestSqlWriter) checks['transferRequestSqlWriter'] = { status: transferRequestSqlWriter.enabled ? 'up' : 'disabled' };
 		if (inventorySqlWriter) checks['inventorySqlWriter'] = { status: inventorySqlWriter.enabled ? 'up' : 'disabled' };
+		if (repairSqlWriter) checks['repairSqlWriter'] = { status: repairSqlWriter.enabled ? 'up' : 'disabled' };
 		let ok = true;
 		if (database && database.mode !== 'off') {
 			try { await database.ping(); } catch { checks['database'] = { status: 'down' }; ok = false; }
@@ -55,6 +58,9 @@ export function registerReadinessRoute(
 		}
 		if (inventorySqlWriter?.enabled) {
 			try { await inventorySqlWriter.ping(); } catch { checks['inventorySqlWriter'] = { status: 'down' }; ok = false; }
+		}
+		if (repairSqlWriter?.enabled) {
+			try { await repairSqlWriter.ping(); } catch { checks['repairSqlWriter'] = { status: 'down' }; ok = false; }
 		}
 		return ok ? { ok: true, checks } : reply.code(503).send({ ok: false, checks });
 	});

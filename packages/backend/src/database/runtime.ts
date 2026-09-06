@@ -9,6 +9,8 @@ import { readLatestCatalogMirrorPlan } from '../catalog-mirror/reader.js';
 import type { CatalogMirrorPlan } from '../catalog-mirror/model.js';
 import { readInventorySqlRecords } from '../inventory-sql/reader.js';
 import type { InventorySqlRecord } from '../inventory-sql/model.js';
+import { readRepairSqlRecords } from '../repair-sql/reader.js';
+import type { RepairSqlRecord } from '../repair-sql/model.js';
 
 export interface DatabaseRuntime {
 	readonly mode: DatabaseConfig['mode'];
@@ -20,6 +22,7 @@ export interface DatabaseRuntime {
 	readCurrentTransferRequests?(): Promise<StoredTransferRequest[]>;
 	readLatestCatalogMirrorPlan?(): Promise<CatalogMirrorPlan | null>;
 	readInventoryRecords?(): Promise<InventorySqlRecord[]>;
+	readRepairRecords?(): Promise<RepairSqlRecord[]>;
 	close(): Promise<void>;
 }
 
@@ -50,6 +53,7 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 			async readCurrentTransferRequests() { return []; },
 			async readLatestCatalogMirrorPlan() { return null; },
 			async readInventoryRecords() { return []; },
+			async readRepairRecords() { return []; },
 			async close() {},
 		};
 	}
@@ -80,6 +84,9 @@ export function createDatabaseRuntime(config: DatabaseConfig): DatabaseRuntime {
 		},
 		async readInventoryRecords() {
 			return readInventorySqlRecords(pool);
+		},
+		async readRepairRecords() {
+			return readRepairSqlRecords(pool);
 		},
 		async close() {
 			await pool.end();

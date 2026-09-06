@@ -1,4 +1,5 @@
 import { bx24Auth } from './bitrix-auth.js';
+import { newIdempotencyKey } from './idempotency-key.js';
 
 export type RepairKind = 'client' | 'presale';
 export type RepairStatus =
@@ -91,6 +92,15 @@ export interface NewRepairInput {
 	files: RepairFile[];
 }
 
+const pendingRepairCreationKeys = new Map<string, string>();
+
+function creationKey(prefix: string, payload: unknown): { fingerprint: string; key: string } {
+	const fingerprint = `${prefix}:${JSON.stringify(payload)}`;
+	const key = pendingRepairCreationKeys.get(fingerprint) ?? newIdempotencyKey(prefix);
+	pendingRepairCreationKeys.set(fingerprint, key);
+	return { fingerprint, key };
+}
+
 export async function fetchRepairs(): Promise<{ repairs: Repair[]; canEditPrice: boolean }> {
 	const res = await fetch('/api/repairs/list', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -102,12 +112,14 @@ export async function fetchRepairs(): Promise<{ repairs: Repair[]; canEditPrice:
 }
 
 export async function createRepair(input: NewRepairInput): Promise<Repair> {
+	const pending = creationKey('repair-create', input);
 	const res = await fetch('/api/repairs/create', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), ...input }),
+		body: JSON.stringify({ ...bx24Auth(), ...input, idempotencyKey: pending.key }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; syncWarning?: string | null; taskCreated?: boolean; taskError?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось принять в ремонт');
+	pendingRepairCreationKeys.delete(pending.fingerprint);
 	if ('taskCreated' in json && !json.taskCreated) json.repair.taskWarning = `Задача не создана: ${json.taskError || 'Б24 не вернул ID задачи'}`;
 	if (json.syncWarning) json.repair.dealSyncWarning = json.syncWarning;
 	return json.repair;
@@ -137,12 +149,15 @@ export async function fetchRepairStoreStock(store: string): Promise<Array<{ prod
 
 /** Принять в ПРЕДПРОДАЖНЫЙ ремонт: товар со склада-источника (productId) уходит чиниться. */
 export async function createPresaleRepair(sourceStore: string, productId: number, itemName: string): Promise<Repair> {
+	const payload = { sourceStore, productId, itemName };
+	const pending = creationKey('repair-presale-create', payload);
 	const res = await fetch('/api/repairs/create-presale', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), sourceStore, productId, itemName }),
+		body: JSON.stringify({ ...bx24Auth(), ...payload, idempotencyKey: pending.key }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; repair?: Repair; taskCreated?: boolean; taskError?: string | null };
 	if (!json.ok || !json.repair) throw new Error(json.error ?? 'не удалось создать предпродажный ремонт');
+	pendingRepairCreationKeys.delete(pending.fingerprint);
 	if ('taskCreated' in json && !json.taskCreated) json.repair.taskWarning = `Задача не создана: ${json.taskError || 'Б24 не вернул ID задачи'}`;
 	return json.repair;
 }

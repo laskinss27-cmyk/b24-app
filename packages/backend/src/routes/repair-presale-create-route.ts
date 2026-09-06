@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { createRepairNotifyTask } from './repair-notification-service.js';
-import type { RepairData } from './repair-record.js';
+import { parseItem, type RepairData } from './repair-record.js';
 import { movePresaleForStatus } from './repair-stock-service.js';
-import { assignRepairNo } from './repair-storage.js';
+import { assignRepairIdentity, createRepairData, loadRepairItem, updateRepairData } from './repair-storage.js';
 import { currentUser } from './repair-user-access.js';
 
 interface AuthBody {
@@ -34,7 +33,16 @@ export function registerRepairPresaleCreateRoute(app: FastifyInstance, clientFro
 		try {
 			const me = await currentUser(client);
 			const now = new Date().toISOString();
-			const repairNo = await assignRepairNo(client, app.log);
+			const assigned = await assignRepairIdentity(app, client, app.log, {
+				idempotencyKey: s((b as Record<string, unknown>)['idempotencyKey']),
+				request: { kind: 'presale', sourceStore, productId, itemName, internalComment: s(b['internalComment']) },
+			});
+			const repairNo = assigned.repairNo;
+			if (assigned.alreadyConsumed && assigned.identity) {
+				const existing = parseItem(await loadRepairItem(app, client, assigned.identity.publicId, 'create-presale-retry') ?? {});
+				if (!existing) throw new Error('SQL-first повтор создания не нашёл уже сохранённый ремонт');
+				return { ok: true, id: existing.id, repair: existing, taskCreated: Boolean(existing.taskId), taskError: null };
+			}
 			const data: RepairData = {
 				kind: 'presale',
 				status: 'pre_office',
@@ -59,13 +67,11 @@ export function registerRepairPresaleCreateRoute(app: FastifyInstance, clientFro
 			// «Принято в офисе» — перемещаем товар источник → Измайловский (мутирует repairStore).
 			await movePresaleForStatus(data, 'pre_office', app.log);
 			const name = (`[предпродажа] ${itemName}`).slice(0, 120) || 'Предпродажный ремонт';
-			const added = await client.call<number | { id?: number }>('entity.item.add', { ENTITY: REPAIRS_ENTITY, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
-			const newId = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-			if (!newId) throw new Error('entity.item.add не вернул id');
+			const newId = await createRepairData(app, client, { name, data, ...(assigned.identity ? { identity: assigned.identity } : {}) });
 			const taskSync = await createRepairNotifyTask(client, data, newId, app.log);
 			if (taskSync.taskId) {
 				data.taskId = taskSync.taskId;
-				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: newId, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
+				await updateRepairData(app, client, { id: newId, name, data });
 			}
 			app.log.info({ id: newId, productId, sourceStore }, '[api/repairs/create-presale] ok');
 			return { ok: true, id: newId, repair: { id: newId, name, ...data }, taskCreated: Boolean(taskSync.taskId), taskError: taskSync.error };

@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import type { RepairData } from './repair-record.js';
 import { normalizeStatus } from './repair-status.js';
+import { updateRepairData } from './repair-storage.js';
 
 function errInfo(err: unknown): string {
 	return err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
@@ -135,6 +135,7 @@ export async function ensureRepairNotifyTask(
 	client: B24Client,
 	repair: RepairData & { id: number; name: string },
 	log: FastifyInstance['log'],
+	app?: FastifyInstance,
 ): Promise<TaskSyncResult> {
 	if (repair.taskId || isFinishedRepair(repair)) return { taskId: repair.taskId ?? null, error: null };
 	const { id, name, ...data } = repair;
@@ -143,7 +144,8 @@ export async function ensureRepairNotifyTask(
 		if (found) {
 			data.taskId = found;
 			repair.taskId = found;
-			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
+			if (app) await updateRepairData(app, client, { id, name: name || 'Ремонт', data });
+			else throw new Error('Repair storage runtime is required to persist the recovered task link');
 			return { taskId: found, error: null };
 		}
 	} catch (err) {
@@ -155,7 +157,8 @@ export async function ensureRepairNotifyTask(
 	if (created.taskId) {
 		data.taskId = created.taskId;
 		repair.taskId = created.taskId;
-		await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
+		if (app) await updateRepairData(app, client, { id, name: name || 'Ремонт', data });
+		else throw new Error('Repair storage runtime is required to persist the created task link');
 	}
 	return created;
 }

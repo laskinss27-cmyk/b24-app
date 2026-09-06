@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { syncRepairDeal, type DealSyncResult } from './repair-deal-sync-service.js';
 import type { RepairData } from './repair-record.js';
 import {
@@ -16,6 +15,7 @@ import {
 import { movePresaleForStatus, moveRepairForStatus, writeOffRepairOnIssue } from './repair-stock-service.js';
 import { currentUser } from './repair-user-access.js';
 import { completeRefusedRepairTask } from './repair-refusal-effects.js';
+import { loadRepairItem, updateRepairData } from './repair-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -51,8 +51,7 @@ export function registerRepairStatusUpdateRoute(
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		if (![...CLIENT_ORDER, ...PRESALE_ORDER].includes(status)) return reply.code(400).send({ ok: false, error: 'bad status' });
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
-			const raw = (items ?? [])[0];
+			const raw = await loadRepairItem(app, client, id, 'update-status');
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const kind: RepairKind = data.kind === 'presale' ? 'presale' : 'client';
@@ -89,7 +88,7 @@ export function registerRepairStatusUpdateRoute(
 			if (dealSync) {
 				await attachRepairLinkToCreatedDeal(systemClient() ?? client, data, id, dealSync);
 			}
-			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
+			await updateRepairData(app, client, { id, name: raw['NAME'], data, sourceItem: raw });
 			app.log.info({ id, status }, '[api/repairs/update-status] ok');
 			return {
 				ok: true,

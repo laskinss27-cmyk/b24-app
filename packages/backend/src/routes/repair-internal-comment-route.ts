@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import type { RepairData } from './repair-record.js';
+import { loadRepairItem, updateRepairData } from './repair-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -25,14 +25,13 @@ export function registerRepairInternalCommentRoute(app: FastifyInstance, clientF
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
-			const raw = (items ?? [])[0];
+			const raw = await loadRepairItem(app, client, id, 'internal-comment');
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			if (data.kind !== 'presale') return reply.code(400).send({ ok: false, error: 'для клиентского ремонта используй обычное редактирование' });
 			data.internalComment = String(b.internalComment ?? '').trim().slice(0, 2000);
 			const name = String(raw['NAME'] ?? '').trim() || `[предпродажа] ${data.device || `#${data.productId ?? id}`}`;
-			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
+			await updateRepairData(app, client, { id, name, data, sourceItem: raw });
 			app.log.info({ id }, '[api/repairs/update-internal-comment] ok');
 			return { ok: true, repair: { id, name, ...data } };
 		} catch (err) {

@@ -6,6 +6,7 @@ import type { DatabaseRuntime } from '../database/runtime.js';
 import type { ReservationRuntime } from '../reservations/runtime.js';
 import type { TransferSqlWriteRuntime } from '../transfers/sql-runtime.js';
 import type { InventorySqlWriteRuntime } from '../inventory-sql/runtime.js';
+import type { RepairSqlWriteRuntime } from '../repair-sql/runtime.js';
 import { registerHealthRoute, registerReadinessRoute } from './health.js';
 
 test('process health keeps its existing response contract', async () => {
@@ -22,6 +23,7 @@ test('process health keeps its existing response contract', async () => {
 	transferSqlRead: 'off',
 	transferRequestSqlRead: 'off',
 		inventorySqlRead: 'off',
+		repairSqlRead: 'off',
 		nodeEnv: 'test',
 	};
 	const app = Fastify();
@@ -109,6 +111,25 @@ test('readiness fails explicitly when the transfer shadow writer cannot reach SQ
 	assert.deepEqual(response.json(), {
 		ok: false,
 		checks: { database: { status: 'disabled' }, transferSqlWriter: { status: 'down' } },
+	});
+	await app.close();
+});
+
+test('readiness probes the repair shadow writer independently', async () => {
+	const repairSqlWriter = {
+		mode: 'shadow', enabled: true,
+		async write() { throw new Error('unused'); },
+		async markDeleted() { throw new Error('unused'); },
+		async ping() { throw new Error('secret connection details'); },
+		async close() {},
+	} as unknown as RepairSqlWriteRuntime;
+	const app = Fastify();
+	registerReadinessRoute(app, undefined, undefined, undefined, undefined, undefined, repairSqlWriter);
+	const response = await app.inject({ method: 'GET', url: '/ready' });
+	assert.equal(response.statusCode, 503);
+	assert.deepEqual(response.json(), {
+		ok: false,
+		checks: { database: { status: 'disabled' }, repairSqlWriter: { status: 'down' } },
 	});
 	await app.close();
 });

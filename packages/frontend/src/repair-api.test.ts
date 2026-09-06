@@ -89,10 +89,21 @@ test('repair listing and creation preserve fallbacks, warnings, and payload', as
 		taskWarning: 'Задача не создана: denied',
 		dealSyncWarning: 'partial sync',
 	});
-	assert.deepEqual(requests, [
-		{ url: '/api/repairs/list', body: { domain: 'repairs.example', accessToken: 'repairs-token' } },
-		{ url: '/api/repairs/create', body: { domain: 'repairs.example', accessToken: 'repairs-token', ...input } },
+	assert.deepEqual(requests[0], { url: '/api/repairs/list', body: { domain: 'repairs.example', accessToken: 'repairs-token' } });
+	assert.equal(requests[1]?.url, '/api/repairs/create');
+	assert.match(String(requests[1]?.body['idempotencyKey']), /^repair-create:/);
+	const { idempotencyKey: _idempotencyKey, ...creationBody } = requests[1]!.body;
+	assert.deepEqual(creationBody, { domain: 'repairs.example', accessToken: 'repairs-token', ...input });
+});
+
+test('repair creation keeps one idempotency key across a user retry', async () => {
+	const requests = captureResponses([
+		{ ok: false, error: 'temporary failure' },
+		{ ok: true, repair: { id: 9 } },
 	]);
+	await assert.rejects(createRepair(input), /temporary failure/);
+	assert.deepEqual(await createRepair(input), { id: 9 });
+	assert.equal(requests[0]?.body['idempotencyKey'], requests[1]?.body['idempotencyKey']);
 });
 
 test('repair editing lifecycle preserves endpoints and response mutation', async () => {

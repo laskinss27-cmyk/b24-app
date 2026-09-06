@@ -1,13 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { resolveOrCreateContact } from './repair-contact-service.js';
 import { syncRepairDeal, type DealSyncResult } from './repair-deal-sync-service.js';
 import { createRepairNotifyTask } from './repair-notification-service.js';
-import type { RepairData, RepairFile, RepairPhoto } from './repair-record.js';
+import { parseItem, type RepairData, type RepairFile, type RepairPhoto } from './repair-record.js';
 import { syncRepairStock } from './repair-stock-service.js';
-import { assignRepairNo } from './repair-storage.js';
+import { assignRepairIdentity, createRepairData, loadRepairItem, updateRepairData } from './repair-storage.js';
 import { currentUser } from './repair-user-access.js';
 
 interface AuthBody {
@@ -69,7 +68,20 @@ export function registerRepairCreateRoute(
 			// Клиент = контакт Б24: берём привязанный / находим по телефону / заводим нового (с телефоном).
 			const contactId = await resolveOrCreateContact(client, { contactId: Number(cl.contactId) || null, name: s(cl.name), phone: s(cl.phone) }, app.log);
 
-			const repairNo = await assignRepairNo(client, app.log);
+			const assigned = await assignRepairIdentity(app, client, app.log, {
+				idempotencyKey: s(b['idempotencyKey']),
+				request: {
+					kind: 'client', client: cl, device, model: s(b['model']), serial: s(b['serial']), point,
+					appearance: s(b['appearance']), defect: s(b['defect']), payType, cost: reqCost, ourPrice: reqOur,
+					comment: s(b['comment']), internalComment: s(b['internalComment']), photos, files,
+				},
+			});
+			const repairNo = assigned.repairNo;
+			if (assigned.alreadyConsumed && assigned.identity) {
+				const existing = parseItem(await loadRepairItem(app, client, assigned.identity.publicId, 'create-retry') ?? {});
+				if (!existing) throw new Error('SQL-first повтор создания не нашёл уже сохранённый ремонт');
+				return { ok: true, id: existing.id, repair: existing, canEditPrice: me.canEditPrice, dealCreated: false, dealNoContact: false, syncWarning: null, taskCreated: Boolean(existing.taskId), taskError: null };
+			}
 
 			const data: RepairData = {
 				kind: 'client',
@@ -110,18 +122,13 @@ export function registerRepairCreateRoute(
 			const dealClient = systemClient() ?? client;
 			const dealSync = await syncRepairDeal(dealClient, data, app.log);
 			const nameParts = [device, data.model, data.client.name].filter(Boolean);
-			const added = await client.call<number | { id?: number }>('entity.item.add', {
-				ENTITY: REPAIRS_ENTITY,
-				NAME: nameParts.join(' · ') || 'Ремонт',
-				DETAIL_TEXT: JSON.stringify(data),
-			});
-			const id = typeof added === 'number' ? added : Number((added as { id?: number })?.id ?? 0);
-			if (!id) throw new Error('entity.item.add не вернул id');
+			const repairName = nameParts.join(' · ') || 'Ремонт';
+			const id = await createRepairData(app, client, { name: repairName, data, ...(assigned.identity ? { identity: assigned.identity } : {}) });
 			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
 			const taskSync = await createRepairNotifyTask(client, data, id, app.log);
 			if (taskSync.taskId) {
 				data.taskId = taskSync.taskId;
-				await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: nameParts.join(' · ') || 'Ремонт', DETAIL_TEXT: JSON.stringify(data) });
+				await updateRepairData(app, client, { id, name: repairName, data });
 			}
 			app.log.info({ id }, '[api/repairs/create] ok');
 			return {

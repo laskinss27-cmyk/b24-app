@@ -8,6 +8,7 @@ import { createReservationRuntime } from './reservations/runtime.js';
 import { createTransferSqlWriteRuntime, loadTransferSqlWriteConfig } from './transfers/sql-runtime.js';
 import { createTransferRequestSqlWriteRuntime, loadTransferRequestSqlWriteConfig } from './transfers/request-sql-runtime.js';
 import { createInventorySqlWriteRuntime, loadInventorySqlWriteConfig } from './inventory-sql/runtime.js';
+import { createRepairSqlWriteRuntime, loadRepairSqlWriteConfig } from './repair-sql/runtime.js';
 
 const config = loadConfig();
 const database = createDatabaseRuntime(loadDatabaseConfig());
@@ -15,8 +16,9 @@ const reservations = createReservationRuntime(loadReservationConfig());
 const transferSqlWriter = createTransferSqlWriteRuntime(loadTransferSqlWriteConfig());
 const transferRequestSqlWriter = createTransferRequestSqlWriteRuntime(loadTransferRequestSqlWriteConfig());
 const inventorySqlWriter = createInventorySqlWriteRuntime(loadInventorySqlWriteConfig());
+const repairSqlWriter = createRepairSqlWriteRuntime(loadRepairSqlWriteConfig());
 
-const app = await buildApp({ config, database, reservations, transferSqlWriter, transferRequestSqlWriter, inventorySqlWriter });
+const app = await buildApp({ config, database, reservations, transferSqlWriter, transferRequestSqlWriter, inventorySqlWriter, repairSqlWriter });
 
 try {
 	const address = await app.listen({ port: config.port, host: config.host });

@@ -41,6 +41,7 @@ function config(mode: 'off' | 'on'): Config {
 		transferSqlRead: 'off',
 		transferRequestSqlRead: 'off',
 		inventorySqlRead: 'off',
+		repairSqlRead: 'off',
 		nodeEnv: 'test',
 	};
 }

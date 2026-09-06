@@ -4,7 +4,7 @@ import { B24ApiError, type B24Client } from '../b24/client.js';
 import { ensureRepairsEntity } from '../b24/placement.js';
 import { ensureRepairNotifyTask, isFinishedRepair, resolveNames, userNameCache } from './repair-notification-service.js';
 import { parseItem, type RepairData } from './repair-record.js';
-import { fetchAllRepairs } from './repair-storage.js';
+import { loadRepairItems } from './repair-storage.js';
 import { currentUser } from './repair-user-access.js';
 
 interface AuthBody {
@@ -25,7 +25,7 @@ export function registerRepairListRoute(app: FastifyInstance, clientFrom: Repair
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		await ensureRepairsEntity(client);
 		try {
-			const items = await fetchAllRepairs(client); // ВСЕ записи постранично — чтобы список не обрезался на 50
+			const items = await loadRepairItems(app, client, 'list'); // ВСЕ записи постранично — чтобы список не обрезался на 50
 			const repairs = items.map(parseItem).filter((r): r is RepairData & { id: number; name: string } => r != null);
 			// Дорезолвить имена в истории для старых записей (где сохранён только byId).
 			const needIds = new Set<string>();
@@ -40,7 +40,7 @@ export function registerRepairListRoute(app: FastifyInstance, clientFrom: Repair
 			}
 			for (const r of repairs) {
 				if (r.taskId || isFinishedRepair(r)) continue;
-				await ensureRepairNotifyTask(client, r, app.log);
+				await ensureRepairNotifyTask(client, r, app.log, app);
 			}
 			const me = await currentUser(client);
 			return { ok: true, repairs, canEditPrice: appPermission(req, 'repairs.edit_prices', me.canEditPrice) };

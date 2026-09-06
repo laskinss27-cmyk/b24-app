@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import type { RepairData } from './repair-record.js';
 import { isLocked, normalizeStatus } from './repair-status.js';
 import { currentUser } from './repair-user-access.js';
+import { deleteRepairData, loadRepairItem } from './repair-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -27,8 +27,7 @@ export function registerRepairDeleteRoute(app: FastifyInstance, clientFrom: Repa
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		try {
 			// Заморозка: принятый в офисе ремонт удаляет только снабжение+.
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
-			const raw = (items ?? [])[0];
+			const raw = await loadRepairItem(app, client, id, 'delete');
 			if (raw) {
 				const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 				const me = await currentUser(client);
@@ -36,7 +35,7 @@ export function registerRepairDeleteRoute(app: FastifyInstance, clientFrom: Repa
 					return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — удалить может только снабжение' });
 				}
 			}
-			await client.call('entity.item.delete', { ENTITY: REPAIRS_ENTITY, ID: id });
+			await deleteRepairData(app, client, id);
 			app.log.info({ id }, '[api/repairs/delete] ok');
 			return { ok: true };
 		} catch (err) {

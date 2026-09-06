@@ -62,7 +62,7 @@ export function loadInventorySqlWriteConfig(env: NodeJS.ProcessEnv = process.env
 	const forbidden = [
 		env['B24_APP_DB_USER'], env['B24_APP_MIGRATION_DB_USER'], env['B24_APP_BACKFILL_DB_USER'],
 		env['B24_APP_TILDA_DB_USER'], env['B24_APP_RESERVATION_DB_USER'], env['B24_APP_TRANSFER_DB_USER'],
-		env['B24_APP_CATALOG_SYNC_DB_USER'],
+		env['B24_APP_CATALOG_SYNC_DB_USER'], env['B24_APP_REPAIR_DB_USER'],
 	].map((value) => String(value ?? '').trim()).filter(Boolean);
 	if (forbidden.includes(user)) throw new Error('Inventory SQL writer database user must be a separate identity');
 	if (mode === 'primary' && String(env['B24_APP_INVENTORY_SQL_READ'] ?? 'off').trim() !== 'primary') {

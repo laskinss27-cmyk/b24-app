@@ -117,7 +117,7 @@ function clearExpiredScans(now: number): void {
 	for (const [scanId, scan] of controlScans) if (now - scan.createdAt > CONTROL_SCAN_TTL_MS) controlScans.delete(scanId);
 }
 
-async function controlScan(client: B24Client, erp: ErpClient, period: AdminControlPeriod, scanId?: string): Promise<{ scanId: string; scan: AdminControlScan }> {
+async function controlScan(client: B24Client, erp: ErpClient, period: AdminControlPeriod, scanId?: string, app?: FastifyInstance): Promise<{ scanId: string; scan: AdminControlScan }> {
 	const now = Date.now();
 	clearExpiredScans(now);
 	if (scanId) {
@@ -129,7 +129,7 @@ async function controlScan(client: B24Client, erp: ErpClient, period: AdminContr
 	}
 	const [dealIds, repairItems] = await Promise.all([
 		dealIdsModifiedInPeriod(erp, period.dateFrom, period.dateTo),
-		listAdminRepairItemsInPeriod(client, period.dateFrom, period.dateTo),
+		listAdminRepairItemsInPeriod(client, period.dateFrom, period.dateTo, app),
 	]);
 	const created = { createdAt: now, period, dealIds, repairItems };
 	const createdId = randomUUID();
@@ -145,7 +145,7 @@ export async function checkAdminControlBatch(
 	scanId?: string,
 	app?: FastifyInstance,
 ): Promise<AdminControlBatch> {
-	const prepared = await controlScan(client, erp, period, scanId);
+	const prepared = await controlScan(client, erp, period, scanId, app);
 	const { dealIds, repairItems } = prepared.scan;
 	const [deals, repairs] = await Promise.all([
 		diagnoseDeals(client, erp, dealIds.slice(cursor.dealOffset, cursor.dealOffset + 1), app),

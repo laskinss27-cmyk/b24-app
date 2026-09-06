@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { syncRepairDeal, type DealSyncResult } from './repair-deal-sync-service.js';
 import type { RepairData } from './repair-record.js';
 import { isLocked, normalizeStatus } from './repair-status.js';
 import { syncRepairStock } from './repair-stock-service.js';
 import { currentUser } from './repair-user-access.js';
+import { loadRepairItem, updateRepairData } from './repair-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -40,8 +40,7 @@ export function registerRepairPaymentRoute(
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		const payType: 'warranty' | 'paid' = b.payType === 'paid' ? 'paid' : 'warranty';
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
-			const raw = (items ?? [])[0];
+			const raw = await loadRepairItem(app, client, id, 'payment');
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			if (data.clientRefusal) return reply.code(409).send({ ok: false, error: 'клиент отказался от ремонта — вид и цены больше не меняются' });
@@ -72,7 +71,7 @@ export function registerRepairPaymentRoute(
 			const dealClient = systemClient() ?? client;
 			const dealSync = await syncRepairDeal(dealClient, data, app.log);
 			await attachRepairLinkToCreatedDeal(dealClient, data, id, dealSync);
-			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data) });
+			await updateRepairData(app, client, { id, name: raw['NAME'], data, sourceItem: raw });
 			app.log.info({ id, payType, byPriceEditor: me.canEditPrice }, '[api/repairs/set-pay] ok');
 			return {
 				ok: true,

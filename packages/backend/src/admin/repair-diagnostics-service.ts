@@ -1,7 +1,8 @@
+import type { FastifyInstance } from 'fastify';
 import type { B24Client } from '../b24/client.js';
 import type { ErpClient } from '../erp/client.js';
 import { parseItem, type RepairData } from '../routes/repair-record.js';
-import { fetchAllRepairs } from '../routes/repair-storage.js';
+import { fetchAllRepairs, loadRepairItems } from '../routes/repair-storage.js';
 import { diagnoseRepairState, expectedRepairStore, type DiagnosticIssue } from './repair-diagnostics-model.js';
 import { readDiagnosticDeal, readDiagnosticErp, readDiagnosticTask, type DiagnosticDeal, type DiagnosticErpState, type DiagnosticTask } from './repair-diagnostics-readers.js';
 
@@ -64,9 +65,9 @@ function rawDetail(item: Record<string, unknown>): Record<string, unknown> {
 	}
 }
 
-export async function searchAdminRepairs(client: B24Client, query: string, limit = 20): Promise<AdminRepairSummary[]> {
+export async function searchAdminRepairs(client: B24Client, query: string, limit = 20, app?: FastifyInstance): Promise<AdminRepairSummary[]> {
 	const needle = query.trim().toLocaleLowerCase('ru-RU');
-	return (await fetchAllRepairs(client))
+	return (app ? await loadRepairItems(app, client, 'admin-search') : await fetchAllRepairs(client))
 		.map(parseItem)
 		.filter((repair): repair is NonNullable<ReturnType<typeof parseItem>> => Boolean(repair))
 		.filter((repair) => !needle || searchable(repair).includes(needle))
@@ -125,15 +126,15 @@ export function repairActivityDate(item: Record<string, unknown>): string {
 	].sort().at(-1) ?? '';
 }
 
-export async function listAdminRepairItemsInPeriod(client: B24Client, dateFrom: string, dateTo: string): Promise<Array<Record<string, unknown>>> {
-	return (await fetchAllRepairs(client))
+export async function listAdminRepairItemsInPeriod(client: B24Client, dateFrom: string, dateTo: string, app?: FastifyInstance): Promise<Array<Record<string, unknown>>> {
+	return (app ? await loadRepairItems(app, client, 'admin-period') : await fetchAllRepairs(client))
 		.map((item) => ({ item, activityDate: repairActivityDate(item) }))
 		.filter(({ activityDate }) => activityDate >= dateFrom && activityDate <= dateTo)
 		.sort((left, right) => right.activityDate.localeCompare(left.activityDate) || Number(right.item['ID'] ?? 0) - Number(left.item['ID'] ?? 0))
 		.map(({ item }) => item);
 }
 
-export async function diagnoseAdminRepair(client: B24Client, erp: ErpClient | null, repairId: number): Promise<AdminRepairDiagnostic | null> {
-	const item = (await fetchAllRepairs(client)).find((row) => Number(row['ID']) === repairId);
+export async function diagnoseAdminRepair(client: B24Client, erp: ErpClient | null, repairId: number, app?: FastifyInstance): Promise<AdminRepairDiagnostic | null> {
+	const item = (app ? await loadRepairItems(app, client, 'admin-diagnose') : await fetchAllRepairs(client)).find((row) => Number(row['ID']) === repairId);
 	return item ? diagnoseAdminRepairItem(client, erp, item) : null;
 }

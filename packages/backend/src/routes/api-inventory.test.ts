@@ -33,6 +33,7 @@ const mobileConfig: Config = {
 	transferSqlRead: 'off',
 	transferRequestSqlRead: 'off',
 	inventorySqlRead: 'off',
+	repairSqlRead: 'off',
 	appClientId: 'local.test',
 	appClientSecret: 'secret',
 	nodeEnv: 'test',

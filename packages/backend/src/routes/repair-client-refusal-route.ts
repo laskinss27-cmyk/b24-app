@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { cancelRefusedRepairDeal, reframeRefusedRepairTask } from './repair-refusal-effects.js';
 import type { RepairData } from './repair-record.js';
 import { currentUser } from './repair-user-access.js';
+import { loadRepairItem, updateRepairData } from './repair-storage.js';
 
 interface AuthBody { domain?: string; accessToken?: string }
 type RepairClientFrom = (body: AuthBody) => B24Client | null;
@@ -30,11 +30,7 @@ export function registerRepairClientRefusalRoute(
 			return reply.code(400).send({ ok: false, error: 'укажи причину отказа (от 3 до 500 символов)' });
 		}
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', {
-				ENTITY: REPAIRS_ENTITY,
-				FILTER: { ID: id },
-			});
-			const raw = (items ?? [])[0];
+			const raw = await loadRepairItem(app, client, id, 'refuse');
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			if (data.kind === 'presale') return reply.code(400).send({ ok: false, error: 'отказ клиента применим только к клиентскому ремонту' });
@@ -64,9 +60,7 @@ export function registerRepairClientRefusalRoute(
 					byName: me.name,
 					note: `клиент отказался от ремонта: ${reason}`,
 				});
-				await client.call('entity.item.update', {
-					ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data),
-				});
+				await updateRepairData(app, client, { id, name: raw['NAME'], data, sourceItem: raw });
 			}
 
 			const warnings: string[] = [];
@@ -87,9 +81,7 @@ export function registerRepairClientRefusalRoute(
 					warnings.push(`задача пока не обновлена: ${errInfo(error)}`);
 				}
 			}
-			await client.call('entity.item.update', {
-				ENTITY: REPAIRS_ENTITY, ID: id, NAME: raw['NAME'], DETAIL_TEXT: JSON.stringify(data),
-			});
+			await updateRepairData(app, client, { id, name: raw['NAME'], data, sourceItem: raw });
 			app.log.info({ id, warnings }, '[api/repairs/refuse] saved');
 			return { ok: true, repair: { id, name: String(raw['NAME'] ?? ''), ...data }, warnings };
 		} catch (error) {

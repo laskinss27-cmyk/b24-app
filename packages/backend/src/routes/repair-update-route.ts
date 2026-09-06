@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { appPermission } from '../access-policy.js';
 import { B24ApiError, type B24Client } from '../b24/client.js';
-import { REPAIRS_ENTITY } from '../b24/placement.js';
 import { resolveOrCreateContact } from './repair-contact-service.js';
 import { syncRepairDeal, type DealSyncResult } from './repair-deal-sync-service.js';
 import type { RepairData, RepairFile, RepairPhoto } from './repair-record.js';
 import { isLocked, normalizeStatus } from './repair-status.js';
 import { syncRepairStock } from './repair-stock-service.js';
 import { currentUser } from './repair-user-access.js';
+import { loadRepairItem, updateRepairData } from './repair-storage.js';
 
 interface AuthBody {
 	domain?: string;
@@ -44,8 +44,7 @@ export function registerRepairUpdateRoute(
 		const point = s(b['point']);
 		if (!point) return reply.code(400).send({ ok: false, error: 'выбери склад приёмки — без него ремонт сохранить нельзя' });
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: REPAIRS_ENTITY, FILTER: { ID: id } });
-			const raw = (items ?? [])[0];
+			const raw = await loadRepairItem(app, client, id, 'update');
 			if (!raw) return reply.code(404).send({ ok: false, error: 'ремонт не найден' });
 			const data = (raw['DETAIL_TEXT'] ? JSON.parse(String(raw['DETAIL_TEXT'])) : {}) as RepairData;
 			const me = await currentUser(client);
@@ -100,7 +99,7 @@ export function registerRepairUpdateRoute(
 				data.files = (b['files'] as Array<Record<string, unknown>>).map((f) => ({ id: Number(f['id']) || 0, name: s(f['name']), url: s(f['url']), type: s(f['type']) })).filter((f) => f.url);
 			}
 			const name = [data.device, data.model, data.client.name].filter(Boolean).join(' · ') || 'Ремонт';
-			await client.call('entity.item.update', { ENTITY: REPAIRS_ENTITY, ID: id, NAME: name, DETAIL_TEXT: JSON.stringify(data) });
+			await updateRepairData(app, client, { id, name, data, sourceItem: raw });
 			app.log.info({ id }, '[api/repairs/update] ok');
 			return {
 				ok: true,

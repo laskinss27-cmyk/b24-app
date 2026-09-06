@@ -541,6 +541,17 @@ public health, readiness, официальный ERP read, сеть `erpnext_fra
 
 ## Восстановление ERPNext
 
+### SQL ремонтов, подготовка 2026-09-06
+
+Нормализованный контур ремонтов описан в
+[sql-repairs-2026-09-06.md](sql-repairs-2026-09-06.md). Миграции `0075`–`0082`,
+backfill, отдельный runtime-user и флаги `B24_APP_REPAIR_SQL_READ/WRITE`
+применяются на production только после явного разрешения и свежего полного
+backup/restore drill. Порядок переключения: `off` → `shadow` → `verified`
+(только чтение) → совместные `READ=primary` и `WRITE=primary`. На каждой стадии
+обязательны internal/public health, readiness, официальный ERP API и проверка
+сети `erpnext_frappe_network`; Bitrix-путь сохраняется как совместимое зеркало.
+
 Восстановление перезаписывает рабочую БД. Перед началом:
 
 1. остановить пользовательские операции;

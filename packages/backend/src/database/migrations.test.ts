@@ -108,6 +108,14 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0072_create_inventory_mutations.sql',
 		'0073_create_inventory_commands.sql',
 		'0074_create_inventory_bitrix_outbox.sql',
+		'0075_create_repair_records.sql',
+		'0076_create_repair_history.sql',
+		'0077_create_repair_media.sql',
+		'0078_create_repair_backfill_checkpoints.sql',
+		'0079_create_repair_mutations.sql',
+		'0080_create_repair_commands.sql',
+		'0081_create_repair_bitrix_outbox.sql',
+		'0082_create_repair_identities.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);
@@ -500,4 +508,40 @@ test('inventory SQL-first journal and outbox are normalized and append-only', as
 	assert.match(sql, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
 	assert.doesNotMatch(sql, /\bJSON\b/i);
 	assert.doesNotMatch(sql, /^\s*(?:INSERT|UPDATE|DELETE|DROP|TRUNCATE|GRANT)\b/im);
+});
+
+test('repair SQL foundation is normalized, soft-deleted and payload-free', async () => {
+	const migrations = await readMigrationFiles(projectMigrationsDirectory);
+	const byName = new Map(migrations.map((migration) => [migration.filename, migration.sql]));
+	const records = byName.get('0075_create_repair_records.sql')!;
+	const history = byName.get('0076_create_repair_history.sql')!;
+	const media = byName.get('0077_create_repair_media.sql')!;
+	const checkpoints = byName.get('0078_create_repair_backfill_checkpoints.sql')!;
+	const mutations = byName.get('0079_create_repair_mutations.sql')!;
+	const commands = byName.get('0080_create_repair_commands.sql')!;
+	const outbox = byName.get('0081_create_repair_bitrix_outbox.sql')!;
+	const identities = byName.get('0082_create_repair_identities.sql')!;
+	for (const migration of [records, history, media, checkpoints, mutations, commands, outbox, identities]) {
+		assert.equal(migration.split(';').filter((statement) => statement.trim()).length, 1);
+		assert.doesNotMatch(migration, /^\s*(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b/im);
+		assert.doesNotMatch(migration, /\bJSON\b/i);
+		assert.match(migration, /ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\s*$/);
+		const identifiers = [...migration.matchAll(/(?:CONSTRAINT|UNIQUE KEY|KEY)\s+([a-z0-9_]+)/g)].map((match) => match[1]!);
+		assert.ok(identifiers.every((identifier) => identifier.length <= 64));
+	}
+	assert.match(records, /bitrix_external_id BIGINT UNSIGNED NULL/);
+	assert.match(records, /UNIQUE KEY uq_repair_records_number \(repair_no\)/);
+	assert.match(records, /last_state_hash BINARY\(32\) NOT NULL/);
+	assert.match(records, /deleted_at DATETIME\(6\) NULL/);
+	assert.match(records, /repair_kind IN \('client', 'presale'\)/);
+	assert.match(history, /UNIQUE KEY uq_repair_history_ordinal \(repair_id, ordinal\)/);
+	assert.match(history, /is_present BOOLEAN NOT NULL DEFAULT TRUE/);
+	assert.match(media, /media_kind IN \('photo', 'file'\)/);
+	assert.match(media, /is_present BOOLEAN NOT NULL DEFAULT TRUE/);
+	assert.match(checkpoints, /UNIQUE KEY uq_repair_backfill_hash \(plan_hash\)/);
+	assert.match(mutations, /UNIQUE KEY uq_repair_mutations_number \(repair_id, mutation_no\)/);
+	assert.match(commands, /UNIQUE KEY uq_repair_commands_key \(idempotency_key\)/);
+	assert.match(outbox, /status IN \('pending', 'processing', 'delivered', 'superseded'\)/);
+	assert.match(identities, /UNIQUE KEY uq_repair_identities_number \(repair_no\)/);
+	assert.match(identities, /UNIQUE KEY uq_repair_identities_command \(idempotency_key\)/);
 });
