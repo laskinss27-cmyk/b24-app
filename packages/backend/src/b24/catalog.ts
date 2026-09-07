@@ -21,6 +21,7 @@
  * Розница = BASE (group 2).
  */
 import { B24Client, type BatchCall } from './client.js';
+import { isRetiredConsumablesProduct } from '@b24-app/shared';
 import type { CatalogProductContent } from '../catalog-content.js';
 
 /** iblock основных товаров (простые/услуги/родители). */
@@ -222,6 +223,7 @@ export async function buildProductBase(client: B24Client): Promise<ProductBaseDa
 		if (Number(p['type']) === PARENT_TYPE) continue;
 		const id = Number(p['id']);
 		if (id === B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID) continue;
+		if (isRetiredConsumablesProduct(id)) continue;
 		const sid = Number(p['iblockSectionId'] ?? 0) || undefined;
 		rows.push({
 			id,

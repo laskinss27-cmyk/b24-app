@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isPassThroughProduct } from '@b24-app/shared';
 import { photoFullUrl, type BaseRow, type CatalogProductUpdateInput, type StoreInfo } from './b24.js';
 import { formatCatalogNumber as fmt, productStatuses, PRODUCT_STATUS_OPTIONS } from './catalog-product-display.js';
 import { prepareCatalogPhoto, type PreparedCatalogPhoto } from './catalog-product-photo.js';
@@ -186,7 +187,7 @@ export function CatalogProductCard({
 						</div>}
 						<div className="catalog-product-totals">
 							<div><span>Розница</span><b>{fmt(row.retail)} ₽</b></div>
-							<div><span>Закупка</span><b>{fmt(row.purchase ?? 0)} ₽</b></div>
+							<div><span>{isPassThroughProduct(row.id) ? 'Закупка в сделке' : 'Закупка'}</span><b>{isPassThroughProduct(row.id) ? 'По цене продажи' : `${fmt(row.purchase ?? 0)} ₽`}</b></div>
 							{!row.isService && <div><span>Всего на складах</span><b>{fmt(row.total)} шт.</b></div>}
 						</div>
 					</aside>
@@ -201,7 +202,7 @@ export function CatalogProductCard({
 									<label>Артикул<input value={article} onChange={(event) => setArticle(event.target.value)} /></label>
 									<label>Раздел<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
 									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} disabled={!canEditPrices} onChange={(event) => setRetail(event.target.value)} /></label>
-									<label>Закупочная цена, ₽<input inputMode="decimal" value={purchase} disabled={!canEditPrices} onChange={(event) => setPurchase(event.target.value)} /></label>
+									<label>{isPassThroughProduct(row.id) ? 'Закупка в сделке = продажа после скидки' : 'Закупочная цена, ₽'}<input inputMode="decimal" value={isPassThroughProduct(row.id) ? 'Автоматически по строке сделки' : purchase} disabled={!canEditPrices || isPassThroughProduct(row.id)} onChange={(event) => setPurchase(event.target.value)} /></label>
 									{!canEditPrices && <div className="wide catalog-price-permission-note">Цены показаны только для справки — право на их изменение настраивается отдельно.</div>}
 									<fieldset className="wide catalog-status-editor">
 										<legend>Статус товара</legend>

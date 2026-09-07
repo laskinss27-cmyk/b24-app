@@ -1,16 +1,19 @@
 import { rub } from './deal-display-formatters.js';
+import { dealProductPurchasingPrice, dealProductPurchaseWarning } from './deal-product-row-values.js';
 import type { DealProductRealizationPart } from './deal-product-realization-parts.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
 export function DealProductRealizationRow({ row, part }: { row: EnrichedRow; part: DealProductRealizationPart }): JSX.Element {
+	const purchase = dealProductPurchasingPrice(row);
+	const purchaseWarning = dealProductPurchaseWarning(row);
 	return (
 		<tr className="part-row">
 			<td className="check-col"></td>
 			<td className="part-name">↳ {row.name}</td>
 			<td className="num">
 				{rub(row.price)}
-				{row.purchasingPrice != null
-					? <div className={`purchase-hint${row.price <= row.purchasingPrice ? ' danger' : ''}`}>закуп {rub(row.purchasingPrice)}{row.price <= row.purchasingPrice ? ' ⚠' : ''}</div>
+				{purchase != null
+					? <div className={`purchase-hint${purchaseWarning ? ' danger' : ''}`}>закуп {rub(purchase)}{purchaseWarning ? ' ⚠' : ''}</div>
 					: <div className="purchase-hint muted-hint">закуп —</div>}
 			</td>
 			<td className="num"><span className="none">—</span></td>

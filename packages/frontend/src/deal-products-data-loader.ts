@@ -1,3 +1,4 @@
+import { dealLinePurchasingPrice } from '@b24-app/shared';
 import {
 	fetchDealContracts,
 	fetchDealPlan,
@@ -56,7 +57,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		discountSum: Math.round((p.priceListRate - p.rate) * 100) / 100, // скидка ₽/ед = база − итог (база восстановима)
 		measure: 'шт',
 		stocks: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? [] : mkStocks(p.productId),
-		purchasingPrice: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? null : (enrich[p.productId]?.purchasingPrice ?? null),
+		purchasingPrice: dealLinePurchasingPrice(p.productId, p.rate, p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? null : enrich[p.productId]?.purchasingPrice),
 	}));
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
 	const visibleProductIds = planIdsSet;
@@ -87,7 +88,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 			discountSum: 0,
 			measure: 'шт',
 			stocks: mkStocks(productId),
-			purchasingPrice: enrich[productId]?.purchasingPrice ?? null,
+			purchasingPrice: dealLinePurchasingPrice(productId, price, enrich[productId]?.purchasingPrice),
 		}];
 	});
 	const planRows = [...planRowsFromCore, ...historicalGoods];
@@ -103,7 +104,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 			discountSum: Math.round((item.priceListRate - rate) * 100) / 100,
 			measure: 'шт',
 			stocks: item.isService ? [] : mkStocks(item.productId),
-			purchasingPrice: item.isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
+			purchasingPrice: dealLinePurchasingPrice(item.productId, rate, item.isService ? null : enrich[item.productId]?.purchasingPrice),
 		} satisfies EnrichedRow;
 	})]));
 	return { rows, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };

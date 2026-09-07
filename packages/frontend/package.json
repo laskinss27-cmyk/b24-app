@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "pretest": "npm run test:consumables",
+    "test:consumables": "tsx --test src/consumables.test.tsx",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

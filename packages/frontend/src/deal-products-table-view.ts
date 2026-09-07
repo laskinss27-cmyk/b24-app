@@ -1,6 +1,7 @@
+import { isPassThroughProduct } from '@b24-app/shared';
 import { isWorkRow } from './b24.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
-import { dealProductLine } from './deal-product-row-values.js';
+import { dealProductLine, dealProductPurchasingPrice } from './deal-product-row-values.js';
 
 export function buildDealProductsTableView(data: TableData, workingMode: boolean, summaryView: boolean) {
 	// Товар = всё, что не работа: TYPE 1 (товар) И TYPE 4 (вариация — живой баг сделки 36766,
@@ -55,12 +56,13 @@ export function buildDealProductsTableView(data: TableData, workingMode: boolean
 	const sumWorks = sumRealWorks;
 
 	const total = sumGoods + sumWorks;
-	const profitWorks = sumWorks * data.coef;
+	const profitWorks = pricedWorks.reduce((sum, row) => sum + (isPassThroughProduct(row.productId) ? 0 : dealProductLine(row) * data.coef), 0);
 	let profitGoods = 0;
 	let unknownGoods = 0;
 	for (const r of pricedGoods) {
-		if (r.purchasingPrice == null) unknownGoods++;
-		else profitGoods += (r.price - r.purchasingPrice) * r.quantity;
+		const purchase = dealProductPurchasingPrice(r);
+		if (purchase == null) unknownGoods++;
+		else profitGoods += (r.price - purchase) * r.quantity;
 	}
 	const profitability = profitGoods + profitWorks;
 

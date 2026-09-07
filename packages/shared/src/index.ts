@@ -1,4 +1,5 @@
 export * from './domain.js';
+export * from './consumables.js';
 export * from './product-aliases.js';
 export * from './access-control.js';
 // b24-types.ts генерится автоматически — см. scripts/gen-types.ts.

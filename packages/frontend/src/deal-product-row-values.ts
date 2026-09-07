@@ -1,3 +1,4 @@
+import { dealLinePurchasingPrice, isPassThroughProduct } from '@b24-app/shared';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
 export interface DealProductRowEdit {
@@ -31,8 +32,18 @@ export function dealProductFinalUnit(edit: DealProductRowEdit): number {
 
 /** Наценка относительно закупочной цены; считаем от фактической цены продажи после скидки. */
 export function dealProductMarkupPercent(row: EnrichedRow, edit: DealProductRowEdit): number | null {
+	if (isPassThroughProduct(row.productId)) return 0;
 	if (row.purchasingPrice == null || row.purchasingPrice <= 0) return null;
 	return Math.round(((dealProductFinalUnit(edit) - row.purchasingPrice) / row.purchasingPrice) * 1000) / 10;
+}
+
+export function dealProductPurchasingPrice(row: EnrichedRow, finalUnit = row.price): number | null {
+	return dealLinePurchasingPrice(row.productId, finalUnit, row.purchasingPrice);
+}
+
+export function dealProductPurchaseWarning(row: EnrichedRow, finalUnit = row.price): boolean {
+	const purchase = dealProductPurchasingPrice(row, finalUnit);
+	return !isPassThroughProduct(row.productId) && purchase != null && finalUnit <= purchase;
 }
 
 export function dealProductMarkupText(row: EnrichedRow, edit: DealProductRowEdit): string {

@@ -1,3 +1,4 @@
+import { isRetiredConsumablesProduct } from '@b24-app/shared';
 import { ErpClient } from './client.js';
 import { TECH_SUPPLIER, UOM } from './erp-setup.js';
 import {
@@ -212,6 +213,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 	for (const row of rows) {
 		const productId = Number(row['name']);
 		if (!Number.isInteger(productId) || productId <= 0) continue;
+		if (isRetiredConsumablesProduct(productId)) continue;
 		const content = parseCatalogContent(row['b24_catalog_content']);
 		const normalizedIdentity = splitCatalogProductNameStatus(
 			row['item_name'],
