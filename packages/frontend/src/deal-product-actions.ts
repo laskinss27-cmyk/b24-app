@@ -4,6 +4,8 @@ import { bx24Auth } from './bitrix-auth.js';
 export const QUICKSALE_USER_IDS = ['1858', '986', '1'];
 
 export interface QuickSaleItem {
+	/** Exact stock location includes the selected condition. */
+	stockTitle?:string;
 	productId: number;
 	name: string;
 	price: number;
@@ -30,8 +32,11 @@ export async function createQuickSale(items: QuickSaleItem[], opts: QuickSaleOpt
 			storeId: opts.storeId ?? undefined,
 		}),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; dealId?: number };
-	if (!json.ok) throw new Error(json.error ?? 'не удалось создать продажу');
+	const json = (await res.json()) as { ok: boolean; error?: string; dealId?: number;partial?:boolean };
+	if (!json.ok) {
+		const error=new Error(json.partial&&json.dealId?`Сделка #${json.dealId} создана, но подготовка реализации не завершена: ${json.error}. Продолжите в этой сделке, не создавайте повторную продажу.`:json.error??'не удалось создать продажу');
+		Object.assign(error,{createdDealId:json.partial?json.dealId:undefined});throw error;
+	}
 	return json.dealId ?? 0;
 }
 

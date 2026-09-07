@@ -6,6 +6,7 @@
   "main": "./dist/server.js",
   "scripts": {
     "test:consumables": "tsx --test src/b24/sales-report-consumables.test.ts",
+    "test:stock-conditions": "tsx --test src/erp/stock-conditions.test.ts src/routes/api-stock-availability.test.ts",
     "state:backfill": "tsx src/remaining-sql/cli.ts",
     "test:remaining-sql": "tsx --test src/remaining-sql/codec.test.ts src/remaining-sql/source.test.ts src/remaining-sql/runtime.test.ts",
     "test:remaining-sql-mariadb": "tsx --test src/remaining-sql/integration.test.ts",

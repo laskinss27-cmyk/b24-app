@@ -111,6 +111,7 @@ export function ProductBase({
 	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
 	// Корзина быстрой продажи: productId → количество.
 	const [cart, setCart] = useState<Map<number, number>>(() => new Map());
+	const [saleStores,setSaleStores]=useState<Record<number,string>>({});
 	const [showCart, setShowCart] = useState(false);
 	const [creatingSale, setCreatingSale] = useState(false);
 	const [saleErr, setSaleErr] = useState<string | null>(null);
@@ -223,6 +224,7 @@ export function ProductBase({
 		try {
 			const base = await withTimeout(fetchProductBase(true, marketplaceMode, reservationDealId), 90000, 'catalog/browse');
 			setRows(base.rows);
+			setCardRow(current=>current?base.rows.find(row=>row.id===current.id)??current:null);
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
 			setCanCreateProduct(base.canCreateProduct);
@@ -379,8 +381,15 @@ export function ProductBase({
 
 	async function createSale(): Promise<void> {
 		setSaleErr(null);
-		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty, discountPercent: discOf(c.row.id) }));
+		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty, discountPercent: discOf(c.row.id), ...(saleStores[c.row.id]?{stockTitle:saleStores[c.row.id]}:{}) }));
 		if (!items.length) return;
+		for(const item of items){
+			const row=rowById.get(item.productId);
+			if(row&&!row.isService){
+				const source=stores.find(s=>s.title===item.stockTitle);
+				if(!source||Number(row.stockByStore[source.id]??0)<item.quantity){setSaleErr(`Для «${item.name}» выберите состояние и склад с достаточным остатком.`);return;}
+			}
+		}
 		if (ctx.__mock) { setSaleErr('dev-мок: продажа создаётся только на проде.'); return; }
 		setCreatingSale(true);
 		try {
@@ -391,8 +400,11 @@ export function ProductBase({
 			);
 			clearCart();
 			setShowCart(false);
+			setSaleStores({});
 			openDeal(dealId);
 		} catch (e) {
+			const partialId=Number((e as {createdDealId?:number})?.createdDealId);
+			if(partialId>0){clearCart();setSaleStores({});setShowCart(false);openDeal(partialId);}
 			setSaleErr(String(e instanceof Error ? e.message : e));
 		} finally {
 			setCreatingSale(false);
@@ -579,6 +591,7 @@ export function ProductBase({
 				canEditMarketplaceOldId={canEditMarketplaceOldId}
 				onSave={saveCatalogProduct}
 				onSaveMarketplaceOldId={saveMarketplaceOldId}
+				{...(!ctx.__mock&&!readOnly&&!pickMode?{onStockChanged:refresh}:{})}
 				onClose={() => setCardRow(null)}
 			/>}
 
@@ -586,6 +599,9 @@ export function ProductBase({
 
 			{!pickMode && showCart && <QuickSaleCartModal
 				items={cartList}
+				stores={visibleStores}
+				selectedStores={saleStores}
+				onStoreChange={(id,title)=>setSaleStores(current=>({...current,[id]:title}))}
 				discountPercent={discOf}
 				lineFinal={lineFinal}
 				cartSum={cartSum}

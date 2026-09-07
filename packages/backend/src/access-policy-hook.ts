@@ -142,6 +142,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 };
 
 function permissionsFor(route: string, body: Record<string, unknown>): readonly AccessPermissionId[] {
+	if(route==='/api/stock/conditions')return body['action']==='change'?['transfers.create','transfers.post']:['catalog.view'];
 	if (route === '/api/stock/create') {
 		return body['kind'] === 'receipt' ? ['stock.create_receipt'] : ['stock.create_issue'];
 	}

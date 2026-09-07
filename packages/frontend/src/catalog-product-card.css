@@ -387,6 +387,12 @@
 	border-top: 1px solid #e4e8ee;
 	background: #fff;
 }
+.stock-condition-panel table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+.stock-condition-panel th, .stock-condition-panel td { text-align: left; padding: 8px; border-bottom: 1px solid #e5e9ef; }
+.stock-condition-panel details { margin-top: 16px; }
+.stock-condition-panel li { margin: 8px 0; }
+.stock-condition-panel > button { margin-top: 12px; }
+.cart-nm select { display: block; width: 100%; max-width: 380px; margin-top: 6px; padding: 6px; }
 @media (max-width: 760px) {
 	.catalog-product-overlay { padding: 16px 8px; }
 	.catalog-product-card { width: calc(100vw - 16px); }

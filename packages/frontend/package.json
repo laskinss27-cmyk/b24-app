@@ -6,6 +6,7 @@
   "scripts": {
     "pretest": "npm run test:consumables",
     "test:consumables": "tsx --test src/consumables.test.tsx",
+    "test:stock-conditions": "tsx --test src/stock-conditions.test.ts src/deal-stock.test.ts",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

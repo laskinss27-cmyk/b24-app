@@ -1,6 +1,8 @@
 import { ErpClient } from './client.js';
 import { DEAL_FIELD, ensureErpSetup } from './erp-setup.js';
 import { erpContext, erpWarehouse } from './warehouse-context.js';
+import {splitConditionStore} from '@b24-app/shared';
+import {conditionTransferDestination,ensureConditionLocation} from './stock-conditions.js';
 
 export const SUPPLY_REQUEST_FIELD = 'b24_supply_request';
 export const SUPPLY_REQUEST_KEY_FIELD = 'b24_supply_request_key';
@@ -55,15 +57,16 @@ export async function createTransferDraft(
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
+	const destinations=await Promise.all(args.lines.map(line=>conditionTransferDestination(erp,line.fromStore,line.toStore)));
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
 		...(args.dealId ? { [DEAL_FIELD]: String(args.dealId) } : {}),
-		items: args.lines.map((l) => ({
+		items: args.lines.map((l,index) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
 			s_warehouse: erpWarehouse(ctx, l.fromStore),
-			t_warehouse: erpWarehouse(ctx, l.toStore),
+			t_warehouse: erpWarehouse(ctx, destinations[index]!),
 		})),
 	});
 	return { name: String(doc['name']) };
@@ -85,6 +88,7 @@ export async function shipTransferToTransit(
 	if (!args.lines.length) throw new Error('пустая отгрузка');
 	const recovered = await finishExistingTransferOperation(erp, await existingTransferOperation(erp, args.transferId, 'ship'));
 	if (recovered) return recovered;
+	const transitTitles=await Promise.all(args.lines.map(line=>ensureConditionLocation(erp,TRANSIT_STORE,splitConditionStore(line.fromStore).condition)));
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
@@ -93,11 +97,11 @@ export async function shipTransferToTransit(
 		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
 		...(args.transferId ? { [TRANSFER_DOCUMENT_FIELD]: String(args.transferId), [TRANSFER_PHASE_FIELD]: 'ship' } : {}),
-		items: args.lines.map((l) => ({
+		items: args.lines.map((l,index) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
 			s_warehouse: erpWarehouse(ctx, l.fromStore),
-			t_warehouse: erpWarehouse(ctx, TRANSIT_STORE),
+			t_warehouse: erpWarehouse(ctx, transitTitles[index]!),
 		})),
 	});
 	const name = String(doc['name']);
@@ -123,6 +127,7 @@ export async function receiveTransferFromTransit(
 	if (!args.lines.length) throw new Error('пустая приёмка');
 	const recovered = await finishExistingTransferOperation(erp, await existingTransferOperation(erp, args.transferId, 'legacy_receive'));
 	if (recovered) return recovered;
+	const transitTitles=await Promise.all(args.lines.map(line=>ensureConditionLocation(erp,TRANSIT_STORE,splitConditionStore(line.toStore).condition)));
 	const doc = await erp.create('Stock Entry', {
 		company: ctx.company,
 		stock_entry_type: 'Material Transfer',
@@ -131,10 +136,10 @@ export async function receiveTransferFromTransit(
 		...(args.supplyRequestKey ? { [SUPPLY_REQUEST_KEY_FIELD]: args.supplyRequestKey } : {}),
 		...(args.purchaseOrder ? { [SUPPLY_PURCHASE_ORDER_FIELD]: args.purchaseOrder } : {}),
 		...(args.transferId ? { [TRANSFER_DOCUMENT_FIELD]: String(args.transferId), [TRANSFER_PHASE_FIELD]: 'legacy_receive' } : {}),
-		items: args.lines.map((l) => ({
+		items: args.lines.map((l,index) => ({
 			item_code: String(l.productId),
 			qty: l.qty,
-			s_warehouse: erpWarehouse(ctx, TRANSIT_STORE),
+			s_warehouse: erpWarehouse(ctx, transitTitles[index]!),
 			t_warehouse: erpWarehouse(ctx, l.toStore),
 		})),
 	});
@@ -196,6 +201,8 @@ export async function completeTransferFromTransit(
 	await ensureSupplyTransferFields(erp);
 	const legs = planTransferCompletion(args.shippedLines, args.finalLines);
 	if (!legs.length) throw new Error('в перемещении нет количества для проведения');
+	const transitTitle=await ensureConditionLocation(erp,TRANSIT_STORE,splitConditionStore(args.fromStore).condition);
+	const destinationTitle=await conditionTransferDestination(erp,args.fromStore,args.toStore);
 
 	const runPhase = async (
 		phase: 'receive' | 'correction_return' | 'correction_extra',
@@ -229,8 +236,8 @@ export async function completeTransferFromTransit(
 		.map((leg) => ({
 			item_code: String(leg.productId),
 			qty: leg.qty,
-			s_warehouse: erpWarehouse(ctx, route === 'extra' ? args.fromStore : TRANSIT_STORE),
-			t_warehouse: erpWarehouse(ctx, route === 'return' ? args.fromStore : args.toStore),
+			s_warehouse: erpWarehouse(ctx, route === 'extra' ? args.fromStore : transitTitle),
+			t_warehouse: erpWarehouse(ctx, route === 'return' ? args.fromStore : destinationTitle),
 		}));
 	const receiveEntry = await runPhase('receive', itemsFor('deliver'));
 	const corrections: Array<{ kind: 'shortage_return' | 'overage_transfer'; name: string; lines: Array<{ productId: number; qty: number }> }> = [];
