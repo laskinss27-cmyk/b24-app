@@ -141,12 +141,16 @@ export async function createInventoryRecoDraft(
 		...(args.postingDate ? { posting_date: args.postingDate } : {}),
 		expense_account: String(adj['name']),
 		[INV_FIELD]: args.invRef,
-		items: args.lines.map((l) => ({
-			item_code: String(l.productId),
-			warehouse: erpWarehouse(ctx, args.storeTitle),
-			qty: l.qty,
-			valuation_rate: Math.max(l.valuation, 0.01),
-		})),
+		items: args.lines.map((l) => {
+			const valuation = Number.isFinite(l.valuation) && l.valuation > 0.01 ? l.valuation : 0;
+			return {
+				item_code: String(l.productId),
+				warehouse: erpWarehouse(ctx, args.storeTitle),
+				qty: l.qty,
+				valuation_rate: valuation,
+				...(valuation === 0 ? { allow_zero_valuation_rate: 1 } : {}),
+			};
+		}),
 	});
 	return { name: String(doc['name']) };
 }

@@ -61,8 +61,10 @@ export async function createInventoryAdjustmentDraft(
 				? { s_warehouse: warehouse }
 				: {
 					t_warehouse: warehouse,
-					basic_rate: Math.max(line.valuation, 0.01),
-					valuation_rate: Math.max(line.valuation, 0.01),
+					// Излишек инвентаризации меняет количество, но не создаёт
+					// техническую закупочную цену. ERPNext явно разрешает нулевую
+					// оценку для такого Material Receipt.
+					allow_zero_valuation_rate: 1,
 				}),
 		})),
 	});

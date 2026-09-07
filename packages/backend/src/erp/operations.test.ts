@@ -48,6 +48,7 @@ import {
 	ensureMarketplaceOldIdField,
 	ensureSupplier,
 	fetchErpPurchasing,
+	fetchErpCatalogPurchasing,
 	fetchErpRetailPrices,
 	fetchErpStocks,
 	fetchErpStocksFor,
@@ -1371,6 +1372,7 @@ test('ERP stock and price readers keep filters, aggregation and buying-price fal
 		[202, { Reserve: -1 }],
 	]);
 	assert.deepEqual([...await fetchErpPurchasing(client, [101, 101, -1, 202])], [[101, 12.5], [202, 18]]);
+	assert.deepEqual([...await fetchErpCatalogPurchasing(client, [101, 101, -1, 202])], [[101, 12.5]]);
 	assert.deepEqual([...await fetchErpRetailPrices(client, [101, 101, 202])], [[101, 25], [202, 40]]);
 
 	const filteredBins = calls.find((call) => call.doctype === 'Bin' && call.filters.length > 0);
@@ -1975,7 +1977,7 @@ test('inventory reconciliation keeps its current draft lifecycle and payload', a
 		invRef: 'inv42:store7',
 		storeTitle: 'Main',
 		postingDate: '2026-08-06',
-		lines: [{ productId: 101, qty: 4, valuation: 0 }],
+		lines: [{ productId: 101, qty: 4, valuation: 0.01 }],
 	});
 	assert.deepEqual(result, { name: 'RECO-1' });
 	const document = created.find((entry) => entry.doctype === 'Stock Reconciliation');
@@ -1985,7 +1987,7 @@ test('inventory reconciliation keeps its current draft lifecycle and payload', a
 	assert.equal(document.fields['b24_inv_ref'], 'inv42:store7');
 	assert.equal(document.fields['posting_date'], '2026-08-06');
 	assert.deepEqual(document.fields['items'], [{
-		item_code: '101', warehouse: 'Main - TEST', qty: 4, valuation_rate: 0.01,
+		item_code: '101', warehouse: 'Main - TEST', qty: 4, valuation_rate: 0, allow_zero_valuation_rate: 1,
 	}]);
 
 	await submitInventoryReco(client, result.name);
@@ -2035,7 +2037,7 @@ test('inventory adjustments create separate shortage and surplus Stock Entries',
 	assert.equal(entries[1]?.fields['b24_inv_ref'], 'inv42:store7:receipt');
 	assert.equal(entries[1]?.fields['b24_note'], 'Оприходование по инвентаризации');
 	assert.deepEqual(entries[1]?.fields['items'], [{
-		item_code: '202', qty: 3, t_warehouse: 'Main - TEST', basic_rate: 40, valuation_rate: 40,
+		item_code: '202', qty: 3, t_warehouse: 'Main - TEST', allow_zero_valuation_rate: 1,
 	}]);
 
 	await submitInventoryAdjustment(client, issue.name);

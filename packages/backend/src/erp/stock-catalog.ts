@@ -138,6 +138,25 @@ export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): 
 	return out;
 }
 
+/**
+ * Явная закупочная цена каталога. Не подменяет отсутствующую закупку
+ * складской valuation_rate: движения инвентаризации не должны выглядеть
+ * в интерфейсе как закупочная цена.
+ */
+export async function fetchErpCatalogPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+	const out = new Map<number, number>();
+	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200).map(String);
+		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
+			['item_code', 'in', chunk],
+			['price_list', '=', 'Standard Buying'],
+		]);
+		for (const row of prices) out.set(Number(row['item_code']), Number(row['price_list_rate'] ?? 0));
+	}
+	return out;
+}
+
 /** Розничные цены каталога ядра для сделок и подборщиков. */
 export async function fetchErpRetailPrices(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
 	const out = new Map<number, number>();

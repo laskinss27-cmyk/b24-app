@@ -132,6 +132,7 @@ export {
 	ensureSupplier,
 	fetchCoreCatalogItems,
 	fetchCoreCatalogPrices,
+	fetchErpCatalogPurchasing,
 	fetchErpPurchasing,
 	fetchErpRetailPrices,
 	fetchErpStocks,

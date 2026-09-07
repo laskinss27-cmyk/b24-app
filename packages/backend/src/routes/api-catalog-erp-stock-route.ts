@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
-import { fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
+import { fetchErpCatalogPurchasing, fetchErpStocksFor } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
 import { appPermission } from '../access-policy.js';
@@ -24,7 +24,7 @@ export function applyDealReservationAvailability(
 
 export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 	// Остатки из ЯДРА (ERPNext) — payoff выноса склада: один запрос Bin вместо BX24 catalog.storeproduct.
-	// Ядро = зеркало остатков Б24 (сверка-в-ноль), поэтому подмена прозрачна; закупка — из valuation_rate.
+	// Ядро = зеркало остатков Б24 (сверка-в-ноль), поэтому подмена прозрачна; закупка — только из Standard Buying.
 	// Гейт env ERPNEXT_URL: ядро не подключено → явная ошибка, без складского фолбэка Б24.
 	// Склады отдаём по имени и маппим в стабильные ID интерфейса из справочника ядра.
 	app.post('/api/catalog/erp-stocks', async (req, reply) => {
@@ -46,7 +46,7 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 			// Запрашиваем только нужные item_code: полный Bin избыточен и заметно замедляет ответ.
 			const [physicalStocks, purchasing] = await Promise.all([
 				fetchErpStocksFor(erp, ids),
-				fetchErpPurchasing(erp, ids),
+				fetchErpCatalogPurchasing(erp, ids),
 			]);
 			let stocks = physicalStocks;
 			let availability: ReservationAvailabilityLine[] = [];
