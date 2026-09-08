@@ -68,7 +68,7 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
 		await root.query(`CREATE DATABASE ${database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 		schemaPool = mariadb.createPool({ host, port, user: 'root', password: rootPassword, database, connectionLimit: 1 });
-		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 18);
+		assert.equal((await applyMigrations(schemaPool, rehearsalDirectory)).length, 19);
 		assert.deepEqual(await applyMigrations(schemaPool, rehearsalDirectory), []);
 		await root.query(`CREATE USER '${writerUser}'@'%' IDENTIFIED BY '${writerPassword}'`);
 		await root.query(`GRANT SELECT, INSERT, UPDATE ON ${database}.* TO '${writerUser}'@'%'`);
