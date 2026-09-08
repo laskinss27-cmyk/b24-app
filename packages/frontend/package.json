@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pretest": "npm run test:consumables",
+    "pretest": "npm run test:inventory-export && npm run test:consumables",
+    "test:inventory-export": "tsx --test src/inventory-export.test.tsx",
     "test:consumables": "tsx --test src/consumables.test.tsx",
     "test:stock-conditions": "tsx --test src/stock-conditions.test.ts src/deal-stock.test.ts",
     "dev": "vite",

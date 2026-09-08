@@ -30,6 +30,7 @@ import {
 	type StoreInfo,
 } from './b24.js';
 import { InventoryCount } from './InventoryReport.js';
+import { InventoryExportButton } from './InventoryExportButton.js';
 
 /**
  * Модуль инвентаризации (вход из левого меню). Своя сущность, без привязки к задаче.
@@ -472,6 +473,7 @@ export function InventoryHome(): JSX.Element {
 					<strong>{inv.title}</strong>
 					<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status === 'closed' ? 'закрыта' : inv.status}</span>
 					{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
+					<InventoryExportButton inventoryId={inv.id} />
 					{isInitiator && (
 						<button className="btn-del" title="Удалить инвентаризацию" onClick={() => void removeInventory(inv)}>
 							✕
@@ -490,6 +492,7 @@ export function InventoryHome(): JSX.Element {
 										{s.dot} {s.text}
 									</span>
 									{pointAction(inv, p)}
+									<InventoryExportButton inventoryId={inv.id} storeId={p.storeId} />
 									<button
 										className="btn-mini ghost qr-btn"
 										title="QR для подсчёта с телефона"

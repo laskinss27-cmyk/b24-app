@@ -34,9 +34,12 @@ h2.inv-h2 {
 }
 .inv-card-head {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 10px;
 }
+.inventory-export { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.inventory-export-error { color: #b42318; font-size: 12px; max-width: 360px; }
 .badge {
 	font-size: 11px;
 	padding: 2px 8px;

@@ -215,3 +215,16 @@ test('inventory primary read exposes SQL failure without falling back to Bitrix'
 	await assert.rejects(() => loadInventoryItems(readApp, client, 'list'), /SQL down/);
 	assert.deepEqual(trace, ['sql-read']);
 });
+
+test('Excel export does not flush pending mirrors or write on SQL-primary reads', async () => {
+	const trace: string[] = [];
+	const readApp = {
+		config: { inventorySqlRead: 'primary' },
+		databaseRuntime: { mode: 'readiness', async readInventoryRecords() { trace.push('sql-read'); return []; } },
+		inventorySqlWriter: { ...runtime(trace), mode: 'primary', async pendingMirrors() { assert.fail('export must not flush mirrors'); } },
+		log: { info() {} },
+	} as unknown as FastifyInstance;
+	const client = { async callWithMeta() { assert.fail('export must not read Bitrix in primary mode'); } } as unknown as B24Client;
+	assert.deepEqual(await loadInventoryItems(readApp, client, 'export'), []);
+	assert.deepEqual(trace, ['sql-read']);
+});

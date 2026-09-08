@@ -131,6 +131,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/marketplaces/bundle': ['marketplaces.create_bundle'],
 
 	'/api/inventory/list': ['inventory.view'],
+	'/api/inventory/export-xlsx': ['inventory.view'],
 	'/api/inventory/stock': ['inventory.view'],
 	'/api/inventory/search-products': ['inventory.view'],
 	'/api/inventory/create': ['inventory.create'],

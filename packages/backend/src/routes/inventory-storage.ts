@@ -9,11 +9,11 @@ import { inventorySqlRecordToBitrixItem, readPrimaryInventorySqlItems, resolveIn
 export async function loadInventoryItems(
 	app: FastifyInstance,
 	client: B24Client,
-	scope: 'list' | 'update' | 'point',
+	scope: 'list' | 'update' | 'point' | 'export',
 ): Promise<Record<string, unknown>[]> {
 	if (app.config.inventorySqlRead === 'primary') {
 		const items = await readPrimaryInventorySqlItems(app.databaseRuntime);
-		await flushPendingNativeInventoryMirrors(app, client);
+		if (scope !== 'export') await flushPendingNativeInventoryMirrors(app, client);
 		app.log.info({
 			mode: 'primary',
 			scope,

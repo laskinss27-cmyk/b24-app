@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { registerInventoryCreateRoute } from './api-inventory-create-route.js';
+import { registerInventoryExportRoute } from './api-inventory-export-route.js';
 import { registerInventoryDeleteRoute } from './api-inventory-delete-route.js';
 import { registerInventoryReadRoutes } from './api-inventory-read-routes.js';
 import { registerInventoryReconciliationRoutes } from './api-inventory-reconciliation-routes.js';
@@ -17,6 +18,7 @@ export { withInventoryUpdateLock } from './api-inventory-update-lock.js';
  */
 export function registerApiInventoryRoute(app: FastifyInstance): void {
 	registerInventoryReadRoutes(app);
+	registerInventoryExportRoute(app);
 	registerInventoryCreateRoute(app);
 	registerInventoryUpdateRoute(app);
 	registerInventoryReconciliationRoutes(app);
