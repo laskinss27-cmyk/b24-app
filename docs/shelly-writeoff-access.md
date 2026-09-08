@@ -1,5 +1,10 @@
 # Scoped Shelly write-off access
 
+**Withdrawn at the user's request on 2026-09-08.** The customer intended marketplace sales,
+not Material Issue write-offs. The implementation commit is reverted; the preceding
+inventory release is restored without changing existing marketplace permissions.
+The remainder of this document is historical evidence, not an active access grant.
+
 User explicitly approved implementation and deployment on 2026-09-08.
 Portal profiles visually verified: Савченко Николай (760), Маркетплейсович Николай (3608).
 

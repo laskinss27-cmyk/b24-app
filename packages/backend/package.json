@@ -5,7 +5,6 @@
   "type": "module",
   "main": "./dist/server.js",
   "scripts": {
-    "test:shelly-access": "tsx --test src/routes/api-stock-access.test.ts src/routes/api-stock-shelly-access.test.ts",
     "test:inventory-money": "tsx --test src/inventory-retail-prices.test.ts src/routes/api-inventory-money.test.ts src/inventory-xlsx.test.ts src/inventory-sql/reader.test.ts src/inventory-sql/writer.test.ts src/database/migrations.test.ts",
     "test:supply-comments": "tsx --test src/routes/api-supply-request-note.test.ts",
     "test:inventory-export": "tsx --test src/inventory-xlsx.test.ts src/routes/api-inventory-export-route.test.ts",

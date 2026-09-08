@@ -2,8 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
 import { listActiveStoreTitles, submitDoc } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
-import { stockAccess, isShellyIssueDocument, SHELLY_ISSUE_STORE } from './api-stock-access.js';
-import { erpContext, erpWarehouse } from '../erp/warehouse-context.js';
+import { canManageStock } from './api-stock-access.js';
 import { ReservationService } from '../reservations/service.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody } from './api-stock-types.js';
@@ -22,18 +21,12 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 			: b.kind === 'issue' ? 'Stock Entry' : null;
 		if (!doctype) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
 		try {
-			const access = await stockAccess(client);
-			const generalPost = appPermission(req, 'stock.post_documents', access.canManage);
-			const scopedPost = b.kind === 'issue' && appPermission(req, 'stock.post_documents', access.canIssueShelly);
-			if (!generalPost && !scopedPost) {
+			if (!appPermission(req, 'stock.post_documents', await canManageStock(client))) {
 				return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
 			}
 			let issueLines: Array<{ productId: number; qty: number; fromStore: string }> = [];
 			if (b.kind === 'issue') {
 				const doc = await erp.get<Record<string, unknown>>('Stock Entry', name);
-				if (!generalPost && !isShellyIssueDocument(doc, erpWarehouse(await erpContext(erp), SHELLY_ISSUE_STORE))) {
-					return reply.code(403).send({ ok: false, error: 'Разрешено проводить только списания со склада Shelly. Все строки документа должны списываться с этого склада.' });
-				}
 				const stores = await listActiveStoreTitles(erp);
 				const rawLines = Array.isArray(doc?.['items']) ? doc?.['items'] as Array<Record<string, unknown>> : [];
 				issueLines = rawLines

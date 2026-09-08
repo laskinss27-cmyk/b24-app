@@ -5,7 +5,4 @@ export interface StockForm {
 	suppliers: string[];
 	canCreate: boolean;
 	canCancel?: boolean;
-	canCreateIssue?: boolean;
-	canPostIssue?: boolean;
-	issueStores?: string[];
 }

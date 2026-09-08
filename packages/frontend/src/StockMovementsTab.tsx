@@ -33,8 +33,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const [busyDoc, setBusyDoc] = useState<string | null>(null);
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string } | null>(null);
-	const canPost = kind === 'issue' ? Boolean(form?.canPostIssue ?? form?.canCreate) : Boolean(form?.canCreate) && kind === 'receipt';
-	const canCreate = kind === 'issue' ? Boolean(form?.canCreateIssue ?? form?.canCreate) : canPost;
+	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
 	const canCancel = Boolean(form?.canCancel);
 	// Пустой журнал остаётся быстрым (последние 50), а непустой поиск работает по всей истории.
 	// Зависимость — boolean, поэтому набор каждого следующего символа не создаёт новый запрос.
@@ -86,7 +85,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 
 	return (
 		<>
-			{showCreate && canCreate && (
+			{showCreate && canPost && (
 				<div style={{ marginBottom: 10 }}>
 					<button className="btn-primary" onClick={() => setShowForm(true)}>{createLabel}</button>
 				</div>

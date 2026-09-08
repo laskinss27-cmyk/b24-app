@@ -7,7 +7,7 @@ import {
 	updateCoreCatalogPrices,
 } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
-import { stockAccess, SHELLY_ISSUE_STORE } from './api-stock-access.js';
+import { canManageStock } from './api-stock-access.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody, StockIssueLine, StockReceiptLine } from './api-stock-types.js';
 
@@ -22,9 +22,7 @@ export function registerStockDocumentCreationRoute(app: FastifyInstance): void {
 			const kind = b['kind'] === 'receipt' ? 'receipt' : b['kind'] === 'issue' ? 'issue' : null;
 			if (!kind) return reply.code(400).send({ ok: false, error: 'kind должен быть receipt|issue' });
 			const permissionId = kind === 'receipt' ? 'stock.create_receipt' : 'stock.create_issue';
-			const access = await stockAccess(client);
-			const scopedIssue = kind === 'issue' && access.canIssueShelly && b['fromStore'] === SHELLY_ISSUE_STORE;
-			if (!appPermission(req, permissionId, access.canManage || scopedIssue)) {
+			if (!appPermission(req, permissionId, await canManageStock(client))) {
 				return reply.code(403).send({ ok: false, error: 'создавать складские документы может только снабжение' });
 			}
 

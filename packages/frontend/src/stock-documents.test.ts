@@ -23,16 +23,11 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 
 test('stock form data preserves empty and boolean fallbacks', async () => {
 	const requests = captureResponses([{ ok: true, canCreate: 1 }]);
-	assert.deepEqual(await fetchStockFormData(), { stores: [], suppliers: [], canCreate: true, canCancel: false, isSupply: false, canCreateIssue: true, canPostIssue: true, issueStores: [] });
+	assert.deepEqual(await fetchStockFormData(), { stores: [], suppliers: [], canCreate: true, canCancel: false, isSupply: false });
 	assert.deepEqual(requests[0], {
 		url: '/api/stock/form-data',
 		body: { domain: 'mobile.example', accessToken: 'documents-token' },
 	});
-});
-
-test('Shelly issue permissions do not turn on general stock creation or cancellation', async () => {
-	captureResponses([{ ok: true, stores: ['Shelly', 'Офис'], canCreate: false, canCancel: false, isSupply: false, canCreateIssue: true, canPostIssue: true, issueStores: ['Shelly'] }]);
-	assert.deepEqual(await fetchStockFormData(), { stores: ['Shelly', 'Офис'], suppliers: [], canCreate: false, canCancel: false, isSupply: false, canCreateIssue: true, canPostIssue: true, issueStores: ['Shelly'] });
 });
 
 test('stock product creation succeeds and search rejects backend errors', async () => {

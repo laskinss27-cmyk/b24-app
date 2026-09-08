@@ -86,7 +86,7 @@ export function StockLedger(): JSX.Element {
 				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
 				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
 				: tab === 'ledger' ? <StockItemHistoryTab />
-					: <StockMovementsTab kind={tab} form={form} showCreate={tab === 'issue' && !form?.canCreate && Boolean(form?.canCreateIssue)} />}
+				: <StockMovementsTab kind={tab} form={form} showCreate={false} />}
 		</div>
 	);
 }

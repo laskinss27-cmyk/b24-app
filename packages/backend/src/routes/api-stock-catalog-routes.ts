@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
 import { ensureCoreItem, fetchErpStocksFor, listActiveStoreTitles, searchErpItems } from '../erp/operations.js';
 import { appPermission } from '../access-policy.js';
-import { canManageStock, stockAccess, SHELLY_ISSUE_STORE } from './api-stock-access.js';
+import { canManageStock, stockAccess } from './api-stock-access.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import { fetchSupplierCompanies } from './api-stock-suppliers.js';
 import type { StockAuthBody } from './api-stock-types.js';
@@ -23,11 +23,7 @@ export function registerStockCatalogRoutes(app: FastifyInstance): void {
 				|| appPermission(req, 'stock.create_issue', access.canManage);
 			const canCancel = appPermission(req, 'stock.post_documents', access.canManage);
 			const isSupply = appPermission(req, 'supply.view', access.isSupply);
-			const canCreateIssue = appPermission(req, 'stock.create_issue', access.canManage || access.canIssueShelly);
-			const canPostIssue = appPermission(req, 'stock.post_documents', access.canManage || access.canIssueShelly);
-			const issueStores = access.canManage ? stores : access.canIssueShelly ? stores.filter((store) => store === SHELLY_ISSUE_STORE) : [];
-			// Keep legacy canCreate/canCancel unchanged: supply, receipts and transfers consume them.
-			return { ok: true, stores, suppliers, canCreate, canCancel, isSupply, canCreateIssue, canPostIssue, issueStores };
+			return { ok: true, stores, suppliers, canCreate, canCancel, isSupply };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${stockErrorInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: stockErrorInfo(e) });
