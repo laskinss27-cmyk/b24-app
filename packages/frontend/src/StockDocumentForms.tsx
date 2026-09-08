@@ -57,7 +57,7 @@ function ItemPicker({ onPick }: { onPick: (it: StockItem) => void }): JSX.Elemen
 interface ReceiptLine { productId: number; name: string; qty: number; purchase: number; retail: number }
 
 /** Под-форma «Добавить товар» (логика 1С): поиск → выбор → кол-во (+цены для прихода) → «Добавить». */
-function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPrices: boolean; highlightStore?: string; onAdd: (it: ReceiptLine) => void; onClose: () => void }): JSX.Element {
+function AddItemModal({ withPrices, highlightStore, allowCreate = true, onAdd, onClose }: { withPrices: boolean; highlightStore?: string; allowCreate?: boolean; onAdd: (it: ReceiptLine) => void; onClose: () => void }): JSX.Element {
 	const [sel, setSel] = useState<StockItem | null>(null);
 	const [qty, setQty] = useState(1);
 	const [purchase, setPurchase] = useState(0);
@@ -96,7 +96,7 @@ function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPric
 				) : (
 					<>
 						<ItemPicker onPick={setSel} />
-						<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Нет в базе? <a href="#" onClick={(e) => { e.preventDefault(); setCreating(true); }} style={{ color: '#185fa5' }}>Создать новый товар</a></p>
+						{allowCreate && <p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Нет в базе? <a href="#" onClick={(e) => { e.preventDefault(); setCreating(true); }} style={{ color: '#185fa5' }}>Создать новый товар</a></p>}
 					</>
 				)) : (
 					<>
@@ -201,7 +201,8 @@ export function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClos
 
 interface SimpleLine { productId: number; name: string; qty: number }
 export function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose: () => void; onDone: () => void }): JSX.Element {
-	const [fromStore, setFromStore] = useState('');
+	const stores = form.issueStores ?? form.stores;
+	const [fromStore, setFromStore] = useState(stores.length === 1 ? stores[0]! : '');
 	const [reason, setReason] = useState('');
 	const [note, setNote] = useState('');
 	const [lines, setLines] = useState<SimpleLine[]>([]);
@@ -231,10 +232,10 @@ export function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose:
 			<div style={modalCard}>
 				<h2 style={{ fontSize: 17, margin: '0 0 8px' }}>➕ Списание</h2>
 				<label style={fieldLabel}>Склад списания</label>
-				{storeSelect(fromStore, setFromStore, form.stores, '— выберите склад —')}
+				{storeSelect(fromStore, setFromStore, stores, '— выберите склад —')}
 				<label style={fieldLabel}>Причина</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="например: брак, бой, недостача" value={reason} onChange={(e) => setReason(e.target.value)} />
-				{addOpen && <AddItemModal withPrices={false} {...(fromStore ? { highlightStore: fromStore } : {})} onAdd={add} onClose={() => setAddOpen(false)} />}
+				{addOpen && <AddItemModal withPrices={false} allowCreate={form.canCreate} {...(fromStore ? { highlightStore: fromStore } : {})} onAdd={add} onClose={() => setAddOpen(false)} />}
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<label style={fieldLabel}>Товары</label>
