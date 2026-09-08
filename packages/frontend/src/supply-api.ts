@@ -1,4 +1,5 @@
 import { bx24Auth } from './bitrix-auth.js';
+import { requireSupplyOrderNote } from '@b24-app/shared';
 import { newIdempotencyKey } from './idempotency-key.js';
 import type { TransferDoc, TransferHistoryEventDto, TransferLineDto } from './stock-transfer-types.js';
 
@@ -62,11 +63,12 @@ export async function fetchSupplyOrders(): Promise<SupplyOrderRow[]> {
 }
 
 /** Сформировать заказ в снабжение по выбранным чекбоксами товарам сделки. */
-export async function createDealSupplyRequest(dealId: number, lines: Array<{ productId: number; itemName: string; qty: number; note: string }>, options: { toStore: string; deadline: string; note?: string }): Promise<string> {
+export async function createDealSupplyRequest(dealId: number, lines: Array<{ productId: number; itemName: string; qty: number }>, options: { toStore: string; deadline: string; note: string }): Promise<string> {
+	const note = requireSupplyOrderNote(options.note);
 	const res = await fetch('/api/supply/request', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, lines, ...options }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, lines, ...options, note }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; name?: string };
 	if (!res.ok || !json.ok || !json.name) throw new Error(json.error ?? 'сервер не подтвердил создание заявки в снабжение');
@@ -74,6 +76,7 @@ export async function createDealSupplyRequest(dealId: number, lines: Array<{ pro
 }
 
 export async function updateSupplyOrderNote(requestName: string, note: string): Promise<string> {
+	note = requireSupplyOrderNote(note);
 	const res = await fetch('/api/supply/request-note', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

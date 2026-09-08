@@ -1,4 +1,5 @@
 import { createDealSupplyRequest } from './b24.js';
+import { requireSupplyOrderNote } from '@b24-app/shared';
 import { plural } from './deal-display-formatters.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
@@ -15,7 +16,6 @@ export function createDealSupplyOrderActions({
 	supplyBusy,
 	busy,
 	hasPendingDrafts,
-	supplyNotes,
 	supplyQty,
 	supplyToStore,
 	supplyDeadline,
@@ -24,7 +24,6 @@ export function createDealSupplyOrderActions({
 	onReload,
 	setSupplyBusy,
 	setShowSupplyOrder,
-	setSupplyNotes,
 	setSupplyQty,
 	setSupplyToStore,
 	setSupplyDeadline,
@@ -38,7 +37,6 @@ export function createDealSupplyOrderActions({
 	supplyBusy: boolean;
 	busy: boolean;
 	hasPendingDrafts: boolean;
-	supplyNotes: Record<string, string>;
 	supplyQty: Record<string, string>;
 	supplyToStore: string;
 	supplyDeadline: string;
@@ -47,7 +45,6 @@ export function createDealSupplyOrderActions({
 	onReload: () => Promise<void>;
 	setSupplyBusy: (busy: boolean) => void;
 	setShowSupplyOrder: (shown: boolean) => void;
-	setSupplyNotes: (notes: Record<string, string>) => void;
 	setSupplyQty: (quantities: Record<string, string>) => void;
 	setSupplyToStore: (store: string) => void;
 	setSupplyDeadline: (deadline: string) => void;
@@ -71,6 +68,9 @@ export function createDealSupplyOrderActions({
 		if (!supplyToStore) { setSupplyFormError('Выберите конечный склад.'); return; }
 		if (!supplyDeadline) { setSupplyFormError('Укажите крайнюю дату поставки.'); return; }
 		if (supplyDeadline < supplyMinimumDate()) { setSupplyFormError('Крайняя дата не может быть в прошлом.'); return; }
+		let note: string;
+		try { note = requireSupplyOrderNote(supplyOrderNote); }
+		catch (error) { setSupplyFormError((error as Error).message); return; }
 		const quantities = new Map<string, number>();
 		for (const row of supplyGoods) {
 			const qty = Number(String(supplyQty[row.id] ?? '').replace(',', '.'));
@@ -88,10 +88,9 @@ export function createDealSupplyOrderActions({
 		setSupplyBusy(true);
 		setNotice(null);
 		try {
-			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)!, note: String(supplyNotes[row.id] ?? '').trim() }));
-			const requestName = await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, ...(supplyOrderNote.trim() ? { note: supplyOrderNote.trim() } : {}) });
+			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)! }));
+			const requestName = await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, note });
 			setSelected({});
-			setSupplyNotes({});
 			setSupplyQty({});
 			setSupplyToStore('');
 			setSupplyDeadline('');

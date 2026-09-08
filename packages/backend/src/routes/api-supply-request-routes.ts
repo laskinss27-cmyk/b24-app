@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireSupplyOrderNote } from '@b24-app/shared';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import {
@@ -31,23 +32,29 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; lines?: unknown; toStore?: unknown; deadline?: unknown; note?: unknown };
 		const client = supplyClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		let note: string;
+		try { note = requireSupplyOrderNote(b.note); }
+		catch (error) { return reply.code(400).send({ ok: false, error: (error as Error).message }); }
+		if (Array.isArray(b.lines) && b.lines.some((line) => line && typeof line === 'object' && String(line.note ?? '').trim())) {
+			return reply.code(400).send({ ok: false, error: 'Комментарии к позициям больше не поддерживаются. Перенесите их в общий комментарий и повторите заказ.' });
+		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено' });
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const lines = (Array.isArray(b.lines) ? b.lines : [])
-			.map((l) => l as { productId?: unknown; itemName?: unknown; qty?: unknown; note?: unknown })
-			.map((l) => ({ productId: Number(l.productId), itemName: String(l.itemName ?? ''), qty: Number(l.qty), note: String(l.note ?? '').trim() }))
+			.filter((l) => l && typeof l === 'object')
+			.map((l) => l as { productId?: unknown; itemName?: unknown; qty?: unknown })
+			.map((l) => ({ productId: Number(l.productId), itemName: String(l.itemName ?? ''), qty: Number(l.qty) }))
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0);
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций для заявки' });
 		try {
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const toStore = String(b.toStore ?? '').trim();
 			const scheduleDate = String(b.deadline ?? '').trim();
-			const note = String(b.note ?? '').trim();
 			if (!toStore) return reply.code(400).send({ ok: false, error: 'не указан конечный склад' });
 			if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate) || Number.isNaN(new Date(`${scheduleDate}T00:00:00`).getTime())) return reply.code(400).send({ ok: false, error: 'не указана крайняя дата поставки' });
-			const { name } = await createSupplyRequest(erp, { dealId, scheduleDate, toStore, ...(note ? { note } : {}), lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.note ? { note: l.note } : {}) })) });
+			const { name } = await createSupplyRequest(erp, { dealId, scheduleDate, toStore, note, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, ...(l.itemName ? { itemName: l.itemName } : {}) })) });
 			app.log.info({ dealId, lines: lines.length, name, toStore, scheduleDate }, '[api/supply/request] created');
 			return { ok: true, name };
 		} catch (err) {
@@ -60,6 +67,9 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 		const b = (req.body ?? {}) as AuthBody & { requestName?: unknown; note?: unknown };
 		const client = supplyClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		let commonNote: string;
+		try { commonNote = requireSupplyOrderNote(b.note); }
+		catch (error) { return reply.code(400).send({ ok: false, error: (error as Error).message }); }
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 		const requestName = String(b.requestName ?? '').trim();
@@ -68,7 +78,7 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			if (!appPermission(req, 'supply.edit_request_note', await canManageStock(client))) {
 				return reply.code(403).send({ ok: false, error: 'редактирование комментария доступно снабжению' });
 			}
-			const note = await updateSupplyRequestNote(erp, requestName, String(b.note ?? ''));
+			const note = await updateSupplyRequestNote(erp, requestName, commonNote);
 			app.log.info({ requestName }, '[api/supply/request-note] updated');
 			return { ok: true, note };
 		} catch (err) {

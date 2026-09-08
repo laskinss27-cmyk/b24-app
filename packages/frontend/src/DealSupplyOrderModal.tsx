@@ -18,13 +18,11 @@ export function DealSupplyOrderModal({
 	orderNote,
 	formError,
 	quantities,
-	notes,
 	onClose,
 	onStoreChange,
 	onDeadlineChange,
 	onOrderNoteChange,
 	onQuantityChange,
-	onNoteChange,
 	onSubmit,
 }: {
 	rows: SupplyOrderRow[];
@@ -36,13 +34,11 @@ export function DealSupplyOrderModal({
 	orderNote: string;
 	formError: string | null;
 	quantities: Record<string, string>;
-	notes: Record<string, string>;
 	onClose: () => void;
 	onStoreChange: (value: string) => void;
 	onDeadlineChange: (value: string) => void;
 	onOrderNoteChange: (value: string) => void;
 	onQuantityChange: (rowId: string, value: string) => void;
-	onNoteChange: (rowId: string, value: string) => void;
 	onSubmit: () => void;
 }): JSX.Element {
 	return (
@@ -55,14 +51,14 @@ export function DealSupplyOrderModal({
 				<div className="deal-supply-order-fields">
 					<label><span>Конечный склад</span><select value={toStore} disabled={busy} onChange={(event) => onStoreChange(event.target.value)}><option value="">Выберите склад</option>{stores.map((store) => <option key={store.id} value={store.title}>{store.title}</option>)}</select></label>
 					<label><span>Привезти не позднее</span><input type="date" min={minimumDate} value={deadline} disabled={busy} onChange={(event) => onDeadlineChange(event.target.value)} /></label>
-					<label className="wide"><span>Общий комментарий</span><textarea rows={2} maxLength={500} value={orderNote} disabled={busy} placeholder="Комментарий ко всему заказу" onChange={(event) => onOrderNoteChange(event.target.value)} /></label>
+					<label className="wide"><span>Общий комментарий (обязательно)</span><textarea required rows={2} maxLength={500} value={orderNote} disabled={busy} placeholder="Укажите пожелания и условия ко всему заказу" onChange={(event) => onOrderNoteChange(event.target.value)} /></label>
 				</div>
 				<div className={`deal-supply-order-destination${toStore ? '' : ' is-empty'}`}>
 					{toStore
 						? <>Конечный склад: <b>{toStore}</b>. Заявка будет создана только после нажатия кнопки ниже.</>
 						: 'Выберите конечный склад вручную — он не берётся из отмеченных строк.'}
 				</div>
-				{formError && <div className="deal-supply-order-error">{formError}</div>}
+				{formError && <div className="deal-supply-order-error" role="alert">{formError}</div>}
 				<div className="deal-supply-order-lines">
 					{rows.map((row) => (
 						<label key={row.id} className="deal-supply-order-line">
@@ -75,20 +71,12 @@ export function DealSupplyOrderModal({
 								disabled={busy}
 								onChange={(event) => onQuantityChange(row.id, event.target.value)}
 							/></span>
-							<textarea
-								value={notes[row.id] ?? ''}
-								maxLength={500}
-								rows={2}
-								placeholder="Комментарий к позиции"
-								disabled={busy}
-								onChange={(event) => onNoteChange(row.id, event.target.value)}
-							/>
 						</label>
 					))}
 				</div>
 				<footer>
 					<button type="button" disabled={busy} onClick={onClose}>Отмена</button>
-					<button className="primary" type="button" disabled={busy} onClick={onSubmit}>{busy ? 'Создаю…' : 'Создать заказ'}</button>
+					<button className="primary" type="button" disabled={busy || !orderNote.trim()} onClick={onSubmit}>{busy ? 'Создаю…' : 'Создать заказ'}</button>
 				</footer>
 			</section>
 		</div>

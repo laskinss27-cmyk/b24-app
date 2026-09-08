@@ -148,7 +148,7 @@ test('supply selection ignores stopped requests and never duplicates an uncovere
 	assert.equal(result.availableByRow.has(second.id), false);
 });
 
-function supplyOrderActions(overrides: { deadline?: string; onReload?: () => Promise<void>; onNotice?: (notice: { kind: 'ok' | 'err'; text: string } | null) => void } = {}) {
+function supplyOrderActions(overrides: { note?: string; deadline?: string; onReload?: () => Promise<void>; onNotice?: (notice: { kind: 'ok' | 'err'; text: string } | null) => void } = {}) {
 	const row = supplyRow('row-17', 17, 1);
 	let formError: string | null = null;
 	const actions = createDealSupplyOrderActions({
@@ -157,16 +157,14 @@ function supplyOrderActions(overrides: { deadline?: string; onReload?: () => Pro
 		supplyBusy: false,
 		busy: false,
 		hasPendingDrafts: false,
-		supplyNotes: {},
 		supplyQty: { [row.id]: '1' },
 		supplyToStore: 'Основной склад',
 		supplyDeadline: overrides.deadline ?? '',
-		supplyOrderNote: '',
+		supplyOrderNote: overrides.note ?? 'Для монтажа',
 		remaining: () => 1,
 		onReload: overrides.onReload ?? (async () => {}),
 		setSupplyBusy: () => {},
 		setShowSupplyOrder: () => {},
-		setSupplyNotes: () => {},
 		setSupplyQty: () => {},
 		setSupplyToStore: () => {},
 		setSupplyDeadline: () => {},
@@ -202,4 +200,15 @@ test('supply order success names the document confirmed by the server', async ()
 	assert.equal(reloads, 1);
 	assert.match(notices.at(-1)?.text ?? '', /MAT-MR-2026-00104/);
 	assert.equal(requests[0]?.url, '/api/supply/request');
+	assert.equal(requests[0]?.body['note'], 'Для монтажа');
+	assert.ok((requests[0]?.body['lines'] as Array<Record<string, unknown>>).every((line) => !('note' in line)));
+});
+
+test('supply order refuses blank common comment before sending or clearing the form', async () => {
+	globalThis.fetch = (async () => { throw new Error('request must not be sent'); }) as typeof fetch;
+	for (const note of ['', '   ', '\n\t']) {
+		const scenario = supplyOrderActions({ deadline: '2099-09-04', note });
+		await scenario.actions.doCreateSupply();
+		assert.equal(scenario.formError(), 'Заполните общий комментарий к заказу.');
+	}
 });

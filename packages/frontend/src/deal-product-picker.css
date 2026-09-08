@@ -229,7 +229,7 @@
 
 .deal-supply-order-line {
 	display: grid;
-	grid-template-columns: minmax(220px, 0.8fr) 110px minmax(260px, 1.2fr);
+	grid-template-columns: minmax(0, 1fr) 110px;
 	align-items: center;
 	gap: 18px;
 	padding: 12px 4px;
@@ -281,25 +281,6 @@
 .deal-supply-order-line-head small {
 	color: #66758a;
 	font-size: 11px;
-}
-
-.deal-supply-order-line textarea {
-	box-sizing: border-box;
-	width: 100%;
-	min-height: 54px;
-	resize: vertical;
-	border: 1px solid #aeb9c8;
-	border-radius: 6px;
-	padding: 8px 10px;
-	background: #fff;
-	color: #172033;
-	font: inherit;
-	font-size: 13px;
-}
-
-.deal-supply-order-line textarea:focus {
-	border-color: #2673c9;
-	outline: 2px solid rgba(38, 115, 201, 0.14);
 }
 
 .deal-supply-order-modal footer {

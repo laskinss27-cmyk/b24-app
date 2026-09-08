@@ -60,7 +60,7 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 
 test('supply order listing rejects backend errors and request creation requires a confirmed document number', async () => {
 	const requests = captureResponses([{ ok: false, error: 'supply unavailable' }, { ok: true, name: 'MAT-MR-2026-00104' }, { ok: true }]);
-	const lines = [{ productId: 17, itemName: 'Товар', qty: 2, note: 'Срочно' }];
+	const lines = [{ productId: 17, itemName: 'Товар', qty: 2 }];
 
 	await assert.rejects(fetchSupplyOrders(), /supply unavailable/);
 	assert.equal(await createDealSupplyRequest(91, lines, {
@@ -71,6 +71,7 @@ test('supply order listing rejects backend errors and request creation requires 
 	await assert.rejects(createDealSupplyRequest(91, lines, {
 		toStore: 'Основной склад',
 		deadline: '2026-08-20',
+		note: 'Для сделки',
 	}), /сервер не подтвердил создание/);
 	assert.deepEqual(requests, [
 		{
@@ -88,7 +89,7 @@ test('supply order listing rejects backend errors and request creation requires 
 			url: '/api/supply/request',
 			body: {
 				domain: 'mobile.example', accessToken: 'supply-token', dealId: 91, lines,
-				toStore: 'Основной склад', deadline: '2026-08-20',
+				toStore: 'Основной склад', deadline: '2026-08-20', note: 'Для сделки',
 			},
 		},
 	]);
