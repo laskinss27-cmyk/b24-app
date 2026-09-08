@@ -146,6 +146,7 @@ test('application SQL migrations are ordered and use narrowly scoped DDL', async
 		'0110_create_app_operation_details.sql',
 		'0111_create_app_state_module_gates.sql',
 		'0112_create_app_realization_identities.sql',
+		'0113_add_inventory_result_retail_price.sql',
 	]);
 	for (const migration of migrations.filter((_, index) => index !== 7 && index < 17)) {
 		assert.match(migration.sql, /^CREATE TABLE IF NOT EXISTS (?:workflow_|supply_mirror_|tilda_|stock_)[a-z_]+ \(/);

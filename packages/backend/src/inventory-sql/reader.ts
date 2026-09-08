@@ -118,7 +118,7 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 		`),
 		pool.query<QueryRow[]>(`
 			SELECT line.point_id, line.line_ordinal, line.product_id, line.product_name,
-				line.book_qty, line.fact_qty, line.difference_qty, line.line_comment
+				line.book_qty, line.fact_qty, line.difference_qty, line.line_comment, line.retail_price
 			FROM inventory_result_lines line
 			JOIN inventory_points point ON point.id = line.point_id AND point.is_present = 1
 			WHERE line.is_present = 1
@@ -204,6 +204,7 @@ export async function readInventorySqlRecords(pool: TransferSqlPool): Promise<In
 			bookQty: quantity(row['book_qty'], 'inventory result book quantity'),
 			factQty: quantity(row['fact_qty'], 'inventory result fact quantity'),
 			differenceQty: quantity(row['difference_qty'], 'inventory result difference quantity'),
+			...(row['retail_price'] != null ? { retailPrice: quantity(row['retail_price'], 'inventory retail price') } : {}),
 			comment: String(row['line_comment'] ?? ''),
 		});
 	}

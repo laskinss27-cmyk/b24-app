@@ -1,4 +1,5 @@
 import { inventorySnapshotQuantities } from './inventory-stock-snapshot.js';
+import { inventoryMoneyTotals } from '@b24-app/shared';
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {};
@@ -17,6 +18,7 @@ export interface InventoryExportLine {
 	fact: number | null;
 	diff: number | null;
 	comment: string;
+	retailPrice?: number;
 }
 export interface InventoryExportPoint {
 	storeId: number;
@@ -26,6 +28,7 @@ export interface InventoryExportPoint {
 	snapshotAt: string;
 	note: string;
 	lines: InventoryExportLine[];
+	money?: ReturnType<typeof inventoryMoneyTotals>;
 }
 export interface InventoryExport {
 	id: string;
@@ -69,16 +72,25 @@ export function prepareInventoryExport(item: RecordValue, storeId?: number): Inv
 				productId, name: String(saved?.['name'] ?? ''), article: '', book, fact,
 				diff: book !== null && fact !== null ? Math.round((fact - book) * 1e9) / 1e9 : null,
 				comment: String(comments[productId] ?? saved?.['comment'] ?? ''),
+				...(quantity(saved?.['retailPrice']) !== null && fact === quantity(saved?.['fact']) ? { retailPrice: Number(saved?.['retailPrice']) } : {}),
 			};
 		});
 		const notes = [];
+		const money = Array.isArray(result['lines']) ? inventoryMoneyTotals([...results.values()].map((line) => ({
+			diff: Number(line['fact']) - Number(line['book']),
+			...(quantity(line['retailPrice']) !== null ? { retailPrice: Number(line['retailPrice']) } : {}),
+		}))) : undefined;
+		if (money) {
+			notes.push('Денежные итоги — по последнему отправленному отчёту и розничным ценам на момент отправки.');
+			if (money.missingShortage + money.missingSurplus) notes.push(`Нет сохранённой цены для ${money.missingShortage + money.missingSurplus} поз. с расхождением.`);
+		}
 		if (!snapshot) notes.push('Старая ревизия без снимка: выгружены только сохранённые позиции. Неизвестный учёт оставлен пустым.');
 		if (Number(result['counted']) > lines.filter((line) => line.fact !== null).length) {
 			notes.push('Часть фактов прежнего раунда не сохранена по товарам и оставлена пустой.');
 		}
 		points.push({ storeId: Number(point['storeId']), storeName: String(point['storeName'] ?? ''),
 			responsible: String(point['responsibleName'] ?? ''), status: String(point['status'] ?? 'idle'),
-			snapshotAt: String(record(point['stockSnapshot'])['capturedAt'] ?? ''), note: notes.join(' '), lines });
+			snapshotAt: String(record(point['stockSnapshot'])['capturedAt'] ?? ''), note: notes.join(' '), lines, ...(money ? { money } : {}) });
 	}
 	if (!points.length) throw new Error('Склад инвентаризации не найден');
 	return { id: String(item['ID']), title: String(item['NAME'] ?? 'Инвентаризация'),

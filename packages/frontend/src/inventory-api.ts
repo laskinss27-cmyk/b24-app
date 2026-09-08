@@ -39,6 +39,8 @@ export interface InvResultLine {
 	diff: number;
 	/** Пояснение проверяющего к конкретной позиции. */
 	comment?: string;
+	/** Розничная цена в рублях, зафиксированная сервером при отправке отчёта. */
+	retailPrice?: number;
 }
 export interface InvResult {
 	counted: number;
@@ -125,6 +127,7 @@ export async function createInventory(
 
 /** Обновление одной точки (claim / saveDraft / submit) — через бэкенд, entity. */
 interface InventoryUpdateResponse {
+	result?: InvResult;
 	draftUpdatedAt?: string | null;
 	ignored?: boolean;
 }
@@ -172,8 +175,9 @@ export async function submitPoint(
 	result: InvResult,
 	facts: Record<number, number>,
 	comments: Record<number, string>,
-): Promise<void> {
-	await postInventoryUpdate({ inventoryId, storeId, action: 'submit', userId, userName, result, facts, comments });
+): Promise<InvResult | undefined> {
+	const response = await postInventoryUpdate({ inventoryId, storeId, action: 'submit', userId, userName, result, facts, comments });
+	return response.result;
 }
 
 /** «Сформировать акт разногласий» (инициатор) — точка уходит менеджеру на сверку. */

@@ -30,6 +30,7 @@ export interface InventorySqlResultLine {
 	factQty: number;
 	differenceQty: number;
 	comment: string;
+	retailPrice?: number;
 }
 
 export interface InventorySqlErpDocument {
@@ -265,7 +266,12 @@ function parsePoint(raw: unknown, ordinal: number, inventoryIdentity: string, is
 					const lineIdentity = `${identity}.result:${index + 1}`;
 					const line = record(rawLine);
 					if (!line) { issue(issues, 'invalid_result_line', lineIdentity, 'Result line must be an object'); continue; }
-					unknownKeys(line, ['productId', 'name', 'book', 'fact', 'diff', 'comment'], lineIdentity, issues);
+					unknownKeys(line, ['productId', 'name', 'book', 'fact', 'diff', 'comment', 'retailPrice'], lineIdentity, issues);
+					let retailPrice: number | null = null;
+					if (line['retailPrice'] !== undefined) {
+						if (typeof line['retailPrice'] !== 'number') issue(issues, 'invalid_price', `${lineIdentity}.retailPrice`, 'Retail price must be numeric or absent');
+						else retailPrice = nonNegativeNumber(line['retailPrice'], `${lineIdentity}.retailPrice`, issues);
+					}
 					const id = productId(line['productId'], lineIdentity, issues);
 					const bookQty = nonNegativeNumber(line['book'], `${lineIdentity}.book`, issues);
 					const factQty = nonNegativeNumber(line['fact'], `${lineIdentity}.fact`, issues);
@@ -285,6 +291,7 @@ function parsePoint(raw: unknown, ordinal: number, inventoryIdentity: string, is
 						factQty,
 						differenceQty,
 						comment: limitedText(line['comment'], 500, `${lineIdentity}.comment`, issues),
+						...(retailPrice !== null ? { retailPrice } : {}),
 					});
 				}
 			}

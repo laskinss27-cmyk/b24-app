@@ -379,11 +379,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		try {
 			queueSnapshot(countsRef.current, commentsRef.current, 0);
 			await flushLatest();
-			await submitPoint(inventoryId, storeId, me.id, me.name, result, facts, savedComments);
+			const savedResult = await submitPoint(inventoryId, storeId, me.id, me.name, result, facts, savedComments);
 			latestSnapshotRef.current = null;
 			clearInventoryLocalDraft(localDraftKey);
 			setDone('sent');
-			setTimeout(() => onSubmitted(result, facts, savedComments), 700);
+			setTimeout(() => onSubmitted(savedResult ?? result, facts, savedComments), 700);
 		} catch (e: unknown) {
 			setActionErr(String(e instanceof Error ? e.message : e));
 		} finally {

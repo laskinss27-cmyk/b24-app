@@ -9,11 +9,16 @@
 	border-bottom: none;
 }
 .disc-detail {
+	overflow-x: auto;
 	margin: 2px 0 10px;
 	padding: 10px 12px;
 	background: #f8fafc;
 	border-radius: 8px;
 }
+.inventory-money-summary { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 6px 0 12px; font-size: 13px; }
+.inventory-money-summary .short { color: #b42318; }
+.inventory-money-summary .over { color: #16733b; }
+.inventory-money-summary small { flex-basis: 100%; color: #667085; }
 .disc-head {
 	font-size: 12px;
 	color: #6b7280;

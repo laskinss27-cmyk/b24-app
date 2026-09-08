@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { inventoryLineAmount } from '@b24-app/shared';
 import type { InventoryExport } from './inventory-export.js';
 
 const text = (value: string): string => value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ').slice(0, 32767);
@@ -42,14 +43,17 @@ export function createInventoryWorkbook(data: InventoryExport, now = new Date())
 		ws.headerFooter.oddFooter = 'Страница &P из &N';
 		return ws;
 	};
-	const summary = sheet('Сводка', ['Склад', 'Ответственный', 'Статус', 'Снимок (МСК)', 'Позиций в файле', 'Сохранено фактов', 'Расхождений по известным значениям', 'Примечание'], [30, 27, 20, 22, 15, 17, 23, 64]);
-	const detail = sheet('Товары', ['Склад', 'ID товара', 'Товар', 'Артикул', 'Учёт', 'Факт', 'Расхождение', 'Комментарий'], [30, 14, 55, 22, 16, 16, 18, 64]);
+	const summary = sheet('Сводка', ['Склад', 'Ответственный', 'Статус', 'Снимок (МСК)', 'Позиций в файле', 'Сохранено фактов', 'Расхождений по известным значениям', 'Примечание', 'Недостача, ₽', 'Излишки, ₽'], [30, 27, 20, 22, 15, 17, 23, 64, 20, 20]);
+	const detail = sheet('Товары', ['Склад', 'ID товара', 'Товар', 'Артикул', 'Учёт', 'Факт', 'Расхождение', 'Комментарий', 'Розница при отправке, ₽', 'Сумма расхождения, ₽'], [30, 14, 55, 22, 16, 16, 18, 64, 22, 22]);
 	for (const point of data.points) {
-		summary.addRow([text(point.storeName), text(point.responsible), statuses[point.status] ?? text(point.status), timestamp(point.snapshotAt),
+		const summaryRow = summary.addRow([text(point.storeName), text(point.responsible), statuses[point.status] ?? text(point.status), timestamp(point.snapshotAt),
 			point.lines.length, point.lines.filter((line) => line.fact !== null).length,
-			point.lines.filter((line) => line.diff !== null && Math.abs(line.diff) >= 1e-9).length, text(point.note)]);
+			point.lines.filter((line) => line.diff !== null && Math.abs(line.diff) >= 1e-9).length, text(point.note), point.money?.shortage ?? null, point.money?.surplus ?? null]);
+		for (const column of [9, 10]) summaryRow.getCell(column).numFmt = '#,##0.00';
 		for (const line of point.lines) {
-			const row = detail.addRow([text(point.storeName), String(line.productId), text(line.name || `Товар #${line.productId}`), text(line.article), line.book, line.fact, line.diff, text(line.comment)]);
+			const amount = line.diff === null ? null : inventoryLineAmount({ diff: line.diff, ...(line.retailPrice !== undefined ? { retailPrice: line.retailPrice } : {}) });
+			const row = detail.addRow([text(point.storeName), String(line.productId), text(line.name || `Товар #${line.productId}`), text(line.article), line.book, line.fact, line.diff, text(line.comment), line.retailPrice ?? null, amount]);
+			for (const column of [9, 10]) row.getCell(column).numFmt = '#,##0.00';
 			for (const column of [5, 6, 7]) row.getCell(column).numFmt = '#,##0.#########';
 			if (line.diff !== null && Math.abs(line.diff) >= 1e-9) row.getCell(7).fill = {
 				type: 'pattern', pattern: 'solid', fgColor: { argb: line.diff < 0 ? 'FFFDE8E7' : 'FFE6F4EA' },
@@ -57,7 +61,7 @@ export function createInventoryWorkbook(data: InventoryExport, now = new Date())
 		}
 	}
 	for (const ws of [summary, detail]) {
-		ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: Math.max(5, ws.rowCount), column: 8 } };
+		ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: Math.max(5, ws.rowCount), column: ws.columnCount } };
 		ws.eachRow((row, index) => {
 			if (index <= 5) return;
 			row.font = { name: 'Arial', size: 11 };

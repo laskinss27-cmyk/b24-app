@@ -31,6 +31,8 @@ import {
 } from './b24.js';
 import { InventoryCount } from './InventoryReport.js';
 import { InventoryExportButton } from './InventoryExportButton.js';
+import { InventoryMoneySummary, inventoryRubles } from './InventoryMoneySummary.js';
+import { inventoryLineAmount } from '@b24-app/shared';
 
 /**
  * Модуль инвентаризации (вход из левого меню). Своя сущность, без привязки к задаче.
@@ -501,6 +503,7 @@ export function InventoryHome(): JSX.Element {
 										📱 QR
 									</button>
 								</div>
+								{p.result && <InventoryMoneySummary result={p.result} />}
 								{expanded === key && p.result && <DiscDetail result={p.result} />}
 							</li>
 						);
@@ -788,6 +791,8 @@ function DiscDetail({ result }: { result: InvResult }): JSX.Element {
 							<th className="num">Учёт</th>
 							<th className="num">Факт</th>
 							<th className="num">Разница</th>
+							<th className="num">Розница, ₽</th>
+							<th className="num">Сумма, ₽</th>
 							<th>Комментарий</th>
 						</tr>
 					</thead>
@@ -798,6 +803,8 @@ function DiscDetail({ result }: { result: InvResult }): JSX.Element {
 								<td className="num">{l.book}</td>
 								<td className="num">{l.fact}</td>
 								<td className={`num ${l.diff < 0 ? 'short' : 'over'}`}>{l.diff > 0 ? `+${l.diff}` : l.diff}</td>
+								<td className="num">{l.retailPrice === undefined ? '—' : inventoryRubles(l.retailPrice)}</td>
+								<td className={`num ${l.diff < 0 ? 'short' : 'over'}`}>{inventoryLineAmount(l) === null ? '—' : inventoryRubles(inventoryLineAmount(l)!)}</td>
 								<td className="disc-comment">{l.comment || '—'}</td>
 							</tr>
 						))}

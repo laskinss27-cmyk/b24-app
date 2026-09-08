@@ -62,6 +62,7 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 			'0069_create_inventory_public_ids.sql', '0070_create_inventory_identity_checkpoints.sql',
 			'0071_make_inventory_bitrix_identity_optional.sql', '0072_create_inventory_mutations.sql',
 			'0073_create_inventory_commands.sql', '0074_create_inventory_bitrix_outbox.sql',
+			'0113_add_inventory_result_retail_price.sql',
 		]) await copyFile(join(migrationsDirectory, filename), join(rehearsalDirectory, filename));
 		await root.query(`DROP DATABASE IF EXISTS ${database}`);
 		await root.query(`DROP USER IF EXISTS '${writerUser}'@'%'`);
@@ -102,7 +103,7 @@ test('real MariaDB keeps active inventory drafts normalized and freezes their op
 			counted: 1,
 			discrepancies: 2,
 			lines: [
-				{ productId: 11962, name: 'Коробка', book: 3, fact: 2, diff: -1 },
+				{ productId: 11962, name: 'Коробка', book: 3, fact: 2, diff: -1, retailPrice: 123.45 },
 				{ productId: 13017, name: 'Монитор', book: 2, fact: 0, diff: -2 },
 			],
 		};

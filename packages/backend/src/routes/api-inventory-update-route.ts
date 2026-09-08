@@ -9,6 +9,7 @@ import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 import { loadInventoryItems, updateInventoryData } from './inventory-storage.js';
 import { inventoryDraftSaveDecision } from './inventory-draft-save-guard.js';
+import { priceInventoryResult } from '../inventory-retail-prices.js';
 
 export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/update', async (req, reply) => {
@@ -114,6 +115,9 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 						pt['startedAt'] = pt['startedAt'] ?? now;
 					}
 				} else if (b.action === 'submit') {
+					if (status === 'submitted' || status === 'reconciled') {
+						return { ok: false, error: 'Отчёт уже отправлен. Для изменения верните точку в работу.' };
+					}
 					const previousResult = pt['result'] && typeof pt['result'] === 'object'
 						? pt['result'] as Record<string, unknown>
 						: {};
@@ -132,7 +136,11 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 					pt['submittedAt'] = now;
 					// Only explicitly entered facts are compared with the immutable opening snapshot.
 					// Blank rows are uncounted and therefore never create warehouse movements.
-					pt['result'] = submitted.result;
+					if (submitted.result.lines.length) {
+						const erp = ErpClient.fromEnv();
+						if (!erp) throw new Error('Не удалось загрузить розничные цены. Отчёт не отправлен, повторите отправку позже.');
+						pt['result'] = await priceInventoryResult(erp, submitted.result);
+					} else pt['result'] = submitted.result;
 					pt['draft'] = submitted.facts;
 					if (comments) pt['comments'] = comments;
 					if (!pt['responsibleId']) {
@@ -161,7 +169,7 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 					sourceItem: item,
 				});
 				app.log.info({ action: b.action, inventoryId: b.inventoryId, storeId: b.storeId }, '[api/inventory/update] ok');
-				return { ok: true, ...(b.action === 'saveDraft' ? { draftSaved: true } : {}), draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
+				return { ok: true, ...(b.action === 'saveDraft' ? { draftSaved: true } : {}), ...(b.action === 'submit' ? { result: pt['result'] } : {}), draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
 			} catch (err) {
 				app.log.error({ action: b.action, inventoryId: b.inventoryId, storeId: b.storeId }, `[api/inventory/update] failed — ${inventoryErrorInfo(err)}`);
 				return reply.code(200).send({ ok: false, error: inventoryErrorInfo(err) });

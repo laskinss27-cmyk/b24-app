@@ -90,6 +90,27 @@ test('inventory shadow writes one record atomically without creating a backfill 
 	assert.equal(connection.queries.some((sql) => /\bDELETE\b/i.test(sql)), false);
 });
 
+test('inventory SQL writer preserves retail price, explicit zero and unknown price', async () => {
+	const item = sourceItem();
+	const data = JSON.parse(String(item['DETAIL_TEXT']));
+	data.points[0].result = { total: 3, counted: 3, discrepancies: 3, lines: [
+		{ productId: 10, name: 'A', book: 3, fact: 2, diff: -1, retailPrice: 123.45 },
+		{ productId: 11, name: 'B', book: 4, fact: 2, diff: -2, retailPrice: 0 },
+		{ productId: 12, name: 'C', book: 0, fact: 2, diff: 2 },
+	] };
+	item['DETAIL_TEXT'] = JSON.stringify(data);
+	const plan = buildInventorySqlBackfillPlan({
+		observedAt: '2026-09-04T10:00:00Z', sourceComplete: true, sourceRecordCount: 1, items: [item],
+	});
+	assert.equal(plan.readyToApply, true);
+	const connection = new RecordingConnection();
+	const pool: TransferSqlPool = { getConnection: async () => connection, query: async <T>() => [] as T };
+	await writeInventorySqlRecord(pool, plan.inventories[0]!);
+	const batch = connection.batches.find((entry) => entry.sql.includes('INSERT INTO inventory_result_lines'))!;
+	assert.match(batch.sql, /retail_price/);
+	assert.deepEqual(batch.rows.map((row) => row[8]), [123.45, 0, null]);
+});
+
 test('inventory shadow deletion is a soft tombstone in one transaction', async () => {
 	class DeleteConnection extends RecordingConnection {
 		override async query<T = unknown>(sql: string): Promise<T> {

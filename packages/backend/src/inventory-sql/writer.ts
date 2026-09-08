@@ -255,15 +255,15 @@ async function upsertPointLines(connection: TransferSqlConnection, pointId: numb
 	if (point.resultLines.length) await connection.batch(`
 		INSERT INTO inventory_result_lines (
 			point_id, line_ordinal, product_id, product_name, book_qty, fact_qty,
-			difference_qty, line_comment, is_present
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+			difference_qty, line_comment, retail_price, is_present
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 		ON DUPLICATE KEY UPDATE
 			line_ordinal = VALUES(line_ordinal), product_name = VALUES(product_name),
 			book_qty = VALUES(book_qty), fact_qty = VALUES(fact_qty), difference_qty = VALUES(difference_qty),
-			line_comment = VALUES(line_comment), is_present = 1
+			line_comment = VALUES(line_comment), retail_price = VALUES(retail_price), is_present = 1
 	`, point.resultLines.map((line) => [
 		pointId, line.ordinal, line.productId, line.productName, line.bookQty,
-		line.factQty, line.differenceQty, line.comment,
+		line.factQty, line.differenceQty, line.comment, line.retailPrice ?? null,
 	]));
 	if (point.erpDocuments.length) await connection.batch(`
 		INSERT INTO inventory_erp_documents (

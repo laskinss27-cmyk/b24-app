@@ -76,6 +76,7 @@ function pointData(point: InventorySqlPoint): Record<string, unknown> {
 				book: line.bookQty,
 				fact: line.factQty,
 				diff: line.differenceQty,
+				...(line.retailPrice !== undefined ? { retailPrice: line.retailPrice } : {}),
 				...(line.comment ? { comment: line.comment } : {}),
 			})),
 		};

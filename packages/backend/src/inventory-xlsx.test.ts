@@ -72,3 +72,16 @@ test('XLSX round trip retains numeric cells, text identifiers, literal comments,
 	assert.equal(summary.getCell('G6').value, 3);
 	assert.equal(summary.getCell('A7').value, 'Пустой склад');
 });
+
+test('Excel shows separate saved retail money totals and numeric per-line price and amount', async () => {
+	const data = prepareInventoryExport(item([{ storeId: 1, storeName: 'Склад', status: 'submitted', result: { counted: 2, total: 2, discrepancies: 2, lines: [
+		{ productId: 1, name: 'Монитор', book: 10, fact: 8, diff: -2, retailPrice: 5000 },
+		{ productId: 2, name: 'Кабель', book: 1, fact: 3, diff: 2, retailPrice: 100 },
+	] } }]));
+	const book = new ExcelJS.Workbook();
+	await book.xlsx.load(await createInventoryWorkbook(data).xlsx.writeBuffer());
+	assert.equal(book.getWorksheet('Сводка')!.getCell('I6').value, 10000);
+	assert.equal(book.getWorksheet('Сводка')!.getCell('J6').value, 200);
+	assert.equal(book.getWorksheet('Товары')!.getCell('I6').value, 5000);
+	assert.equal(book.getWorksheet('Товары')!.getCell('J6').value, 10000);
+});

@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./dist/server.js",
   "scripts": {
+    "test:inventory-money": "tsx --test src/inventory-retail-prices.test.ts src/routes/api-inventory-money.test.ts src/inventory-xlsx.test.ts src/inventory-sql/reader.test.ts src/inventory-sql/writer.test.ts src/database/migrations.test.ts",
     "test:supply-comments": "tsx --test src/routes/api-supply-request-note.test.ts",
     "test:inventory-export": "tsx --test src/inventory-xlsx.test.ts src/routes/api-inventory-export-route.test.ts",
     "test:consumables": "tsx --test src/b24/sales-report-consumables.test.ts",
@@ -15,7 +16,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "test:oauth": "tsx --test src/b24/owner-oauth-vault.test.ts",
-    "pretest": "npm run test:supply-comments && npm run test:inventory-export && npm run test:consumables && npm run test:oauth && npm run test:transfer-sql-reader && npm run test:transfer-request-sql && npm run test:catalog-mirror && npm run test:inventory-sql && npm run test:repair-sql && npm run test:remaining-sql",
+    "pretest": "npm run test:inventory-money && npm run test:supply-comments && npm run test:inventory-export && npm run test:consumables && npm run test:oauth && npm run test:transfer-sql-reader && npm run test:transfer-request-sql && npm run test:catalog-mirror && npm run test:inventory-sql && npm run test:repair-sql && npm run test:remaining-sql",
     "test:transfer-sql-reader": "tsx --test src/transfers/sql-reader.test.ts",
     "test:transfer-request-sql": "tsx --test src/transfers/request-sql-store.test.ts src/transfers/request-sql-identity.test.ts src/transfers/request-sql-runtime.test.ts src/routes/transfer-request-storage.test.ts",
     "test:catalog-mirror": "tsx --test src/catalog-mirror/plan.test.ts src/catalog-mirror/erp-reader.test.ts src/catalog-mirror/source-reader.test.ts src/catalog-mirror/writer.test.ts src/catalog-mirror/reader.test.ts src/catalog-mirror/product-base.test.ts src/catalog-mirror/live-stock.test.ts src/catalog-mirror/compare.test.ts src/catalog-mirror/read-config.test.ts src/catalog-mirror/sync-config.test.ts src/routes/api-catalog-sql-cache.test.ts",

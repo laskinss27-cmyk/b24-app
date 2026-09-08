@@ -19,7 +19,7 @@ export interface SubmittedInventoryResult {
 	total: number;
 	counted: number;
 	discrepancies: number;
-	lines: Array<FrozenInventoryDifference & { comment?: string }>;
+	lines: Array<FrozenInventoryDifference & { comment?: string; retailPrice?: number }>;
 }
 
 export interface NormalizedInventorySubmission {
