@@ -24,3 +24,19 @@ and preserved administrator access. Restricted form also inspected in a local br
 Deployment must preserve the existing b24-backend as rollback, retain its effective env/state/ports,
 and verify internal/public health, readiness, ERP REST read, frontend bundle identity and
 erpnext_frappe_network membership. Operation scripts/results: outputs/shelly-access in the main workspace.
+
+## Deployed 2026-09-08
+
+Code commit 8d50a7d; image b24-app:8d50a7d-shelly-access-20260908145429551.
+Rollback: b24-backend-prev-before-8d50a7d-shelly-access-20260908145429551,
+the previous inventory-compatible production container, retained stopped.
+Verified internal/public health, readiness, official ERP Company read, runtime scoped-role checks,
+public JS /assets/index-DtEUuaTb.js matching the built bytes, and Docker ERP network membership.
+All 924 baseline package files matched production (DOCX compared as binary). Local full backend
+suite: 444 passed; frontend: 141 passed; targeted scope/API/UI suites: 11 passed, also rerun
+in isolated candidate containers with no network or production credentials before switching.
+
+The first attempt safely rolled back because its extra public-index probe requested `/`, which
+intentionally does not serve index.html. Corrected the probe to read the asset path from the built
+template and verify the actual public JS. The second attempt passed. Both deployment logs and the
+first candidate container are retained. No schema, environment-mode or real stock changes were made.
