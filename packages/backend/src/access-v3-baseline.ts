@@ -1,5 +1,6 @@
 import { hasDirectMarketplaceAccess, hasMarketplaceBundlePriceAccess, accessV3Permissions, type AccessV3BaselineCell, type AccessV3Directory, type AccessV3Draft, type AccessV3Person } from '@b24-app/shared';
 import { catalogAccessForUser } from './catalog-access.js';
+import { hasDirectCatalogPriceEditAccess } from './access-policy.js';
 
 /** Only static legacy rules we can establish from code. Never guess CRM/object-level access. */
 function legacyCells(user: AccessV3Person, stores: string[]): Record<string, AccessV3BaselineCell> {
@@ -15,7 +16,7 @@ function legacyCells(user: AccessV3Person, stores: string[]): Record<string, Acc
 	// Portal ADMIN can add card editing rights and is not reliably exposed by user.get.
 	if (catalog.canCreateProduct) set(['catalog.create'], true, 'Текущее правило каталога, включая личные исключения');
 	if (catalog.canEditCard) set(['catalog.edit_card'], true, 'Текущее правило редактирования каталога');
-	set(['catalog.edit_purchase_prices', 'catalog.edit_retail_prices'], catalog.canEditPrices, 'Текущее правило цен: снабжение или персональное исключение');
+	set(['catalog.edit_purchase_prices', 'catalog.edit_retail_prices'], catalog.canEditPrices || hasDirectCatalogPriceEditAccess(user.id), 'Текущее правило цен: снабжение или персональное исключение');
 	const marketplace = stockManager || hasDirectMarketplaceAccess(user.id);
 	set(['marketplaces.view', 'marketplaces.create_sale', 'marketplaces.post_sale', 'marketplaces.create_return', 'marketplaces.post_return', 'marketplaces.create_bundle'], marketplace, 'Текущее правило маркетплейсов, включая личные исключения');
 	if (hasMarketplaceBundlePriceAccess(user.id, user.departments)) set(['marketplaces.edit_bundle_prices'], true, 'Текущее право отдела маркетплейсов или личное исключение');

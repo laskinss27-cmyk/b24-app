@@ -16,6 +16,8 @@ import { normalizeDomain } from './security.js';
 
 export const ACCESS_POLICY_OPTION = 'ud_access_control_draft_v1';
 export const ACCESS_MANAGER_IDS = new Set(['1', '986', '1858']);
+/** Confirmed account: Владимир Дранишников. Only these two price permissions. */
+export function hasDirectCatalogPriceEditAccess(userId: unknown): boolean { return String(userId ?? '') === '1'; }
 /**
  * Emergency fail-open switch. The saved policy is intentionally preserved, but it
  * must not affect application access until the editor and rules are reviewed.
@@ -182,7 +184,9 @@ export async function resolveCurrentAccess(
 	const directCatalogCreateAccess = hasDirectCatalogProductCreateAccess(user.id);
 	const decisions = Object.fromEntries(ACCESS_PERMISSIONS.map((permission) => [
 		permission.id,
-		marketplaceBundlePriceAccess && permission.id === 'marketplaces.edit_bundle_prices'
+		hasDirectCatalogPriceEditAccess(user.id) && (permission.id === 'catalog.edit_purchase_prices' || permission.id === 'catalog.edit_retail_prices')
+			? 'allow'
+			: marketplaceBundlePriceAccess && permission.id === 'marketplaces.edit_bundle_prices'
 			? 'allow'
 			: directMarketplaceAccess && permission.id.startsWith('marketplaces.')
 			? 'allow'
