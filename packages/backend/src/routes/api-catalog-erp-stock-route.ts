@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
-import { fetchErpCatalogPurchasing, fetchErpStocksFor } from '../erp/operations.js';
+import { fetchErpStocksFor } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
 import { appPermission } from '../access-policy.js';
 import { ReservationService, type ReservationAvailabilityLine } from '../reservations/service.js';
 import type { AuthBody } from './api-catalog-types.js';
-import { errInfo } from './api-catalog-route-helpers.js';
+import { catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
+import { baseCache } from './api-catalog-cache.js';
+import { fetchDealCatalogPurchasing } from './catalog-purchasing.js';
 
 export function applyDealReservationAvailability(
 	stocks: Map<number, Record<string, number>>,
@@ -24,7 +26,7 @@ export function applyDealReservationAvailability(
 
 export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 	// Остатки из ЯДРА (ERPNext) — payoff выноса склада: один запрос Bin вместо BX24 catalog.storeproduct.
-	// Ядро = зеркало остатков Б24 (сверка-в-ноль), поэтому подмена прозрачна; закупка — только из Standard Buying.
+	// Закупка совпадает с каталогом: Standard Buying, при отсутствии записи — цена карточки Б24.
 	// Гейт env ERPNEXT_URL: ядро не подключено → явная ошибка, без складского фолбэка Б24.
 	// Склады отдаём по имени и маппим в стабильные ID интерфейса из справочника ядра.
 	app.post('/api/catalog/erp-stocks', async (req, reply) => {
@@ -43,10 +45,16 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, coreOff: true, error: 'ядро не подключено (ERPNEXT_URL)' });
 		try {
+			const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
+			const cached = baseCache.get(normalizeDomain(body.domain));
+			const legacyPrices = cached && cached.expires > Date.now()
+				? new Map(cached.data.rows.map(row => [row.id, row.purchase])) : undefined;
 			// Запрашиваем только нужные item_code: полный Bin избыточен и заметно замедляет ответ.
 			const [physicalStocks, purchasing] = await Promise.all([
 				fetchErpStocksFor(erp, ids),
-				fetchErpCatalogPurchasing(erp, ids),
+				canViewPurchasePrices
+					? fetchDealCatalogPurchasing(erp, catalogClientFrom(app, body), ids, legacyPrices)
+					: Promise.resolve(new Map<number, number>()),
 			]);
 			let stocks = physicalStocks;
 			let availability: ReservationAvailabilityLine[] = [];
@@ -61,7 +69,6 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 			// Возвращаем КАЖДЫЙ запрошенный товар (даже с нулём — чтобы не потерять закупку у бесстоковых).
 			const availabilityByKey = new Map(availability.map((line) => [`${line.productId}\u0000${line.storeTitle}`, line]));
 			const byProduct: Record<number, { stocks: Record<string, number>; purchasing: number; reservations: Record<string, { physical: number; reservedByOthers: number; reservedByOwnDeal: number; available: number }> }> = {};
-			const canViewPurchasePrices = appPermission(req, 'catalog.view_purchase_prices', true);
 			for (const requestedId of requestedIds) {
 				const pid = canonicalProductId(requestedId);
 				byProduct[requestedId] = {

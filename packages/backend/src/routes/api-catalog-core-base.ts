@@ -9,6 +9,7 @@ import {
 } from '../erp/operations.js';
 import type { CatalogStore, CoreProductBaseRow } from './api-catalog-types.js';
 import { coreSectionId, normalizedStoreTitle } from './api-catalog-value-helpers.js';
+import { catalogPurchasingPrice } from './catalog-purchasing.js';
 
 export async function buildCoreProductBase(erp: ErpClient, metadata: ProductBaseData): Promise<{
 	data: { rows: CoreProductBaseRow[]; generatedAt: string };
@@ -52,7 +53,7 @@ export async function buildCoreProductBase(erp: ErpClient, metadata: ProductBase
 			filterCategory: item.filterCategory,
 			marketplaceOldId: item.marketplaceOldId,
 			retail: corePrices?.retail ?? known?.retail ?? null,
-			purchase: corePrices?.purchase ?? known?.purchase ?? null,
+			purchase: catalogPurchasingPrice(corePrices?.purchase, known?.purchase),
 			photoPath,
 			total: Object.values(stockByStore).reduce((sum, qty) => sum + qty, 0),
 			stockByStore,
