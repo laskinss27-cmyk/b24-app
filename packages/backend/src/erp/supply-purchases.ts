@@ -3,6 +3,7 @@ import { DEAL_FIELD, TECH_SUPPLIER, ensureErpSetup } from './erp-setup.js';
 import { ensureCoreItem, ensureSupplier, fetchErpPurchasing } from './stock-catalog.js';
 import { SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD } from './stock-transfers.js';
 import { erpContext, erpWarehouse } from './warehouse-context.js';
+import { assertReceiptPrices } from './receipt-price-validation.js';
 
 export const SUPPLY_PURCHASE_STAGE_FIELD = 'b24_supply_stage';
 export const SUPPLY_PURCHASE_ORDERED_AT_FIELD = 'b24_ordered_at';
@@ -118,7 +119,7 @@ export async function createPurchaseOrderDraft(
 			qty: l.qty,
 			[SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: Math.max(l.requestQty ?? l.qty, 0),
 			schedule_date: args.scheduleDate,
-			rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
+			rate: l.rate ?? rates.get(l.productId) ?? 0,
 		})),
 	});
 	return { name: String(doc['name']) };
@@ -152,7 +153,7 @@ export async function updatePurchaseOrderDraft(
 				qty: l.qty,
 				[SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: Math.max(l.requestQty ?? existing ?? 0, 0),
 				schedule_date: scheduleDate,
-				rate: Math.max(l.rate ?? rates.get(l.productId) ?? 0, 0.01),
+				rate: l.rate ?? rates.get(l.productId) ?? 0,
 			};
 		}),
 	};
@@ -208,6 +209,7 @@ export async function createSupplyPurchaseReceipt(
 		}
 	}
 	const incomingByProduct = new Map<number, number>();
+	assertReceiptPrices(args.lines.map((line) => ({ rate: rateByProduct.get(line.productId) ?? line.rate, itemCode: line.productId })));
 	for (const line of args.lines) incomingByProduct.set(line.productId, (incomingByProduct.get(line.productId) ?? 0) + line.qty);
 	for (const [productId, incoming] of incomingByProduct.entries()) {
 		const remaining = Math.max((orderedByProduct.get(productId) ?? 0) - (receivedByProduct.get(productId) ?? 0), 0);
@@ -227,7 +229,7 @@ export async function createSupplyPurchaseReceipt(
 			item_code: String(l.productId),
 			qty: l.qty,
 			warehouse: erpWarehouse(ctx, args.toStore),
-			rate: Math.max(rateByProduct.get(l.productId) ?? l.rate, 0.01),
+			rate: rateByProduct.get(l.productId) ?? l.rate,
 		})),
 	});
 	const name = String(doc['name']);

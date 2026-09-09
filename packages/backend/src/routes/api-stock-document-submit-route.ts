@@ -6,6 +6,7 @@ import { canManageStock } from './api-stock-access.js';
 import { ReservationService } from '../reservations/service.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody } from './api-stock-types.js';
+import { assertReceiptPrices } from '../erp/receipt-price-validation.js';
 
 export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 	app.post('/api/stock/submit', async (req, reply) => {
@@ -25,6 +26,12 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 				return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
 			}
 			let issueLines: Array<{ productId: number; qty: number; fromStore: string }> = [];
+			if (b.kind === 'receipt' && doctype === 'Purchase Receipt') {
+				const document = await erp.get<Record<string, unknown>>('Purchase Receipt', name);
+				const items = Array.isArray(document?.['items']) ? document['items'] as Array<Record<string, unknown>> : [];
+				if (!items.length) throw new Error('Не удалось проверить закупочные цены: в оприходовании нет позиций.');
+				assertReceiptPrices(items.map((line) => ({ rate: line['rate'], itemCode: line['item_code'], itemName: line['item_name'] })));
+			}
 			if (b.kind === 'issue') {
 				const doc = await erp.get<Record<string, unknown>>('Stock Entry', name);
 				const stores = await listActiveStoreTitles(erp);

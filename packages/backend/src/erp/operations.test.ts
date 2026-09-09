@@ -1555,7 +1555,7 @@ test('supply purchase drafts keep create, edit and stage payloads', async () => 
 		},
 		{
 			item_code: '202', qty: 1, [SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: 1,
-			schedule_date: '2026-08-20', rate: 0.01,
+			schedule_date: '2026-08-20', rate: 0,
 		},
 	]);
 
@@ -1699,6 +1699,15 @@ test('supply purchase receipt keeps limits, ERP payload and submit rollback', as
 		/submit failed/,
 	);
 	assert.deepEqual(deleted, ['PR-2']);
+	for (const rate of [0, -1, NaN, Infinity]) {
+		order.items[0]!.rate = rate;
+		await assert.rejects(createSupplyPurchaseReceipt(client, {
+			dealId: 77, supplyRequest: 'MR-7', supplyRequestKey: 'MR-7::v1', purchaseOrder: 'PO-7',
+			toStore: 'Main', lines: [{ productId: 101, qty: 1, rate: 99 }],
+		}), /Заполните закупочную цену больше 0 ₽.*101/);
+	}
+	assert.equal(created.length, 2);
+	assert.deepEqual(submitted, ['PR-1', 'PR-2']);
 });
 
 test('supply line quantity change updates only the request', async () => {
