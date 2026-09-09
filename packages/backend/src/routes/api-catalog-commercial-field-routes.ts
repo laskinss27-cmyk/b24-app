@@ -11,6 +11,7 @@ import {
 	errInfo,
 } from './api-catalog-route-helpers.js';
 import { baseCache } from './api-catalog-cache.js';
+import { catalogPricePermissions } from '../catalog-price-permissions.js';
 
 export type CatalogPriceEditScope = 'all' | 'marketplace-bundle' | 'none';
 
@@ -34,40 +35,34 @@ export function registerCatalogCommercialFieldRoutes(app: FastifyInstance): void
 		const client = catalogClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const legacyAccess = await catalogAccess(client);
-		const canEditAllPrices = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices)
-			&& appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
 		const marketplaceMode = body['marketplaceMode'] === true;
-		const scope = catalogPriceEditScope({
-			canEditAllPrices,
-			marketplaceMode,
-			canEditMarketplaceBundlePrices: appPermission(
-				req,
-				'marketplaces.edit_bundle_prices',
-				legacyAccess.canEditMarketplaceBundlePrices,
-			),
-		});
-		if (scope === 'none') {
+		const normal = catalogPricePermissions(req, legacyAccess.canEditPrices);
+		const bundleGrant = marketplaceMode && appPermission(req, 'marketplaces.edit_bundle_prices', legacyAccess.canEditMarketplaceBundlePrices);
+		const permissions = catalogPricePermissions(req, legacyAccess.canEditPrices, bundleGrant);
+		const hasRetail = Object.hasOwn(body, 'retail'), hasPurchase = Object.hasOwn(body, 'purchase');
+		if ((!hasRetail && !hasPurchase) || (hasRetail && !permissions.retail) || (hasPurchase && !permissions.purchase)) {
 			return reply.code(403).send({ ok: false, error: 'нет права на изменение цен' });
 		}
 		const productId = Number(body['productId']);
 		const retail = Number(body['retail']);
 		const purchase = Number(body['purchase']);
 		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
-		if (!Number.isFinite(retail) || retail < 0) return reply.code(400).send({ ok: false, error: 'розничная цена должна быть 0 или больше' });
-		if (!Number.isFinite(purchase) || purchase < 0) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		if (hasRetail && (!Number.isFinite(retail) || retail < 0)) return reply.code(400).send({ ok: false, error: 'розничная цена должна быть 0 или больше' });
+		if (hasPurchase && (!Number.isFinite(purchase) || purchase < 0)) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		try {
-			if (scope === 'marketplace-bundle') {
+			if ((hasRetail && !normal.retail) || (hasPurchase && !normal.purchase)) {
 				const item = await erp.get<Record<string, unknown>>('Item', String(productId));
 				if (!isMarketplaceBundlePriceTarget(item)) {
 					return reply.code(403).send({ ok: false, error: 'сотрудникам маркетплейсов разрешено менять цены только у комплектов' });
 				}
 			}
-			await updateCoreCatalogPrices(erp, { productId, retail, purchase });
+			const changes = { ...(hasRetail ? { retail } : {}), ...(hasPurchase ? { purchase } : {}) };
+			await updateCoreCatalogPrices(erp, { productId, ...changes });
 			baseCache.delete(normalizeDomain(body.domain ?? ''));
 			app.log.info({ productId, retail, purchase }, '[api/catalog/update-prices] ok');
-			return { ok: true, productId, retail, purchase };
+			return { ok: true, productId, ...changes };
 		} catch (error) {
 			app.log.error({ productId }, `[api/catalog/update-prices] failed — ${errInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(error) });

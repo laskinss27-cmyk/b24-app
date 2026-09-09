@@ -4,6 +4,7 @@ import { ErpClient } from '../erp/client.js';
 import { coreStoreId, listActiveStoreTitles } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
+import { catalogPricePermissions } from '../catalog-price-permissions.js';
 import type { AuthBody } from './api-catalog-types.js';
 import { catalogAccess, catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
 import { baseCache, CACHE_TTL_MS } from './api-catalog-cache.js';
@@ -69,8 +70,9 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 
 		const legacyAccess = await catalogAccess(client);
-		const canEditPrices = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices)
-			&& appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
+		const pricePermissions = catalogPricePermissions(req, legacyAccess.canEditPrices);
+		const canEditRetailPrices = pricePermissions.retail, canEditPurchasePrices = pricePermissions.purchase;
+		const canEditPrices = canEditRetailPrices && canEditPurchasePrices;
 		const canEditMarketplaceBundlePrices = body.marketplaceMode === true
 			&& appPermission(req, 'marketplaces.edit_bundle_prices', legacyAccess.canEditMarketplaceBundlePrices);
 		const canEditCard = appPermission(req, 'catalog.edit_card', legacyAccess.canEditCard);
@@ -187,6 +189,10 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 				canCreateProduct,
 				canEditCard,
 				canEditPrices,
+				canEditRetailPrices,
+				canEditPurchasePrices,
+				canViewPurchasePrices,
+				priceRuleDenials: { retail: req.accessV3Rules?.['catalog.edit_retail_prices'] === 'deny', purchase: req.accessV3Rules?.['catalog.edit_purchase_prices'] === 'deny' },
 				canEditMarketplaceBundlePrices,
 				canEditMarketplaceOldId,
 			};

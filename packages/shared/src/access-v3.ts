@@ -54,8 +54,25 @@ export function emptyAccessV3Pilot(): AccessV3PilotState {
 	return { version: 1, revision: 0, active: false, userId: '1858', permissionId: 'catalog.view_purchase_prices', decision: null, draftRevision: null, updatedAt: null, updatedById: null };
 }
 
+/** Only audited catalog price capabilities are publishable in this release. */
+export const ACCESS_V3_LIVE_PERMISSIONS = ['catalog.view_purchase_prices', 'catalog.edit_retail_prices', 'catalog.edit_purchase_prices'] as const;
+export interface AccessV3Publication {
+	version: 1; revision: number; active: boolean; draftRevision: number | null;
+	departments: AccessV3Rules; employees: AccessV3Rules;
+	directoryFingerprint: string | null; updatedAt: string | null; updatedById: string | null;
+}
+export interface AccessV3PublicationStatus { state: AccessV3Publication; history: AccessV3Publication[]; canActivate: boolean }
+export interface AccessV3PublicationPreview {
+	token: string; revision: number; draftRevision: number; directoryFingerprint: string;
+	changes: Array<{ userId: string; name: string; permissionId: string; before: string; after: string; source: string }>;
+	ignoredRules: number; ruleCount: number;
+}
+export function emptyAccessV3Publication(): AccessV3Publication {
+	return { version: 1, revision: 0, active: false, draftRevision: null, departments: {}, employees: {}, directoryFingerprint: null, updatedAt: null, updatedById: null };
+}
+
 /** Explicit rules only: runtime inheritance must use today's role check, never a historical snapshot. */
-export function resolveAccessV3Override(draft: AccessV3Draft, user: AccessV3Person, permissionId: string, departments: AccessV3Department[]): AccessV3Resolution | null {
+export function resolveAccessV3Override(draft: Pick<AccessV3Draft, 'employees' | 'departments'>, user: AccessV3Person, permissionId: string, departments: AccessV3Department[]): AccessV3Resolution | null {
 	const personal = draft.employees[user.id]?.[permissionId];
 	if (personal === 'allow' || personal === 'deny') return { value: personal, source: 'Личное исключение', conflict: false };
 	if (personal != null) throw new Error('Некорректное личное правило');

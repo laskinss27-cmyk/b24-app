@@ -37,6 +37,10 @@ export interface BaseRow {
 }
 
 export interface ProductBaseResult {
+	canEditRetailPrices: boolean;
+	canEditPurchasePrices: boolean;
+	canViewPurchasePrices: boolean;
+	priceRuleDenials: { retail: boolean; purchase: boolean };
 	rows: BaseRow[];
 	/** Активные склады Битрикса и складского ядра; ERP-only склады имеют служебные ID. */
 	stores: StoreInfo[];
@@ -67,7 +71,7 @@ export async function fetchProductBase(force = false, marketplaceMode = false, d
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode, ...(Number.isInteger(dealId) && Number(dealId) > 0 ? { dealId } : {}) }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canCreateProduct?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceBundlePrices?: boolean; canEditMarketplaceOldId?: boolean };
+	const json = (await res.json()) as Partial<ProductBaseResult> & { ok: boolean; error?: string };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return {
 		rows: json.rows ?? [],
@@ -77,6 +81,10 @@ export async function fetchProductBase(force = false, marketplaceMode = false, d
 		canCreateProduct: Boolean(json.canCreateProduct),
 		canEditCard: Boolean(json.canEditCard),
 		canEditPrices: Boolean(json.canEditPrices),
+		canEditRetailPrices: Boolean(json.canEditRetailPrices ?? json.canEditPrices),
+		canEditPurchasePrices: Boolean(json.canEditPurchasePrices ?? json.canEditPrices),
+		canViewPurchasePrices: json.canViewPurchasePrices !== false,
+		priceRuleDenials: json.priceRuleDenials ?? { retail: false, purchase: false },
 		canEditMarketplaceBundlePrices: Boolean(json.canEditMarketplaceBundlePrices),
 		canEditMarketplaceOldId: Boolean(json.canEditMarketplaceOldId),
 	};
@@ -176,7 +184,7 @@ export async function downloadMarketplaceCatalogSelection(input: {
 	}
 }
 
-export async function updateCatalogPrices(productId: number, retail: number, purchase: number, marketplaceMode = false): Promise<{ retail: number; purchase: number }> {
+export async function updateCatalogPrices(productId: number, retail: number | undefined, purchase: number | undefined, marketplaceMode = false): Promise<{ retail?: number; purchase?: number }> {
 	const res = await fetch('/api/catalog/update-prices', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -184,7 +192,7 @@ export async function updateCatalogPrices(productId: number, retail: number, pur
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; retail?: number; purchase?: number };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось сохранить цены');
-	return { retail: Number(json.retail ?? retail), purchase: Number(json.purchase ?? purchase) };
+	return { ...(retail === undefined ? {} : { retail: Number(json.retail ?? retail) }), ...(purchase === undefined ? {} : { purchase: Number(json.purchase ?? purchase) }) };
 }
 
 export async function updateMarketplaceOldId(productId: number, oldId: string): Promise<string> {

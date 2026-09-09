@@ -11,6 +11,8 @@ export function CatalogProductCard({
 	sections,
 	canEdit,
 	canEditPrices,
+	canEditRetailPrices = canEditPrices,
+	canEditPurchasePrices = canEditPrices,
 	showMarketplaceOldId,
 	canEditMarketplaceOldId,
 	onSave,
@@ -23,6 +25,8 @@ export function CatalogProductCard({
 	sections: Array<{ id: number; name: string }>;
 	canEdit: boolean;
 	canEditPrices: boolean;
+	canEditRetailPrices?: boolean;
+	canEditPurchasePrices?: boolean;
 	showMarketplaceOldId: boolean;
 	canEditMarketplaceOldId: boolean;
 	onSave: (input: CatalogProductUpdateInput) => Promise<void>;
@@ -205,9 +209,9 @@ export function CatalogProductCard({
 									<label>Модель<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
 									<label>Артикул<input value={article} onChange={(event) => setArticle(event.target.value)} /></label>
 									<label>Раздел<select value={sectionId} onChange={(event) => setSectionId(event.target.value)}><option value="">Выбрать</option>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} disabled={!canEditPrices} onChange={(event) => setRetail(event.target.value)} /></label>
-									<label>{isPassThroughProduct(row.id) ? 'Закупка в сделке = продажа после скидки' : 'Закупочная цена, ₽'}<input inputMode="decimal" value={isPassThroughProduct(row.id) ? 'Автоматически по строке сделки' : purchase} disabled={!canEditPrices || isPassThroughProduct(row.id)} onChange={(event) => setPurchase(event.target.value)} /></label>
-									{!canEditPrices && <div className="wide catalog-price-permission-note">Цены показаны только для справки — право на их изменение настраивается отдельно.</div>}
+									<label>Розничная цена, ₽<input inputMode="decimal" value={retail} disabled={!canEditRetailPrices} onChange={(event) => setRetail(event.target.value)} /></label>
+									<label>{isPassThroughProduct(row.id) ? 'Закупка в сделке = продажа после скидки' : 'Закупочная цена, ₽'}<input inputMode="decimal" value={isPassThroughProduct(row.id) ? 'Автоматически по строке сделки' : purchase} disabled={!canEditPurchasePrices || isPassThroughProduct(row.id)} onChange={(event) => setPurchase(event.target.value)} /></label>
+									{(!canEditRetailPrices || !canEditPurchasePrices) && <div className="wide catalog-price-permission-note">Недоступные для редактирования цены не изменятся при сохранении карточки.</div>}
 									<fieldset className="wide catalog-status-editor">
 										<legend>Общие метки карточки (не распределяют количество)</legend>
 										<small>Сток, ремонт и другие состояния количества назначаются инструментом «Изменить состояние части остатка». Старые общие метки можно снять здесь.</small>

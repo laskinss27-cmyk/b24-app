@@ -7,6 +7,7 @@ import { ACCESS_V3_SHADOW_ROUTES, bounded } from './access-v3-shadow.js';
 import { normalizeDomain } from './security.js';
 
 export function previewAccessV3Pilot(record: AccessV3RecordFile, user: AccessV3Person): AccessV3PilotPreview {
+	if (record.publication?.active) throw new Error('Рабочие права отделов уже включены. Узкий пилот нельзя включать одновременно.');
 	if (user.id !== APP_OWNER_USER_ID) throw new Error('Пилот доступен только владельцу #1858.');
 	const rule = resolveAccessV3Override(record.current, user, 'catalog.view_purchase_prices', []);
 	if (!rule || rule.value === 'context') throw new Error('Для владельца задайте явное разрешение или запрет «Каталог → Видеть закупочные цены» и сохраните черновик.');

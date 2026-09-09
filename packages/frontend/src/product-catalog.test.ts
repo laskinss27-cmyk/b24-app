@@ -73,9 +73,19 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 		canCreateProduct: true,
 		canEditCard: false,
 		canEditPrices: false,
+		canEditRetailPrices: false,
+		canEditPurchasePrices: false,
+		canViewPurchasePrices: true,
+		priceRuleDenials: { retail: false, purchase: false },
 		canEditMarketplaceBundlePrices: false,
 		canEditMarketplaceOldId: false,
 	});
+});
+
+test('single-price update does not send or synthesize the other price', async () => {
+	const requests = captureResponses([jsonResponse({ ok: true, retail: 1200 })]);
+	assert.deepEqual(await updateCatalogPrices(17, 1200, undefined), { retail: 1200 });
+	assert.equal(Object.hasOwn(requests[0]!.body, 'purchase'), false);
 });
 
 test('catalog mutations preserve payload merging and current response fallbacks', async () => {

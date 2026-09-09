@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { emptyAccessV3Pilot, type AccessV3Draft, type AccessV3PilotState } from '@b24-app/shared';
+import { ACCESS_V3_LIVE_PERMISSIONS, emptyAccessV3Publication, validateAccessV3Rules, emptyAccessV3Pilot, type AccessV3Draft, type AccessV3PilotState, type AccessV3Publication } from '@b24-app/shared';
 
-export interface AccessV3RecordFile { current: AccessV3Draft; history: AccessV3Draft[]; pilot?: AccessV3PilotState; pilotHistory?: AccessV3PilotState[] }
+export interface AccessV3RecordFile { current: AccessV3Draft; history: AccessV3Draft[]; pilot?: AccessV3PilotState; pilotHistory?: AccessV3PilotState[]; publication?: AccessV3Publication; publicationHistory?: AccessV3Publication[] }
 export class AccessV3Store {
 	constructor(private readonly root = join(process.env['B24_STATE_DIR'] ?? '/app/state', 'access-v3-drafts')) {}
 	private path(domain: string): string { return join(this.root, createHash('sha256').update(domain).digest('hex') + '.json'); }
@@ -16,6 +16,15 @@ export class AccessV3Store {
 		if (parsed.pilot != null) {
 			const p = parsed.pilot;
 			if (p.version !== 1 || !Number.isSafeInteger(p.revision) || p.revision < 0 || typeof p.active !== 'boolean' || p.userId !== '1858' || p.permissionId !== 'catalog.view_purchase_prices' || (p.active && (p.decision !== 'allow' && p.decision !== 'deny')) || (p.active && (!Number.isSafeInteger(p.draftRevision) || Number(p.draftRevision) < 1))) throw new Error('Повреждена активная версия пилота. Доступ закрыт до восстановления.');
+		}
+		if (parsed.publication != null) {
+			const p = parsed.publication;
+			if (p.version !== 1 || !Number.isSafeInteger(p.revision) || p.revision < 0 || typeof p.active !== 'boolean' || (p.active && (!Number.isSafeInteger(p.draftRevision) || Number(p.draftRevision) < 1 || !p.directoryFingerprint))) throw new Error('Повреждена действующая версия прав. Требуется восстановление.');
+			for (const rules of [p.departments, p.employees]) {
+				if (!rules || typeof rules !== 'object' || Array.isArray(rules) || Object.keys(rules).some(id => !/^\d{1,12}$/.test(id))) throw new Error('Повреждены правила доступа.');
+				validateAccessV3Rules(rules, Object.keys(rules), ACCESS_V3_LIVE_PERMISSIONS);
+			}
+			if (p.active && parsed.pilot?.active) throw new Error('Одновременно включены несовместимые режимы прав.');
 		}
 		return parsed;
 	}
@@ -33,7 +42,16 @@ export class AccessV3Store {
 			if (!previous) throw new Error('Сначала сохраните черновик прав.');
 			const old = previous.pilot ?? emptyAccessV3Pilot();
 			const pilot = compile(previous);
+			if (pilot.active && previous.publication?.active) throw new Error('Рабочие права отделов уже включены; сначала отключите их.');
 			return { ...previous, pilot, pilotHistory: [...(previous.pilotHistory ?? []), old].slice(-20) };
+		});
+	}
+	async publishRules(domain: string, compile: (record: AccessV3RecordFile) => AccessV3Publication): Promise<AccessV3RecordFile> {
+		return this.change(domain, previous => {
+			if (!previous) throw new Error('Сначала сохраните черновик прав.');
+			const publication = compile(previous);
+			if (publication.active && previous.pilot?.active) throw new Error('Сначала отключите узкий пилот владельца.');
+			return { ...previous, publication, publicationHistory: [...(previous.publicationHistory ?? []), previous.publication ?? emptyAccessV3Publication()].slice(-20) };
 		});
 	}
 	private async change(domain: string, update: (previous: AccessV3RecordFile | null) => AccessV3RecordFile): Promise<AccessV3RecordFile> {

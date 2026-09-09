@@ -105,6 +105,7 @@ export function ProductBase({
 	const [canCreateProduct, setCanCreateProduct] = useState(false);
 	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
+	const [priceRights, setPriceRights] = useState({ retail: false, purchase: false, viewPurchase: true, denyRetail: false, denyPurchase: false });
 	const [canEditMarketplaceBundlePrices, setCanEditMarketplaceBundlePrices] = useState(false);
 	const [canEditMarketplaceOldId, setCanEditMarketplaceOldId] = useState(false);
 	const [priceRow, setPriceRow] = useState<BaseRow | null>(null);
@@ -171,6 +172,7 @@ export function ProductBase({
 				setCanCreateProduct(base.canCreateProduct);
 				setCanEditCard(base.canEditCard);
 				setCanEditPrices(base.canEditPrices);
+				setPriceRights({ retail: base.canEditRetailPrices, purchase: base.canEditPurchasePrices, viewPurchase: base.canViewPurchasePrices, denyRetail: base.priceRuleDenials.retail, denyPurchase: base.priceRuleDenials.purchase });
 				setCanEditMarketplaceBundlePrices(base.canEditMarketplaceBundlePrices);
 				setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 				setAppAccess(appAccess);
@@ -230,6 +232,7 @@ export function ProductBase({
 			setCanCreateProduct(base.canCreateProduct);
 			setCanEditCard(base.canEditCard);
 			setCanEditPrices(base.canEditPrices);
+			setPriceRights({ retail: base.canEditRetailPrices, purchase: base.canEditPurchasePrices, viewPurchase: base.canViewPurchasePrices, denyRetail: base.priceRuleDenials.retail, denyPurchase: base.priceRuleDenials.purchase });
 			setCanEditMarketplaceBundlePrices(base.canEditMarketplaceBundlePrices);
 			setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 		} catch {
@@ -352,12 +355,15 @@ export function ProductBase({
 		}
 	}
 
+	function priceAccessForRow(row: BaseRow): { retail: boolean; purchase: boolean } {
+		const bundle = marketplaceMode && canEditMarketplaceBundlePrices && Boolean(row.isMarketplaceBundle);
+		return { retail: !priceRights.denyRetail && (priceRights.retail || bundle), purchase: priceRights.viewPurchase && !priceRights.denyPurchase && (priceRights.purchase || bundle) };
+	}
 	async function saveCatalogPrices(retail: number, purchase: number): Promise<void> {
 		if (!priceRow) return;
-		const canEditSelectedPrices = canEditPrices
-			|| (marketplaceMode && canEditMarketplaceBundlePrices && Boolean(priceRow.isMarketplaceBundle));
-		if (!canEditSelectedPrices) throw new Error('Нет права на изменение цен этой позиции.');
-		const saved = ctx.__mock ? { retail, purchase } : await updateCatalogPrices(priceRow.id, retail, purchase, marketplaceMode);
+		const access = priceAccessForRow(priceRow);
+		if (!access.retail && !access.purchase) throw new Error('Нет права на изменение цен этой позиции.');
+		const saved = ctx.__mock ? { ...(access.retail ? { retail } : {}), ...(access.purchase ? { purchase } : {}) } : await updateCatalogPrices(priceRow.id, access.retail ? retail : undefined, access.purchase ? purchase : undefined, marketplaceMode);
 		setRows((current) => current.map((row) => row.id === priceRow.id ? { ...row, ...saved } : row));
 		setPriceRow(null);
 	}
@@ -546,6 +552,7 @@ export function ProductBase({
 				canQuickSale={canQuickSale}
 				pickMode={pickMode}
 				canEditPrices={canEditPrices}
+				priceAccessForRow={priceAccessForRow}
 				canEditMarketplaceBundlePrices={canEditMarketplaceBundlePrices}
 				priceTagMode={priceTagMode}
 				sid={sid}
@@ -578,7 +585,7 @@ export function ProductBase({
 
 			{canCreateCatalogProduct && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
 
-			{priceRow && <CatalogPriceEditorModal row={priceRow} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
+			{priceRow && <CatalogPriceEditorModal row={priceRow} canEditRetail={priceAccessForRow(priceRow).retail} canEditPurchase={priceAccessForRow(priceRow).purchase} canViewPurchase={priceRights.viewPurchase} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
 
 			{cardRow && <CatalogProductCard
 				key={cardRow.id}
@@ -586,7 +593,9 @@ export function ProductBase({
 				stores={visibleStores}
 				sections={sections}
 				canEdit={canEditCard && !pickMode}
-				canEditPrices={canEditPrices || (marketplaceMode && canEditMarketplaceBundlePrices && Boolean(cardRow.isMarketplaceBundle))}
+				canEditPrices={canEditPrices}
+				canEditRetailPrices={priceRights.retail}
+				canEditPurchasePrices={priceRights.purchase}
 				showMarketplaceOldId={marketplaceMode}
 				canEditMarketplaceOldId={canEditMarketplaceOldId}
 				onSave={saveCatalogProduct}

@@ -37,6 +37,7 @@ import { registerPlacementReportBuilderRoute } from './routes/placement-report-b
 import { registerAccessPolicyHook } from './access-policy-hook.js';
 import { registerAccessV3Shadow } from './access-v3-shadow.js';
 import { registerAccessV3Pilot } from './access-v3-pilot.js';
+import { registerAccessV3Publication } from './access-v3-publication.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
 import { registerOperationLog } from './operation-log/register.js';
@@ -141,6 +142,7 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	registerAccessPolicyHook(app);
 	registerAccessV3Shadow(app);
 	registerAccessV3Pilot(app);
+	registerAccessV3Publication(app);
 	registerOperationLog(app);
 
 	registerHealthRoute(app);

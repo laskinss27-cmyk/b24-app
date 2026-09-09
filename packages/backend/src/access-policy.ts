@@ -227,6 +227,8 @@ export function appPermission(
 	// Observation only: neither the callback result nor its failure can change access.
 	try { req.accessV3Observe?.(permissionId, actual); } catch { /* Keep the existing decision. */ }
 	// Pilot is a price-visibility restriction only. An allow never bypasses an existing denial.
+	const published = req.accessV3Rules?.[permissionId];
+	if (published === 'allow' || published === 'deny') return published === 'allow';
 	return req.accessV3Pilot?.active && req.accessV3Pilot.permissionId === permissionId
 		? actual && req.accessV3Pilot.decision === 'allow'
 		: actual;

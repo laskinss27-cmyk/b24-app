@@ -30,6 +30,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const currentUser = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
 		const legacyAccess = catalogAccessForUser(currentUser);
+		const viewPurchase = appPermission(req, 'catalog.view_purchase_prices', true);
 		if (!appPermission(req, 'catalog.create', legacyAccess.canCreateProduct)) {
 			return reply.code(403).send({ ok: false, error: 'нет права создавать карточки товаров' });
 		}
@@ -84,8 +85,9 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 				for (const row of [...cachedRows, ...fresh]) merged.set(row.id, row);
 				const candidates = rankedCandidates([...merged.values()], { name, model, manufacturer, isService });
 				const exact = candidates.filter((candidate) => candidate.exact);
-				if (exact.length) return { ok: true, status: 'duplicate', name, candidates: exact };
-				if (candidates.length && !similarReviewed) return { ok: true, status: 'review', name, candidates };
+				const visible = (rows: typeof candidates) => viewPurchase ? rows : rows.map(row => ({ ...row, purchase: null }));
+				if (exact.length) return { ok: true, status: 'duplicate', name, candidates: visible(exact) };
+				if (candidates.length && !similarReviewed) return { ok: true, status: 'review', name, candidates: visible(candidates) };
 
 				let productId = 0;
 				let coreCreated = false;
@@ -177,7 +179,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 					stockByStore: {},
 				};
 				app.log.info({ productId, name, sectionId, delegated }, '[api/catalog/create-product] ok');
-				return { ok: true, status: 'created', name, product: row };
+				return { ok: true, status: 'created', name, product: viewPurchase ? row : { ...row, purchase: null } };
 			});
 		} catch (error) {
 			app.log.error({}, `[api/catalog/create-product] failed — ${errInfo(error)}`);

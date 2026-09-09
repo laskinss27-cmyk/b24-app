@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import type { BaseRow } from './b24.js';
 
-export function CatalogPriceEditorModal({ row, onSave, onClose }: {
+export function CatalogPriceEditorModal({ row, onSave, onClose, canEditRetail = true, canEditPurchase = true, canViewPurchase = true }: {
 	row: BaseRow;
+	canEditRetail?: boolean;
+	canEditPurchase?: boolean;
+	canViewPurchase?: boolean;
 	onSave: (retail: number, purchase: number) => Promise<void>;
 	onClose: () => void;
 }): JSX.Element {
@@ -13,8 +16,8 @@ export function CatalogPriceEditorModal({ row, onSave, onClose }: {
 	const save = async (): Promise<void> => {
 		const retail = retailText.trim() === '' ? NaN : Number(retailText.replace(',', '.'));
 		const purchase = purchaseText.trim() === '' ? NaN : Number(purchaseText.replace(',', '.'));
-		if (!Number.isFinite(retail) || retail < 0 || !Number.isFinite(purchase) || purchase < 0) {
-			setError('Укажи обе цены: 0 или больше.');
+		if ((canEditRetail && (!Number.isFinite(retail) || retail < 0)) || (canEditPurchase && (!Number.isFinite(purchase) || purchase < 0))) {
+			setError('Укажи доступные для изменения цены: 0 или больше.');
 			return;
 		}
 		setBusy(true);
@@ -35,13 +38,13 @@ export function CatalogPriceEditorModal({ row, onSave, onClose }: {
 					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
 				</div>
 				<div className="catalog-price-fields">
-					<label>Розничная, ₽<input autoFocus inputMode="decimal" value={retailText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setRetailText(event.target.value)} /></label>
-					<label>Закупочная, ₽<input inputMode="decimal" value={purchaseText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setPurchaseText(event.target.value)} /></label>
+					<label>Розничная, ₽<input autoFocus disabled={!canEditRetail || busy} inputMode="decimal" value={retailText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setRetailText(event.target.value)} /></label>
+					<label>Закупочная, ₽<input disabled={!canEditPurchase || busy} inputMode="decimal" value={canViewPurchase ? purchaseText : 'Скрыта правами доступа'} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setPurchaseText(event.target.value)} /></label>
 				</div>
 				{error && <div className="new-product-error">{error}</div>}
 				<div className="new-product-actions">
 					<button type="button" className="btn-secondary" disabled={busy} onClick={onClose}>Отмена</button>
-					<button type="button" className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
+					<button type="button" className="btn-primary" disabled={busy || (!canEditRetail && !canEditPurchase)} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
 				</div>
 			</div>
 		</div>

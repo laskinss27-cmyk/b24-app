@@ -11,6 +11,7 @@ import {
 } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { appPermission } from '../access-policy.js';
+import { catalogPricePermissions } from '../catalog-price-permissions.js';
 import {STOCK_CONDITIONS} from '@b24-app/shared';
 import type { AuthBody } from './api-catalog-types.js';
 import { catalogAccess, catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
@@ -24,8 +25,7 @@ export function registerCatalogProductUpdateRoute(app: FastifyInstance): void {
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const legacyAccess = await catalogAccess(client);
 		const canEditCard = appPermission(req, 'catalog.edit_card', legacyAccess.canEditCard);
-		const canEditRetailPrice = appPermission(req, 'catalog.edit_retail_prices', legacyAccess.canEditPrices);
-		const canEditPurchasePrice = appPermission(req, 'catalog.edit_purchase_prices', legacyAccess.canEditPrices);
+		const { retail: canEditRetailPrice, purchase: canEditPurchasePrice, viewPurchase } = catalogPricePermissions(req, legacyAccess.canEditPrices);
 		if (!canEditCard) {
 			return reply.code(403).send({ ok: false, error: 'нет права редактировать карточку товара' });
 		}
@@ -121,7 +121,7 @@ export function registerCatalogProductUpdateRoute(app: FastifyInstance): void {
 				await erp.update('Item', String(productId), { image: uploaded.fileUrl });
 			}
 			if (canEditRetailPrice || canEditPurchasePrice) {
-				await updateCoreCatalogPrices(erp, { productId, retail: nextRetail, purchase: nextPurchase });
+				await updateCoreCatalogPrices(erp, { productId, ...(canEditRetailPrice ? { retail: nextRetail } : {}), ...(canEditPurchasePrice ? { purchase: nextPurchase } : {}) });
 			}
 			baseCache.delete(normalizeDomain(body.domain ?? ''));
 			app.log.info({ productId, iblockId }, '[api/catalog/update-product] ok');
@@ -141,7 +141,7 @@ export function registerCatalogProductUpdateRoute(app: FastifyInstance): void {
 					description: renderedDescription,
 					content,
 					retail: nextRetail,
-					purchase: nextPurchase,
+					purchase: viewPurchase ? nextPurchase : null,
 					...(photoPath ? { photoPath: `/api/inventory/erp-image?p=${encodeURIComponent(photoPath)}` } : {}),
 				},
 			};
@@ -166,8 +166,8 @@ export function registerCatalogProductUpdateRoute(app: FastifyInstance): void {
 					});
 					await updateCoreCatalogPrices(erp, {
 						productId,
-						retail: beforePrices?.retail ?? 0,
-						purchase: beforePrices?.purchase ?? 0,
+						...(canEditRetailPrice ? { retail: beforePrices?.retail ?? 0 } : {}),
+						...(canEditPurchasePrice ? { purchase: beforePrices?.purchase ?? 0 } : {}),
 					});
 				} catch (rollbackError) {
 					app.log.error({ productId }, `[api/catalog/update-product] rollback failed — ${errInfo(rollbackError)}`);
