@@ -219,7 +219,10 @@ export function appPermission(
 	legacyAllowed: boolean,
 ): boolean {
 	const decision = req.appAccess?.decisions[permissionId] ?? 'inherit';
-	return decision === 'allow' ? true : decision === 'deny' ? false : legacyAllowed;
+	const actual = decision === 'allow' ? true : decision === 'deny' ? false : legacyAllowed;
+	// Observation only: neither the callback result nor its failure can change access.
+	try { req.accessV3Observe?.(permissionId, actual); } catch { /* Keep the existing decision. */ }
+	return actual;
 }
 
 declare module 'fastify' {

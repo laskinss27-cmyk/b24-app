@@ -26,6 +26,31 @@ export interface AccessV3Preview { changes: AccessV3Change[]; changedUsers: numb
 export interface AccessV3Response {
 	draft: AccessV3Draft; directory: AccessV3Directory;
 	history: Array<{ revision: number; updatedAt: string | null; updatedBy: string | null }>;
+	shadow?: AccessV3ShadowReport;
+}
+
+export interface AccessV3ShadowObservation {
+	at: string; revision: number; userId: string; route: string; permissionId: string;
+	actual: boolean; proposed: boolean; source: string; conflict: boolean; httpStatus: number;
+}
+export interface AccessV3ShadowReport {
+	mode: 'shadow'; enforcement: false; userIds: string[]; permissionIds: string[]; routes: string[];
+	startedAt: string; total: number; differences: number; skipped: number;
+	lastSkip: string | null; observations: AccessV3ShadowObservation[];
+}
+
+/** Explicit rules only: runtime inheritance must use today's role check, never a historical snapshot. */
+export function resolveAccessV3Override(draft: AccessV3Draft, user: AccessV3Person, permissionId: string, departments: AccessV3Department[]): AccessV3Resolution | null {
+	const personal = draft.employees[user.id]?.[permissionId];
+	if (personal === 'allow' || personal === 'deny') return { value: personal, source: 'Личное исключение', conflict: false };
+	if (personal != null) throw new Error('Некорректное личное правило');
+	const rules = user.departments.flatMap(id => {
+		const value = draft.departments[String(id)]?.[permissionId];
+		if (value != null && value !== 'allow' && value !== 'deny') throw new Error('Некорректное правило отдела');
+		return value ? [{ value, name: departments.find(d => d.id === id)?.name ?? `#${id}` }] : [];
+	});
+	const denied = rules.filter(r => r.value === 'deny');
+	return rules.length ? { value: denied.length ? 'deny' : 'allow', source: `Отдел: ${(denied.length ? denied : rules).map(r => r.name).join(', ')}`, conflict: denied.length > 0 && denied.length < rules.length } : null;
 }
 
 export function accessV3Permissions(stores: readonly string[]): AccessV3Permission[] {
@@ -39,18 +64,8 @@ export function accessV3Permissions(stores: readonly string[]): AccessV3Permissi
 }
 
 export function resolveAccessV3(draft: AccessV3Draft, user: AccessV3Person, permissionId: string, directory: AccessV3Directory): AccessV3Resolution {
-	const personal = draft.employees[user.id]?.[permissionId];
-	if (personal) return { value: personal, source: 'Личное исключение', conflict: false };
-	const rules = user.departments.flatMap(id => {
-		const value = draft.departments[String(id)]?.[permissionId];
-		return value ? [{ value, name: directory.departments.find(d => d.id === id)?.name ?? `Отдел #${id}` }] : [];
-	});
-	const denied = rules.filter(r => r.value === 'deny');
-	if (rules.length) return {
-		value: denied.length ? 'deny' : 'allow',
-		source: `Отдел: ${(denied.length ? denied : rules).map(r => r.name).join(', ')}`,
-		conflict: denied.length > 0 && denied.length < rules.length,
-	};
+	const explicit = resolveAccessV3Override(draft, user, permissionId, directory.departments);
+	if (explicit) return explicit;
 	const base = draft.baseline.users[user.id]?.[permissionId];
 	return { value: base?.value ?? 'context', source: base?.reason ?? 'Текущий доступ требует проверки; не меняем', conflict: false };
 }

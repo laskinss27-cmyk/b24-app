@@ -53,7 +53,7 @@ function canonical(value: unknown): unknown {
 
 /** Draft editor only. It is deliberately not imported by access-policy or business routes. */
 export function registerAccessV3Routes(app: FastifyInstance, store = new AccessV3Store(), directoryReader = readAccessV3Directory): void {
-	for (const action of ['load', 'preview', 'save'] as const) app.post(`/api/access-control/v3/${action}`, async (req, reply) => {
+	for (const action of ['load', 'preview', 'save', 'shadow'] as const) app.post(`/api/access-control/v3/${action}`, async (req, reply) => {
 		const body = (req.body ?? {}) as Record<string, unknown>;
 		const auth = { domain: String(body.domain ?? ''), accessToken: String(body.accessToken ?? '') };
 		const client = accessClientFrom(app, auth);
@@ -64,11 +64,15 @@ export function registerAccessV3Routes(app: FastifyInstance, store = new AccessV
 			if (!/^\d{1,12}$/.test(actorId) || (!ACCESS_MANAGER_IDS.has(actorId) && actor.ADMIN !== true && String(actor.ADMIN ?? '').toUpperCase() !== 'Y')) {
 				return reply.code(403).send({ ok: false, error: 'Черновики прав доступны только руководству и администраторам. Личный переключатель не даёт доступ к этому редактору.' });
 			}
+			if (action === 'shadow') {
+				if (!app.accessV3Shadow) return reply.code(503).send({ ok: false, error: 'Проверочный режим на этом сервере не подключён.' });
+				return { ok: true, ...app.accessV3Shadow.snapshot() };
+			}
 			const domain = normalizeDomain(auth.domain);
 			const [directory, saved] = await Promise.all([directoryReader(client), store.read(domain)]);
 			const current = saved?.current ?? seedAccessV3(directory);
 			const history = (saved?.history ?? []).map(d => ({ revision: d.revision, updatedAt: d.updatedAt, updatedBy: d.updatedBy }));
-			if (action === 'load') return { ok: true, draft: current, directory, history, enforcement: false };
+			if (action === 'load') return { ok: true, draft: current, directory, history, enforcement: false, shadow: app.accessV3Shadow?.snapshot() };
 			if (Number(body.revision) !== current.revision || body.directoryFingerprint !== directory.fingerprint) {
 				return reply.code(409).send({ ok: false, error: 'Изменился черновик или список сотрудников/складов. Обновите окно и заново проверьте изменения.' });
 			}
@@ -88,7 +92,7 @@ export function registerAccessV3Routes(app: FastifyInstance, store = new AccessV
 			next.updatedAt = new Date().toISOString();next.updatedBy = `${actor.LAST_NAME ?? ''} ${actor.NAME ?? ''}`.trim() || `#${actorId}`;
 			const result = await store.save(domain, current.revision, next, current);
 			app.log.info({ actorId, revision: result.current.revision, restoredFrom: body.restoreRevision ?? null, changedRules: preview.changedRules, affectedUsers: preview.changedUsers }, '[access-v3] draft saved; enforcement remains off');
-			return { ok: true, draft: result.current, directory, history: result.history.map(d => ({ revision: d.revision, updatedAt: d.updatedAt, updatedBy: d.updatedBy })), enforcement: false };
+			return { ok: true, draft: result.current, directory, history: result.history.map(d => ({ revision: d.revision, updatedAt: d.updatedAt, updatedBy: d.updatedBy })), enforcement: false, shadow: app.accessV3Shadow?.snapshot() };
 		} catch (error) {
 			app.log.warn({ action, error: error instanceof Error ? error.message : 'unknown' }, '[access-v3] failed closed');
 			return reply.code(409).send({ ok: false, error: error instanceof Error ? error.message : 'Не удалось проверить права. Изменения не сохранены.' });

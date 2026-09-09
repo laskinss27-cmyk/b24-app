@@ -35,6 +35,7 @@ import { registerAccessV3Routes } from './routes/api-access-v3.js';
 import { registerApiReportBuilderRoute } from './routes/api-report-builder.js';
 import { registerPlacementReportBuilderRoute } from './routes/placement-report-builder.js';
 import { registerAccessPolicyHook } from './access-policy-hook.js';
+import { registerAccessV3Shadow } from './access-v3-shadow.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
 import { registerOperationLog } from './operation-log/register.js';
@@ -137,6 +138,7 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	// настроенных записей хук оставляет прежние ролевые проверки без изменений.
 	registerMobileSessionAuthHook(app);
 	registerAccessPolicyHook(app);
+	registerAccessV3Shadow(app);
 	registerOperationLog(app);
 
 	registerHealthRoute(app);

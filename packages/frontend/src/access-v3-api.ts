@@ -1,10 +1,11 @@
-import type { AccessV3Draft, AccessV3Preview, AccessV3Response } from '@b24-app/shared';
+import type { AccessV3Draft, AccessV3Preview, AccessV3Response, AccessV3ShadowReport } from '@b24-app/shared';
 import { bx24Auth } from './bitrix-auth.js';
 
 export async function accessV3Request(action: 'load', data?: Record<string, unknown>): Promise<AccessV3Response>;
 export async function accessV3Request(action: 'preview', data: Record<string, unknown>): Promise<AccessV3Preview>;
 export async function accessV3Request(action: 'save', data: Record<string, unknown>): Promise<AccessV3Response>;
-export async function accessV3Request(action: string, data: Record<string, unknown> = {}): Promise<AccessV3Response | AccessV3Preview> {
+export async function accessV3Request(action: 'shadow'): Promise<AccessV3ShadowReport>;
+export async function accessV3Request(action: string, data: Record<string, unknown> = {}): Promise<AccessV3Response | AccessV3Preview | AccessV3ShadowReport> {
 	const response = await fetch(`/api/access-control/v3/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), ...data }) });
 	const result = await response.json();
 	if (!response.ok || !result.ok || result.enforcement !== false) throw new Error(result.error ?? 'Не удалось безопасно открыть черновик прав');
