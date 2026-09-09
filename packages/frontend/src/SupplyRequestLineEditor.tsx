@@ -56,7 +56,7 @@ export function SupplyRequestLineEditor({
 	const removeRemainder = async (): Promise<void> => {
 		const message = minimum > 0
 			? `Убрать необработанный остаток позиции? Уже распределённое количество ${minimum} останется в заявке и документах.`
-			: 'Удалить позицию из заявки снабжению? Состав сделки не изменится.';
+			: 'Удалить позицию из заявки снабжению? Если это последняя позиция, заявка тоже будет удалена. Состав сделки не изменится.';
 		if (!window.confirm(message)) return;
 		setBusy(true); setError('');
 		try {

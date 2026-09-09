@@ -26,6 +26,12 @@ function memoryStorage(initial?: string): Pick<Storage, 'getItem' | 'setItem'> &
 	};
 }
 
+test('line removal confirmation warns that the last line deletes the request, not deal goods', () => {
+	const source = readFileSync(new URL('./SupplyRequestLineEditor.tsx', import.meta.url), 'utf8');
+	assert.match(source, /Если это последняя позиция, заявка тоже будет удалена/);
+	assert.match(source, /Состав сделки не изменится/);
+});
+
 test('loads the default layout when nothing has been saved', () => {
 	assert.deepEqual(loadSupplyUiLayout(memoryStorage()), DEFAULT_SUPPLY_UI_LAYOUT);
 });

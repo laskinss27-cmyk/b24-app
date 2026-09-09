@@ -158,10 +158,14 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			|| (!removeRemainder && (!Number.isInteger(nextProductId) || nextProductId <= 0 || !Number.isFinite(nextQty) || nextQty <= 0))) {
 			return reply.code(400).send({ ok: false, error: 'некорректные данные строки заявки' });
 		}
+		const lockKey = `${normalizeDomain(b.domain ?? '')}:${requestKey}`;
+		if (supplyCreationLocks.has(lockKey)) return reply.code(200).send({ ok: false, error: 'Заявка сейчас изменяется. Дождитесь завершения операции и повторите.' });
+		supplyCreationLocks.add(lockKey);
 		try {
 			if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 			const transferAllocation = new Map<string, Map<number, number>>();
-			for (const transfer of await loadTransfers(app, client)) {
+			const transfers = await loadTransfers(app, client);
+			for (const transfer of transfers) {
 				if (transfer.correctionOf || transfer.purchaseOrder || transfer.status === 'canceled' || transfer.supplyRequestKey !== requestKey) continue;
 				const byProduct = transferAllocation.get(transfer.supplyRequestKey) ?? new Map<number, number>();
 				for (const line of transfer.lines) byProduct.set(line.productId, (byProduct.get(line.productId) ?? 0) + line.qty);
@@ -175,18 +179,27 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 				transferAllocation,
 			};
 			const result = removeRemainder
-				? await removeSupplyRequestLineRemainder(erp, common)
+				? await removeSupplyRequestLineRemainder(erp, {
+					...common,
+					allowDeleteRequest: appPermission(req, 'supply.delete_documents', await canManageStock(client)),
+					hasLinkedTransfers: transfers.some((transfer) => transfer.status !== 'canceled' && transfer.supplyRequest === requestName
+						&& (!transfer.supplyRequestKey || transfer.supplyRequestKey === requestKey)),
+				})
 				: await updateSupplyRequestLine(erp, {
 					...common,
 					nextProductId,
 					nextItemName: String(b.nextItemName ?? '').trim(),
 					nextQty,
 				});
-			app.log.info({ requestName, productId, nextProductId, nextQty, removeRemainder, requestQty: result.requestQty }, '[api/supply/request-line] updated independently');
-			return { ok: true, requestQty: result.requestQty, ...('removed' in result ? { removed: result.removed } : {}) };
+			app.log.info({ requestName, productId, nextProductId, nextQty, removeRemainder, requestQty: result.requestQty,
+				requestDeleted: 'requestDeleted' in result && result.requestDeleted === true }, '[api/supply/request-line] updated independently');
+			return { ok: true, requestQty: result.requestQty, ...('removed' in result ? { removed: result.removed,
+				requestDeleted: 'requestDeleted' in result && result.requestDeleted === true } : {}) };
 		} catch (err) {
 			app.log.error({ requestName, productId, nextProductId }, `[api/supply/request-line] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			supplyCreationLocks.delete(lockKey);
 		}
 	});
 }

@@ -73,13 +73,15 @@ export async function removeSupplyRequestLineRemainder(
 		rowName?: string;
 		productId: number;
 		transferAllocation?: SupplyAllocationMap;
+		allowDeleteRequest?: boolean;
+		hasLinkedTransfers?: boolean;
 	},
-): Promise<{ requestQty: number; removed: boolean }> {
+): Promise<{ requestQty: number; removed: boolean; requestDeleted?: boolean }> {
 	const request = await erp.get<Record<string, unknown>>('Material Request', args.requestName);
 	if (!request || materialRequestKey(args.requestName, request['creation']) !== args.requestKey) throw new Error('заявка была изменена; обновите список');
 	const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
-	const target = rawItems.find((item) =>
-		(args.rowName && String(item['name'] ?? '') === args.rowName) || Number(item['item_code']) === args.productId);
+	const target = rawItems.find((item) => Number(item['item_code']) === args.productId
+		&& (!args.rowName || String(item['name'] ?? '') === args.rowName));
 	if (!target) throw new Error('позиция больше не найдена в заявке');
 	const requestQty = Number(target['qty'] ?? 0);
 	const allocatedQty = Math.min(requestQty, await requestLineAllocation(erp, args.requestName, args.requestKey, args.productId, args.transferAllocation));
@@ -88,7 +90,22 @@ export async function removeSupplyRequestLineRemainder(
 		if (item !== target) return [requestItemPayload(item, {})];
 		return allocatedQty > 0.000001 ? [requestItemPayload(item, { qty: allocatedQty })] : [];
 	});
-	if (!after.length) throw new Error('нельзя удалить последнюю позицию заявки; закройте заявку целиком');
+	if (!after.length) {
+		if (!args.allowDeleteRequest) throw new Error('Для удаления последней позиции требуется право удаления документов снабжения: вместе с позицией удаляется заявка.');
+		if (Number(request['docstatus'] ?? 0) !== 0) throw new Error('Нельзя удалить последнюю позицию проведённой или отменённой заявки. Сначала разберите её связанные документы.');
+		if (args.hasLinkedTransfers) throw new Error('Нельзя удалить заявку: по ней есть перемещения. Сначала отмените связанные перемещения.');
+		// Allocation can be zero even when a linked document exists (e.g. an extra purchase).
+		// Keep that document's parent; never cascade-delete execution history.
+		for (const doctype of ['Purchase Order', 'Purchase Receipt', 'Stock Entry']) {
+			const linked = await erp.list<Record<string, unknown>>(doctype, ['name', SUPPLY_REQUEST_KEY_FIELD],
+				[[SUPPLY_REQUEST_FIELD, '=', args.requestName], ['docstatus', '!=', 2]], 0);
+			if (linked.some((doc) => !doc[SUPPLY_REQUEST_KEY_FIELD] || String(doc[SUPPLY_REQUEST_KEY_FIELD]) === args.requestKey)) {
+				throw new Error('Нельзя удалить заявку: по ней есть связанные закупки, приходы или перемещения. Сначала отмените или удалите связанные документы.');
+			}
+		}
+		await erp.delete('Material Request', args.requestName);
+		return { requestQty: 0, removed: true, requestDeleted: true };
+	}
 	await erp.update('Material Request', args.requestName, { items: after });
 	return { requestQty: allocatedQty, removed: allocatedQty <= 0.000001 };
 }
