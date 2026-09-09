@@ -12,7 +12,7 @@ export interface ContractPartyInfo {
 	missing: string[];
 }
 
-export type ContractTemplateId = 'universal_work' | 'supply' | 'design' | 'smart_home';
+export type ContractTemplateId = 'universal_work' | 'supply_shelly' | 'supply' | 'design' | 'smart_home';
 export type ContractPartyKind = 'company' | 'ip' | 'person';
 export type ContractDurationUnit = 'calendar' | 'working';
 

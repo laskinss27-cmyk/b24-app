@@ -26,6 +26,8 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 				return reply.code(403).send({ ok: false, error: 'проводить складские документы может только снабжение' });
 			}
 			let issueLines: Array<{ productId: number; qty: number; fromStore: string }> = [];
+			const sourceDocument = await erp.get<Record<string, unknown>>(doctype, name);
+			if (sourceDocument?.['b24_inv_ref']) throw new Error('Это документ инвентаризации. Проводите его из ревизии: там проверяется соответствие обоих документов актуальному отчёту.');
 			if (b.kind === 'receipt' && doctype === 'Purchase Receipt') {
 				const document = await erp.get<Record<string, unknown>>('Purchase Receipt', name);
 				const items = Array.isArray(document?.['items']) ? document['items'] as Array<Record<string, unknown>> : [];

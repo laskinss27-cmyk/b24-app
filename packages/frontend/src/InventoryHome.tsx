@@ -633,12 +633,14 @@ function ErpDocModal(props: {
 	const [lines, setLines] = useState<ErpRecoLine[] | null>(null);
 	const [docs, setDocs] = useState<ErpInvDocuments>({});
 	const [legacyDoc, setLegacyDoc] = useState<ErpInvDoc | null>(null);
+	const [documentCheck, setDocumentCheck] = useState<ErpInvDocumentState['documentCheck']>(undefined);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
 	function applyDocumentState(state: ErpInvDocumentState): void {
 		setDocs(state.docs);
 		setLegacyDoc(state.legacyDoc);
+		setDocumentCheck(state.documentCheck);
 	}
 
 	async function refreshDocumentState(): Promise<void> {
@@ -651,22 +653,25 @@ function ErpDocModal(props: {
 		if (props.mock) { setLines([]); setErr('dev-мок: документ ядра доступен только с подключённым ERPNext.'); return; }
 		let alive = true;
 		withTimeout(previewErpDoc(props.invId, props.storeId), 20000, 'erp-doc-preview')
-			.then((result) => { if (alive) { setLines(result.lines); setDocs(result.docs); setLegacyDoc(result.legacyDoc); } })
+			.then((result) => { if (alive) { setLines(result.lines); applyDocumentState(result); } })
 			.catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)); });
 		return () => { alive = false; };
 	}, [props.invId, props.storeId, props.mock]);
 
 	async function doSave(recreate = false): Promise<void> {
+		if (recreate && !window.confirm('Пересоздать непроведённые черновики по обновлённому отчёту? Старые черновики будут удалены. Факты подсчёта и исходный снимок не изменятся; новые документы нужно будет провести отдельно.')) return;
 		setBusy(true); setErr(null);
 		try {
 			const state = await withTimeout(saveErpDoc(props.invId, props.storeId, recreate), 25000, 'erp-doc-save');
 			applyDocumentState(state);
+			await refreshDocumentState();
 			props.onChanged();
 		} catch (e: unknown) { setErr(String(e instanceof Error ? e.message : e)); }
 		finally { setBusy(false); }
 	}
 
 	async function doSubmit(): Promise<void> {
+		if (!documentCheck || documentCheck.blocked) { setErr(documentCheck?.message ?? 'Сначала обновите проверку документов.'); return; }
 		const pending = Object.values(docs).filter((document) => document.status !== 'submitted');
 		if (!legacyDoc && !pending.length) return;
 		const pendingNames = legacyDoc && legacyDoc.status !== 'submitted'
@@ -692,8 +697,7 @@ function ErpDocModal(props: {
 	const submitted = documentList.length > 0
 		? documentList.every(([, document]) => document.status === 'submitted')
 		: legacyDoc?.status === 'submitted';
-	const canRecreate = legacyDoc?.status === 'draft'
-		|| (documentList.length > 0 && documentList.every(([, document]) => document.status === 'draft'));
+	const canRecreate = documentCheck?.canRecreate === true;
 	return (
 		<div className="qr-overlay" onClick={props.onClose}>
 			<div className="qr-modal erp-doc-modal" onClick={(e) => e.stopPropagation()}>
@@ -716,7 +720,8 @@ function ErpDocModal(props: {
 				) : (
 					<p className="muted">Документы ещё не записаны. Будут созданы отдельно: списание недостачи и оприходование излишков.</p>
 				)}
-				<DocumentError message={err} />
+				<DocumentError message={err ?? documentCheck?.message ?? null} />
+				{hasDocuments && !documentCheck && !busy && <p>Проверка актуальности документов не получена. Проведение заблокировано.</p>}
 				{lines === null && !err ? <p>Считаю болванку…</p> : null}
 				{lines !== null && !submitted && (
 					lines.length ? (
@@ -743,10 +748,11 @@ function ErpDocModal(props: {
 					)}
 					{hasDocuments && !submitted && (
 						<>
-							<button className="btn-primary" disabled={busy} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести документы'}</button>
-							{canRecreate && <button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать по текущим остаткам</button>}
+							<button className="btn-primary" disabled={busy || !documentCheck || documentCheck.blocked} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести документы'}</button>
+							{canRecreate && <button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать по обновлённому отчёту</button>}
 						</>
 					)}
+					<button className="btn-secondary" disabled={busy} onClick={() => { setBusy(true); setErr(null); void refreshDocumentState().catch(e => { setDocumentCheck(undefined); setErr(String(e instanceof Error ? e.message : e)); }).finally(() => setBusy(false)); }}>Обновить проверку</button>
 					<button className="btn-secondary" onClick={props.onClose}>Закрыть</button>
 				</div>
 			</div>

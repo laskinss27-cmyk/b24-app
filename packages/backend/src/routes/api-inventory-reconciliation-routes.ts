@@ -24,6 +24,7 @@ import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 import { ReservationService } from '../reservations/service.js';
 import { updateInventoryData } from './inventory-storage.js';
+import { checkInventoryDocuments } from './inventory-document-freshness.js';
 
 function draftRecord(name: string, lines: number, savedAt: string): InventoryDocumentRecord {
 	return { name, status: 'draft', lines, savedAt };
@@ -65,6 +66,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 			return {
 				ok: true,
 				lines,
+				documentCheck: await checkInventoryDocuments(erp, pt, lines),
 				storeName,
 				docs: inventoryDocumentSet(pt),
 				legacyDoc: legacyInventoryDocument(pt) ?? null,
@@ -88,13 +90,27 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 			const saved = await withInventoryUpdateLock(body.inventoryId, async () => {
 				const loaded = await loadInventoryPoint(app, client, body.inventoryId!, Number(body.storeId));
 				if (String(loaded.pt['status']) !== 'reconciled') throw new Error('документы ядра — только по сверенной точке');
+				// Compute first. A failed calculation must never delete existing drafts.
+				const calculated = await computeInventoryReconciliationLines(erp, loaded.pt);
+				const check = await checkInventoryDocuments(erp, loaded.pt, calculated.lines);
+				if (body.recreate && !check.canRecreate && (legacyInventoryDocument(loaded.pt) || inventoryDocumentCount(inventoryDocumentSet(loaded.pt)))) throw new Error(check.message ?? 'Пересоздание запрещено: проверьте статусы документов в ядре.');
+				if (!calculated.lines.length && body.recreate) {
+					const oldLegacy = legacyInventoryDocument(loaded.pt);
+					if (oldLegacy) await deleteInventoryRecoDraft(erp, oldLegacy.name);
+					await deleteDraftDocuments(erp, inventoryDocumentSet(loaded.pt));
+					delete loaded.pt['erpDoc']; delete loaded.pt['erpDocs'];
+					synchronizeInventoryStatus(loaded.data, loaded.points);
+					await updateInventoryItem(app, client, loaded);
+					return { docs: {}, legacyDoc: null, lines: 0 };
+				}
+				if (!calculated.lines.length) throw new Error('В отчёте нет расхождений — документы не нужны. Для удаления прежних черновиков используйте пересоздание.');
 
 				const legacy = legacyInventoryDocument(loaded.pt);
 				if (legacy) {
 					if (legacy.status === 'submitted') throw new Error(`документ ${legacy.name} уже проведён`);
 					if (!body.recreate) throw new Error(`черновик ${legacy.name} уже записан (recreate — пересоздать)`);
 					await deleteInventoryRecoDraft(erp, legacy.name);
-					const { lines, storeName } = await computeInventoryReconciliationLines(erp, loaded.pt);
+					const { lines, storeName } = calculated;
 					const recoLines: InventoryRecoLine[] = lines.map((line) => ({
 						productId: line.productId, qty: line.fact, valuation: line.valuation,
 					}));
@@ -121,7 +137,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					await deleteDraftDocuments(erp, previous);
 				}
 
-				const { lines, storeName } = await computeInventoryReconciliationLines(erp, loaded.pt);
+				const { lines, storeName } = calculated;
 				const issueLines: InventoryAdjustmentLine[] = lines
 					.filter((line) => line.diff < 0)
 					.map((line) => ({ productId: line.productId, qty: Math.abs(line.diff), valuation: line.valuation }));
@@ -178,6 +194,10 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 			const storeTitle = String(pointBeforeSubmit.pt['storeName'] ?? pointBeforeSubmit.pt['store'] ?? '').trim();
 			const completed = await withInventoryUpdateLock(body.inventoryId, async () => {
 				const loaded = await loadInventoryPoint(app, client, body.inventoryId!, Number(body.storeId));
+				if (String(loaded.pt['status']) !== 'reconciled') throw new Error('Ревизия ещё не сверена. Завершите подсчёт и проверку отчёта; проведение прежних документов запрещено.');
+				const { lines } = await computeInventoryReconciliationLines(erp, loaded.pt);
+				const check = await checkInventoryDocuments(erp, loaded.pt, lines);
+				if (check.blocked) throw new Error(check.message!);
 				const legacy = legacyInventoryDocument(loaded.pt);
 				if (legacy) {
 					const live = await erp.get('Stock Reconciliation', legacy.name);

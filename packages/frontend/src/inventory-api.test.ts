@@ -22,6 +22,13 @@ const {
 	submitPoint,
 } = await import('./b24.js');
 
+test('inventory document preview preserves server stale warning and recreation may return no documents', async () => {
+	const check = { blocked: true, canRecreate: true, message: 'Черновики устарели' };
+	captureResponses([{ ok: true, lines: [], docs: {}, documentCheck: check }, { ok: true, docs: {}, lines: 0 }]);
+	assert.deepEqual((await previewErpDoc('1', 7)).documentCheck, check);
+	assert.deepEqual((await saveErpDoc('1', 7, true)).docs, {});
+});
+
 test('inventory posting surfaces backend business error even with HTTP 200', async () => {
 	captureResponses([{ ok: false, error: 'Товар: 16944\nНе хватает: 995' }]);
 	await assert.rejects(submitErpDoc('inv-test', 7), /Товар: 16944\nНе хватает: 995/);

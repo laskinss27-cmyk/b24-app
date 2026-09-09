@@ -60,7 +60,7 @@ export async function generateDealContract(
 	const template = CONTRACT_TEMPLATES.find((item) => item.id === input.templateId);
 	if (!template) throw new Error('неизвестный шаблон договора');
 	if (!template.available) throw new Error(`шаблон «${template.title}» пока не подключён`);
-	if (template.id === 'supply' && customer.kind === 'person') {
+	if (template.usesSupplyTerms && customer.kind === 'person') {
 		throw new Error('договор поставки доступен только для компаний и ИП');
 	}
 	const objectAddress = contractObjectAddress(input.objectAddress);
@@ -78,8 +78,8 @@ export async function generateDealContract(
 	}
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ядро недоступно — нельзя получить состав сделки');
-	const lines = await loadContractLines(client, erp, dealId, template.id === 'supply');
-	if (!lines.length) throw new Error(template.id === 'supply'
+	const lines = await loadContractLines(client, erp, dealId, template.usesSupplyTerms);
+	if (!lines.length) throw new Error(template.usesSupplyTerms
 		? 'в сделке нет товаров для спецификации'
 		: 'в сделке нет товаров или работ для сметы');
 	const contractNumber = await allocateContractNumber(client, company, '', primary ? {idempotencyKey:idempotencyKey!,requestHash} : undefined);

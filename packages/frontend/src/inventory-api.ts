@@ -90,6 +90,7 @@ export interface ErpInvDocuments {
 }
 export interface ErpInvDocumentState {
 	docs: ErpInvDocuments;
+	documentCheck?: { blocked: boolean; message: string | null; canRecreate: boolean };
 	/** Legacy Stock Reconciliation, retained for inventories that already created it. */
 	legacyDoc: ErpInvDoc | null;
 }
@@ -213,23 +214,24 @@ async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Pr
 }
 
 /** Болванка: строки документа ядра, ничего не записано (1С: «не сохранил — пропала»). */
-function inventoryDocumentState(response: { docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }): ErpInvDocumentState {
+function inventoryDocumentState(response: { docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; documentCheck?: NonNullable<ErpInvDocumentState['documentCheck']> }): ErpInvDocumentState {
 	return {
 		docs: response.docs ?? {},
+		...(response.documentCheck ? { documentCheck: response.documentCheck } : {}),
 		legacyDoc: response.legacyDoc ?? response.doc ?? null,
 	};
 }
 
 export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[] } & ErpInvDocumentState> {
-	const j = await postErpDoc<{ lines?: ErpRecoLine[]; docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
+	const j = await postErpDoc<{ lines?: ErpRecoLine[]; docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; documentCheck?: NonNullable<ErpInvDocumentState['documentCheck']> }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
 	return { lines: j.lines ?? [], ...inventoryDocumentState(j) };
 }
 
 /** Создать черновики списания недостачи и/или оприходования излишков. */
 export async function saveErpDoc(inventoryId: string, storeId: number, recreate = false): Promise<ErpInvDocumentState> {
-	const j = await postErpDoc<{ docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null }>('/api/inventory/erp-doc-save', { inventoryId, storeId, recreate });
+	const j = await postErpDoc<{ docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; lines?: number }>('/api/inventory/erp-doc-save', { inventoryId, storeId, recreate });
 	const state = inventoryDocumentState(j);
-	if (!Object.keys(state.docs).length && !state.legacyDoc) throw new Error('бэкенд не вернул складские документы');
+	if (!Object.keys(state.docs).length && !state.legacyDoc && j.lines !== 0) throw new Error('бэкенд не вернул складские документы');
 	return state;
 }
 

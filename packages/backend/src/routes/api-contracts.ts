@@ -18,7 +18,7 @@ function errInfo(error: unknown): string {
 	return error instanceof B24ApiError ? `${error.code}: ${error.description ?? ''}` : String(error instanceof Error ? error.message : error);
 }
 
-export function registerApiContractsRoute(app: FastifyInstance): void {
+export function registerApiContractsRoute(app: FastifyInstance, generate = generateDealContract): void {
 	const clientFrom = (body: AuthBody): B24Client | null => {
 		if (!body.domain || !body.accessToken) return null;
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
@@ -101,10 +101,11 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 		const supplyDeliveryDays = Number(body.supplyDeliveryDays);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		if (!Number.isInteger(companyId) || companyId <= 0) return reply.code(400).send({ ok: false, error: 'bad companyId' });
-		if (!['universal_work', 'supply', 'design', 'smart_home'].includes(templateId)) return reply.code(400).send({ ok: false, error: 'bad templateId' });
-		if (!['company', 'ip', 'person'].includes(customerKind)) return reply.code(400).send({ ok: false, error: 'bad customerKind' });
 		const template = CONTRACT_TEMPLATES.find((item) => item.id === templateId);
-		if (template?.id === 'supply' && customerKind === 'person') return reply.code(400).send({ ok: false, error: 'supply contract is not available for person' });
+		if (!template) return reply.code(400).send({ ok: false, error: 'Выбранный шаблон договора не найден. Обновите окно и выберите шаблон из списка.' });
+		if (!template.available) return reply.code(400).send({ ok: false, error: `Шаблон «${template.title}» пока недоступен. Выберите другой шаблон.` });
+		if (!['company', 'ip', 'person'].includes(customerKind)) return reply.code(400).send({ ok: false, error: 'bad customerKind' });
+		if (template.usesSupplyTerms && customerKind === 'person') return reply.code(400).send({ ok: false, error: 'Договор поставки доступен только для компаний и ИП.' });
 		if (template?.usesWorkDuration && (!Number.isInteger(workDuration) || workDuration < 1 || workDuration > 3650)) {
 			return reply.code(400).send({ ok: false, error: 'bad workDuration' });
 		}
@@ -118,10 +119,10 @@ export function registerApiContractsRoute(app: FastifyInstance): void {
 			return reply.code(400).send({ ok: false, error: 'bad supplyDeliveryDays' });
 		}
 		try {
-			const result = await generateDealContract(client, dealId, {
+			const result = await generate(client, dealId, {
 				...(typeof body.idempotencyKey === 'string' ? { idempotencyKey: body.idempotencyKey } : {}),
 				companyId,
-				templateId: templateId as 'universal_work' | 'supply' | 'design' | 'smart_home',
+				templateId: template.id,
 				customerKind: customerKind as 'company' | 'ip' | 'person',
 				contractDate: String(body.contractDate ?? ''),
 				objectAddress: String(body.objectAddress ?? ''),
