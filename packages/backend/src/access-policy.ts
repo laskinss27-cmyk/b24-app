@@ -226,7 +226,10 @@ export function appPermission(
 	const actual = decision === 'allow' ? true : decision === 'deny' ? false : legacyAllowed;
 	// Observation only: neither the callback result nor its failure can change access.
 	try { req.accessV3Observe?.(permissionId, actual); } catch { /* Keep the existing decision. */ }
-	return actual;
+	// Pilot is a price-visibility restriction only. An allow never bypasses an existing denial.
+	return req.accessV3Pilot?.active && req.accessV3Pilot.permissionId === permissionId
+		? actual && req.accessV3Pilot.decision === 'allow'
+		: actual;
 }
 
 declare module 'fastify' {

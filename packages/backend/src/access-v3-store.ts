@@ -1,22 +1,42 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AccessV3Draft } from '@b24-app/shared';
+import { emptyAccessV3Pilot, type AccessV3Draft, type AccessV3PilotState } from '@b24-app/shared';
 
-interface RecordFile { current: AccessV3Draft; history: AccessV3Draft[] }
+export interface AccessV3RecordFile { current: AccessV3Draft; history: AccessV3Draft[]; pilot?: AccessV3PilotState; pilotHistory?: AccessV3PilotState[] }
 export class AccessV3Store {
 	constructor(private readonly root = join(process.env['B24_STATE_DIR'] ?? '/app/state', 'access-v3-drafts')) {}
 	private path(domain: string): string { return join(this.root, createHash('sha256').update(domain).digest('hex') + '.json'); }
-	async read(domain: string): Promise<RecordFile | null> {
+	async read(domain: string): Promise<AccessV3RecordFile | null> {
 		let data: string;
 		try { data = await readFile(this.path(domain), 'utf8'); }
 		catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
-		const parsed = JSON.parse(data) as RecordFile;
+		const parsed = JSON.parse(data) as AccessV3RecordFile;
 		if (parsed.current?.version !== 3 || parsed.current.mode !== 'draft' || !Number.isSafeInteger(parsed.current.revision) || !Array.isArray(parsed.history)) throw new Error('Повреждён черновик прав. Сохранение заблокировано; требуется восстановление.');
+		if (parsed.pilot != null) {
+			const p = parsed.pilot;
+			if (p.version !== 1 || !Number.isSafeInteger(p.revision) || p.revision < 0 || typeof p.active !== 'boolean' || p.userId !== '1858' || p.permissionId !== 'catalog.view_purchase_prices' || (p.active && (p.decision !== 'allow' && p.decision !== 'deny')) || (p.active && (!Number.isSafeInteger(p.draftRevision) || Number(p.draftRevision) < 1))) throw new Error('Повреждена активная версия пилота. Доступ закрыт до восстановления.');
+		}
 		return parsed;
 	}
-	async save(domain: string, expectedRevision: number, next: AccessV3Draft, initial?: AccessV3Draft): Promise<RecordFile> {
+	async save(domain: string, expectedRevision: number, next: AccessV3Draft, initial?: AccessV3Draft): Promise<AccessV3RecordFile> {
 		if (next.mode !== 'draft' || next.version !== 3) throw new Error('В этой версии можно сохранять только черновики прав');
+		return this.change(domain, previous => {
+			if ((previous?.current.revision ?? 0) !== expectedRevision) throw new Error('Черновик уже изменён. Обновите окно перед сохранением.');
+			const current = { ...next, mode: 'draft' as const, revision: expectedRevision + 1 };
+			const original = previous?.current ?? initial;
+			return { ...previous, current, history: [...(previous?.history ?? []), ...(original ? [original] : [])].slice(-20) };
+		});
+	}
+	async publish(domain: string, compile: (record: AccessV3RecordFile) => AccessV3PilotState): Promise<AccessV3RecordFile> {
+		return this.change(domain, previous => {
+			if (!previous) throw new Error('Сначала сохраните черновик прав.');
+			const old = previous.pilot ?? emptyAccessV3Pilot();
+			const pilot = compile(previous);
+			return { ...previous, pilot, pilotHistory: [...(previous.pilotHistory ?? []), old].slice(-20) };
+		});
+	}
+	private async change(domain: string, update: (previous: AccessV3RecordFile | null) => AccessV3RecordFile): Promise<AccessV3RecordFile> {
 		await mkdir(this.root, { recursive: true, mode: 0o700 });
 		const file = this.path(domain), lockPath = file + '.lock';
 		const lock = await open(lockPath, 'wx', 0o600).catch(error => {
@@ -26,10 +46,7 @@ export class AccessV3Store {
 		const temp = file + '.' + randomUUID() + '.tmp';
 		try {
 			const previous = await this.read(domain);
-			if ((previous?.current.revision ?? 0) !== expectedRevision) throw new Error('Черновик уже изменён. Обновите окно перед сохранением.');
-			const current = { ...next, mode: 'draft' as const, revision: expectedRevision + 1 };
-			const original = previous?.current ?? initial;
-			const data = { current, history: [...(previous?.history ?? []), ...(original ? [original] : [])].slice(-20) };
+			const data = update(previous);
 			const handle = await open(temp, 'wx', 0o600);
 			try { await handle.writeFile(JSON.stringify(data)); await handle.sync(); } finally { await handle.close(); }
 			await rename(temp, file);

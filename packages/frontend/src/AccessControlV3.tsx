@@ -3,6 +3,7 @@ import { accessV3Permissions, previewAccessV3, resolveAccessV3, type AccessV3Dra
 import { accessV3Request, accessV3SaveInput } from './access-v3-api.js';
 import { accessV3Demo } from './access-v3-demo.js';
 import { AccessV3ShadowPanel } from './AccessV3ShadowPanel.js';
+import { AccessV3PilotPanel } from './AccessV3PilotPanel.js';
 import './access-v3.css';
 
 const label = (value: AccessV3Value): string => value === 'allow' ? 'Разрешено' : value === 'deny' ? 'Запрещено' : 'Нужна проверка';
@@ -70,9 +71,10 @@ export function AccessControlV3({ mock, onClose, onDirtyChange }: { mock: boolea
 
 	return <section className="access-v3" aria-label="Настройка прав отделов и сотрудников">
 		<header className="av3-header"><div><span className="av3-badge">{mock ? 'ДЕМО · НЕ РЕАЛЬНЫЕ ПРАВА' : 'ЧЕРНОВИК · НЕ ВЛИЯЕТ НА РАБОТУ'}</span><h1>Права отделов и сотрудников</h1><p>База отдела → личные исключения → предварительная проверка</p></div><button type="button" onClick={close}>Закрыть</button></header>
-		<div className="av3-safety"><b>Рабочие права остаются прежними.</b> Здесь можно подготовить и сохранить настройки, но включения новой модели пока нет. Ограничения Битрикса на сделки сохраняются. «Нужна проверка» означает, что базовое право ещё не подтверждено для всех сценариев.</div>
+		<div className="av3-safety"><b>Сохранение черновика не меняет рабочие права.</b> Для владельца можно отдельно включить сохранённую версию узкого пилота просмотра закупки. Её статус показан ниже. Остальные настройки остаются черновиком. Ограничения Битрикса сохраняются; «Нужна проверка» не подтверждает доступ во всех сценариях.</div>
 		{error && <div role="alert" className="av3-error">{error}</div>}{notice && <div role="status" className="av3-notice">{notice}</div>}
 		{loaded && <AccessV3ShadowPanel initial={loaded.shadow} mock={mock} />}
+		{loaded && <AccessV3PilotPanel mock={mock} dirty={dirty || busy} savedRevision={loaded.draft.revision} />}
 		{loaded && draft && draft.baseline.directoryFingerprint !== loaded.directory.fingerprint && <div role="alert" className="av3-scope-note">Справочник сотрудников, отделов или складов изменился после создания базы. Оценки наследования основаны на прежнем снимке и требуют повторной сверки. Черновик не является подтверждением текущего доступа.</div>}
 		{!loaded || !draft ? <p>{busy ? 'Загружаю полный справочник сотрудников, отделов и складов…' : 'Не удалось загрузить настройки. Закройте и откройте окно повторно.'}</p> : <>
 			<div className="av3-layout"><aside className="av3-subjects"><label>Найти отдел или сотрудника<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Имя или отдел" /></label>

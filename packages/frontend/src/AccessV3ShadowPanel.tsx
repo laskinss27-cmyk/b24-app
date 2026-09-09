@@ -16,7 +16,7 @@ export function AccessV3ShadowPanel({ initial, mock }: { initial: AccessV3Shadow
 	return <section className="av3-preview" aria-label="Серверная проверка прав">
 		<h2>Проверка без изменения доступа</h2>
 		<p>Пилот: только аккаунт владельца #1858 и просмотр закупочных цен в каталоге, окне остатков и выгрузке подборки маркетплейса.</p>
-		<p>Новые правила рассчитываются рядом с действующей проверкой. Ответы приложения остаются прежними. Проверки сделок, проведение документов и доступ по складам в этот пилот не входят.</p>
+		<p>Этот блок сравнивает черновик с прежней проверкой и сам не применяет права. Отдельно включённая версия может ограничивать просмотр закупки — смотрите её статус ниже. Сделки, проведение документов и доступ по складам в пилот не входят.</p>
 		{mock ? <p>Это демо редактора: реальных серверных наблюдений здесь нет.</p> : <>
 			<button type="button" disabled={busy} onClick={() => void refresh()}>{busy ? 'Обновляю…' : 'Обновить результаты проверки'}</button>
 			{error && <p role="alert" className="av3-error">{error}</p>}
@@ -27,7 +27,7 @@ export function AccessV3ShadowPanel({ initial, mock }: { initial: AccessV3Shadow
 				<small>С {new Date(report.startedAt).toLocaleString('ru-RU')}. Последние 200 наблюдений текущего процесса; перезапуск сервера очищает статистику. HTTP-код не подтверждает успешность всей операции.</small>
 				<div className="av3-preview-list">{report.observations.slice().reverse().map((row, index) => <div key={`${row.at}:${index}`}>
 					<b>{row.actual === row.proposed ? 'Совпадает' : 'Расхождение'}</b>
-					<span>Сейчас: {row.actual ? 'видно' : 'скрыто'} → по черновику: {row.proposed ? 'видно' : 'скрыто'}</span>
+					<span>По прежним правилам: {row.actual ? 'видно' : 'скрыто'} → по черновику: {row.proposed ? 'видно' : 'скрыто'}</span>
 					<span>Версия {row.revision} · HTTP {row.httpStatus}</span>
 					<small>{row.route} · {row.source}{row.conflict ? ' · конфликт отделов' : ''} · {new Date(row.at).toLocaleString('ru-RU')}</small>
 				</div>)}</div>

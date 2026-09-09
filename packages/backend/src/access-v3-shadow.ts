@@ -34,7 +34,7 @@ export class AccessV3Shadow {
 	}
 }
 
-async function bounded<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+export async function bounded<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try { return await Promise.race([task, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('shadow-timeout')), timeoutMs); })]); }
 	finally { if (timer) clearTimeout(timer); }

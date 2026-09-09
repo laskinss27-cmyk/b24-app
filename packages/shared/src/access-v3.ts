@@ -39,6 +39,21 @@ export interface AccessV3ShadowReport {
 	lastSkip: string | null; observations: AccessV3ShadowObservation[];
 }
 
+export interface AccessV3PilotState {
+	version: 1; revision: number; active: boolean;
+	userId: '1858'; permissionId: 'catalog.view_purchase_prices';
+	decision: AccessV3Decision | null; draftRevision: number | null;
+	updatedAt: string | null; updatedById: string | null;
+}
+export interface AccessV3PilotStatus { state: AccessV3PilotState; canActivate: boolean; history: AccessV3PilotState[] }
+export interface AccessV3PilotPreview {
+	token: string; pilotRevision: number; draftRevision: number;
+	decision: AccessV3Decision; source: string; userId: '1858'; permissionId: 'catalog.view_purchase_prices';
+}
+export function emptyAccessV3Pilot(): AccessV3PilotState {
+	return { version: 1, revision: 0, active: false, userId: '1858', permissionId: 'catalog.view_purchase_prices', decision: null, draftRevision: null, updatedAt: null, updatedById: null };
+}
+
 /** Explicit rules only: runtime inheritance must use today's role check, never a historical snapshot. */
 export function resolveAccessV3Override(draft: AccessV3Draft, user: AccessV3Person, permissionId: string, departments: AccessV3Department[]): AccessV3Resolution | null {
 	const personal = draft.employees[user.id]?.[permissionId];
