@@ -30,6 +30,7 @@ import { CatalogProductTable, type CatalogSortKey as SortKey } from './CatalogPr
 import { buildCatalogView, catalogSections, indexCatalogRows } from './catalog-product-view.js';
 import { MOCK_CATALOG_ROWS, MOCK_CATALOG_STORES } from './catalog-product-mock-data.js';
 import { AdminConsole } from './AdminConsole.js';
+import { catalogCreationAvailable } from './product-catalog.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -103,6 +104,7 @@ export function ProductBase({
 	const [uid, setUid] = useState('');
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
 	const [canCreateProduct, setCanCreateProduct] = useState(false);
+	const [catalogCreateDenied, setCatalogCreateDenied] = useState(false);
 	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [priceRights, setPriceRights] = useState({ retail: false, purchase: false, viewPurchase: true, denyRetail: false, denyPurchase: false });
@@ -170,6 +172,7 @@ export function ProductBase({
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setCanCreateProduct(base.canCreateProduct);
+				setCatalogCreateDenied(base.catalogCreateDenied);
 				setCanEditCard(base.canEditCard);
 				setCanEditPrices(base.canEditPrices);
 				setPriceRights({ retail: base.canEditRetailPrices, purchase: base.canEditPurchasePrices, viewPurchase: base.canViewPurchasePrices, denyRetail: base.priceRuleDenials.retail, denyPurchase: base.priceRuleDenials.purchase });
@@ -230,6 +233,7 @@ export function ProductBase({
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
 			setCanCreateProduct(base.canCreateProduct);
+			setCatalogCreateDenied(base.catalogCreateDenied);
 			setCanEditCard(base.canEditCard);
 			setCanEditPrices(base.canEditPrices);
 			setPriceRights({ retail: base.canEditRetailPrices, purchase: base.canEditPurchasePrices, viewPurchase: base.canViewPurchasePrices, denyRetail: base.priceRuleDenials.retail, denyPurchase: base.priceRuleDenials.purchase });
@@ -249,7 +253,7 @@ export function ProductBase({
 	};
 	const canQuickSale = !readOnly && permissionAllows('realizations.create', QUICKSALE_USER_IDS.includes(uid));
 	const canPrintPriceTags = permissionAllows('catalog.print_price_tags', true);
-	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canCreateProduct);
+	const canCreateCatalogProduct = permissionAllows('catalog.create', catalogCreationAvailable(catalogCreateDenied, pickMode, allowCreateProduct, canCreateProduct)) && !catalogCreateDenied;
 	const canExportComparison = permissionAllows('catalog.export_comparison', canEditPrices || canQuickSale);
 	const canViewSalesReport = permissionAllows('reports.sales', !readOnly);
 	const canUseAdminConsole = uid === APP_OWNER_USER_ID;

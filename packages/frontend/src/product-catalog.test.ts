@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { catalogCreationAvailable } from './product-catalog.js';
 
 interface CapturedRequest {
 	url: string;
@@ -71,6 +72,7 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 		generatedAt: '',
 		cached: false,
 		canCreateProduct: true,
+		catalogCreateDenied: false,
 		canEditCard: false,
 		canEditPrices: false,
 		canEditRetailPrices: false,
@@ -80,6 +82,15 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 		canEditMarketplaceBundlePrices: false,
 		canEditMarketplaceOldId: false,
 	});
+});
+
+test('published create denial overrides every picker fallback, and absent denial preserves legacy behavior', async () => {
+	for (const pick of [false, true]) for (const explicit of [false, true]) for (const legacy of [false, true]) {
+		assert.equal(catalogCreationAvailable(true, pick, explicit, legacy), false);
+		assert.equal(catalogCreationAvailable(false, pick, explicit, legacy), pick || explicit || legacy);
+	}
+	captureResponses([jsonResponse({ ok: true, catalogCreateDenied: true, canCreateProduct: false })]);
+	const result = await fetchProductBase(); assert.equal(result.catalogCreateDenied, true); assert.equal(result.canCreateProduct, false);
 });
 
 test('single-price update does not send or synthesize the other price', async () => {

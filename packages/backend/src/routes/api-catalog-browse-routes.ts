@@ -187,6 +187,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 				generatedAt: data.generatedAt,
 				cached,
 				canCreateProduct,
+				catalogCreateDenied: req.accessV3Rules?.['catalog.create'] === 'deny',
 				canEditCard,
 				canEditPrices,
 				canEditRetailPrices,

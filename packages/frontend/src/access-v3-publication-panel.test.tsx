@@ -7,6 +7,7 @@ import { CatalogPriceEditorModal } from './CatalogPriceEditorModal.js';
 test('demo labels scope and cannot publish live rules', () => {
 	const html = renderToStaticMarkup(<AccessV3PublicationPanel mock dirty={false} savedRevision={1} />);
 	assert.match(html, /В демо рабочие права не применяются/); assert.match(html, /Доступ владельца к конфигуратору защищён/); assert.doesNotMatch(html, /Подтверждаю применение/);
+	assert.match(html, /пять прав каталога/); assert.match(html, /редактирование карточки целиком/); assert.match(html, /пока не применяется/); assert.match(html, /начальных цен нового товара/);
 });
 test('price editor disables independent fields and hides forbidden purchase', () => {
 	const html = renderToStaticMarkup(<CatalogPriceEditorModal row={{ id: 17, name: 'Item', purchase: 77777 } as never} canEditRetail canEditPurchase={false} canViewPurchase={false} onSave={async () => {}} onClose={() => {}} />);

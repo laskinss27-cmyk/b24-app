@@ -1,5 +1,9 @@
 import { bx24Auth } from './bitrix-auth.js';
 
+export function catalogCreationAvailable(denied: boolean, pickMode: boolean, allowCreateProduct: boolean, canCreateProduct: boolean): boolean {
+	return !denied && (pickMode || allowCreateProduct || canCreateProduct);
+}
+
 export interface StoreInfo {
 	id: number;
 	title: string;
@@ -50,6 +54,8 @@ export interface ProductBaseResult {
 	cached: boolean;
 	/** Право создать новую карточку независимо от права менять существующие. */
 	canCreateProduct: boolean;
+	/** Explicit published denial also hides creation in pickers with legacy fallback. */
+	catalogCreateDenied: boolean;
 	/** Право менять справочные поля и фото карточки независимо от цен. */
 	canEditCard: boolean;
 	/** Право менять справочные цены: отдел снабжения или Константин Ласкин. */
@@ -79,6 +85,7 @@ export async function fetchProductBase(force = false, marketplaceMode = false, d
 		generatedAt: json.generatedAt ?? '',
 		cached: Boolean(json.cached),
 		canCreateProduct: Boolean(json.canCreateProduct),
+		catalogCreateDenied: json.catalogCreateDenied === true,
 		canEditCard: Boolean(json.canEditCard),
 		canEditPrices: Boolean(json.canEditPrices),
 		canEditRetailPrices: Boolean(json.canEditRetailPrices ?? json.canEditPrices),

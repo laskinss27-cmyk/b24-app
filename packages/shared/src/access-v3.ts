@@ -54,8 +54,8 @@ export function emptyAccessV3Pilot(): AccessV3PilotState {
 	return { version: 1, revision: 0, active: false, userId: '1858', permissionId: 'catalog.view_purchase_prices', decision: null, draftRevision: null, updatedAt: null, updatedById: null };
 }
 
-/** Only audited catalog price capabilities are publishable in this release. */
-export const ACCESS_V3_LIVE_PERMISSIONS = ['catalog.view_purchase_prices', 'catalog.edit_retail_prices', 'catalog.edit_purchase_prices'] as const;
+/** Audited catalog capabilities only; content-only editing remains draft-only. */
+export const ACCESS_V3_LIVE_PERMISSIONS = ['catalog.view_purchase_prices', 'catalog.edit_retail_prices', 'catalog.edit_purchase_prices', 'catalog.create', 'catalog.edit_card'] as const;
 export interface AccessV3Publication {
 	version: 1; revision: number; active: boolean; draftRevision: number | null;
 	departments: AccessV3Rules; employees: AccessV3Rules;
