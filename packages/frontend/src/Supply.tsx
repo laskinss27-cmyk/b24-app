@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AccessControlV3 } from './AccessControlV3.js';
 import { getContext } from './b24-context.js';
 import { DealSupplyFallback } from './DealSupplyFallback.js';
 import { ProductBase } from './ProductBase.js';
@@ -43,12 +44,13 @@ export function Supply(): JSX.Element {
 	const [orders, setOrders] = useState<SupplyOrderRow[]>(ctx.__mock ? MOCK_ORDERS : []);
 	const [view, setView] = useState<ViewKey>(requestId > 0 ? 'incoming' : 'orders');
 	const [reportsOpen, setReportsOpen] = useState(false);
+	const [accessDraftDirty, setAccessDraftDirty] = useState(false);
 	const [expanded, setExpanded] = useState('');
 	const [openDocument, setOpenDocument] = useState<OpenSupplyDocument | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', reservations: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', 'report-builder': '', inventory: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', reservations: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', 'report-builder': '', inventory: '', 'access-v3': '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
 	const {
 		sort,
@@ -171,7 +173,7 @@ export function Supply(): JSX.Element {
 
 	return (
 		<div className="supply-proto-shell">
-			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} canOpenReportBuilder={canOpenReportBuilder} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={setView} onToggleReports={() => setReportsOpen((current) => !current)} />
+			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} canOpenReportBuilder={canOpenReportBuilder} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={next => { if (next === view || !accessDraftDirty || window.confirm('Закрыть без сохранения черновика прав?')) setView(next); }} onToggleReports={() => setReportsOpen((current) => !current)} />
 			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'report-builder' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
 				{view !== 'report-builder' && <SupplyPageHeader view={view} onCreate={setCreateKind} />}
 				{(view === 'orders' || view === 'purchase' || view === 'logistics') && <SupplyMetrics orders={orders} view={view} />}
@@ -180,6 +182,7 @@ export function Supply(): JSX.Element {
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
 				{view === 'orders' && <SupplyOrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { cancelReview(); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={startReview} onCancelReview={cancelReview} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
 				{view === 'reservations' && <SupplyReservationsView />}
+				{view === 'access-v3' && <AccessControlV3 mock={Boolean(ctx.__mock)} onDirtyChange={setAccessDraftDirty} onClose={() => setView('orders')} />}
 				{view === 'purchase' && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>

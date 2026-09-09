@@ -31,6 +31,7 @@ import { registerApiSupplyRoute } from './routes/api-supply.js';
 import { registerApiMarketplacesRoute } from './routes/api-marketplaces.js';
 import { registerApiContractsRoute } from './routes/api-contracts.js';
 import { registerApiAccessControlRoute } from './routes/api-access-control.js';
+import { registerAccessV3Routes } from './routes/api-access-v3.js';
 import { registerApiReportBuilderRoute } from './routes/api-report-builder.js';
 import { registerPlacementReportBuilderRoute } from './routes/placement-report-builder.js';
 import { registerAccessPolicyHook } from './access-policy-hook.js';
@@ -178,6 +179,7 @@ export async function buildApp({ config, database, reservations, transferSqlWrit
 	registerApiMarketplacesRoute(app);
 	registerApiContractsRoute(app);
 	registerApiAccessControlRoute(app);
+	registerAccessV3Routes(app);
 	registerApiReportBuilderRoute(app);
 	registerPlacementReportBuilderRoute(app);
 	registerAppHandlerRoute(app);

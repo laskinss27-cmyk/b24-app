@@ -1,5 +1,6 @@
 export * from './domain.js';
 export * from './consumables.js';
+export * from './access-v3.js';
 export * from './product-aliases.js';
 export * from './access-control.js';
 export * from './stock-conditions.js';

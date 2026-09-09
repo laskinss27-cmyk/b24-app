@@ -1,7 +1,7 @@
 import { type StockMovementKind } from './StockLedger.js';
 import { canOpenAssortmentMatrix } from './assortment-matrix-access.js';
 
-export type SupplyViewKey = 'orders' | 'reservations' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'report-builder' | 'inventory';
+export type SupplyViewKey = 'orders' | 'reservations' | 'incoming' | 'purchase' | 'logistics' | 'stocks' | 'marketplaces' | StockMovementKind | 'ledger' | 'turnover' | 'matrix' | 'report-builder' | 'inventory' | 'access-v3';
 
 export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMarketplaces, canOpenReportBuilder, currentUserId, mock, onViewChange, onToggleReports }: {
 	view: SupplyViewKey;
@@ -57,6 +57,7 @@ export function SupplyNavigation({ view, reportsOpen, marketplaceOnly, canOpenMa
 			{canOpenMarketplaces && <div className="supply-proto-nav-group">
 				<button className={view === 'marketplaces' ? 'active' : ''} type="button" onClick={() => onViewChange('marketplaces')}>Маркетплейсы</button>
 			</div>}
+			{(mock || ['1', '986', '1858'].includes(currentUserId)) && <div className="supply-proto-nav-group"><button type="button" className={view === 'access-v3' ? 'active' : ''} onClick={() => onViewChange('access-v3')}>Права отделов <small>черновик</small></button></div>}
 		</nav>
 		<div className="supply-proto-source">Данные: {mock ? 'демо' : 'ядро'}<br />Документы: {mock ? 'превью' : 'живые'}</div>
 	</aside>
