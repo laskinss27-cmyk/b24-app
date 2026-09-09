@@ -29,10 +29,10 @@ export async function computeInventoryReconciliationLines(erp: ErpClient, point:
 			diff: line.diff,
 			valuation: current.get(line.productId)?.valuation ?? 0,
 		}));
-		const unnamed = lines.filter((line) => !line.name).map((line) => line.productId);
+		const unnamed = lines.filter((line) => !line.name || /^товар\s*#/i.test(line.name)).map((line) => line.productId);
 		if (unnamed.length) {
 			const names = await fetchErpItemNames(erp, unnamed);
-			for (const line of lines) if (!line.name) line.name = names.get(line.productId) ?? `товар #${line.productId}`;
+			for (const line of lines) if (!line.name || /^товар\s*#/i.test(line.name)) line.name = names.get(line.productId) ?? `товар #${line.productId}`;
 		}
 		lines.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
 		return { lines, storeName };

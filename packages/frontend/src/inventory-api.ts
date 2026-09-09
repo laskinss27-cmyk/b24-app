@@ -90,9 +90,18 @@ export interface ErpInvDocuments {
 }
 export interface ErpInvDocumentState {
 	docs: ErpInvDocuments;
+	stockCheck?: InventoryStockCheck;
 	documentCheck?: { blocked: boolean; message: string | null; canRecreate: boolean };
 	/** Legacy Stock Reconciliation, retained for inventories that already created it. */
 	legacyDoc: ErpInvDoc | null;
+}
+export interface InventoryStockCheckRow {
+	productId: number; name: string; book: number; fact: number | null; current: number;
+	change: number; adjustment: number; projected: number; shortage: number; available: number;
+}
+export interface InventoryStockCheck {
+	checkedAt: string; warehouse: string; blocked: boolean; message: string | null;
+	shortages: InventoryStockCheckRow[]; changed: InventoryStockCheckRow[]; rows: InventoryStockCheckRow[];
 }
 export interface Inventory {
 	id: string;
@@ -214,16 +223,17 @@ async function postErpDoc<T>(path: string, payload: Record<string, unknown>): Pr
 }
 
 /** Болванка: строки документа ядра, ничего не записано (1С: «не сохранил — пропала»). */
-function inventoryDocumentState(response: { docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; documentCheck?: NonNullable<ErpInvDocumentState['documentCheck']> }): ErpInvDocumentState {
+function inventoryDocumentState(response: { docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; documentCheck?: NonNullable<ErpInvDocumentState['documentCheck']>; stockCheck?: InventoryStockCheck }): ErpInvDocumentState {
 	return {
 		docs: response.docs ?? {},
 		...(response.documentCheck ? { documentCheck: response.documentCheck } : {}),
+		...(response.stockCheck ? { stockCheck: response.stockCheck } : {}),
 		legacyDoc: response.legacyDoc ?? response.doc ?? null,
 	};
 }
 
 export async function previewErpDoc(inventoryId: string, storeId: number): Promise<{ lines: ErpRecoLine[] } & ErpInvDocumentState> {
-	const j = await postErpDoc<{ lines?: ErpRecoLine[]; docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; documentCheck?: NonNullable<ErpInvDocumentState['documentCheck']> }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
+	const j = await postErpDoc<{ lines?: ErpRecoLine[]; docs?: ErpInvDocuments; legacyDoc?: ErpInvDoc | null; doc?: ErpInvDoc | null; documentCheck?: NonNullable<ErpInvDocumentState['documentCheck']>; stockCheck?: InventoryStockCheck }>('/api/inventory/erp-doc-preview', { inventoryId, storeId });
 	return { lines: j.lines ?? [], ...inventoryDocumentState(j) };
 }
 

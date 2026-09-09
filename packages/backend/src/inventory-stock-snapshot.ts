@@ -82,6 +82,28 @@ export function inventorySnapshotQuantities(point: Record<string, unknown>): Map
 	return quantities;
 }
 
+/** The confirmed result stores a second basis, while the opening snapshot remains immutable.
+ * Nonzero differences keep their explicit book; matched facts encode book=fact.
+ * A confirmed result is read-only until a new explicit recount is prepared.
+ */
+export function inventoryCountQuantities(point: Record<string, unknown>): Map<number, number> | null {
+	const quantities = inventorySnapshotQuantities(point);
+	if (!point['resultBookAt']) return quantities;
+	const facts = point['draft'] as Record<string, unknown> | undefined;
+	const result = point['result'] as SubmittedInventoryResult | undefined;
+	if (!quantities || !Number.isFinite(Date.parse(String(point['resultBookAt']))) || !facts || !Array.isArray(result?.lines)) throw new Error('Повреждена база повторного пересчёта. Проведение запрещено.');
+	for (const [id, fact] of Object.entries(facts)) {
+		if (!/^\d+$/.test(id) || Number(id) <= 0 || typeof fact !== 'number' || !Number.isFinite(fact) || fact < 0) throw new Error('Повреждён подтверждённый факт пересчёта.');
+		quantities.set(Number(id), fact);
+	}
+	const seen = new Set<number>();
+	for (const row of result.lines) {
+		if (seen.has(row.productId) || facts[row.productId] !== row.fact || !Number.isFinite(row.book) || row.book < 0 || Math.abs(row.fact - row.book - row.diff) > 1e-8) throw new Error('Подтверждённый пересчёт изменён. Требуется повторное подтверждение фактического наличия; проведение запрещено.');
+		seen.add(row.productId); quantities.set(row.productId, row.book);
+	}
+	return quantities;
+}
+
 /**
  * Builds the submitted discrepancy set from explicitly entered facts.
  * This keeps a cached client from turning blank rows into zero-quantity write-offs.
@@ -90,7 +112,7 @@ export function normalizeInventorySubmission(
 	rawResult: unknown,
 	rawFacts: unknown,
 	snapshot: Map<number, number> | null,
-	previouslyCounted = 0,
+	_previousCounted = 0,
 ): NormalizedInventorySubmission {
 	const resultRecord = rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
 		? rawResult as Record<string, unknown>
@@ -132,17 +154,19 @@ export function normalizeInventorySubmission(
 	}
 
 	const submittedTotal = Number(resultRecord['total']);
-	const total = Math.max(
-		Object.keys(facts).length + previouslyCounted,
+	const total = snapshot ? new Set([...snapshot.keys(), ...Object.keys(facts).map(Number)]).size : Math.max(
+		Object.keys(facts).length,
 		Number.isInteger(submittedTotal) && submittedTotal >= 0 ? submittedTotal : 0,
 	);
-	const counted = Math.min(total, Math.max(0, previouslyCounted) + Object.keys(facts).length);
+	// Facts contain the complete saved map, including the first round. Never add an aggregate again.
+	const counted = Object.keys(facts).length;
 	return { facts, result: { total, counted, discrepancies: lines.length, lines } };
 }
 
 /** Submitted result lines are the immutable discrepancy set for snapshot-based inventories. */
 export function frozenInventoryDifferences(point: Record<string, unknown>): FrozenInventoryDifference[] | null {
-	if (!inventorySnapshotQuantities(point)) return null;
+	const quantities = inventoryCountQuantities(point);
+	if (!quantities) return null;
 	const result = point['result'];
 	const rawLines = result && typeof result === 'object' ? (result as Record<string, unknown>)['lines'] : null;
 	if (!Array.isArray(rawLines)) return [];
@@ -151,7 +175,7 @@ export function frozenInventoryDifferences(point: Record<string, unknown>): Froz
 		if (!raw || typeof raw !== 'object') continue;
 		const row = raw as Record<string, unknown>;
 		const productId = Number(row['productId']);
-		const book = Number(row['book']);
+		const book = quantities.get(productId) ?? 0;
 		const fact = Number(row['fact']);
 		if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(book) || !Number.isFinite(fact)) continue;
 		const diff = fact - book;

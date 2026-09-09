@@ -360,11 +360,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		setActionErr(null);
 		// Пустая строка означает «не считали» и не создаёт складского движения. Явный 0 — посчитанный ноль.
 		const lines: InvResult['lines'] = enteredInventoryDifferences(list, counts, comments);
-		// режим акта → слияние в финал: total и совпавшие берём из 1-го раунда, расхождения = оставшиеся после сверки
-		const actBaseline = Math.max(0, (counted1 ?? total1 ?? list.length) - list.length);
+		// counts contains the entire saved map, including rows outside the act. Count unique facts once.
+		const allCounted = Object.keys(draftObj()).length;
 		const result: InvResult =
 			mode === 'act'
-				? { total: total1 ?? list.length, counted: actBaseline + counted, discrepancies: lines.length, lines }
+				? { total: Math.max(total1 ?? list.length, allCounted), counted: allCounted, discrepancies: lines.length, lines }
 				: { counted, total: list.length, discrepancies: lines.length, lines };
 		const facts = draftObj(); // все факты раунда — чтобы предзаполнить 2-й раунд (акт)
 		const savedComments = commentsObj();

@@ -1,4 +1,4 @@
-import { inventorySnapshotQuantities } from './inventory-stock-snapshot.js';
+import { inventorySnapshotQuantities, inventoryCountQuantities } from './inventory-stock-snapshot.js';
 import { inventoryMoneyTotals } from '@b24-app/shared';
 
 type RecordValue = Record<string, unknown>;
@@ -55,6 +55,7 @@ export function prepareInventoryExport(item: RecordValue, storeId?: number): Inv
 			}
 		}
 		const result = record(point['result']);
+		const countBasis = inventoryCountQuantities(point);
 		const results = new Map<number, RecordValue>();
 		for (const value of Array.isArray(result['lines']) ? result['lines'] : []) {
 			const row = record(value);
@@ -66,7 +67,7 @@ export function prepareInventoryExport(item: RecordValue, storeId?: number): Inv
 		const ids = new Set([...snapshot?.keys() ?? [], ...results.keys(), ...Object.keys(draft).map(validId), ...Object.keys(comments).map(validId)]);
 		const lines = [...ids].map((productId): InventoryExportLine => {
 			const saved = results.get(productId);
-			const book = snapshot ? snapshot.get(productId) ?? 0 : quantity(saved?.['book']);
+			const book = countBasis ? countBasis.get(productId) ?? 0 : quantity(saved?.['book']);
 			const fact = quantity(hasDraft ? draft[productId] : saved?.['fact']);
 			return {
 				productId, name: String(saved?.['name'] ?? ''), article: '', book, fact,
@@ -76,6 +77,7 @@ export function prepareInventoryExport(item: RecordValue, storeId?: number): Inv
 			};
 		});
 		const notes = [];
+		if (point['resultBookAt']) notes.push(`Использована отдельно подтверждённая база пересчёта ${String(point['resultBookAt'])}. Исходный снимок открытия сохранён.`);
 		const money = Array.isArray(result['lines']) ? inventoryMoneyTotals([...results.values()].map((line) => ({
 			diff: Number(line['fact']) - Number(line['book']),
 			...(quantity(line['retailPrice']) !== null ? { retailPrice: Number(line['retailPrice']) } : {}),

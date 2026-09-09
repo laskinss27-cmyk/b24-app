@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DocumentError } from './DocumentError.js';
+import { InventoryStockCheck } from './InventoryStockCheck.js';
 import { InventoryListFilters } from './InventoryListFilters.js';
 import { defaultInventoryListFilters, filterInventoryList } from './inventory-list.js';
 import QRCode from 'qrcode';
@@ -634,6 +635,7 @@ function ErpDocModal(props: {
 	const [docs, setDocs] = useState<ErpInvDocuments>({});
 	const [legacyDoc, setLegacyDoc] = useState<ErpInvDoc | null>(null);
 	const [documentCheck, setDocumentCheck] = useState<ErpInvDocumentState['documentCheck']>(undefined);
+	const [stockCheck, setStockCheck] = useState<ErpInvDocumentState['stockCheck']>(undefined);
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
@@ -641,6 +643,7 @@ function ErpDocModal(props: {
 		setDocs(state.docs);
 		setLegacyDoc(state.legacyDoc);
 		setDocumentCheck(state.documentCheck);
+		setStockCheck(state.stockCheck);
 	}
 
 	async function refreshDocumentState(): Promise<void> {
@@ -672,6 +675,7 @@ function ErpDocModal(props: {
 
 	async function doSubmit(): Promise<void> {
 		if (!documentCheck || documentCheck.blocked) { setErr(documentCheck?.message ?? 'Сначала обновите проверку документов.'); return; }
+		if (!stockCheck || stockCheck.blocked) { setErr(stockCheck?.message ?? 'Сначала обновите проверку остатков.'); return; }
 		const pending = Object.values(docs).filter((document) => document.status !== 'submitted');
 		if (!legacyDoc && !pending.length) return;
 		const pendingNames = legacyDoc && legacyDoc.status !== 'submitted'
@@ -720,14 +724,15 @@ function ErpDocModal(props: {
 				) : (
 					<p className="muted">Документы ещё не записаны. Будут созданы отдельно: списание недостачи и оприходование излишков.</p>
 				)}
-				<DocumentError message={err ?? documentCheck?.message ?? null} />
+				<DocumentError message={err ?? documentCheck?.message ?? stockCheck?.message ?? null} />
+				{!submitted && !documentCheck?.blocked && lines !== null && <InventoryStockCheck check={stockCheck} />}
 				{hasDocuments && !documentCheck && !busy && <p>Проверка актуальности документов не получена. Проведение заблокировано.</p>}
 				{lines === null && !err ? <p>Считаю болванку…</p> : null}
 				{lines !== null && !submitted && (
 					lines.length ? (
 						<table className="disc-table">
 							<thead>
-								<tr><th>Товар</th><th className="num">Учёт ядра</th><th className="num">Факт</th><th className="num">Разница</th></tr>
+								<tr><th>Товар</th><th className="num">База ревизии</th><th className="num">Введено</th><th className="num">Корректировка</th></tr>
 							</thead>
 							<tbody>
 								{lines.map((l) => (
@@ -748,7 +753,7 @@ function ErpDocModal(props: {
 					)}
 					{hasDocuments && !submitted && (
 						<>
-							<button className="btn-primary" disabled={busy || !documentCheck || documentCheck.blocked} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести документы'}</button>
+							<button className="btn-primary" disabled={busy || !documentCheck || documentCheck.blocked || !stockCheck || stockCheck.blocked} onClick={() => void doSubmit()}>{busy ? 'Провожу…' : 'Провести документы'}</button>
 							{canRecreate && <button className="btn-secondary" disabled={busy} onClick={() => void doSave(true)}>Пересоздать по обновлённому отчёту</button>}
 						</>
 					)}

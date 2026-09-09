@@ -8,7 +8,7 @@ import {
 	listActiveStoreTitles,
 	searchErpItems,
 } from '../erp/operations.js';
-import { inventorySnapshotQuantities } from '../inventory-stock-snapshot.js';
+import { inventoryCountQuantities } from '../inventory-stock-snapshot.js';
 import { loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { inventoryStatusForPoints } from './api-inventory-status.js';
@@ -43,7 +43,12 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 				} catch {
 					/* битый JSON — пропускаем */
 				}
-				const points = Array.isArray(parsed['points']) ? parsed['points'] as Array<Record<string, unknown>> : [];
+				const points = (Array.isArray(parsed['points']) ? parsed['points'] as Array<Record<string, unknown>> : []).map(point => {
+					const quantities = inventoryCountQuantities(point), facts = point['draft'] as Record<string, unknown> | undefined;
+					if (!quantities || !facts || !point['result']) return point;
+					const ids = Object.keys(facts).filter(id => /^\d+$/.test(id) && typeof facts[id] === 'number' && Number.isFinite(facts[id]) && Number(facts[id]) >= 0);
+					return { ...point, result: { ...(point['result'] as Record<string, unknown>), counted: ids.length, total: new Set([...quantities.keys(), ...ids.map(Number)]).size } };
+				});
 				return {
 					id: String(it['ID'] ?? ''),
 					title: String(it['NAME'] ?? ''),
@@ -76,7 +81,7 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 			let core: Awaited<ReturnType<typeof fetchErpStoreStockFull>>;
 			if (b.inventoryId) {
 				const loaded = await loadInventoryPoint(app, client, b.inventoryId, Number(b.storeId));
-				const quantities = inventorySnapshotQuantities(loaded.pt);
+				const quantities = inventoryCountQuantities(loaded.pt);
 				if (loaded.data['stockSnapshotAt'] && !quantities) throw new Error('снимок остатков точки повреждён');
 				if (quantities) {
 					core = await fetchErpSnapshotStockFull(erp, quantities);

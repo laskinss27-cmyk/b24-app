@@ -25,6 +25,7 @@ import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
 import { ReservationService } from '../reservations/service.js';
 import { updateInventoryData } from './inventory-storage.js';
 import { checkInventoryDocuments } from './inventory-document-freshness.js';
+import { checkInventoryStock } from './inventory-stock-check.js';
 
 function draftRecord(name: string, lines: number, savedAt: string): InventoryDocumentRecord {
 	return { name, status: 'draft', lines, savedAt };
@@ -62,11 +63,14 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 			const { pt } = await loadInventoryPoint(app, client, body.inventoryId, Number(body.storeId));
 			if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документы ядра — только по сверенной точке' });
 			const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
+			const documentCheck = await checkInventoryDocuments(erp, pt, lines);
+			const stockCheck = documentCheck.blocked ? undefined : await checkInventoryStock(erp, pt, lines);
 			app.log.info({ storeId: body.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
 			return {
 				ok: true,
 				lines,
-				documentCheck: await checkInventoryDocuments(erp, pt, lines),
+				documentCheck,
+				stockCheck,
 				storeName,
 				docs: inventoryDocumentSet(pt),
 				legacyDoc: legacyInventoryDocument(pt) ?? null,
@@ -198,6 +202,8 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 				const { lines } = await computeInventoryReconciliationLines(erp, loaded.pt);
 				const check = await checkInventoryDocuments(erp, loaded.pt, lines);
 				if (check.blocked) throw new Error(check.message!);
+				const stockCheck = await checkInventoryStock(erp, loaded.pt, lines);
+				if (stockCheck.blocked) return { ok: false as const, error: stockCheck.message!, stockCheck };
 				const legacy = legacyInventoryDocument(loaded.pt);
 				if (legacy) {
 					const live = await erp.get('Stock Reconciliation', legacy.name);
@@ -223,6 +229,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 				await updateInventoryItem(app, client, loaded);
 				return { docs: documents, legacyDoc: null, inventoryStatus };
 			});
+			if ('ok' in completed && completed.ok === false) return completed;
 			if (storeTitle && app.reservationRuntime?.canWrite) {
 				await new ReservationService(app.reservationRuntime).reconcileStore(erp, storeTitle)
 					.catch((error) => app.log.error({ inventoryId: body.inventoryId, storeId: body.storeId }, `[reservations] inventory submitted; reconcile required — ${inventoryErrorInfo(error)}`));

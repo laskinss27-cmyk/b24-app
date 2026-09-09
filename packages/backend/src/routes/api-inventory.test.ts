@@ -285,7 +285,7 @@ test('inventory submission ignores blank rows omitted from facts but preserves a
 	});
 });
 
-test('act submission keeps earlier completed rows counted and ignores untouched act rows', () => {
+test('act submission counts unique saved facts, not an earlier aggregate a second time', () => {
 	const submitted = normalizeInventorySubmission({
 		total: 100,
 		lines: [
@@ -293,7 +293,8 @@ test('act submission keeps earlier completed rows counted and ignores untouched 
 		],
 	}, { 201: 5, 202: 7 }, new Map([[201, 5], [202, 8], [203, 4]]), 85);
 
-	assert.equal(submitted.result.counted, 87);
+	assert.equal(submitted.result.counted, 2);
+	assert.equal(submitted.result.total, 3);
 	assert.equal(submitted.result.discrepancies, 1);
 	assert.deepEqual(submitted.result.lines.map((line) => line.productId), [202]);
 });
