@@ -20,6 +20,7 @@ import {
 import { recordRealizationEvent } from '../operation-log/realization-events.js';
 import { ReservationService } from '../reservations/service.js';
 import { loadTransfers } from './transfer-storage.js';
+import { assertDealRealizationPurchasing } from './deal-realization-purchasing.js';
 
 interface AuthBody {
 	domain?: string;
@@ -105,6 +106,7 @@ export function registerDealCoreRealizationRoute(
 						throw new Error(`этап реализации для позиции #${line.productId} не найден`);
 					}
 				}
+				await assertDealRealizationPurchasing(erp, client, parsedGroups.flatMap(group => group.lines));
 				if (app.transferSqlWriter?.mode !== 'primary') await ensureTransfersEntity(client);
 				const reserved = new Map<string, number>();
 				for (const transfer of (await loadTransfers(app, client)).filter((item) => item.status === 'draft' || item.status === 'collected' || item.status === 'requested')) {
@@ -202,8 +204,26 @@ export function registerDealCoreRealizationRoute(
 			if (action === 'submit') {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-				const names = (Array.isArray(b.names) ? b.names : []).map(String).filter((n) => n && n !== 'undefined');
+				const names = [...new Set((Array.isArray(b.names) ? b.names : []).map(String).map(name => name.trim()).filter((n) => n && n !== 'undefined'))];
 				if (!names.length) return reply.code(400).send({ ok: false, error: 'нет документов для проведения' });
+				await client.call('crm.deal.get', { id: dealId });
+				// Check the entire batch from stored documents before submitting any warehouse.
+				const documents = await Promise.all(names.map(name => erp.get<Record<string, unknown>>('Delivery Note', name)));
+				const priceLines: Array<{ productId: number; rate: number; itemName: string }> = [];
+				for (const document of documents) {
+					if (!document || String(document[DEAL_FIELD] ?? '') !== String(dealId) || Number(document['docstatus']) !== 0) {
+						throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
+					}
+					// Returns undo a previous sale and must remain possible without a current price.
+					if (Number(document['is_return'] ?? 0) === 1) continue;
+					const items = Array.isArray(document['items']) ? document['items'] as Array<Record<string, unknown>> : [];
+					if (!items.length) throw new Error('В черновике реализации нет позиций. Обновите сделку.');
+					for (const item of items) {
+						const productId = Number(item['item_code']);
+						if (Number.isSafeInteger(productId) && productId > 0) priceLines.push({ productId, rate: Number(item['rate']), itemName: String(item['item_name'] ?? '') });
+					}
+				}
+				await assertDealRealizationPurchasing(erp, client, priceLines);
 				const dealDocuments = await listDealRealizations(erp, dealId);
 				const allowedDrafts = new Set(dealDocuments.filter((document) => !document.submitted).map((document) => document.name));
 				if (names.some((name) => !allowedDrafts.has(name))) throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
