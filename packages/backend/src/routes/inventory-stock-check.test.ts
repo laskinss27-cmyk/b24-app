@@ -50,6 +50,7 @@ test('pagination reads all rows; malformed responses and nonfinite quantities fa
 });
 test('confirmed current facts get a separate persisted result basis; snapshot and facts never change', () => {
 	const f = fixture(), original = structuredClone(f.point);
+	f.point.resultBookAt = '2026-09-02T08:45:17.623Z';assert.equal(inventoryCountQuantities(f.point)?.get(16944), 1347);delete f.point.resultBookAt;
 	const stock = new Map([[7890, 0], [16944, 47], [15322, 41], [7888, 0], [999, 2]]);
 	const next = prepareConfirmedInventoryRecount(f.point, stock, [7890, 16944, 15322, 7888], '2026-09-09T15:00:00Z');
 	assert.deepEqual(next.stockSnapshot, original.stockSnapshot);assert.deepEqual(next.draft, original.draft);assert.deepEqual(f.point, original);

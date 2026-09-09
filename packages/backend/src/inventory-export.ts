@@ -1,4 +1,4 @@
-import { inventorySnapshotQuantities, inventoryCountQuantities } from './inventory-stock-snapshot.js';
+import { inventorySnapshotQuantities, inventoryCountQuantities, isConfirmedInventoryRecount } from './inventory-stock-snapshot.js';
 import { inventoryMoneyTotals } from '@b24-app/shared';
 
 type RecordValue = Record<string, unknown>;
@@ -77,7 +77,7 @@ export function prepareInventoryExport(item: RecordValue, storeId?: number): Inv
 			};
 		});
 		const notes = [];
-		if (point['resultBookAt']) notes.push(`Использована отдельно подтверждённая база пересчёта ${String(point['resultBookAt'])}. Исходный снимок открытия сохранён.`);
+		if (isConfirmedInventoryRecount(point)) notes.push(`Использована отдельно подтверждённая база пересчёта ${String(point['resultBookAt'])}. Исходный снимок открытия сохранён.`);
 		const money = Array.isArray(result['lines']) ? inventoryMoneyTotals([...results.values()].map((line) => ({
 			diff: Number(line['fact']) - Number(line['book']),
 			...(quantity(line['retailPrice']) !== null ? { retailPrice: Number(line['retailPrice']) } : {}),

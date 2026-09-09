@@ -86,9 +86,13 @@ export function inventorySnapshotQuantities(point: Record<string, unknown>): Map
  * Nonzero differences keep their explicit book; matched facts encode book=fact.
  * A confirmed result is read-only until a new explicit recount is prepared.
  */
+export function isConfirmedInventoryRecount(point: Record<string, unknown>): boolean {
+	return Boolean(point['resultBookAt']) && String(point['draftSessionId'] ?? '').startsWith('confirmed-recount:');
+}
+
 export function inventoryCountQuantities(point: Record<string, unknown>): Map<number, number> | null {
 	const quantities = inventorySnapshotQuantities(point);
-	if (!point['resultBookAt']) return quantities;
+	if (!isConfirmedInventoryRecount(point)) return quantities;
 	const facts = point['draft'] as Record<string, unknown> | undefined;
 	const result = point['result'] as SubmittedInventoryResult | undefined;
 	if (!quantities || !Number.isFinite(Date.parse(String(point['resultBookAt']))) || !facts || !Array.isArray(result?.lines)) throw new Error('Повреждена база повторного пересчёта. Проведение запрещено.');
@@ -175,7 +179,7 @@ export function frozenInventoryDifferences(point: Record<string, unknown>): Froz
 		if (!raw || typeof raw !== 'object') continue;
 		const row = raw as Record<string, unknown>;
 		const productId = Number(row['productId']);
-		const book = quantities.get(productId) ?? 0;
+		const book = Number(row['book']);
 		const fact = Number(row['fact']);
 		if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(book) || !Number.isFinite(fact)) continue;
 		const diff = fact - book;

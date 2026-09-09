@@ -25,5 +25,5 @@ export function prepareConfirmedInventoryRecount(
 	// Preserve known prices and comments; names for new discrepancies are loaded from ERP by the caller.
 	const metadata = new Map(previous.lines.map(row => [row.productId, row]));
 	normalized.result.lines = normalized.result.lines.map(row => ({ ...metadata.get(row.productId), ...row }));
-	return { ...structuredClone(point), resultBookAt: capturedAt, result: normalized.result };
+	return { ...structuredClone(point), resultBookAt: capturedAt, draftSessionId: `confirmed-recount:${capturedAt}`, result: normalized.result };
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ensureInventoryEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { coreStoreId, fetchErpStoreStockFull, listActiveStoreTitles } from '../erp/operations.js';
-import { captureInventoryPointSnapshots, inventorySnapshotQuantities, inventoryCountQuantities, normalizeInventorySubmission } from '../inventory-stock-snapshot.js';
+import { captureInventoryPointSnapshots, inventorySnapshotQuantities, inventoryCountQuantities, isConfirmedInventoryRecount, normalizeInventorySubmission } from '../inventory-stock-snapshot.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
@@ -69,7 +69,7 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 						return { ok: true, draftSaved: true, alreadySaved: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
 					}
 				}
-				if (pt['resultBookAt']) throw new Error('Фактическое наличие этой ревизии уже отдельно подтверждено с учётом движений. Обычное редактирование запрещено, чтобы не потерять базу пересчёта. Для новых чисел нужен повторный подтверждённый пересчёт.');
+				if (isConfirmedInventoryRecount(pt)) throw new Error('Фактическое наличие этой ревизии уже отдельно подтверждено с учётом движений. Обычное редактирование запрещено, чтобы не потерять базу пересчёта. Для новых чисел нужен повторный подтверждённый пересчёт.');
 				// Active inventories created before snapshot support are frozen on their next write.
 				// Submitted history remains untouched and keeps the legacy reconciliation path.
 				if ((b.action === 'claim' || b.action === 'saveDraft') && !inventorySnapshotQuantities(pt)) {
