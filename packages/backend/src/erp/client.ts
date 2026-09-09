@@ -9,21 +9,26 @@
  *  - ошибки ERPNext прячутся в _server_messages (JSON-в-JSON) — разворачиваем.
  */
 
+import { readableErpError } from './readable-error.js';
+
 export interface ErpConfig {
 	url: string;
 	token: string; // формат "token <key>:<secret>"
 }
 
 export class ErpApiError extends Error {
+	readonly technicalMessage: string;
 	constructor(
 		public readonly method: string,
 		public readonly path: string,
 		public readonly status: number,
 		message: string,
 	) {
-		super(`ERPNext [${method} ${path}] ${status}: ${message}`);
+		super(readableErpError(message, status));
 		this.name = 'ErpApiError';
+		this.technicalMessage = `ERPNext [${method} ${path}] ${status}: ${message.slice(0, 32000)}`;
 	}
+	override toString(): string { return this.message; }
 }
 
 function extractError(status: number, json: Record<string, unknown>): string {
@@ -39,7 +44,9 @@ function extractError(status: number, json: Record<string, unknown>): string {
 				.join('; ');
 		} catch { /* оставляем exception */ }
 	}
-	return msg.slice(0, 400) || `HTTP ${status}`;
+	// Strip markup and shorten only afterwards: long warehouse links used to consume
+	// the whole limit, cutting off the useful reason and item/warehouse names.
+	return msg || `HTTP ${status}`;
 }
 
 export class ErpClient {

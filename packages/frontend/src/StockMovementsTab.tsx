@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { DocumentError } from './DocumentError.js';
 import { cancelStockDoc, fetchMovements, submitStockDoc, type CoreMovement, type StockItem } from './b24.js';
 import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
@@ -56,7 +57,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 		if (kind === 'delivery' || kind === 'return') return;
 		setBusyDoc(m.name); setErr(null);
 		try { await submitStockDoc(kind, m.name, m.doctype === 'Stock Entry' ? 'Stock Entry' : 'Purchase Receipt'); setBump((b) => b + 1); }
-		catch (e) { setErr(errText(e)); }
+		catch (e) { setErr(`Документ ${m.name}\n${errText(e)}`); }
 		finally { setBusyDoc(null); }
 	};
 
@@ -98,7 +99,8 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
 			{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
-			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
+			<DocumentError message={err} />
+			{!list ? (!err ? <p>Загрузка…</p> : null) : !shown.length ? <p className="empty">{list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Сделка / ответственный</th><th style={TH}>Инфо</th><th style={TH}>Статус</th>{(canPost || canCancel) && <th style={TH}></th>}</tr></thead>
 					<tbody>

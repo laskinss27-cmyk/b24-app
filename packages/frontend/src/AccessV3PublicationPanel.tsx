@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ACCESS_PERMISSIONS, type AccessV3PublicationPreview, type AccessV3PublicationStatus } from '@b24-app/shared';
+import { ACCESS_PERMISSIONS, type AccessV3Directory, type AccessV3PublicationPreview, type AccessV3PublicationStatus } from '@b24-app/shared';
 import { bx24Auth } from './bitrix-auth.js';
+import { AccessV3History } from './AccessV3History.js';
 
 export async function requestPublication<T>(action: 'status' | 'preview' | 'activate' | 'disable', data: Record<string, unknown> = {}): Promise<T> {
 	const response = await fetch(`/api/access-control/v3/publication/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), ...data }) });
@@ -9,7 +10,7 @@ export async function requestPublication<T>(action: 'status' | 'preview' | 'acti
 	return result;
 }
 const decision = (value: string): string => value === 'allow' ? 'Разрешить' : value === 'deny' ? 'Запретить' : 'Прежние правила';
-export function AccessV3PublicationPanel({ mock, dirty, savedRevision }: { mock: boolean; dirty: boolean; savedRevision: number }): JSX.Element {
+export function AccessV3PublicationPanel({ mock, dirty, savedRevision, directory }: { mock: boolean; dirty: boolean; savedRevision: number; directory?: AccessV3Directory }): JSX.Element {
 	const [status, setStatus] = useState<AccessV3PublicationStatus | null>(null);
 	const [preview, setPreview] = useState<AccessV3PublicationPreview | null>(null);
 	const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -57,7 +58,7 @@ export function AccessV3PublicationPanel({ mock, dirty, savedRevision }: { mock:
 				</div>}
 			</>}
 			{status && !status.canActivate && <p>Применение и отключение доступны только владельцу.</p>}
-			{status && <details><summary>История рабочих версий</summary>{[...status.history, status.state].filter(s => s.revision > 0).reverse().map(s => <p key={s.revision}>Версия {s.revision}: {s.active ? `включена из черновика ${s.draftRevision}` : 'отключена'} · #{s.updatedById} · {s.updatedAt ? new Date(s.updatedAt).toLocaleString('ru-RU') : ''}</p>)}</details>}
+			{status && <AccessV3History status={status} directory={directory} />}
 		</>}
 	</section>;
 }

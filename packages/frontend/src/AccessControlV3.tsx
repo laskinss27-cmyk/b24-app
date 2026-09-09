@@ -74,8 +74,8 @@ export function AccessControlV3({ mock, onClose, onDirtyChange }: { mock: boolea
 		<header className="av3-header"><div><span className="av3-badge">{mock ? 'ДЕМО · НЕ РЕАЛЬНЫЕ ПРАВА' : 'ЧЕРНОВИК · НЕ ВЛИЯЕТ НА РАБОТУ'}</span><h1>Права отделов и сотрудников</h1><p>База отдела → личные исключения → предварительная проверка</p></div><button type="button" onClick={close}>Закрыть</button></header>
 		<div className="av3-safety"><b>Сохранение черновика не меняет рабочие права.</b> Пять прав каталога можно отдельно применить для отделов и сотрудников в блоке ниже. Остальные настройки пока не подключены. Ограничения Битрикса сохраняются; «Нужна проверка» не подтверждает доступ во всех сценариях.</div>
 		{error && <div role="alert" className="av3-error">{error}</div>}{notice && <div role="status" className="av3-notice">{notice}</div>}
+		{loaded && <AccessV3PublicationPanel mock={mock} dirty={dirty || busy} savedRevision={loaded.draft.revision} directory={loaded.directory} />}
 		{loaded && <AccessV3ShadowPanel initial={loaded.shadow} mock={mock} />}
-		{loaded && <AccessV3PublicationPanel mock={mock} dirty={dirty || busy} savedRevision={loaded.draft.revision} />}
 		{loaded && <details><summary>Узкий пилот владельца (предыдущий этап)</summary><AccessV3PilotPanel mock={mock} dirty={dirty || busy} savedRevision={loaded.draft.revision} /></details>}
 		{loaded && draft && draft.baseline.directoryFingerprint !== loaded.directory.fingerprint && <div role="alert" className="av3-scope-note">Справочник сотрудников, отделов или складов изменился после создания базы. Оценки наследования основаны на прежнем снимке и требуют повторной сверки. Черновик не является подтверждением текущего доступа.</div>}
 		{!loaded || !draft ? <p>{busy ? 'Загружаю полный справочник сотрудников, отделов и складов…' : 'Не удалось загрузить настройки. Закройте и откройте окно повторно.'}</p> : <>

@@ -10,6 +10,11 @@ Object.defineProperty(globalThis, 'window', {
 
 const { cancelStockDoc, createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } = await import('./b24.js');
 
+test('posting surfaces backend business error even with HTTP 200', async () => {
+	captureResponses([{ ok: false, error: 'Товар: 16944\nНе хватает: 995' }]);
+	await assert.rejects(submitStockDoc('issue', 'TEST'), /Товар: 16944\nНе хватает: 995/);
+});
+
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
 	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {

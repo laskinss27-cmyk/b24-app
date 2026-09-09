@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { DocumentError } from './DocumentError.js';
+import { InventoryListFilters } from './InventoryListFilters.js';
+import { defaultInventoryListFilters, filterInventoryList } from './inventory-list.js';
 import QRCode from 'qrcode';
 import { getContext, type B24Context } from './b24-context.js';
 import {
@@ -115,6 +118,8 @@ export function InventoryHome(): JSX.Element {
 	const [me, setMe] = useState<SimpleUser>({ id: '', name: '' });
 	const [isInitiator, setIsInitiator] = useState(false);
 	const [inventories, setInventories] = useState<Inventory[]>([]);
+	const [listFilters, setListFilters] = useState({ ...defaultInventoryListFilters });
+	const [listLoading, setListLoading] = useState(true);
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [users, setUsers] = useState<SimpleUser[]>([]);
 	const [sections, setSections] = useState<{ id: number; name: string }[]>([]);
@@ -172,6 +177,7 @@ export function InventoryHome(): JSX.Element {
 				},
 			]);
 			setPhase({ k: 'ready' });
+			setListLoading(false);
 			return;
 		}
 		const bx = window.BX24;
@@ -215,9 +221,10 @@ export function InventoryHome(): JSX.Element {
 				void (async () => {
 					try {
 						setInventories(await withTimeout(listInventories(), 20000, 'entity.item.get'));
+						setStorageWarn(null);
 					} catch (e: unknown) {
 						setStorageWarn(`${String(e instanceof Error ? e.message : e)} (если хранилище не создано — пусть Володя/админ откроет приложение)`);
-					}
+					} finally { setListLoading(false); }
 				})();
 			})().catch((e: unknown) => setPhase({ k: 'error', msg: String(e instanceof Error ? e.message : e) }));
 		});
@@ -225,11 +232,13 @@ export function InventoryHome(): JSX.Element {
 
 	async function reload(): Promise<void> {
 		if (ctx.__mock) return;
+		setListLoading(true);
 		try {
 			setInventories(await withTimeout(listInventories(), 20000, 'list'));
-		} catch {
-			/* оставляем текущий список */
-		}
+			setStorageWarn(null);
+		} catch (error) {
+			setStorageWarn(String(error instanceof Error ? error.message : error));
+		} finally { setListLoading(false); }
 	}
 
 	function markPoint(invId: string, storeId: number, patch: Partial<InvPoint>): void {
@@ -513,11 +522,10 @@ export function InventoryHome(): JSX.Element {
 		);
 	};
 
-	const activeInvs = inventories.filter((inv) => inv.status === 'active');
-	const visibleInvs = isInitiator ? inventories : activeInvs;
+	const visibleInvs = filterInventoryList(inventories, listFilters);
 
-	// Создание доступно всем. Полная сводка, удаление, сверка и документы
-	// остаются только у инициаторов.
+	// Показываем все полученные с сервера записи независимо от роли. Права
+	// удаления, сверки и проведения документов по-прежнему проверяются отдельно.
 	return (
 		<div className="inv">
 			<header>
@@ -588,11 +596,12 @@ export function InventoryHome(): JSX.Element {
 			)}
 
 			{actionErr && <div className="beta-banner">⛔ {actionErr}</div>}
-				{storageWarn && <div className="beta-banner">⚠️ Хранилище не отвечает: {storageWarn}. Список может быть пуст, а создание — не сохраниться. Похоже, упёрлись в entity-хранилище — напиши мне, добью.</div>}
+			{storageWarn && <div className="beta-banner" role="alert">Не удалось обновить список: {storageWarn}. Ниже — ранее загруженные данные, они могут быть неполными или устаревшими. Нажмите «Обновить список».</div>}
 			<h2 className="inv-h2">Инвентаризации</h2>
+			<InventoryListFilters inventories={inventories} value={listFilters} onChange={setListFilters} shown={visibleInvs.length} loading={listLoading} onRefresh={() => void reload()} />
 			{visibleInvs.length
 				? visibleInvs.map(invCard)
-				: <p className="stub-calm">{isInitiator ? 'Пока ни одной инвентаризации. Создайте первую.' : 'Сейчас нет активных инвентаризаций. Можно создать новую.'}</p>}
+				: <p className="stub-calm">{listLoading ? 'Загружаю инвентаризации…' : storageWarn ? 'Список не загружен. Повторите обновление.' : inventories.length ? 'По выбранным фильтрам ничего не найдено. Сбросьте фильтры, чтобы увидеть весь список.' : 'Пока ни одной инвентаризации. Создайте первую.'}</p>}
 			{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
 			{erpFor && (
 				<ErpDocModal
@@ -707,7 +716,7 @@ function ErpDocModal(props: {
 				) : (
 					<p className="muted">Документы ещё не записаны. Будут созданы отдельно: списание недостачи и оприходование излишков.</p>
 				)}
-				{err && <p className="error">⛔ {err}</p>}
+				<DocumentError message={err} />
 				{lines === null && !err ? <p>Считаю болванку…</p> : null}
 				{lines !== null && !submitted && (
 					lines.length ? (

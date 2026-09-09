@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react';
+import { DocumentError } from './DocumentError.js';
 import {
 	createIssueDoc, createManualTransfer, createReceiptDoc, createStockProduct, searchStockItems,
 	type StockItem,
@@ -120,7 +121,7 @@ function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPric
 						)}
 					</>
 				)}
-				{err && <p className="error">⛔ {err}</p>}
+				<DocumentError message={err} />
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
 					<button className="btn-primary" disabled={!sel} onClick={confirm}>Добавить</button>
@@ -189,7 +190,7 @@ export function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClos
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Розничная цена (если заполнена) станет текущей ценой каталога. Пусто — текущую цену не меняем.</p>
 				{addOpen && <AddItemModal withPrices onAdd={add} onClose={() => setAddOpen(false)} />}
-				{err && <p className="error">⛔ {err}</p>}
+				<DocumentError message={err} />
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
 					<button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать черновик'}</button>
@@ -253,7 +254,7 @@ export function IssueForm({ form, onClose, onDone }: { form: StockForm; onClose:
 						</tbody>
 					</table>
 				)}
-				{err && <p className="error">⛔ {err}</p>}
+				<DocumentError message={err} />
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
 					<button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать черновик'}</button>
@@ -318,7 +319,7 @@ export function TransferForm({ form, onClose, onDone }: { form: StockForm; onClo
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
 				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Создаётся статус «Запрошено». Снабжение проведёт «В пути» → «Получено» (честный транзит).</p>
 				{addOpen && <AddItemModal withPrices={false} {...(fromStore ? { highlightStore: fromStore } : {})} onAdd={add} onClose={() => setAddOpen(false)} />}
-				{err && <p className="error">⛔ {err}</p>}
+				<DocumentError message={err} />
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button style={btnGhost} onClick={onClose}>Отмена</button>
 					<button className="btn-primary" disabled={busy} onClick={() => void save()}>{busy ? '…' : 'Создать'}</button>

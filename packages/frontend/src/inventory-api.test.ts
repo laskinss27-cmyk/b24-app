@@ -22,6 +22,11 @@ const {
 	submitPoint,
 } = await import('./b24.js');
 
+test('inventory posting surfaces backend business error even with HTTP 200', async () => {
+	captureResponses([{ ok: false, error: 'Товар: 16944\nНе хватает: 995' }]);
+	await assert.rejects(submitErpDoc('inv-test', 7), /Товар: 16944\nНе хватает: 995/);
+});
+
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
 	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
