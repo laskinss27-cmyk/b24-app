@@ -129,14 +129,28 @@ export async function updateInventoryData(
 			createdById: String(input.sourceItem?.['CREATED_BY'] ?? input.data['createdById'] ?? ''),
 			createdAt: String(input.sourceItem?.['DATE_CREATE'] ?? input.data['createdAt'] ?? ''),
 		});
-		const result = await app.inventorySqlWriter.updateNative({
+		const update = {
 			publicId,
 			idempotencyKey: `inventory-update:${publicId}:${normalized.stateHash}`,
 			name: normalized.displayName,
 			data: input.data,
 			createdById: normalized.createdById,
 			...(normalized.sourceCreatedAt ? { createdAt: normalized.sourceCreatedAt } : {}),
-		});
+		};
+		let result = await app.inventorySqlWriter.updateNative(update);
+		// A state hash is not an action identity: submit -> reopen can return to
+		// an earlier draft. A completed historical command must not fake success
+		// when another state is current. Keep ordinary retries deduplicated, but
+		// give this new transition its own command without rewriting old history.
+		if (result.alreadyApplied && !result.alreadyCurrent) {
+			result = await app.inventorySqlWriter.updateNative({
+				...update,
+				idempotencyKey: `inventory-update:${publicId}:${normalized.stateHash}:${randomUUID()}`,
+			});
+		}
+		if (result.stateHash !== normalized.stateHash || (result.alreadyApplied && !result.alreadyCurrent)) {
+			throw new Error('Изменение инвентаризации не сохранено: состояние уже изменилось. Обновите список и повторите действие.');
+		}
 		if (!result.alreadyApplied) await mirrorNativeInventory(app, client, publicId, result.mutationId, normalized.displayName, input.data);
 		await flushPendingNativeInventoryMirrors(app, client);
 		return;
