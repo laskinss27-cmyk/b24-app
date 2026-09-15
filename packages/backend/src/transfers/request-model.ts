@@ -12,6 +12,9 @@ export interface SupplyRequestLine {
 }
 
 export interface TransferRequestData {
+	/** Optional: omitted on historical records to preserve their SQL hashes. */
+	supplyRequestName?: string;
+	supplyHandoff?: { title: string; at: string; byId: string; byName: string; payload: Record<string, unknown> };
 	kind: TransferRequestKind;
 	fromStore: string;
 	toStore: string;
@@ -66,6 +69,8 @@ export function parseTransferRequestItem(item: Record<string, unknown>): StoredT
 	const kind = kinds.has(data.kind as TransferRequestKind) ? data.kind as TransferRequestKind : 'transfer';
 	return {
 		id,
+		...(typeof data.supplyRequestName === 'string' && data.supplyRequestName ? { supplyRequestName: data.supplyRequestName } : {}),
+		...(data.supplyHandoff && typeof data.supplyHandoff === 'object' ? { supplyHandoff: data.supplyHandoff } : {}),
 		name: String(item['NAME'] ?? item['name'] ?? `Заказ на перемещение #${id}`),
 		kind,
 		fromStore: String(data.fromStore ?? ''),

@@ -174,18 +174,18 @@ async function ensureMrField(erp: ErpClient): Promise<void> {
 export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string }
 
 /** Создать заявку в снабжение (Material Request, тип Purchase) по выбранным товарам сделки. */
-export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string }): Promise<{ name: string }> {
+export async function prepareSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string }): Promise<Record<string, unknown>> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMrField(erp);
 	if (args.note) await ensureNoteField(erp, 'Material Request');
 	if (!args.lines.length) throw new Error('пустая заявка');
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
-	const doc = await erp.create('Material Request', {
+	return {
 		company: ctx.company,
 		material_request_type: 'Purchase',
 		schedule_date: args.scheduleDate,
-		[DEAL_FIELD]: String(args.dealId),
+		[DEAL_FIELD]: args.dealId > 0 ? String(args.dealId) : '',
 		...(args.toStore ? { [MR_TO_STORE_FIELD]: args.toStore } : {}),
 		...(args.note ? { [NOTE_FIELD]: args.note.slice(0, 500) } : {}),
 		items: args.lines.map((l) => ({
@@ -195,7 +195,11 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 			...(args.toStore ? { warehouse: erpWarehouse(ctx, args.toStore) } : {}),
 			...(l.note ? { description: l.note } : {}),
 		})),
-	});
+	};
+}
+
+export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string }): Promise<{ name: string }> {
+	const doc = await erp.create('Material Request', await prepareSupplyRequest(erp, args));
 	return { name: String(doc['name']) };
 }
 

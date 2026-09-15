@@ -110,6 +110,14 @@ export function Supply(): JSX.Element {
 		const loaded = await fetchSupplyOrders();
 		setOrders(loaded);
 	};
+	const openTtSupply = (name: string): void => {
+		void fetchSupplyOrders().then(loaded => {
+			setOrders(loaded);
+			if (!loaded.some(order => order.name === name)) { setNotice(`Документ ${name} не найден в обеспечении. Исходная заявка сохранена; проверьте связанные документы.`); return; }
+			setSearches(current => ({ ...current, orders: '' })); setOrderStatusFilter([]);
+			setExpanded(name); setView('orders');
+		}).catch(error => setNotice(error instanceof Error ? error.message : String(error)));
+	};
 	const {
 		decisions,
 		busy,
@@ -184,7 +192,7 @@ export function Supply(): JSX.Element {
 				{view === 'reservations' && <SupplyReservationsView />}
 				{view === 'access-v3' && <AccessControlV3 mock={Boolean(ctx.__mock)} onDirtyChange={setAccessDraftDirty} onClose={() => setView('orders')} />}
 				{view === 'purchase' && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
-				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
+				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onOpenSupply={openTtSupply} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'logistics' && <>
 					<div className="supply-proto-card supply-stock-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} supplyMode /></div>
 				</>}

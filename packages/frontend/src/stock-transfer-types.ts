@@ -45,6 +45,8 @@ export type TransferRequestKind = 'transfer' | 'supply';
 export interface SupplyRequestLineDto { productId: number | null; name: string; qty: number; link?: string; note?: string }
 
 export interface TransferRequestDoc {
+	supplyRequestName?: string;
+	supplyHandoff?: { title: string; at: string };
 	id: number;
 	name: string;
 	kind: TransferRequestKind;

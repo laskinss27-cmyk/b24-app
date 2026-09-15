@@ -73,6 +73,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/transfer-requests/list': ['transfers.view_own'],
 	'/api/transfer-requests/cancel': ['transfers.cancel_own_request'],
 	'/api/transfer-requests/convert': ['transfers.manage_requests', 'transfers.create'],
+	'/api/transfer-requests/process-supply': ['transfers.manage_requests'],
 	'/api/transfers/create': ['transfers.create'],
 	'/api/transfers/create-manual': ['transfers.create'],
 	'/api/transfers/list': ['transfers.view_own'],

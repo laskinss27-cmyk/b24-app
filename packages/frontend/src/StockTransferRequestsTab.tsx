@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { cancelTransferRequest, listTransferRequests, type TransferRequestDoc } from './b24.js';
 import { ConvertTransferRequestForm, SupplyTtRequestForm, TransferRequestForm } from './StockTransferRequestForms.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
+import { SupplyTtProcessForm } from './SupplyTtProcessForm.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
@@ -17,14 +18,17 @@ const TRANSFER_REQUEST_STATUS: Record<TransferRequestDoc['status'], string> = {
 	canceled: 'Отменён',
 };
 
-export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }: {
+export function TransferRequestsTab({ form, mode, onChanged, initialRequestId, onOpenSupply }: {
 	form: StockForm | null;
 	mode: 'manager' | 'supply';
 	onChanged?: () => void;
 	initialRequestId?: number;
+	onOpenSupply?: (name: string) => void;
 }): JSX.Element {
 	const [requests, setRequests] = useState<TransferRequestDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
+	const [canCancel, setCanCancel] = useState(false);
+	const [processRequest, setProcessRequest] = useState<TransferRequestDoc | null>(null);
 	const [status, setStatus] = useState<'all' | TransferRequestDoc['status']>(mode === 'supply' ? 'pending' : 'all');
 	const [showForm, setShowForm] = useState(false);
 	const [showSupplyForm, setShowSupplyForm] = useState(false);
@@ -40,6 +44,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 			const result = await listTransferRequests();
 			setRequests(result.requests);
 			setIsSupply(result.isSupply);
+			setCanCancel(result.canCancel);
 		} catch (error) {
 			setErr(errText(error));
 			setRequests([]);
@@ -48,7 +53,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 	useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
 	const cancel = async (request: TransferRequestDoc): Promise<void> => {
-		if (!window.confirm(`Отменить заказ на перемещение #${request.id}?`)) return;
+		if (!window.confirm(`Отменить ${request.kind === 'supply' ? 'заявку снабжению' : 'заказ на перемещение'} #${request.id}?`)) return;
 		setBusy(request.id); setErr(null);
 		try { await cancelTransferRequest(request.id); setOpenRequest(null); await load(); onChanged?.(); }
 		catch (error) { setErr(errText(error)); }
@@ -65,7 +70,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 	return (
 		<section>
 			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-				<div><h2 style={{ fontSize: 16, margin: 0 }}>Заказы на перемещение</h2><p style={{ color: '#7a8699', fontSize: 13, margin: '3px 0 0' }}>{mode === 'supply' ? 'Просьбы точек, по которым еще не созданы перемещения.' : 'Заказ ничего не резервирует и не меняет остатки.'}</p></div>
+				<div><h2 style={{ fontSize: 16, margin: 0 }}>Заявки торговых точек</h2><p style={{ color: '#7a8699', fontSize: 13, margin: '3px 0 0' }}>{mode === 'supply' ? 'Заявки снабжению и заказы на перемещение. Откройте заявку для обработки.' : 'Заявка ничего не резервирует и не меняет остатки.'}</p></div>
 				{mode === 'manager' && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
 					<button style={btnGhost} disabled={!form?.stores.length} onClick={() => setShowSupplyForm(true)}>Заявка снабжению</button>
 					<button className="btn-primary" disabled={!form?.stores.length} onClick={() => setShowForm(true)}>Заказ на перемещение</button>
@@ -73,7 +78,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 			</div>
 			<div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
 				<select style={inp} value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
-					<option value="all">Все статусы</option><option value="pending">Ожидает снабжение</option><option value="converted">Перемещение создано</option><option value="canceled">Отменён</option>
+					<option value="all">Все статусы</option><option value="pending">Ожидает снабжение</option><option value="converted">Передано в работу</option><option value="canceled">Отменён</option>
 				</select>
 				<span style={{ marginLeft: 'auto', color: '#7a8699', fontSize: 12 }}>{shown.length} из {(requests ?? []).length}</span>
 			</div>
@@ -90,7 +95,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 						<td style={TD}>{request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : '—'}<div style={{ color: '#7a8699', fontSize: 12 }}>{request.createdByName || '—'}</div></td>
 						<td style={TD}>{isSupplyRequest ? request.toStore : `${request.fromStore} → ${request.toStore}`}</td>
 						<td style={TD}>{(isSupplyRequest ? supplyLines.length : request.lines.length)} поз. · {totalQty} шт.</td>
-						<td style={TD}>{TRANSFER_REQUEST_STATUS[request.status]}{request.transferId ? <div style={{ color: '#185fa5', fontSize: 12 }}>Перемещение #{request.transferId}</div> : null}</td>
+						<td style={TD}>{request.supplyRequestName ? 'Передано в обеспечение' : request.supplyHandoff ? 'Проверить передачу' : TRANSFER_REQUEST_STATUS[request.status]}{request.transferId ? <div style={{ color: '#185fa5', fontSize: 12 }}>Перемещение #{request.transferId}</div> : null}{request.supplyRequestName && <div>{request.supplyRequestName}</div>}</td>
 						<td style={{ ...TD, textAlign: 'right', color: '#185fa5', whiteSpace: 'nowrap' }}>Открыть ›</td>
 					</tr>;
 					})}</tbody>
@@ -103,7 +108,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 							<div style={{ color: '#7a8699', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{openRequest.kind === 'supply' ? 'Заявка снабжению' : 'Заказ на перемещение'}</div>
 							<h2 style={{ fontSize: 18, margin: '3px 0 0' }}>{openRequest.kind === 'supply' ? 'Заявка' : 'Заказ'} #{openRequest.id}</h2>
 						</div>
-						<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><b style={{ fontSize: 13 }}>{TRANSFER_REQUEST_STATUS[openRequest.status]}</b><button style={btnGhost} title="Закрыть" onClick={() => setOpenRequest(null)}>×</button></div>
+						<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><b style={{ fontSize: 13 }}>{openRequest.supplyRequestName ? 'Передано в обеспечение' : openRequest.supplyHandoff ? 'Проверить передачу' : TRANSFER_REQUEST_STATUS[openRequest.status]}</b><button style={btnGhost} title="Закрыть" onClick={() => setOpenRequest(null)}>×</button></div>
 					</div>
 					<div className="transfer-request-detail-meta">
 						{openRequest.kind !== 'supply' && <div><span>Откуда</span><b>{openRequest.fromStore}</b></div>}
@@ -122,7 +127,9 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 					</table>
 					{openRequest.transferId && <div style={{ marginTop: 12, color: '#185fa5', fontSize: 13 }}>Создано перемещение #{openRequest.transferId}</div>}
 					<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-						{openRequest.status === 'pending' && mode === 'manager' && <button disabled={busy != null} onClick={() => void cancel(openRequest)}>{busy === openRequest.id ? '…' : 'Отменить заказ'}</button>}
+						{openRequest.status === 'pending' && !openRequest.supplyHandoff && (mode === 'manager' || canCancel) && <button disabled={busy != null} onClick={() => void cancel(openRequest)}>{busy === openRequest.id ? '…' : 'Отменить заявку'}</button>}
+						{openRequest.supplyRequestName && onOpenSupply && <button className="btn-primary" onClick={() => onOpenSupply(openRequest.supplyRequestName!)}>Открыть обеспечение</button>}
+						{openRequest.status === 'pending' && openRequest.kind === 'supply' && mode === 'supply' && isSupply && <button className="btn-primary" disabled={busy != null || !form} onClick={() => { setProcessRequest(openRequest); setOpenRequest(null); }}>{openRequest.supplyHandoff ? 'Проверить передачу' : 'Обработать заявку'}</button>}
 						<button style={btnGhost} disabled={busy != null} onClick={() => setOpenRequest(null)}>Закрыть</button>
 						{openRequest.status === 'pending' && openRequest.kind === 'transfer' && mode === 'supply' && isSupply && <button className="btn-primary" disabled={busy != null} onClick={() => { setConvertRequest(openRequest); setOpenRequest(null); }}>Создать перемещение</button>}
 					</div>
@@ -131,6 +138,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 			{showForm && form && <TransferRequestForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); onChanged?.(); }} />}
 			{showSupplyForm && form && <SupplyTtRequestForm form={form} onClose={() => setShowSupplyForm(false)} onDone={() => { setShowSupplyForm(false); void load(); onChanged?.(); }} />}
 			{convertRequest && form && <ConvertTransferRequestForm form={form} request={convertRequest} onClose={() => setConvertRequest(null)} onDone={() => { setConvertRequest(null); void load(); onChanged?.(); }} />}
+			{processRequest && form && <SupplyTtProcessForm request={processRequest} stores={form.stores} onClose={() => { setProcessRequest(null); void load(); }} onDone={request => { setProcessRequest(null); void load(); onChanged?.(); if (request.supplyRequestName) onOpenSupply?.(request.supplyRequestName); }} />}
 		</section>
 	);
 }

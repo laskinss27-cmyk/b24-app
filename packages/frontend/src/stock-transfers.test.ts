@@ -92,7 +92,7 @@ test('transfer request lifecycle preserves endpoint order and merged conversion 
 
 	assert.deepEqual(await createTransferRequest({ fromStore: 'Основной', toStore: 'Точка 2', note: 'Заказ', lines }), request);
 	assert.equal((await createSupplyTtRequest({ toStore: 'Точка 2', lines: [{ productId: 17, name: 'Товар', qty: 2 }] })).kind, 'supply');
-	assert.deepEqual(await listTransferRequests(), { requests: [], isSupply: false });
+	assert.deepEqual(await listTransferRequests(), { requests: [], isSupply: false, canCancel: false });
 	assert.equal((await cancelTransferRequest(3)).status, 'canceled');
 	assert.deepEqual(await convertTransferRequest(3, { fromStore: 'Основной', toStore: 'Точка 2', note: 'Конвертация', lines }), {
 		request: { ...request, status: 'converted' }, transfer,

@@ -9,6 +9,8 @@ import type { TransferDraftCreator } from './transfer-draft-service.js';
 import { loadTransferRequest, loadTransferRequests, saveTransferRequest } from './transfer-request-storage.js';
 import { currentUser } from './transfer-user-access.js';
 import { deleteTransferData } from './transfer-storage.js';
+import { prepareSupplyRequest } from '../erp/supply-requests.js';
+import { handoffSupplyRequest, validateSupplyHandoff, type SupplyHandoffInput } from '../transfers/supply-handoff.js';
 
 interface AuthBody {
 	domain?: string;
@@ -38,7 +40,7 @@ export function registerTransferRequestManagementRoutes(
 			const canViewAll = appPermission(req, 'transfers.view_all', me.isSupply);
 			const canManage = appPermission(req, 'transfers.manage_requests', me.isSupply);
 			const requests = canViewAll ? all : all.filter((request) => request.createdById === me.id);
-			return { ok: true, requests, isSupply: canManage };
+			return { ok: true, requests, isSupply: canManage, canCancel: appPermission(req, 'transfers.cancel_own_request', me.isSupply) };
 		} catch (err) {
 			app.log.error({}, `[api/transfer-requests/list] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err), requests: [] });
@@ -51,21 +53,61 @@ export function registerTransferRequestManagementRoutes(
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
-		if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
+		const lockKey = `transfer-request:${id}`;
+		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'заявка уже обрабатывается' });
+		operationLocks.add(lockKey);
 		try {
+			if (app.transferRequestSqlWriter?.mode !== 'primary') await ensureTransferRequestsEntity(client);
 			const [request, me] = await Promise.all([loadTransferRequest(app, client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
 			if (!appPermission(req, 'transfers.cancel_own_request', me.isSupply || request.createdById === me.id)) {
 				return reply.code(403).send({ ok: false, error: 'можно отменить только свою заявку' });
 			}
 			if (request.status !== 'pending') return reply.code(409).send({ ok: false, error: 'заявка уже обработана' });
+			if (request.supplyHandoff) return reply.code(409).send({ ok: false, error: 'Передача в обеспечение уже начата; сначала сверьте её результат' });
 			const canceled = { ...request, status: 'canceled' as const, canceledAt: new Date().toISOString(), canceledById: me.id, canceledByName: me.name };
 			await saveTransferRequest(app, client, canceled);
 			return { ok: true, request: canceled };
 		} catch (err) {
 			app.log.error({ id }, `[api/transfer-requests/cancel] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			operationLocks.delete(lockKey);
 		}
+	});
+
+	app.post('/api/transfer-requests/process-supply', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & Partial<SupplyHandoffInput> & { id?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const id = Number(b.id);
+		if (!Number.isSafeInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		const lockKey = `transfer-request:${id}`;
+		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'заявка уже обрабатывается' });
+		operationLocks.add(lockKey);
+		try {
+			const me = await currentUser(client);
+			if (!appPermission(req, 'transfers.manage_requests', me.isSupply)) return reply.code(403).send({ ok: false, error: 'Обработка доступна снабжению' });
+			const request = await loadTransferRequest(app, client, id);
+			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
+			const erp = ErpClient.fromEnv();
+			if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+			const input: SupplyHandoffInput = { toStore: String(b.toStore ?? '').trim(), deadline: String(b.deadline ?? ''), productIds: Array.isArray(b.productIds) ? b.productIds.map(Number) : [] };
+			if (!request.supplyHandoff && request.status === 'pending') {
+				validateSupplyHandoff(request, input);
+				if (!(await listActiveStoreTitles(erp)).includes(input.toStore)) return reply.code(400).send({ ok: false, error: 'Склад не найден в ядре' });
+			}
+			const result = await handoffSupplyRequest(request, input, me, {
+				prepare: args => prepareSupplyRequest(erp, args),
+				create: payload => erp.create('Material Request', payload),
+				find: title => erp.list('Material Request', ['name', 'docstatus'], [['title', '=', title]], 2),
+				save: value => saveTransferRequest(app, client, value),
+			});
+			return { ok: true, request: result };
+		} catch (err) {
+			app.log.error({ id }, `[api/transfer-requests/process-supply] failed — ${errInfo(err)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally { operationLocks.delete(lockKey); }
 	});
 
 	app.post('/api/transfer-requests/convert', async (req, reply) => {

@@ -47,14 +47,21 @@ export async function createSupplyTtRequest(input: { toStore: string; note?: str
 	return json.request;
 }
 
-export async function listTransferRequests(): Promise<{ requests: TransferRequestDoc[]; isSupply: boolean }> {
+export async function listTransferRequests(): Promise<{ requests: TransferRequestDoc[]; isSupply: boolean; canCancel: boolean }> {
 	const res = await fetch('/api/transfer-requests/list', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; requests?: TransferRequestDoc[]; isSupply?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; requests?: TransferRequestDoc[]; isSupply?: boolean; canCancel?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить заказы на перемещение');
-	return { requests: json.requests ?? [], isSupply: Boolean(json.isSupply) };
+	return { requests: json.requests ?? [], isSupply: Boolean(json.isSupply), canCancel: Boolean(json.canCancel) };
+}
+
+export async function processSupplyTtRequest(id: number, input: { toStore: string; deadline: string; productIds: number[] }): Promise<TransferRequestDoc> {
+	const res = await fetch('/api/transfer-requests/process-supply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bx24Auth(), id, ...input }) });
+	const json = await res.json() as { ok: boolean; error?: string; request?: TransferRequestDoc };
+	if (!json.ok || !json.request) throw new Error(json.error ?? 'Не удалось передать заявку в обеспечение');
+	return json.request;
 }
 
 export async function cancelTransferRequest(id: number): Promise<TransferRequestDoc> {
