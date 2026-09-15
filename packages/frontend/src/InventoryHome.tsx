@@ -426,21 +426,21 @@ export function InventoryHome(): JSX.Element {
 		// Назначенный ответственный — только для уведомления в задаче, не замок (правило Сергея).
 		const key = `${inv.id}:${p.storeId}`;
 		const openBtn = p.result ? (
-			<button className="btn-mini ghost" onClick={() => setExpanded(expanded === key ? null : key)}>
+			<button className="btn-mini ghost point-action-report" aria-expanded={expanded === key} onClick={() => setExpanded(expanded === key ? null : key)}>
 				{expanded === key ? 'Скрыть' : 'Открыть'}
 			</button>
 		) : null;
 		const reopenBtn = isInitiator ? (
-			<button className="btn-mini ghost" onClick={() => void reopenWork(inv, p)}>
+			<button className="btn-mini ghost point-action-reopen" onClick={() => void reopenWork(inv, p)}>
 				Вернуть в работу
 			</button>
 		) : null;
-		if (st === 'idle') return <button className="btn-mini" onClick={() => void startPoint(inv, p)}>Начал выполнение</button>;
-		if (st === 'in_progress') return <button className="btn-mini" onClick={() => continuePoint(inv, p)}>Продолжить</button>;
+		if (st === 'idle') return <button className="btn-mini point-action-main" onClick={() => void startPoint(inv, p)}>Начал выполнение</button>;
+		if (st === 'in_progress') return <button className="btn-mini point-action-main" onClick={() => continuePoint(inv, p)}>Продолжить</button>;
 		if (st === 'submitted') {
 			return (
 				<>
-					{isInitiator && <button className="btn-mini" onClick={() => void makeAct(inv, p)}>Сформировать акт</button>}
+					{isInitiator && <button className="btn-mini point-action-main" onClick={() => void makeAct(inv, p)}>Сформировать акт</button>}
 					{openBtn}
 					{reopenBtn}
 				</>
@@ -449,7 +449,7 @@ export function InventoryHome(): JSX.Element {
 		if (st === 'act') {
 			return (
 				<>
-					<button className="btn-mini" onClick={() => continuePoint(inv, p, 'act')}>Проверить акт</button>
+					<button className="btn-mini point-action-main" onClick={() => continuePoint(inv, p, 'act')}>Проверить акт</button>
 					{openBtn}
 					{reopenBtn}
 				</>
@@ -465,7 +465,7 @@ export function InventoryHome(): JSX.Element {
 			return (
 				<>
 					{isInitiator && (
-						<button className="btn-mini" onClick={() => setErpFor({ invId: inv.id, storeId: p.storeId, storeName: p.storeName })}>
+						<button className="btn-mini point-action-main" onClick={() => setErpFor({ invId: inv.id, storeId: p.storeId, storeName: p.storeName })}>
 							Документы ядра{erpBadge}
 						</button>
 					)}
@@ -480,17 +480,24 @@ export function InventoryHome(): JSX.Element {
 	const invCard = (inv: Inventory): JSX.Element => {
 		const ds = deadlineStatus(inv.deadline);
 		return (
-			<div className="inv-card" key={inv.id}>
+			<article className="inv-card inventory-list-card" key={inv.id} aria-labelledby={`inventory-title-${inv.id}`}>
 				<div className="inv-card-head">
-					<strong>{inv.title}</strong>
-					<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status === 'closed' ? 'закрыта' : inv.status}</span>
-					{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
-					<InventoryExportButton inventoryId={inv.id} />
-					{isInitiator && (
-						<button className="btn-del" title="Удалить инвентаризацию" onClick={() => void removeInventory(inv)}>
-							✕
-						</button>
-					)}
+					<div className="inventory-card-heading">
+						<h3 id={`inventory-title-${inv.id}`}>{inv.title}</h3>
+						<span className="inventory-card-id">№ {inv.id}</span>
+					</div>
+					<div className="inventory-card-status">
+						<span className={`badge ${inv.status}`}>{inv.status === 'active' ? 'активна' : inv.status === 'closed' ? 'закрыта' : inv.status}</span>
+						{ds && <span className={`deadline ${ds.cls}`}>{ds.text}</span>}
+					</div>
+					<div className="inventory-card-tools">
+						<InventoryExportButton inventoryId={inv.id} />
+						{isInitiator && (
+							<button className="btn-del" title="Удалить инвентаризацию" aria-label={`Удалить инвентаризацию № ${inv.id}`} onClick={() => void removeInventory(inv)}>
+								✕
+							</button>
+						)}
+					</div>
 				</div>
 				<ul className="point-list">
 					{inv.points.map((p) => {
@@ -503,10 +510,12 @@ export function InventoryHome(): JSX.Element {
 									<span className="point-state">
 										{s.dot} {s.text}
 									</span>
+								</div>
+								<div className="inventory-point-actions" role="group" aria-label={`Действия — ${p.storeName}`}>
 									{pointAction(inv, p)}
 									<InventoryExportButton inventoryId={inv.id} storeId={p.storeId} />
 									<button
-										className="btn-mini ghost qr-btn"
+										className="btn-mini ghost qr-btn point-action-qr"
 										title="QR для подсчёта с телефона"
 										onClick={() => setQrFor({ invId: inv.id, storeId: p.storeId, storeName: p.storeName })}
 									>
@@ -519,7 +528,7 @@ export function InventoryHome(): JSX.Element {
 						);
 					})}
 				</ul>
-			</div>
+			</article>
 		);
 	};
 
@@ -601,7 +610,7 @@ export function InventoryHome(): JSX.Element {
 			<h2 className="inv-h2">Инвентаризации</h2>
 			<InventoryListFilters inventories={inventories} value={listFilters} onChange={setListFilters} shown={visibleInvs.length} loading={listLoading} onRefresh={() => void reload()} />
 			{visibleInvs.length
-				? visibleInvs.map(invCard)
+				? <div className="inventory-card-list">{visibleInvs.map(invCard)}</div>
 				: <p className="stub-calm">{listLoading ? 'Загружаю инвентаризации…' : storageWarn ? 'Список не загружен. Повторите обновление.' : inventories.length ? 'По выбранным фильтрам ничего не найдено. Сбросьте фильтры, чтобы увидеть весь список.' : 'Пока ни одной инвентаризации. Создайте первую.'}</p>}
 			{qrFor && <QrModal invId={qrFor.invId} storeId={qrFor.storeId} storeName={qrFor.storeName} onClose={() => setQrFor(null)} />}
 			{erpFor && (

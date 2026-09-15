@@ -1,0 +1,178 @@
+/* List-only rules: counting screens and document dialogs keep their layout. */
+.inventory-list-filters .inv-field {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 6px;
+	flex: 1 1 180px;
+	min-width: 0;
+	max-width: 100%;
+	font-size: 12px;
+	color: #58677b;
+}
+.inventory-list-filters :is(select, input) {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	height: 40px;
+	padding: 8px;
+	border: 1px solid #cbd5e1;
+	border-radius: 6px;
+	background: #fff;
+	font: inherit;
+	color: #203b5d;
+}
+.inventory-card-list {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 20px;
+}
+.inv .inventory-list-card {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	background: #fff;
+	border: 1px solid #bccbdc;
+	border-radius: 12px;
+	box-shadow: 0 3px 10px #213a5610;
+}
+.inventory-list-card .inv-card-head {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px 20px;
+	padding: 16px 20px;
+	border-bottom: 1px solid #d9e2ed;
+	border-radius: 12px 12px 0 0;
+	background: #f0f4f9;
+}
+.inventory-card-heading {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 6px 12px;
+	min-width: 0;
+}
+.inventory-card-heading h3 {
+	margin: 0;
+	font-size: 16px;
+	line-height: 1.4;
+	color: #203b5d;
+	overflow-wrap: anywhere;
+}
+.inventory-card-id { color: #64748b; font-size: 12px; }
+.inventory-card-status {
+	grid-column: 1;
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+	font-size: 12px;
+}
+.inventory-card-tools {
+	grid-column: 2;
+	grid-row: 1 / 3;
+	display: grid;
+	grid-template-columns: 160px 36px;
+	align-items: start;
+	gap: 8px;
+}
+.inventory-card-tools .btn-del {
+	width: 36px;
+	height: 40px;
+	margin: 0;
+	color: #69798d;
+}
+.inventory-list-card .point-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.inventory-list-card .point-line-wrap {
+	padding: 18px 20px;
+	border-bottom: 1px solid #d9e2ed;
+}
+.inventory-list-card .point-line-wrap:last-child { border-bottom: 0; }
+.inventory-list-card .point-line {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	align-items: start;
+	gap: 8px 20px;
+	min-height: 40px;
+	padding: 0;
+	margin-bottom: 12px;
+}
+.inventory-list-card .point-name {
+	min-width: 0;
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+.inventory-list-card .point-state {
+	white-space: normal;
+	line-height: 1.6;
+	color: #58677b;
+	overflow-wrap: anywhere;
+}
+/* Explicit slots keep common actions in place even when earlier slots are empty. */
+.inventory-point-actions {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	grid-template-areas: 'main report reopen excel qr';
+	gap: 8px;
+	align-items: start;
+}
+.inventory-point-actions .point-action-main { grid-area: main; }
+.inventory-point-actions .point-action-report { grid-area: report; }
+.inventory-point-actions .point-action-reopen { grid-area: reopen; }
+.inventory-point-actions > .inventory-export { grid-area: excel; }
+.inventory-point-actions .point-action-qr { grid-area: qr; }
+.inventory-list-card .inventory-export {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	min-width: 0;
+}
+.inventory-list-card .inventory-export-error { overflow-wrap: anywhere; }
+.inventory-list-card .btn-mini {
+	box-sizing: border-box;
+	width: 100%;
+	height: 40px;
+	margin: 0;
+	padding: 4px 8px;
+	border: 1px solid transparent;
+	font-size: 12px;
+	line-height: 1.25;
+	white-space: normal;
+}
+.inventory-list-card .btn-mini.ghost { border-color: #c7d2fe; }
+.inventory-list-card button:focus-visible { outline: 2px solid #1a56db; outline-offset: 3px; }
+.inventory-list-card .inventory-money-summary {
+	margin: 14px 0 0;
+	padding: 12px;
+	background: #f8fafc;
+	border: 1px solid #e5ebf2;
+	border-radius: 8px;
+}
+.inventory-list-card .disc-detail { margin-top: 12px; }
+html.low-vision-mode .inventory-list-card .btn-mini { height: 64px; }
+html.low-vision-mode .inventory-point-actions { grid-auto-rows: minmax(64px, auto); }
+@media (max-width: 760px) {
+	.inventory-point-actions {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-areas: 'main report reopen' '. excel qr';
+	}
+	.inventory-list-card .point-line { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+	.inventory-list-card .inv-card-head { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+	.inventory-card-tools { grid-column: 1; grid-row: 3; grid-template-columns: minmax(0, 1fr) 36px; }
+	.inventory-list-card .point-line-wrap { padding: 14px; }
+	.inventory-point-actions {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-areas: 'main report' 'reopen .' 'excel qr';
+		grid-template-rows: repeat(3, minmax(40px, auto));
+	}
+}

@@ -27,6 +27,7 @@ import './inventory-summary.css';
 import './inventory-discrepancies.css';
 import './inventory-count.css';
 import './inventory-count-print.css';
+import './inventory-list-cards.css';
 import './product-catalog.css';
 import './assortment-matrix.css';
 import './deal-product-inline-editing.css';

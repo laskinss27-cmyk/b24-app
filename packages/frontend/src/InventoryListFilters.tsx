@@ -4,7 +4,7 @@ import { defaultInventoryListFilters, inventoryListStores, type InventoryListFil
 export function InventoryListFilters({ inventories, value, onChange, shown, loading, onRefresh }: {
 	inventories: Inventory[]; value: Filters; onChange: (value: Filters) => void; shown: number; loading: boolean; onRefresh: () => void;
 }): JSX.Element {
-	return <section aria-label="Фильтры инвентаризаций" className="inv-card">
+	return <section aria-label="Фильтры инвентаризаций" className="inv-card inventory-list-filters">
 		<div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
 			<label className="inv-field">Статус <select value={value.status} onChange={e => onChange({ ...value, status: e.target.value as Filters['status'] })}>
 				<option value="all">Все ({inventories.length})</option>
