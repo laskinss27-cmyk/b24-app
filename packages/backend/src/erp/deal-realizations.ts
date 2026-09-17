@@ -385,6 +385,41 @@ function hasChangedPrice(snapshot: DeliveryNoteSnapshot, prices: ReadonlyMap<str
 	});
 }
 
+function outstandingPriceChanges(
+	original: DeliveryNoteSnapshot,
+	dependentReturns: readonly DeliveryNoteSnapshot[],
+	prices: ReadonlyMap<string, number>,
+): Map<string, number> {
+	const outstandingByKey = new Map<string, number>();
+	for (const item of original.items) {
+		const key = segmentPriceKey(Number(item['item_code']), itemSegmentId(item));
+		if (!prices.has(key)) continue;
+		outstandingByKey.set(key, (outstandingByKey.get(key) ?? 0) + Math.abs(Number(item['qty'] ?? 0)));
+	}
+	for (const returned of dependentReturns) {
+		if (!returned.submitted) continue;
+		for (const item of returned.items) {
+			const key = segmentPriceKey(Number(item['item_code']), itemSegmentId(item));
+			if (!prices.has(key)) continue;
+			outstandingByKey.set(key, (outstandingByKey.get(key) ?? 0) - Math.abs(Number(item['qty'] ?? 0)));
+		}
+	}
+	const outstandingKeys = new Set([...outstandingByKey]
+		.filter(([, qty]) => qty > 0.000001)
+		.map(([key]) => key));
+	const changedKeys = new Set<string>();
+	for (const document of [original, ...dependentReturns]) {
+		for (const item of document.items) {
+			const key = segmentPriceKey(Number(item['item_code']), itemSegmentId(item));
+			const next = prices.get(key);
+			if (outstandingKeys.has(key) && next !== undefined && Math.abs(next - Number(item['rate'] ?? 0)) >= 0.005) {
+				changedKeys.add(key);
+			}
+		}
+	}
+	return new Map([...prices].filter(([key]) => changedKeys.has(key)));
+}
+
 async function createDeliveryNoteReplacement(
 	erp: ErpClient,
 	snapshot: DeliveryNoteSnapshot,
@@ -436,19 +471,20 @@ export async function syncDealRealizationPrices(
 	const changed = documents.filter((document) => hasChangedPrice(document, prices));
 	if (!changed.length) return result;
 
-	const affectedOriginalNames = new Set<string>();
-	for (const document of changed) {
-		if (!document.isReturn) {
-			if (document.submitted) affectedOriginalNames.add(document.name);
-		} else if (document.returnAgainst) {
-			affectedOriginalNames.add(document.returnAgainst);
-		}
+	const submittedOriginals = documents.filter((document) => !document.isReturn && document.submitted);
+	const returnsByOriginal = new Map<string, DeliveryNoteSnapshot[]>();
+	for (const document of documents) {
+		if (!document.isReturn || !document.returnAgainst) continue;
+		if (!returnsByOriginal.has(document.returnAgainst)) returnsByOriginal.set(document.returnAgainst, []);
+		returnsByOriginal.get(document.returnAgainst)!.push(document);
 	}
-	const originals = documents.filter((document) =>
-		!document.isReturn && document.submitted && affectedOriginalNames.has(document.name));
-	if (affectedOriginalNames.size !== originals.length) {
-		throw new Error('не удалось найти исходную проведённую реализацию для исправления цены');
+	const pricesByOriginal = new Map<string, Map<string, number>>();
+	for (const original of submittedOriginals) {
+		const changes = outstandingPriceChanges(original, returnsByOriginal.get(original.name) ?? [], prices);
+		if (changes.size) pricesByOriginal.set(original.name, changes);
 	}
+	const originals = submittedOriginals.filter((original) => pricesByOriginal.has(original.name));
+	const affectedOriginalNames = new Set(originals.map((original) => original.name));
 	const dependentReturns = documents.filter((document) =>
 		document.isReturn && affectedOriginalNames.has(document.returnAgainst));
 	const graphNames = new Set([...originals, ...dependentReturns].map((document) => document.name));
@@ -501,7 +537,7 @@ export async function syncDealRealizationPrices(
 			canceledOldOriginals.push(original);
 		}
 		for (const original of originals) {
-			const replacement = await createDeliveryNoteReplacement(erp, original, prices, {
+			const replacement = await createDeliveryNoteReplacement(erp, original, pricesByOriginal.get(original.name)!, {
 				amendedFrom: original.name,
 				submit: true,
 			});
@@ -511,7 +547,7 @@ export async function syncDealRealizationPrices(
 		for (const returned of dependentReturns) {
 			const original = replacements.get(returned.returnAgainst);
 			if (!original) throw new Error(`не найдена новая версия реализации ${returned.returnAgainst}`);
-			const replacement = await createDeliveryNoteReplacement(erp, returned, prices, {
+			const replacement = await createDeliveryNoteReplacement(erp, returned, pricesByOriginal.get(returned.returnAgainst)!, {
 				...(returned.submitted ? { amendedFrom: returned.name } : {}),
 				returnAgainst: original.name,
 				sourceRows: original.rowNames,

@@ -897,6 +897,75 @@ test('stage price change amends only that stage realization and its return witho
 	assert.equal(netQty, 3);
 });
 
+test('price change leaves fully returned realization history untouched', async () => {
+	const erp = new FakeErp([
+		{
+			name: 'DN-RETURNED-1',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 0,
+			items: [item('DN-RETURNED-1-ROW', 18612, 1, 151140.25, { [REALIZATION_SEGMENT_FIELD]: 'base' })],
+		},
+		{
+			name: 'RET-RETURNED-1',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 1,
+			return_against: 'DN-RETURNED-1',
+			items: [item('RET-RETURNED-1-ROW', 18612, -1, 84110.5, {
+				dn_detail: 'DN-RETURNED-1-ROW',
+				[REALIZATION_SEGMENT_FIELD]: 'base',
+			})],
+		},
+		{
+			name: 'DN-RETURNED-2',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 0,
+			items: [item('DN-RETURNED-2-ROW', 18612, 1, 18081, { [REALIZATION_SEGMENT_FIELD]: 'base' })],
+		},
+		{
+			name: 'RET-RETURNED-2',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 1,
+			return_against: 'DN-RETURNED-2',
+			items: [item('RET-RETURNED-2-ROW', 18612, -1, 18081, {
+				dn_detail: 'DN-RETURNED-2-ROW',
+				[REALIZATION_SEGMENT_FIELD]: 'base',
+			})],
+		},
+	]);
+
+	const result = await syncDealRealizationPrices(erp.asClient(), 37184, [
+		{ productId: 18612, segmentId: 'base', rate: 99959 },
+	]);
+
+	assert.deepEqual(result, { draftsUpdated: 0, realizationsAmended: 0, returnsAmended: 0 });
+	assert.deepEqual(erp.active().map((document) => [
+		document.name,
+		document.docstatus,
+		Number(document.items[0]?.['rate']),
+	]), [
+		['DN-RETURNED-1', 1, 151140.25],
+		['RET-RETURNED-1', 1, 84110.5],
+		['DN-RETURNED-2', 1, 18081],
+		['RET-RETURNED-2', 1, 18081],
+	]);
+});
+
 test('legacy realization rows are assigned to base and stages in deal order before changing a stage price', async () => {
 	const erp = new FakeErp([
 		{
