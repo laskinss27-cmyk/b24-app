@@ -78,6 +78,7 @@ export type {
 	SupplyRequestSummary,
 } from './supply-requests.js';
 export {
+	assertInventoryReceiptValuations,
 	createInventoryRecoDraft,
 	deleteInventoryRecoDraft,
 	fetchErpItemNames,

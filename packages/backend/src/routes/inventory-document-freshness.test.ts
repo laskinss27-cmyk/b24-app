@@ -14,7 +14,13 @@ function fixture() {
 	const docs: Record<string, Record<string, unknown>> = { I: document('issue', 1042), R: document('receipt', 1, '2') };
 	const point: Record<string, unknown> = { storeId: -7, storeName: 'Измайловский', status: 'reconciled', stockSnapshot: { version: 1, capturedAt: '2026-09-01', lines: [[16944, 1347]] }, result: { discrepancies: 1, lines: [line] }, erpDocs: { issue: record('I'), receipt: record('R') } };
 	const writes: string[] = [];
-	const erp = { async list(type: string) { return type === 'Company' ? [{ name: 'Company', abbr: 'УД' }] : []; }, async get(_type: string, name: string) { return docs[name] ?? null; }, async submit(_type: string, name: string) { writes.push('submit:' + name); }, async delete(_type: string, name: string) { writes.push('delete:' + name); delete docs[name]; } } as unknown as ErpClient;
+	const erp = { async list(type: string) {
+		if (type === 'Company') return [{ name: 'Company', abbr: 'УД' }];
+		if (type === 'Bin') return [{ item_code: '16944', actual_qty: 1347, valuation_rate: 220 }];
+		if (type === 'Item Price') return [{ item_code: '16944', price_list_rate: 220 }];
+		if (type === 'Item') return [{ name: '16944', valuation_rate: 220 }];
+		return [];
+	}, async get(_type: string, name: string) { return docs[name] ?? null; }, async submit(_type: string, name: string) { writes.push('submit:' + name); }, async delete(_type: string, name: string) { writes.push('delete:' + name); delete docs[name]; } } as unknown as ErpClient;
 	return { docs, point, writes, erp };
 }
 test('old deficit 1042 cannot be posted for updated surplus 305; missing or extra kind and warehouse mismatch block', async () => {

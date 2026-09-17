@@ -118,6 +118,21 @@ export interface InventoryRecoLine {
 	qty: number;
 	/** Valuation обязателен для строк, где остатка в ядре ещё нет; для прочих шлём текущий из Bin. */
 	valuation: number;
+	/** Закупочная цена обязательна только для оприходования (излишка). Недостача (false) может идти с нулевой valuation. */
+	requiresPrice?: boolean;
+}
+
+/**
+ * Оприходование без положительной цены блокируется: ноль и техническая цена 0,01
+ * не считаются пригодной стоимостью. Строки без требования цены (недостача) пропускаются.
+ * Проверка чистая (без обращений к ядру) — вызывайте до любых записей в ERPNext.
+ */
+export function assertInventoryReceiptValuations(lines: InventoryRecoLine[]): void {
+	const missing = lines.filter((line) =>
+		line.requiresPrice !== false && !(Number.isFinite(line.valuation) && line.valuation > 0.01));
+	if (missing.length) {
+		throw new Error(`нет закупочной цены для оприходования: ${missing.map((line) => `товар #${line.productId}`).join(', ')}`);
+	}
 }
 
 /**
@@ -128,10 +143,7 @@ export async function createInventoryRecoDraft(
 	erp: ErpClient,
 	args: { invRef: string; storeTitle: string; lines: InventoryRecoLine[]; postingDate?: string },
 ): Promise<{ name: string }> {
-	const missing = args.lines.filter((line) => !(Number.isFinite(line.valuation) && line.valuation > 0.01));
-	if (missing.length) {
-		throw new Error(`нет закупочной цены для оприходования: ${missing.map((line) => `товар #${line.productId}`).join(', ')}`);
-	}
+	assertInventoryReceiptValuations(args.lines);
 	const ctx = await erpContext(erp);
 	await ensureInvField(erp);
 	if (!args.lines.length) throw new Error('нет строк с расхождениями — документ не нужен');

@@ -1,5 +1,5 @@
 import type { ErpClient } from './client.js';
-import { INV_FIELD } from './inventory-reconciliation.js';
+import { INV_FIELD, assertInventoryReceiptValuations } from './inventory-reconciliation.js';
 import { NOTE_FIELD, WRITEOFF_REASON_FIELD, ensureNoteField, ensureWriteoffField } from './stock-movements.js';
 import { erpContext, erpWarehouse } from './warehouse-context.js';
 
@@ -40,12 +40,7 @@ export async function createInventoryAdjustmentDraft(
 	},
 ): Promise<{ name: string }> {
 	if (!args.lines.length) throw new Error('нет строк для складского документа инвентаризации');
-	if (args.kind === 'receipt') {
-		const missing = args.lines.filter((line) => !(Number.isFinite(line.valuation) && line.valuation > 0.01));
-		if (missing.length) {
-			throw new Error(`нет закупочной цены для оприходования: ${missing.map((line) => `товар #${line.productId}`).join(', ')}`);
-		}
-	}
+	if (args.kind === 'receipt') assertInventoryReceiptValuations(args.lines);
 	const ctx = await erpContext(erp);
 	await ensureInventoryField(erp);
 	await ensureNoteField(erp, 'Stock Entry');

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
 import {
+	assertInventoryReceiptValuations,
 	createInventoryAdjustmentDraft,
 	createInventoryRecoDraft,
 	deleteInventoryAdjustmentDraft,
@@ -113,11 +114,18 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 				if (legacy) {
 					if (legacy.status === 'submitted') throw new Error(`документ ${legacy.name} уже проведён`);
 					if (!body.recreate) throw new Error(`черновик ${legacy.name} уже записан (recreate — пересоздать)`);
-					await deleteInventoryRecoDraft(erp, legacy.name);
 					const { lines, storeName } = calculated;
 					const recoLines: InventoryRecoLine[] = lines.map((line) => ({
-						productId: line.productId, qty: line.fact, valuation: line.inventoryRate,
+						productId: line.productId,
+						qty: line.fact,
+						// Цена обязательна только для излишка; недостача идёт с текущей valuation склада (в т.ч. нулевой).
+						valuation: line.diff > 0 ? line.inventoryRate : line.valuation,
+						requiresPrice: line.diff > 0,
 					}));
+					// Проверка цены ДО удаления старого черновика и любых записей в ядро:
+					// при ошибке прежний документ сохраняется.
+					assertInventoryReceiptValuations(recoLines);
+					await deleteInventoryRecoDraft(erp, legacy.name);
 					const created = await createInventoryRecoDraft(erp, {
 						invRef: `inv${body.inventoryId}:store${body.storeId}`,
 						storeTitle: storeName,
@@ -129,6 +137,15 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					return { docs: {}, legacyDoc, lines: lines.length };
 				}
 
+				const { lines, storeName } = calculated;
+				const issueLines: InventoryAdjustmentLine[] = lines
+					.filter((line) => line.diff < 0)
+					.map((line) => ({ productId: line.productId, qty: Math.abs(line.diff), valuation: line.valuation }));
+				const receiptLines: InventoryAdjustmentLine[] = lines
+					.filter((line) => line.diff > 0)
+					.map((line) => ({ productId: line.productId, qty: line.diff, valuation: line.inventoryRate }));
+				if (!issueLines.length && !receiptLines.length) throw new Error('нет расхождений — документы не нужны');
+
 				const previous = inventoryDocumentSet(loaded.pt);
 				if (inventoryDocumentCount(previous)) {
 					if (Object.values(previous).some((document) => document?.status === 'submitted')) {
@@ -138,17 +155,11 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 						const names = Object.values(previous).map((document) => document?.name).filter(Boolean).join(', ');
 						throw new Error(`черновики уже записаны: ${names} (recreate — пересоздать)`);
 					}
+					// Оприходование без цены блокируем до удаления прежних черновиков:
+					// при ошибке старые документы сохраняются.
+					assertInventoryReceiptValuations(receiptLines);
 					await deleteDraftDocuments(erp, previous);
 				}
-
-				const { lines, storeName } = calculated;
-				const issueLines: InventoryAdjustmentLine[] = lines
-					.filter((line) => line.diff < 0)
-					.map((line) => ({ productId: line.productId, qty: Math.abs(line.diff), valuation: line.valuation }));
-				const receiptLines: InventoryAdjustmentLine[] = lines
-					.filter((line) => line.diff > 0)
-					.map((line) => ({ productId: line.productId, qty: line.diff, valuation: line.inventoryRate }));
-				if (!issueLines.length && !receiptLines.length) throw new Error('нет расхождений — документы не нужны');
 
 				const createdNames: string[] = [];
 				const documents: InventoryDocumentSet = {};
