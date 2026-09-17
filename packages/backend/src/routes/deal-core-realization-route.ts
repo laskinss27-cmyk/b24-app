@@ -19,6 +19,7 @@ import {
 } from '../erp/operations.js';
 import { recordRealizationEvent } from '../operation-log/realization-events.js';
 import { ReservationService } from '../reservations/service.js';
+import { deliverReservationNotices } from './api-reservations.js';
 import { loadTransfers } from './transfer-storage.js';
 import { assertDealRealizationPurchasing } from './deal-realization-purchasing.js';
 
@@ -55,7 +56,9 @@ export function registerDealCoreRealizationRoute(
 		const logDealId = Number(b.dealId);
 		const loggedDocuments: string[] = [];
 		try {
-			const reservationService = app.reservationRuntime ? new ReservationService(app.reservationRuntime) : null;
+			const reservationService = app.reservationRuntime ? new ReservationService(app.reservationRuntime, async (notices) => {
+				await deliverReservationNotices(app, client, erp, notices);
+			}) : null;
 			if (action === 'list') {
 				// Что уже реализовано по сделке — из ЯДРА (Delivery Note по b24_deal_id), а не из
 				// битриксовых отгрузок. Возвращает и черновики (docstatus 0), и проведённые (1).

@@ -10,6 +10,7 @@ import {
 } from './domain.js';
 import type { ReservationRuntime } from './runtime.js';
 import { beginReservationCommand, finishReservationCommand, lockAvailabilityKeys, type AvailabilityKey } from './sql-foundation.js';
+import { buildEndedNotice, buildRequestedNotice, type ReservationNotice, type ReservationNoticeSink } from './notices.js';
 
 export interface ReservationActor { id: string; name: string }
 
@@ -170,6 +171,14 @@ interface RequestLineRow extends Record<string, unknown> {
 
 function id(value: unknown): string { return String(value ?? ''); }
 
+/** Сделка резерва: явная связь приоритетнее источника. */
+function reservationDealId(reservation: Record<string, unknown>): number | null {
+	if (Number(reservation['deal_link_explicit']) === 1) {
+		return reservation['deal_id'] == null ? null : Number(reservation['deal_id']);
+	}
+	return String(reservation['source_type']) === 'deal' ? Number(reservation['source_id']) : null;
+}
+
 function iso(value: unknown): string {
 	const date = value instanceof Date ? value : new Date(String(value));
 	if (!Number.isFinite(date.getTime())) throw new Error('Stored reservation date is invalid');
@@ -310,10 +319,16 @@ async function physicalByKey(erp: ErpClient, keys: readonly AvailabilityKey[]): 
 }
 
 export class ReservationService {
-	constructor(private readonly runtime: ReservationRuntime) {}
+	/** sink получает уведомления после успешной записи; он сам отвечает за ошибки доставки. */
+	constructor(private readonly runtime: ReservationRuntime, private readonly noticeSink?: ReservationNoticeSink) {}
 
 	get enabled(): boolean { return this.runtime.enabled; }
 	get canWrite(): boolean { return this.runtime.canWrite; }
+
+	private async emitNotices(notices: ReservationNotice[]): Promise<void> {
+		if (!this.noticeSink || !notices.length) return;
+		await this.noticeSink(notices);
+	}
 
 	private requireWrite(): void {
 		if (!this.runtime.canWrite) throw new Error('Запись резервов пока не включена');
@@ -321,9 +336,11 @@ export class ReservationService {
 
 	private async expireDue(): Promise<void> {
 		if (!this.runtime.canWrite) return;
+		const notices: ReservationNotice[] = [];
 		await this.runtime.transaction(async (connection) => {
 			const due = await connection.query<Array<Record<string, unknown>>>(`
-				SELECT id, reservation_key, version FROM stock_reservations
+				SELECT id, reservation_key, version, deal_id, deal_link_explicit, source_type, source_id
+				FROM stock_reservations
 				WHERE status IN ('active', 'shortfall') AND expires_at IS NOT NULL AND expires_at <= NOW(6)
 				ORDER BY id FOR UPDATE
 			`);
@@ -334,12 +351,29 @@ export class ReservationService {
 					actorId: 'system:expiry', reservationId: id(reservation['id']),
 				});
 				if (command.disposition !== 'start') continue;
+				const lineRows = await connection.query<Array<Record<string, unknown>>>(`
+					SELECT erp_warehouse_name, item_code, active_qty
+					FROM stock_reservation_lines WHERE reservation_id = ? AND active_qty > 0
+				`, [reservation['id']]);
 				await connection.query(`UPDATE stock_reservation_lines SET released_qty = released_qty + active_qty, version = version + 1 WHERE reservation_id = ? AND active_qty > 0`, [reservation['id']]);
 				await connection.query(`UPDATE stock_reservations SET status = 'expired', version = version + 1 WHERE id = ?`, [reservation['id']]);
 				await connection.query(`INSERT INTO stock_reservation_events (reservation_id, command_id, event_index, event_type, reservation_version, actor_id) VALUES (?, ?, 0, 'expired', ?, 'system:expiry')`, [reservation['id'], command.command.id, Number(reservation['version']) + 1]);
 				await finishReservationCommand(connection, command.command.id, 'applied');
+				if (lineRows.length) {
+					notices.push(buildEndedNotice('expired', {
+						reservationId: id(reservation['id']),
+						dealId: reservationDealId(reservation),
+						lines: lineRows.map((line) => ({
+							erpWarehouseName: String(line['erp_warehouse_name']),
+							itemCode: String(line['item_code']),
+							itemName: `#${String(line['item_code'])}`,
+							quantity: formatReservationQuantity(parseReservationQuantity(String(line['active_qty']))),
+						})),
+					}));
+				}
 			}
 		});
+		await this.emitNotices(notices);
 	}
 
 	private async reconcileKeys(erp: ErpClient, input: readonly AvailabilityKey[]): Promise<void> {
@@ -521,7 +555,8 @@ export class ReservationService {
 	): Promise<number> {
 		if (!this.runtime.canWrite || !lines.length) return 0;
 		const ctx = await erpContext(erp);
-		return this.runtime.transaction(async (connection) => {
+		const finalizedConsumed: string[] = [];
+		const consumedTotalCount = await this.runtime.transaction(async (connection) => {
 			const payload = lines.map((line) => ({
 				...line, erpWarehouseName: erpWarehouse(ctx, line.storeTitle), quantity: quantityText(line.quantity),
 			}));
@@ -574,11 +609,29 @@ export class ReservationService {
 				if (Number(row['active_qty'] ?? 0) <= 0) {
 					const status = Number(row['consumed_qty'] ?? 0) === Number(row['reserved_qty'] ?? 0) ? 'consumed' : 'closed';
 					await connection.query('UPDATE stock_reservations SET status = ?, version = version + 1 WHERE id = ?', [status, reservationId]);
+					finalizedConsumed.push(reservationId);
 				}
 			}
 			await finishReservationCommand(connection, command.command.id, 'applied', { doctype: 'Delivery Note', documentName });
 			return Number(formatReservationQuantity(consumedTotal));
 		});
+		if (finalizedConsumed.length) {
+			for (const reservationId of finalizedConsumed) {
+				const reservationRow = await this.runtime.query(async (connection) => connection.query<Array<Record<string, unknown>>>(`SELECT id, deal_link_explicit, deal_id, source_type, source_id FROM stock_reservations WHERE id = ?`, [reservationId]));
+				if (!reservationRow.length) continue;
+				const consumedLines = await this.runtime.query(async (connection) => connection.query<Array<Record<string, unknown>>>(`SELECT erp_warehouse_name, item_code, consumed_qty FROM stock_reservation_lines WHERE reservation_id = ? AND consumed_qty > 0`, [reservationId]));
+				if (!consumedLines.length) continue;
+				await this.emitNotices([buildEndedNotice('consumed', {
+					reservationId, dealId: reservationDealId(reservationRow[0]!),
+					lines: consumedLines.map((line) => ({
+						erpWarehouseName: String(line['erp_warehouse_name']),
+						itemCode: String(line['item_code']), itemName: `#${String(line['item_code'])}`,
+						quantity: formatReservationQuantity(parseReservationQuantity(String(line['consumed_qty']))),
+					})),
+				})]);
+			}
+		}
+		return consumedTotalCount;
 	}
 
 	async createDealRequest(erp: ErpClient, actor: ReservationActor, input: CreateDealReservationRequestInput): Promise<ReservationListItem> {
@@ -647,6 +700,14 @@ export class ReservationService {
 		const found = (await this.listDeal(input.dealId)).find((item) => item.requestKey === requestKey);
 		if (!found) throw new Error('Созданная заявка не найдена');
 		const names = new Map(normalized.map((line) => [`${line.sourceLineKey}\u0000${line.productId}`, line.itemName]));
+		await this.emitNotices([buildRequestedNotice({
+			requestId: found.id, dealId: input.dealId, comment,
+			requestedExpiresAt: requestedExpiresAt.toISOString(),
+			lines: normalized.map((line) => ({
+				erpWarehouseName: line.erpWarehouseName, itemCode: String(line.productId),
+				itemName: line.itemName, quantity: line.quantity,
+			})),
+		})]);
 		return { ...found, lines: found.lines.map((line) => ({ ...line, itemName: itemName(line.sourceLineKey, line.itemCode, names) })) };
 	}
 
@@ -857,9 +918,11 @@ export class ReservationService {
 	async releaseBySupply(actor: ReservationActor, reservationId: string, reason: string, requestKey?: string): Promise<void> {
 		this.requireWrite();
 		const key = requestKey?.trim() || randomUUID();
+		let releasedNotice: ReservationNotice | null = null;
 		await this.runtime.transaction(async (connection) => {
 			const reservations = await connection.query<Array<Record<string, unknown>>>(`
-				SELECT id, version, status, expires_at FROM stock_reservations WHERE id = ? FOR UPDATE
+				SELECT id, version, status, expires_at, deal_id, deal_link_explicit, source_type, source_id
+				FROM stock_reservations WHERE id = ? FOR UPDATE
 			`, [reservationId]);
 			const reservation = reservations[0];
 			if (!reservation) throw new Error('Резерв не найден');
@@ -876,7 +939,7 @@ export class ReservationService {
 				) VALUES (?, ?, 'approved', ?, ?, ?, NOW(6), 'Снято снабжением')
 			`, [key, reservationId, reason.trim() || null, actor.id, actor.id]);
 			await connection.query('UPDATE stock_reservation_commands SET release_request_id = ? WHERE id = ?', [release.insertId, command.command.id]);
-			const lines = await connection.query<Array<Record<string, unknown>>>(`SELECT id, active_qty FROM stock_reservation_lines WHERE reservation_id = ? AND active_qty > 0 FOR UPDATE`, [reservationId]);
+			const lines = await connection.query<Array<Record<string, unknown>>>(`SELECT id, active_qty, erp_warehouse_name, item_code FROM stock_reservation_lines WHERE reservation_id = ? AND active_qty > 0 FOR UPDATE`, [reservationId]);
 			let eventIndex = 0;
 			for (const line of lines) {
 				await connection.query('UPDATE stock_reservation_lines SET released_qty = released_qty + active_qty, version = version + 1 WHERE id = ?', [line['id']]);
@@ -884,7 +947,18 @@ export class ReservationService {
 			}
 			await connection.query("UPDATE stock_reservations SET status = 'released', version = version + 1 WHERE id = ?", [reservationId]);
 			await finishReservationCommand(connection, command.command.id, 'applied');
+			if (lines.length) {
+				releasedNotice = buildEndedNotice('released', {
+					reservationId, dealId: reservationDealId(reservation),
+					lines: lines.map((line) => ({
+						erpWarehouseName: String(line['erp_warehouse_name']),
+						itemCode: String(line['item_code']), itemName: `#${String(line['item_code'])}`,
+						quantity: formatReservationQuantity(parseReservationQuantity(String(line['active_qty']))),
+					})),
+				});
+			}
 		});
+		await this.emitNotices(releasedNotice ? [releasedNotice] : []);
 	}
 
 	async requestRelease(actor: ReservationActor, dealId: number, reservationId: string, reason: string, requestKey?: string): Promise<void> {
@@ -917,6 +991,7 @@ export class ReservationService {
 	async reviewRelease(actor: ReservationActor, args: { releaseRequestId: string; decision: 'approve' | 'reject'; reason?: string; idempotencyKey?: string }): Promise<void> {
 		this.requireWrite();
 		const key = args.idempotencyKey?.trim() || randomUUID();
+		let releasedNotice: ReservationNotice | null = null;
 		await this.runtime.transaction(async (connection) => {
 			const rows = await connection.query<Array<Record<string, unknown>>>(`SELECT * FROM stock_reservation_release_requests WHERE id = ? FOR UPDATE`, [args.releaseRequestId]);
 			const release = rows[0];
@@ -932,7 +1007,8 @@ export class ReservationService {
 			await connection.query(`UPDATE stock_reservation_release_requests SET status = ?, reviewed_by = ?, reviewed_at = NOW(6), decision_reason = ?, version = version + 1 WHERE id = ?`, [args.decision === 'approve' ? 'approved' : 'rejected', actor.id, String(args.reason ?? '').trim() || null, args.releaseRequestId]);
 			if (args.decision === 'approve') {
 				const lines = await connection.query<Array<Record<string, unknown>>>(`
-					SELECT rl.id, rl.active_qty, r.version AS reservation_version
+					SELECT rl.id, rl.active_qty, rl.erp_warehouse_name, rl.item_code, r.version AS reservation_version,
+						r.deal_id, r.deal_link_explicit, r.source_type, r.source_id
 					FROM stock_reservation_lines rl JOIN stock_reservations r ON r.id = rl.reservation_id
 					WHERE rl.reservation_id = ? AND rl.active_qty > 0 FOR UPDATE
 				`, [reservationId]);
@@ -942,8 +1018,19 @@ export class ReservationService {
 					await connection.query(`INSERT INTO stock_reservation_events (reservation_id, reservation_line_id, command_id, event_index, event_type, quantity, reservation_version, actor_id) VALUES (?, ?, ?, ?, 'released', ?, ?, ?)`, [reservationId, line['id'], command.command.id, eventIndex++, line['active_qty'], Number(line['reservation_version']) + 1, actor.id]);
 				}
 				await connection.query(`UPDATE stock_reservations SET status = 'released', version = version + 1 WHERE id = ?`, [reservationId]);
+				if (lines.length) {
+					releasedNotice = buildEndedNotice('released', {
+						reservationId, dealId: reservationDealId(lines[0]!),
+						lines: lines.map((line) => ({
+							erpWarehouseName: String(line['erp_warehouse_name']),
+							itemCode: String(line['item_code']), itemName: `#${String(line['item_code'])}`,
+							quantity: formatReservationQuantity(parseReservationQuantity(String(line['active_qty']))),
+						})),
+					});
+				}
 			}
 			await finishReservationCommand(connection, command.command.id, 'applied');
 		});
+		await this.emitNotices(releasedNotice ? [releasedNotice] : []);
 	}
 }

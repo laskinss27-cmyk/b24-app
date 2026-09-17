@@ -1428,6 +1428,10 @@
 .supply-reservation-toolbar > div:first-child { display: grid; gap: 2px; }
 .supply-reservation-toolbar > div:first-child > b { color: #172033; font-size: 14px; }
 .supply-reservation-toolbar > div:first-child > span { color: #7a8699; font-size: 12px; }
+.supply-reservation-toolbar .supply-proto-actions { display: flex; align-items: center; gap: 8px; }
+.supply-reservation-search { width: 240px; height: 32px; padding: 0 10px; border: 1px solid #cfd7e2; border-radius: 8px; background: #fff; color: #172033; font-size: 12px; }
+.supply-reservation-search:focus { outline: 2px solid #2f6fed33; border-color: #2f6fed; }
+.supply-reservation-sort { height: 32px; padding: 0 8px; border: 1px solid #cfd7e2; border-radius: 8px; background: #fff; color: #172033; font-size: 12px; }
 .supply-reservation-registry { margin-bottom: 0; }
 .supply-reservation-registry-columns,
 .supply-reservation-summary {

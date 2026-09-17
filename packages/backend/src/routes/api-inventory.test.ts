@@ -30,6 +30,8 @@ const mobileConfig: Config = {
 	publicBaseUrl: 'https://app.example.com',
 	appSectionUrl: '',
 	inventoryNotify: 'off',
+		reservationNotify: 'off',
+		reservationStoreNotify: '',
 	appOAuthVault: 'off',
 	supplyShadowCompare: 'off',
 	supplySqlRead: 'off',

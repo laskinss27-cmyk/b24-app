@@ -1,9 +1,14 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { accessClientFrom, type AccessAuthBody } from '../access-policy.js';
 import { ErpClient } from '../erp/client.js';
+import { b24StoreTitle, erpContext } from '../erp/warehouse-context.js';
 import { ReservationService, type ReservationActor, type ReservationListItem } from '../reservations/service.js';
 import type { ReservationRuntime } from '../reservations/runtime.js';
+import { reservationNoticeTaskText, type ReservationNotice } from '../reservations/notices.js';
+import { loadStoreNotifyUsers, resolveStoreNotifyUsers } from '../reservations/store-notify.js';
 import { stockAccess } from './api-stock-access.js';
+
+type ReservationB24Client = NonNullable<ReturnType<typeof accessClientFrom>>;
 
 interface AuthBody extends AccessAuthBody {}
 
@@ -25,6 +30,49 @@ function requireErp(): ErpClient {
 	const erp = ErpClient.fromEnv();
 	if (!erp) throw new Error('ERPNext не настроен');
 	return erp;
+}
+
+/**
+ * Доставка уведомлений по резервам: по одной задаче Б24 на каждую точку (склад).
+ * Задачи создаём только при reservationNotify=on и непустом маппинге склад→пользователи;
+ * любая ошибка доставки логируется и не влияет на основной запрос.
+ */
+export async function deliverReservationNotices(app: FastifyInstance, client: ReservationB24Client, erp: ErpClient, notices: ReservationNotice[]): Promise<void> {
+	if (app.config.reservationNotify !== 'on' || !notices.length) return;
+	const mapping = loadStoreNotifyUsers(app.config.reservationStoreNotify);
+	if (!mapping.size) return;
+	try {
+		const ctx = await erpContext(erp);
+		const itemCodes = [...new Set(notices.flatMap((notice) => notice.stores.flatMap((store) => store.items.map((item) => item.itemCode))))];
+		const names = new Map<string, string>();
+		for (let start = 0; start < itemCodes.length; start += 100) {
+			for (const row of await erp.list<Record<string, unknown>>('Item', ['name', 'item_name'], [['name', 'in', itemCodes.slice(start, start + 100)]])) {
+				names.set(String(row['name']), String(row['item_name'] ?? row['name']));
+			}
+		}
+		for (const notice of notices) {
+			for (const store of notice.stores) {
+				const storeTitle = b24StoreTitle(ctx, store.erpWarehouseName);
+				const users = resolveStoreNotifyUsers(mapping, storeTitle);
+				if (!users.length) continue;
+				const text = reservationNoticeTaskText(notice, {
+					...store,
+					items: store.items.map((item) => ({ ...item, itemName: names.get(item.itemCode) ?? item.itemName })),
+				}, storeTitle);
+				await client.call('tasks.task.add', {
+					fields: {
+						TITLE: text.title,
+						DESCRIPTION: text.description,
+						RESPONSIBLE_ID: users[0]!,
+						...(users.length > 1 ? { ACCOMPLICES: users.slice(1) } : {}),
+					},
+				});
+			}
+		}
+		app.log.info({ notices: notices.length }, '[api/reservations] notify tasks delivered');
+	} catch (error) {
+		app.log.warn({}, `[api/reservations] notify delivery failed — ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 async function enrichItemNames(erp: ErpClient, requests: ReservationListItem[]): Promise<ReservationListItem[]> {
@@ -89,6 +137,11 @@ async function enrichBitrixContext(client: NonNullable<ReturnType<typeof accessC
 
 export function registerApiReservationsRoute(app: FastifyInstance, runtime?: ReservationRuntime): void {
 	const service = runtime ? new ReservationService(runtime) : null;
+	/** Сервис на запрос с доставкой уведомлений складам (задачи Б24). Sink ошибок не пробрасывает. */
+	const serviceFor = (client: ReservationB24Client, erp: ErpClient | null): ReservationService | null =>
+		runtime
+			? new ReservationService(runtime, async (notices) => { if (erp) await deliverReservationNotices(app, client, erp, notices); })
+			: null;
 	app.post('/api/reservations/status', async () => ({
 		ok: true, enabled: service?.enabled ?? false, mode: runtime?.mode ?? 'off', canWrite: service?.canWrite ?? false,
 	}));
@@ -103,9 +156,10 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 			await client.call('crm.deal.get', { id: dealId });
 			if (!service?.enabled) return { ok: true, enabled: false, canWrite: false, requests: [] };
 			const erp = requireErp();
-			if (service.canWrite) await service.reconcileDeal(erp, dealId);
-			const requests = await service?.listDeal(dealId) ?? [];
-			return { ok: true, enabled: service?.enabled ?? false, canWrite: service?.canWrite ?? false, requests: requests.length ? await enrichItemNames(erp, requests) : [] };
+			const svc = serviceFor(client, erp);
+			if (svc?.canWrite) await svc.reconcileDeal(erp, dealId);
+			const requests = await svc?.listDeal(dealId) ?? [];
+			return { ok: true, enabled: svc?.enabled ?? false, canWrite: svc?.canWrite ?? false, requests: requests.length ? await enrichItemNames(erp, requests) : [] };
 		} catch (error) { return errorReply(reply, error); }
 	});
 
@@ -117,7 +171,8 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 			await client.call('user.current', {});
 			if (!service?.enabled) return { ok: true, enabled: false, canWrite: false, requests: [] };
 			const erp = requireErp();
-			const requests = await service.listSupply();
+			const svc = serviceFor(client, erp);
+			const requests = await svc?.listSupply() ?? [];
 			const named = requests.length ? await enrichItemNames(erp, requests) : [];
 			return { ok: true, enabled: true, canWrite: false, requests: await enrichBitrixContext(client, named) };
 		} catch (error) { return errorReply(reply, error); }
@@ -131,7 +186,8 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 			const dealId = Number(body.dealId);
 			await client.call('crm.deal.get', { id: dealId });
 			const requestKey = String(body.requestKey ?? '').trim();
-			const result = await service?.createDealRequest(requireErp(), await actorFrom(client), {
+			const erp = requireErp();
+			const result = await serviceFor(client, erp)?.createDealRequest(erp, await actorFrom(client), {
 				dealId, requestedExpiresAt: String(body.requestedExpiresAt ?? ''), comment: String(body.comment ?? ''), ...(requestKey ? { requestKey } : {}),
 				lines: Array.isArray(body.lines) ? body.lines as never[] : [],
 			});
@@ -159,8 +215,9 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		try {
 			if (!(await stockAccess(client)).canManage) return reply.code(403).send({ ok: false, error: 'Только для снабжения' });
-			const requests = await service?.listSupply() ?? [];
-			const named = requests.length ? await enrichItemNames(requireErp(), requests) : [];
+			const erp = requireErp();
+			const requests = await serviceFor(client, erp)?.listSupply() ?? [];
+			const named = requests.length ? await enrichItemNames(erp, requests) : [];
 			return { ok: true, enabled: service?.enabled ?? false, canWrite: service?.canWrite ?? false, requests: await enrichBitrixContext(client, named) };
 		} catch (error) { return errorReply(reply, error); }
 	});
@@ -225,7 +282,8 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 		try {
 			if (!(await stockAccess(client)).canManage) return reply.code(403).send({ ok: false, error: 'Только для снабжения' });
 			if (!service) throw new Error('Запись резервов пока не включена');
-			await service.releaseBySupply(await actorFrom(client), String(body.reservationId ?? ''), String(body.reason ?? ''), String(body.requestKey ?? '').trim() || undefined);
+			const erp = requireErp();
+			await serviceFor(client, erp)?.releaseBySupply(await actorFrom(client), String(body.reservationId ?? ''), String(body.reason ?? ''), String(body.requestKey ?? '').trim() || undefined);
 			return { ok: true };
 		} catch (error) { return errorReply(reply, error); }
 	});
@@ -258,7 +316,8 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 			const decision = String(body.decision) as 'approve' | 'reject';
 			if (decision !== 'approve' && decision !== 'reject') throw new Error('Некорректное решение');
 			const idempotencyKey = String(body.idempotencyKey ?? '').trim();
-			await service.reviewRelease(await actorFrom(client), {
+			const erp = requireErp();
+			await serviceFor(client, erp)?.reviewRelease(await actorFrom(client), {
 				releaseRequestId: String(body.releaseRequestId ?? ''), decision, reason: String(body.reason ?? ''),
 				...(idempotencyKey ? { idempotencyKey } : {}),
 			});

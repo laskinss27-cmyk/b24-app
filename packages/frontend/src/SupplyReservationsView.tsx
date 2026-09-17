@@ -6,7 +6,7 @@ import {
 	releaseSupplyReservation, reviewReservationRelease, reviewReservationRequest, setSupplyReservationDeal,
 	type ReservationRequestView,
 } from './reservation-api.js';
-import { reservationDisplayNumber, reservationProductSummary } from './supply-reservation-summary.js';
+import { reservationDisplayNumber, reservationProductSummary, filterReservationRequests, sortReservationRequests, type ReservationSort } from './supply-reservation-summary.js';
 
 type DraftLine = { productId: number; itemName: string; storeTitle: string; quantity: number };
 
@@ -51,6 +51,8 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 	const [notice, setNotice] = useState<string | null>(null);
 	const [expires, setExpires] = useState<Record<string, string>>({});
 	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [search, setSearch] = useState('');
+	const [sort, setSort] = useState<ReservationSort>('status');
 	const [showCreate, setShowCreate] = useState(false);
 	const [stores, setStores] = useState<string[]>([]);
 	const [dealInput, setDealInput] = useState('');
@@ -78,6 +80,7 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 		if (!readOnly) void fetchStockFormData().then((result) => setStores(result.stores)).catch(() => setStores([]));
 	}, [readOnly, refresh]);
 	const selected = useMemo(() => requests.find((request) => request.id === selectedId) ?? null, [requests, selectedId]);
+	const visibleRequests = useMemo(() => sortReservationRequests(filterReservationRequests(requests, search), sort), [requests, search, sort]);
 
 	const review = async (request: ReservationRequestView, decision: 'approve' | 'reject'): Promise<void> => {
 		const reason = decision === 'reject' ? window.prompt('Причина отказа:', '') : '';
@@ -160,12 +163,12 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 	return <div className="supply-reservations">
 		{error && <div className="supply-proto-notice"><span>{error}</span><button type="button" onClick={() => setError(null)}>Закрыть</button></div>}
 		{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
-		<div className="supply-reservation-toolbar"><div><b>Все резервы</b><span>{requests.length} записей, включая обработанные</span></div>{!readOnly && <div className="supply-proto-actions"><button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Закрыть создание' : 'Создать резерв'}</button></div>}</div>
+		<div className="supply-reservation-toolbar"><div><b>Все резервы</b><span>{visibleRequests.length === requests.length ? `${requests.length} записей, включая обработанные` : `Найдено ${visibleRequests.length} из ${requests.length}`}</span></div><div className="supply-proto-actions"><input className="supply-reservation-search" placeholder="Поиск: товар, склад, сделка, статус…" value={search} onChange={(event) => setSearch(event.target.value)} /><select className="supply-reservation-sort" value={sort} onChange={(event) => setSort(event.target.value as ReservationSort)} aria-label="Сортировка резервов"><option value="status">По статусу</option><option value="expires">По сроку</option><option value="created">По дате создания</option></select>{!readOnly && <button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Закрыть создание' : 'Создать резерв'}</button>}</div></div>
 		{!readOnly && showCreate && <CreateReservationForm busy={busy} stores={stores} dealInput={dealInput} dealPreview={dealPreview} purpose={purpose} comment={comment} expires={createExpires} picked={picked} pickedStore={pickedStore} pickedQty={pickedQty} lines={draftLines} onDealInput={(value) => { setDealInput(value); setDealPreview(null); }} onLookup={() => void lookupDeal()} onPurpose={setPurpose} onComment={setComment} onExpires={setCreateExpires} onPicked={setPicked} onPickedStore={setPickedStore} onPickedQty={setPickedQty} onAdd={addLine} onRemove={(index) => setDraftLines((current) => current.filter((_line, lineIndex) => lineIndex !== index))} onCancel={() => setShowCreate(false)} onCreate={() => void create()} />}
 		<section className="supply-proto-card supply-reservation-registry">
 			<div className="supply-reservation-registry-columns" aria-hidden="true"><span>Номер</span><span>Товар / количество</span><span>Сделка</span><span>Срок</span><span>Статус</span><span></span></div>
-			{!requests.length && <div className="empty">Резервов пока нет.</div>}
-			{requests.map((request) => <ReservationCard key={request.id} request={request} selected={selected?.id === request.id} canWrite={canWrite} busy={busy} expires={expires[request.id] ?? ''} linkInput={linkInput} onToggle={() => setSelectedId(selectedId === request.id ? null : request.id)} onExpires={(value) => setExpires((current) => ({ ...current, [request.id]: value }))} onReview={(decision) => void review(request, decision)} onReleaseDecision={(decision) => void decideRelease(request, decision)} onLinkInput={setLinkInput} onChangeDeal={(dealId) => void changeDeal(request, dealId)} onRelease={() => void directRelease(request)} />)}
+			{!visibleRequests.length && <div className="empty">{requests.length ? 'Ничего не найдено по поиску.' : 'Резервов пока нет.'}</div>}
+			{visibleRequests.map((request) => <ReservationCard key={request.id} request={request} selected={selected?.id === request.id} canWrite={canWrite} busy={busy} expires={expires[request.id] ?? ''} linkInput={linkInput} onToggle={() => setSelectedId(selectedId === request.id ? null : request.id)} onExpires={(value) => setExpires((current) => ({ ...current, [request.id]: value }))} onReview={(decision) => void review(request, decision)} onReleaseDecision={(decision) => void decideRelease(request, decision)} onLinkInput={setLinkInput} onChangeDeal={(dealId) => void changeDeal(request, dealId)} onRelease={() => void directRelease(request)} />)}
 		</section>
 	</div>;
 }

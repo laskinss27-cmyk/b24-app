@@ -35,6 +35,8 @@ function config(mode: 'off' | 'on'): Config {
 		publicBaseUrl: 'https://app.example.com',
 		appSectionUrl: '',
 		inventoryNotify: 'off',
+		reservationNotify: 'off',
+		reservationStoreNotify: '',
 		appOAuthVault: 'off',
 		supplyShadowCompare: mode,
 		supplySqlRead: 'off',
