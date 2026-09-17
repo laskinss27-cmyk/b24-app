@@ -335,7 +335,28 @@ test('inventory documents use the frozen result after live stock changes', async
 	};
 	assert.deepEqual(await computeInventoryReconciliationLines(erp, point), {
 		storeName: 'Dunayskiy',
-		lines: [{ productId: 101, name: 'Relay', bookErp: 10, fact: 9, diff: -1, valuation: 125 }],
+		lines: [{ productId: 101, name: 'Relay', bookErp: 10, fact: 9, diff: -1, valuation: 125, inventoryRate: 125 }],
+	});
+});
+
+test('inventory surplus uses Standard Buying instead of the current bin valuation', async () => {
+	const erp = {
+		list: async (doctype: string) => {
+			if (doctype === 'Company') return [{ name: 'Test Company', abbr: 'TEST' }];
+			if (doctype === 'Bin') return [{ item_code: '101', actual_qty: 6, valuation_rate: 90 }];
+			if (doctype === 'Item Price') return [{ item_code: '101', price_list_rate: 125 }];
+			if (doctype === 'Item') return [{ name: '101', valuation_rate: 90 }];
+			return [];
+		},
+	} as unknown as ErpClient;
+	const point: Record<string, unknown> = {
+		storeName: 'Dunayskiy',
+		stockSnapshot: { version: 1, capturedAt: '2026-09-04T10:00:00.000Z', lines: [[101, 10]] },
+		result: { lines: [{ productId: 101, name: 'Relay', book: 10, fact: 12, diff: 2 }] },
+	};
+	assert.deepEqual(await computeInventoryReconciliationLines(erp, point), {
+		storeName: 'Dunayskiy',
+		lines: [{ productId: 101, name: 'Relay', bookErp: 10, fact: 12, diff: 2, valuation: 90, inventoryRate: 125 }],
 	});
 });
 

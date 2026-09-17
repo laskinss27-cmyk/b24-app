@@ -134,6 +134,7 @@ export {
 	fetchCoreCatalogPrices,
 	fetchErpCatalogPurchasing,
 	fetchErpPurchasing,
+	fetchErpPurchasingRates,
 	fetchErpRetailPrices,
 	fetchErpStocks,
 	fetchErpStocksFor,

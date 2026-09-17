@@ -128,6 +128,10 @@ export async function createInventoryRecoDraft(
 	erp: ErpClient,
 	args: { invRef: string; storeTitle: string; lines: InventoryRecoLine[]; postingDate?: string },
 ): Promise<{ name: string }> {
+	const missing = args.lines.filter((line) => !(Number.isFinite(line.valuation) && line.valuation > 0.01));
+	if (missing.length) {
+		throw new Error(`нет закупочной цены для оприходования: ${missing.map((line) => `товар #${line.productId}`).join(', ')}`);
+	}
 	const ctx = await erpContext(erp);
 	await ensureInvField(erp);
 	if (!args.lines.length) throw new Error('нет строк с расхождениями — документ не нужен');
@@ -141,16 +145,12 @@ export async function createInventoryRecoDraft(
 		...(args.postingDate ? { posting_date: args.postingDate } : {}),
 		expense_account: String(adj['name']),
 		[INV_FIELD]: args.invRef,
-		items: args.lines.map((l) => {
-			const valuation = Number.isFinite(l.valuation) && l.valuation > 0.01 ? l.valuation : 0;
-			return {
-				item_code: String(l.productId),
-				warehouse: erpWarehouse(ctx, args.storeTitle),
-				qty: l.qty,
-				valuation_rate: valuation,
-				...(valuation === 0 ? { allow_zero_valuation_rate: 1 } : {}),
-			};
-		}),
+		items: args.lines.map((line) => ({
+			item_code: String(line.productId),
+			warehouse: erpWarehouse(ctx, args.storeTitle),
+			qty: line.qty,
+			valuation_rate: line.valuation,
+		})),
 	});
 	return { name: String(doc['name']) };
 }

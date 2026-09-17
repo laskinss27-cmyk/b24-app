@@ -1,7 +1,7 @@
 import type { B24Client } from '../b24/client.js';
 import type { FastifyInstance } from 'fastify';
 import type { ErpClient } from '../erp/client.js';
-import { fetchErpItemNames, fetchErpStoreStock } from '../erp/operations.js';
+import { fetchErpItemNames, fetchErpPurchasingRates, fetchErpStoreStock } from '../erp/operations.js';
 import { frozenInventoryDifferences } from '../inventory-stock-snapshot.js';
 import { loadInventoryItems } from './inventory-storage.js';
 
@@ -34,8 +34,13 @@ export async function computeInventoryReconciliationLines(erp: ErpClient, point:
 			const names = await fetchErpItemNames(erp, unnamed);
 			for (const line of lines) if (!line.name || /^товар\s*#/i.test(line.name)) line.name = names.get(line.productId) ?? `товар #${line.productId}`;
 		}
-		lines.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
-		return { lines, storeName };
+		const purchaseRates = await fetchErpPurchasingRates(erp, lines.filter((line) => line.diff > 0).map((line) => line.productId));
+		const pricedLines = lines.map((line) => ({
+			...line,
+			inventoryRate: line.diff > 0 ? (purchaseRates.get(line.productId) ?? 0) : line.valuation,
+		}));
+		pricedLines.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+		return { lines: pricedLines, storeName };
 	}
 
 	// Старые инвентаризации без снимка сохраняют прежнюю логику совместимости.
@@ -65,6 +70,11 @@ export async function computeInventoryReconciliationLines(erp: ErpClient, point:
 		const names = await fetchErpItemNames(erp, unnamed);
 		for (const line of lines) if (!line.name) line.name = names.get(line.productId) ?? `товар #${line.productId}`;
 	}
-	lines.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
-	return { lines, storeName };
+	const purchaseRates = await fetchErpPurchasingRates(erp, lines.filter((line) => line.diff > 0).map((line) => line.productId));
+	const pricedLines = lines.map((line) => ({
+		...line,
+		inventoryRate: line.diff > 0 ? (purchaseRates.get(line.productId) ?? 0) : line.valuation,
+	}));
+	pricedLines.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+	return { lines: pricedLines, storeName };
 }

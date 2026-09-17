@@ -116,7 +116,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					await deleteInventoryRecoDraft(erp, legacy.name);
 					const { lines, storeName } = calculated;
 					const recoLines: InventoryRecoLine[] = lines.map((line) => ({
-						productId: line.productId, qty: line.fact, valuation: line.valuation,
+						productId: line.productId, qty: line.fact, valuation: line.inventoryRate,
 					}));
 					const created = await createInventoryRecoDraft(erp, {
 						invRef: `inv${body.inventoryId}:store${body.storeId}`,
@@ -147,7 +147,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					.map((line) => ({ productId: line.productId, qty: Math.abs(line.diff), valuation: line.valuation }));
 				const receiptLines: InventoryAdjustmentLine[] = lines
 					.filter((line) => line.diff > 0)
-					.map((line) => ({ productId: line.productId, qty: line.diff, valuation: line.valuation }));
+					.map((line) => ({ productId: line.productId, qty: line.diff, valuation: line.inventoryRate }));
 				if (!issueLines.length && !receiptLines.length) throw new Error('нет расхождений — документы не нужны');
 
 				const createdNames: string[] = [];

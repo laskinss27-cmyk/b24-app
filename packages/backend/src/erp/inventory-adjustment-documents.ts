@@ -40,6 +40,12 @@ export async function createInventoryAdjustmentDraft(
 	},
 ): Promise<{ name: string }> {
 	if (!args.lines.length) throw new Error('нет строк для складского документа инвентаризации');
+	if (args.kind === 'receipt') {
+		const missing = args.lines.filter((line) => !(Number.isFinite(line.valuation) && line.valuation > 0.01));
+		if (missing.length) {
+			throw new Error(`нет закупочной цены для оприходования: ${missing.map((line) => `товар #${line.productId}`).join(', ')}`);
+		}
+	}
 	const ctx = await erpContext(erp);
 	await ensureInventoryField(erp);
 	await ensureNoteField(erp, 'Stock Entry');
@@ -61,10 +67,8 @@ export async function createInventoryAdjustmentDraft(
 				? { s_warehouse: warehouse }
 				: {
 					t_warehouse: warehouse,
-					// Излишек инвентаризации меняет количество, но не создаёт
-					// техническую закупочную цену. ERPNext явно разрешает нулевую
-					// оценку для такого Material Receipt.
-					allow_zero_valuation_rate: 1,
+					basic_rate: line.valuation,
+					valuation_rate: line.valuation,
 				}),
 		})),
 	});

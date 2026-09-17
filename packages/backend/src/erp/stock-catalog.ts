@@ -158,6 +158,35 @@ export async function fetchErpCatalogPurchasing(erp: ErpClient, productIds: numb
 	return out;
 }
 
+/**
+ * Оценка для складского оприходования: сначала явная закупочная цена
+ * Standard Buying, затем valuation_rate карточки Item. Нулевые и технические
+ * цены 0,01 не считаются пригодной стоимостью оприходования.
+ */
+export async function fetchErpPurchasingRates(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+	const out = new Map<number, number>();
+	const ids = [...new Set(productIds.filter((value) => Number.isInteger(value) && value > 0))];
+	for (let i = 0; i < ids.length; i += 200) {
+		const chunk = ids.slice(i, i + 200).map(String);
+		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
+			['item_code', 'in', chunk],
+			['price_list', '=', 'Standard Buying'],
+		]);
+		for (const row of prices) {
+			const productId = Number(row['item_code']);
+			const rate = Number(row['price_list_rate'] ?? 0);
+			if (Number.isInteger(productId) && rate > 0.01) out.set(productId, rate);
+		}
+		const items = await erp.list('Item', ['name', 'valuation_rate'], [['name', 'in', chunk]]);
+		for (const row of items) {
+			const productId = Number(row['name']);
+			const rate = Number(row['valuation_rate'] ?? 0);
+			if (!out.has(productId) && Number.isInteger(productId) && rate > 0.01) out.set(productId, rate);
+		}
+	}
+	return out;
+}
+
 /** Розничные цены каталога ядра для сделок и подборщиков. */
 export async function fetchErpRetailPrices(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
 	const out = new Map<number, number>();
