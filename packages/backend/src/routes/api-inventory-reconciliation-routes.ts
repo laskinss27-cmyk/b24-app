@@ -146,6 +146,10 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 					.map((line) => ({ productId: line.productId, qty: line.diff, valuation: line.inventoryRate }));
 				if (!issueLines.length && !receiptLines.length) throw new Error('нет расхождений — документы не нужны');
 
+				// Оприходование без цены блокируем до удаления прежних черновиков и до
+				// любых записей в ядро: проверка — всегда, а не только при пересоздании.
+				assertInventoryReceiptValuations(receiptLines);
+
 				const previous = inventoryDocumentSet(loaded.pt);
 				if (inventoryDocumentCount(previous)) {
 					if (Object.values(previous).some((document) => document?.status === 'submitted')) {
@@ -155,9 +159,6 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 						const names = Object.values(previous).map((document) => document?.name).filter(Boolean).join(', ');
 						throw new Error(`черновики уже записаны: ${names} (recreate — пересоздать)`);
 					}
-					// Оприходование без цены блокируем до удаления прежних черновиков:
-					// при ошибке старые документы сохраняются.
-					assertInventoryReceiptValuations(receiptLines);
 					await deleteDraftDocuments(erp, previous);
 				}
 

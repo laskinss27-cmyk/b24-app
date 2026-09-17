@@ -160,6 +160,50 @@ test('recreate without purchase price keeps existing Stock Entry drafts', async 
 	assert.equal(bitrixWrites, 0);
 });
 
+test('first save without purchase price writes nothing to ERPNext at all', async (t) => {
+	const point = reconciledPoint({});
+	const erp = mockErp();
+	let bitrixWrites = 0;
+	const harness = t as MockHarness;
+	harness.mock.method(B24Client.prototype, 'call', async (method: string) => {
+		if (method === 'entity.item.update') bitrixWrites += 1;
+		return true;
+	});
+	harness.mock.method(B24Client.prototype, 'callWithMeta', async (method: string) => {
+		assert.equal(method, 'entity.item.get');
+		return {
+			result: [{
+				ID: '42', NAME: 'Ревизия',
+				DETAIL_TEXT: JSON.stringify({ status: 'active', points: [point] }),
+			}],
+		};
+	});
+	harness.mock.method(ErpClient, 'fromEnv', () => erp.client);
+	const app = Fastify();
+	app.decorate('config', testConfig);
+	registerInventoryReconciliationRoutes(app);
+	try {
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/inventory/erp-doc-save',
+			payload: {
+				domain: testConfig.portalDomain, accessToken: 'test-only',
+				inventoryId: '42', storeId: 7,
+			},
+		});
+		const body = response.json() as Record<string, unknown>;
+		assert.equal(body['ok'], false);
+		assert.match(String(body['error']), /нет закупочной цены.*товар #202/);
+		// Ни временный черновик списания, ни любая другая запись в ядро не создавались.
+		assert.deepEqual(erp.created, []);
+		assert.deepEqual(erp.deleted, []);
+		assert.deepEqual(erp.requests, []);
+		assert.equal(bitrixWrites, 0);
+	} finally {
+		await app.close();
+	}
+});
+
 test('legacy Stock Reconciliation allows a shortage line with zero valuation', async () => {
 	const created: Array<{ doctype: string; fields: Record<string, unknown> }> = [];
 	const client = {
