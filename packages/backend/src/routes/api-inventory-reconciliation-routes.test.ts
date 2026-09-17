@@ -88,14 +88,21 @@ function reconciledPoint(extra: Record<string, unknown>): Record<string, unknown
 	};
 }
 
-async function injectRecreate(t: test.Test, point: Record<string, unknown>) {
+interface MockHarness {
+	mock: {
+		method: (target: unknown, method: string, implementation: (...args: never[]) => unknown) => void;
+	};
+}
+
+async function injectRecreate(t: unknown, point: Record<string, unknown>) {
+	const harness = t as MockHarness;
 	const erp = mockErp();
 	let bitrixWrites = 0;
-	t.mock.method(B24Client.prototype, 'call', async (method: string) => {
+	harness.mock.method(B24Client.prototype, 'call', async (method: string) => {
 		if (method === 'entity.item.update') bitrixWrites += 1;
 		return true;
 	});
-	t.mock.method(B24Client.prototype, 'callWithMeta', async (method: string) => {
+	harness.mock.method(B24Client.prototype, 'callWithMeta', async (method: string) => {
 		assert.equal(method, 'entity.item.get');
 		return {
 			result: [{
@@ -104,7 +111,7 @@ async function injectRecreate(t: test.Test, point: Record<string, unknown>) {
 			}],
 		};
 	});
-	t.mock.method(ErpClient, 'fromEnv', () => erp.client);
+	harness.mock.method(ErpClient, 'fromEnv', () => erp.client);
 	const app = Fastify();
 	app.decorate('config', testConfig);
 	registerInventoryReconciliationRoutes(app);
