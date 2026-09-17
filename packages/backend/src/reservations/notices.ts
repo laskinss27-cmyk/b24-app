@@ -1,7 +1,7 @@
 /**
  * Уведомления по резервам: точка (склад) узнаёт о запросе на резерв и о его
  * окончании (товар возвращается на полки). Модуль чистый: текст и группировка
- * отделены от доставки (Bitrix-задачи собирает слой роутов).
+ * отделены от доставки (сообщения в складские чаты собирает слой роутов).
  */
 
 export type ReservationNoticeKind = 'requested' | 'released' | 'expired' | 'consumed';
@@ -77,14 +77,15 @@ export function buildEndedNotice(
 	};
 }
 
-/** Текст Bitrix-задачи для одной точки (склада) уведомления. */
-export function reservationNoticeTaskText(notice: ReservationNotice, store: ReservationNoticeStore, storeTitle: string): { title: string; description: string } {
+/** Текст сообщения в складской чат для одной точки уведомления. */
+export function reservationNoticeChatText(notice: ReservationNotice, store: ReservationNoticeStore, storeTitle: string): string {
 	const meta = NOTICE_META[notice.kind];
 	const subject = notice.reservationId ? `Резерв №${notice.reservationId}` : notice.requestId ? `Заявка №${notice.requestId}` : 'Резерв';
 	const items = store.items.map((item) => `— ${item.itemName} (#${item.itemCode}) · ${item.quantity} шт.`).join('\n');
 	const lines = [
-		`${meta.body} «${storeTitle}».`,
+		`${meta.title}: ${subject} — склад «${storeTitle}»`,
 		``,
+		meta.body + ` «${storeTitle}».`,
 		items,
 	];
 	if (notice.kind === 'requested' && notice.expiresAt) {
@@ -92,5 +93,5 @@ export function reservationNoticeTaskText(notice: ReservationNotice, store: Rese
 	}
 	if (notice.dealId != null) lines.push(`Сделка: №${notice.dealId}`);
 	if (notice.comment) lines.push(`Комментарий: ${notice.comment}`);
-	return { title: `${meta.title} — склад «${storeTitle}» (${subject})`, description: lines.join('\n') };
+	return lines.join('\n');
 }

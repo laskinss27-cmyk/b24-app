@@ -4,8 +4,8 @@ import { ErpClient } from '../erp/client.js';
 import { b24StoreTitle, erpContext } from '../erp/warehouse-context.js';
 import { ReservationService, type ReservationActor, type ReservationListItem } from '../reservations/service.js';
 import type { ReservationRuntime } from '../reservations/runtime.js';
-import { reservationNoticeTaskText, type ReservationNotice } from '../reservations/notices.js';
-import { loadStoreNotifyUsers, resolveStoreNotifyUsers } from '../reservations/store-notify.js';
+import { reservationNoticeChatText, type ReservationNotice } from '../reservations/notices.js';
+import { storeChat } from '../transfers/chats.js';
 import { stockAccess } from './api-stock-access.js';
 
 type ReservationB24Client = NonNullable<ReturnType<typeof accessClientFrom>>;
@@ -33,15 +33,16 @@ function requireErp(): ErpClient {
 }
 
 /**
- * Доставка уведомлений по резервам: по одной задаче Б24 на каждую точку (склад).
- * Задачи создаём только при reservationNotify=on и непустом маппинге склад→пользователи;
- * любая ошибка доставки логируется и не влияет на основной запрос.
+ * Доставка уведомлений по резервам: по одному сообщению в складской чат (маппинг
+ * склад→чат — transfers/chats.ts, тот же, что для перемещений). Сообщения шлём
+ * от серверной личности владельца (owner OAuth vault): сотрудники не привязаны к
+ * складам и часто не состоят в складских чатах. Любая ошибка доставки логируется
+ * и не влияет на основной запрос.
  */
 export async function deliverReservationNotices(app: FastifyInstance, client: ReservationB24Client, erp: ErpClient, notices: ReservationNotice[]): Promise<void> {
 	if (app.config.reservationNotify !== 'on' || !notices.length) return;
-	const mapping = loadStoreNotifyUsers(app.config.reservationStoreNotify);
-	if (!mapping.size) return;
 	try {
+		const chatClient = app.ownerOAuthVault ? await app.ownerOAuthVault.getClient() : client;
 		const ctx = await erpContext(erp);
 		const itemCodes = [...new Set(notices.flatMap((notice) => notice.stores.flatMap((store) => store.items.map((item) => item.itemCode))))];
 		const names = new Map<string, string>();
@@ -53,23 +54,22 @@ export async function deliverReservationNotices(app: FastifyInstance, client: Re
 		for (const notice of notices) {
 			for (const store of notice.stores) {
 				const storeTitle = b24StoreTitle(ctx, store.erpWarehouseName);
-				const users = resolveStoreNotifyUsers(mapping, storeTitle);
-				if (!users.length) continue;
-				const text = reservationNoticeTaskText(notice, {
-					...store,
-					items: store.items.map((item) => ({ ...item, itemName: names.get(item.itemCode) ?? item.itemName })),
-				}, storeTitle);
-				await client.call('tasks.task.add', {
-					fields: {
-						TITLE: text.title,
-						DESCRIPTION: text.description,
-						RESPONSIBLE_ID: users[0]!,
-						...(users.length > 1 ? { ACCOMPLICES: users.slice(1) } : {}),
-					},
+				const dialogId = storeChat(storeTitle);
+				if (!dialogId) {
+					app.log.warn({ store: storeTitle }, '[api/reservations] no store chat for reservation notice');
+					continue;
+				}
+				await chatClient.call('im.message.add', {
+					DIALOG_ID: dialogId,
+					MESSAGE: reservationNoticeChatText(notice, {
+						...store,
+						items: store.items.map((item) => ({ ...item, itemName: names.get(item.itemCode) ?? item.itemName })),
+					}, storeTitle),
+					URL_PREVIEW: 'N',
 				});
 			}
 		}
-		app.log.info({ notices: notices.length }, '[api/reservations] notify tasks delivered');
+		app.log.info({ notices: notices.length }, '[api/reservations] notify chat messages delivered');
 	} catch (error) {
 		app.log.warn({}, `[api/reservations] notify delivery failed — ${error instanceof Error ? error.message : String(error)}`);
 	}

@@ -31,7 +31,6 @@ const mobileConfig: Config = {
 	appSectionUrl: '',
 	inventoryNotify: 'off',
 		reservationNotify: 'off',
-		reservationStoreNotify: '',
 	appOAuthVault: 'off',
 	supplyShadowCompare: 'off',
 	supplySqlRead: 'off',

@@ -4,7 +4,7 @@ import {
 	buildEndedNotice,
 	buildRequestedNotice,
 	groupLinesByStore,
-	reservationNoticeTaskText,
+	reservationNoticeChatText,
 	type ReservationNotice,
 } from './notices.js';
 
@@ -48,25 +48,22 @@ test('buildEndedNotice supports released, expired and consumed', () => {
 	assert.throws(() => buildEndedNotice('released', { reservationId: 'x', dealId: null, lines: [] }), /at least one line/);
 });
 
-test('reservationNoticeTaskText builds task title and description per store', () => {
+test('reservationNoticeChatText builds chat message per store', () => {
 	const notice: ReservationNotice = buildRequestedNotice({
 		requestId: 'req-2', dealId: 5, comment: 'Для КП', requestedExpiresAt: '2026-09-25T12:00:00.000Z',
 		lines: [line('Склад А - УД', '10'), line('Склад Б - УД', '20')],
 	});
 	const storeA = notice.stores.find((store) => store.erpWarehouseName === 'Склад А - УД')!;
-	const text = reservationNoticeTaskText(notice, storeA, 'Склад А');
-	assert.match(text.title, /Резерв: новая заявка/);
-	assert.match(text.title, /Склад А/);
-	assert.match(text.title, /Заявка №req-2/);
-	assert.match(text.description, /Товар 10 \(#10\) · 2\.000000000 шт\./);
-	assert.match(text.description, /Сделка: №5/);
-	assert.match(text.description, /Для КП/);
+	const text = reservationNoticeChatText(notice, storeA, 'Склад А');
+	assert.match(text, /Резерв: новая заявка: Заявка №req-2 — склад «Склад А»/);
+	assert.match(text, /Товар 10 \(#10\) · 2\.000000000 шт\./);
+	assert.match(text, /Сделка: №5/);
+	assert.match(text, /Для КП/);
 });
 
-test('reservationNoticeTaskText for expired asks to return goods to shelves', () => {
+test('reservationNoticeChatText for expired asks to return goods to shelves', () => {
 	const notice = buildEndedNotice('expired', { reservationId: 'res-3', dealId: 12, lines: [line('Склад А - УД', '30')] });
-	const text = reservationNoticeTaskText(notice, notice.stores[0]!, 'Склад А');
-	assert.match(text.title, /Резерв истёк/);
-	assert.match(text.title, /Резерв №res-3/);
-	assert.match(text.description, /верните/i);
+	const text = reservationNoticeChatText(notice, notice.stores[0]!, 'Склад А');
+	assert.match(text, /Резерв истёк: Резерв №res-3/);
+	assert.match(text, /верните/i);
 });

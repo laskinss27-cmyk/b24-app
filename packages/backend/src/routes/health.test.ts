@@ -18,7 +18,6 @@ test('process health keeps its existing response contract', async () => {
 		appSectionUrl: '',
 		inventoryNotify: 'off',
 		reservationNotify: 'off',
-		reservationStoreNotify: '',
 		appOAuthVault: 'off',
 		supplyShadowCompare: 'off',
 		supplySqlRead: 'off',

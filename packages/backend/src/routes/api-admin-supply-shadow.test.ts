@@ -36,7 +36,6 @@ function config(mode: 'off' | 'on'): Config {
 		appSectionUrl: '',
 		inventoryNotify: 'off',
 		reservationNotify: 'off',
-		reservationStoreNotify: '',
 		appOAuthVault: 'off',
 		supplyShadowCompare: mode,
 		supplySqlRead: 'off',

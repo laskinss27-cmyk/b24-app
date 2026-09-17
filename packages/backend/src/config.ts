@@ -13,10 +13,8 @@ const ConfigSchema = z.object({
 	appSectionUrl: z.string().default(''),
 	/** Гейт оповещения: off — соисполнителей не добавляем (мьют на обкатке); on — шлём выбранным в UI. */
 	inventoryNotify: z.enum(['off', 'on']).default('on'),
-	/** Уведомления по резервам: off (default) — задачи складам не создаём; on — создаём по маппингу B24_RESERVATION_STORE_NOTIFY. */
+	/** Уведомления по резервам: off (default) — в складские чаты не шлём; on — шлём сообщения (маппинг склад→чат в transfers/chats.ts). */
 	reservationNotify: z.enum(['off', 'on']).default('off'),
-	/** Склад → ID пользователей Б24: "Измайловский=123,456; Склад УД=789". */
-	reservationStoreNotify: z.string().default(''),
 	appClientId: z.string().optional(),
 	appClientSecret: z.string().optional(),
 	appSecret: z.string().optional(),
@@ -54,7 +52,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		appSectionUrl: env['APP_SECTION_URL'],
 		inventoryNotify: env['INVENTORY_NOTIFY'],
 		reservationNotify: env['B24_RESERVATION_NOTIFY'],
-		reservationStoreNotify: env['B24_RESERVATION_STORE_NOTIFY'],
 		appClientId: env['APP_CLIENT_ID'],
 		appClientSecret: env['APP_CLIENT_SECRET'],
 		appSecret: env['APP_SECRET'],
