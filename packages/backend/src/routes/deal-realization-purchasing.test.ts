@@ -9,6 +9,7 @@ import { registerDealCoreRealizationRoute } from './deal-core-realization-route.
 function fixture() {
 	const core = new Map<number, unknown>();
 	const legacy = new Map<number, unknown>();
+	const lastPurchase = new Map<number, unknown>();
 	const services = new Set<number>();
 	const docs = new Map<string, Record<string, unknown>>();
 	const writes: string[] = [];
@@ -25,7 +26,7 @@ function fixture() {
 		async list(dt: string, _fields: string[], filters: Array<[string, string, unknown]> = []) {
 			reads.push(dt);
 			const ids = ((filters.find(f => f[1] === 'in')?.[2] ?? []) as string[]).map(Number);
-			if (dt === 'Item') return ids.map(id => ({ name: String(id), item_name: `Товар ${id}`, is_stock_item: services.has(id) ? 0 : 1 }));
+			if (dt === 'Item') return ids.map(id => ({ name: String(id), item_name: `Товар ${id}`, is_stock_item: services.has(id) ? 0 : 1, last_purchase_rate: lastPurchase.get(id) }));
 			if (dt === 'Item Price') return ids.filter(id => core.has(id)).map(id => ({ item_code: String(id), price_list_rate: core.get(id) }));
 			if (dt === 'Company') return [{ name: 'Test', abbr: 'T' }];
 			if (dt === 'Delivery Note') return [...docs.values()];
@@ -38,7 +39,7 @@ function fixture() {
 	} as unknown as ErpClient;
 	const doc = (name: string, id: number) => ({ name, docstatus: 0, b24_deal_id: '42', is_return: 0,
 		items: [{ name: `${name}-ROW`, item_code: String(id), item_name: `Товар ${id}`, qty: 1, rate: 100, warehouse: 'Main - T', b24_deal_segment: 'base' }] });
-	return { core, legacy, services, docs, writes, reads, erp, client, doc };
+	return { core, legacy, lastPurchase, services, docs, writes, reads, erp, client, doc };
 }
 
 test('missing, zero, negative and non-finite prices block goods; the error includes every product but no prices', async () => {
@@ -57,6 +58,23 @@ test('catalog prices are fresh, prefer ERP, fall back to Bitrix, and use canonic
 	await assert.rejects(assertDealRealizationPurchasing(f.erp, f.client, [{ productId: 15882, rate: 6000 }]), /15882/);
 	f.core.set(15882, 5100);
 	await assertDealRealizationPurchasing(f.erp, f.client, [{ productId: 15882, rate: 6000 }]);
+});
+
+test('submitted purchase document rate allows realization when Standard Buying is missing or zero', async () => {
+	const f = fixture();
+	f.core.set(101, 0);
+	f.lastPurchase.set(101, 7493);
+	f.lastPurchase.set(202, 1601);
+	await assertDealRealizationPurchasing(f.erp, f.client, [{ productId: 101, rate: 9000 }, { productId: 202, rate: 2000 }]);
+});
+
+test('non-positive last purchase rate does not bypass missing catalog price', async () => {
+	for (const value of [0, -1, NaN, Infinity]) {
+		const f = fixture();
+		f.core.set(101, 0);
+		f.lastPurchase.set(101, value);
+		await assert.rejects(assertDealRealizationPurchasing(f.erp, f.client, [{ productId: 101, rate: 9000 }]), /101/);
+	}
 });
 
 test('services need no purchase price; pass-through consumables use the actual sale price', async () => {
