@@ -15,6 +15,13 @@ test('routes stores to the new Админка по ТТ chats', () => {
 test('normalizes a store name and selects the point that receives the transfer', () => {
 	assert.equal(storeChat('Максидом Московский 131 - УД'), 'chat17420');
 	assert.equal(receivingChatStore('Склад прихода', 'Максидом Дунайский 64'), 'Максидом Дунайский 64');
-	assert.equal(receivingChatStore('Максидом Тельмана 31', 'Склад прихода'), 'Максидом Тельмана 31');
-	assert.equal(receivingChatStore('Склад прихода', 'Маркетплейс'), null);
+	assert.equal(receivingChatStore('Максидом Тельмана 31', 'Склад прихода'), 'Склад прихода');
+	assert.equal(receivingChatStore('Склад прихода', 'Маркетплейс'), 'Маркетплейс');
+});
+
+test('stores without a dedicated chat fall back to the shared Админка по ТТ chat', () => {
+	assert.equal(storeChat('Измайловский 18Д'), 'chat4150');
+	assert.equal(storeChat('Маркетплейс'), 'chat4150');
+	assert.equal(storeChat('Shelly - УД'), 'chat4150');
+	assert.equal(storeChat('Склад Прихода'), 'chat4150');
 });
