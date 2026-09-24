@@ -74,7 +74,7 @@ export async function removeSupplyRequestLineRemainder(
 		productId: number;
 		transferAllocation?: SupplyAllocationMap;
 	},
-): Promise<{ requestQty: number; removed: boolean }> {
+): Promise<{ requestQty: number; removed: boolean; requestDeleted?: boolean }> {
 	const request = await erp.get<Record<string, unknown>>('Material Request', args.requestName);
 	if (!request || materialRequestKey(args.requestName, request['creation']) !== args.requestKey) throw new Error('заявка была изменена; обновите список');
 	const rawItems = Array.isArray(request['items']) ? request.items as Array<Record<string, unknown>> : [];
@@ -88,7 +88,15 @@ export async function removeSupplyRequestLineRemainder(
 		if (item !== target) return [requestItemPayload(item, {})];
 		return allocatedQty > 0.000001 ? [requestItemPayload(item, { qty: allocatedQty })] : [];
 	});
-	if (!after.length) throw new Error('нельзя удалить последнюю позицию заявки; закройте заявку целиком');
+	if (!after.length) {
+		if (Number(request['docstatus'] ?? 0) !== 0) {
+			throw new Error('последнюю позицию проведённой заявки удалить нельзя');
+		}
+		// ERPNext не принимает Material Request без строк. Для ещё не
+		// распределённого черновика удаляем заявку целиком, не трогая сделку.
+		await erp.delete('Material Request', args.requestName);
+		return { requestQty: 0, removed: true, requestDeleted: true };
+	}
 	await erp.update('Material Request', args.requestName, { items: after });
 	return { requestQty: allocatedQty, removed: allocatedQty <= 0.000001 };
 }

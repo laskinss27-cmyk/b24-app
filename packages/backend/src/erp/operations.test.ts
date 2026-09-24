@@ -293,6 +293,11 @@ class SupplyWorkflowFake {
 		if (doctype === 'Item') return { name, ...structuredClone(fields) };
 		throw new Error(`unexpected update ${doctype}`);
 	}
+
+	async delete(doctype: string, name: string): Promise<void> {
+		if (doctype !== 'Material Request') throw new Error(`unexpected delete ${doctype}`);
+		this.requests.delete(name);
+	}
 }
 
 const item = (name: string, productId: number, qty: number, rate: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -1732,6 +1737,44 @@ test('removing an unallocated supply line leaves the deal plan unchanged', async
 		['202'],
 	);
 	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 5);
+});
+
+test('removing the only unallocated supply line deletes its draft request, not the deal plan', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 2 }],
+	});
+	const request = erp.requestDoc(created.name)!;
+	const result = await removeSupplyRequestLineRemainder(erp.asClient(), {
+		requestName: created.name,
+		requestKey: `${created.name}@${String(request['creation'])}`,
+		productId: 101,
+	});
+
+	assert.deepEqual(result, { requestQty: 0, removed: true, requestDeleted: true });
+	assert.equal(erp.requestDoc(created.name), null);
+	assert.equal((erp.plan()['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 5);
+});
+
+test('removing the last line keeps a request when part of that line is allocated', async () => {
+	const erp = new SupplyWorkflowFake();
+	const created = await createSupplyRequest(erp.asClient(), {
+		dealId: 501,
+		scheduleDate: '2026-08-25',
+		lines: [{ productId: 101, qty: 2 }],
+	});
+	const request = erp.requestDoc(created.name)!;
+	const requestKey = `${created.name}@${String(request['creation'])}`;
+	const result = await removeSupplyRequestLineRemainder(erp.asClient(), {
+		requestName: created.name,
+		requestKey,
+		productId: 101,
+		transferAllocation: new Map([[requestKey, new Map([[101, 1]])]]),
+	});
+	assert.deepEqual(result, { requestQty: 1, removed: false });
+	assert.equal((erp.requestDoc(created.name)!['items'] as Array<Record<string, unknown>>)[0]?.['qty'], 1);
 });
 
 test('removing a partly allocated supply line keeps only its allocated quantity', async () => {

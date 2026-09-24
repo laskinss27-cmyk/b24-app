@@ -18,6 +18,7 @@ export function SupplyRequestLineEditor({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
 	const minimum = Number(item.allocatedQty ?? 0);
+	const removesRequest = (order.originalItems ?? []).length === 1 && minimum === 0;
 
 	useEffect(() => {
 		if (!open || query.trim().length < 2 || query.trim() === selected.name) { setResults([]); return; }
@@ -54,7 +55,9 @@ export function SupplyRequestLineEditor({
 	};
 
 	const removeRemainder = async (): Promise<void> => {
-		const message = minimum > 0
+		const message = removesRequest
+			? 'Это последняя позиция черновика. Удалить всю заявку снабжению? Состав сделки не изменится.'
+			: minimum > 0
 			? `Убрать необработанный остаток позиции? Уже распределённое количество ${minimum} останется в заявке и документах.`
 			: 'Удалить позицию из заявки снабжению? Состав сделки не изменится.';
 		if (!window.confirm(message)) return;
@@ -87,7 +90,7 @@ export function SupplyRequestLineEditor({
 					<label><span>Количество в заявке</span><input type="number" min={minimum || 0.001} step="any" value={qty} disabled={busy} onChange={(event) => { setQty(event.target.value); setError(''); }} /><small>Уже распределено: {minimum}</small></label>
 					{selected.id !== item.productId && minimum > 0 && <p className="supply-order-review-error">Товар уже попал в закупку или перемещение и целиком заменить его нельзя. Необработанный остаток оформите отдельной строкой заявки.</p>}
 					{error && <p className="supply-order-review-error">{error}</p>}
-					<footer><button className="danger" type="button" disabled={busy} onClick={() => void removeRemainder()}>Убрать из заявки</button><button type="button" disabled={busy} onClick={() => setOpen(false)}>Отмена</button><button className="primary" type="button" disabled={busy || !selected.id || query.trim() !== selected.name || (selected.id !== item.productId && minimum > 0)} onClick={() => void save()}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></footer>
+					<footer><button className="danger" type="button" disabled={busy} onClick={() => void removeRemainder()}>{removesRequest ? 'Удалить заявку' : 'Убрать из заявки'}</button><button type="button" disabled={busy} onClick={() => setOpen(false)}>Отмена</button><button className="primary" type="button" disabled={busy || !selected.id || query.trim() !== selected.name || (selected.id !== item.productId && minimum > 0)} onClick={() => void save()}>{busy ? 'Сохраняю...' : 'Сохранить'}</button></footer>
 				</section>
 			</div>}
 		</>

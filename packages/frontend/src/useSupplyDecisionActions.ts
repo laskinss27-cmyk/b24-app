@@ -2,13 +2,14 @@ import { useState, type Dispatch, type SetStateAction } from 'react';
 import {
 	decisionGroups,
 	decisionLinesForOrder,
+	decisionPlanFitsCurrentRequest,
 	makeDecision,
 	requestItemsForOrder,
 	rowKey,
 	type DecisionMap,
 	type DecisionState,
 } from './supply-decision-planning.js';
-import { createSupplyDocuments, type SupplyOrderRow } from './b24.js';
+import { createSupplyDocuments, fetchSupplyOrders, type SupplyOrderRow } from './b24.js';
 
 type UseSupplyDecisionActionsOptions = {
 	mock: boolean;
@@ -99,7 +100,16 @@ export function useSupplyDecisionActions({
 					purchases: [...(row.purchases ?? []), ...purchasePlan.map((group, i) => ({ name: `PUR-DEMO-${i + 1}`, supplier: group.key, status: 'Draft', supplyStage: 'draft', lines: group.lines.map((line) => ({ productId: line.productId, name: line.itemName, qty: line.qty, rate: 0 })), receipts: [] }))],
 				} : row));
 			} else {
-				const created = await createSupplyDocuments({ requestName: order.name, requestKey: order.requestKey, dealId: Number(order.dealId), toStore: order.toStore, lines });
+				const freshOrders = await fetchSupplyOrders();
+				setOrders(freshOrders);
+				const freshOrder = freshOrders.find((row) => row.name === order.name);
+				if (!decisionPlanFitsCurrentRequest(order, freshOrder, lines)) {
+					clearOrderDecisions(order.name);
+					setReviewing('');
+					setNotice('Заявка изменилась. Список обновлён — выбери действия по оставшимся позициям заново.');
+					return;
+				}
+				const created = await createSupplyDocuments({ requestName: freshOrder!.name, requestKey: freshOrder!.requestKey, dealId: Number(freshOrder!.dealId), toStore: freshOrder!.toStore, lines });
 				createdTransferCount = created.transfers.length;
 				createdPurchaseCount = created.purchases.length;
 				updatedPurchaseCount = created.updatedPurchases.length;
@@ -121,6 +131,10 @@ export function useSupplyDecisionActions({
 		} catch (err) {
 			if (!mock) await reload().catch(() => undefined);
 			const message = err instanceof Error ? err.message : String(err);
+			if (/заявка уже изменилась|осталось распределить|остаток изменился/.test(message)) {
+				clearOrderDecisions(order.name);
+				setReviewing('');
+			}
 			setCreationErrors((current) => ({ ...current, [order.name]: message }));
 			setNotice(message);
 		} finally {

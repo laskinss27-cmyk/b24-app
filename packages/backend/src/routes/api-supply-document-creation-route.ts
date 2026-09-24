@@ -89,16 +89,14 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 				for (const line of purchaseRequestLines(purchase.lines)) planned.set(line.productId, (planned.get(line.productId) ?? 0) + line.qty);
 			}
 			const incomingProducts = new Set(lines.map((line) => line.productId));
-			const incomingTransfers = new Map<number, number>();
-			for (const line of lines.filter((item) => item.action === 'transfer')) {
-				incomingTransfers.set(line.productId, (incomingTransfers.get(line.productId) ?? 0) + line.qty);
-			}
+			const incomingTotals = new Map<number, number>();
+			for (const line of lines) incomingTotals.set(line.productId, (incomingTotals.get(line.productId) ?? 0) + line.qty);
 			for (const productId of incomingProducts) {
 				const remaining = Math.max((requested.get(productId) ?? 0) - (planned.get(productId) ?? 0), 0);
 				const title = lines.find((line) => line.productId === productId)?.itemName || `#${productId}`;
 				if (remaining <= 0) throw new Error(`заявка уже изменилась: позиция «${title}» полностью распределена`);
-				const transferQty = incomingTransfers.get(productId) ?? 0;
-				if (transferQty > remaining + 0.0001) throw new Error(`для «${title}» осталось распределить ${remaining}, перемещением выбрано ${transferQty}`);
+				const totalQty = incomingTotals.get(productId) ?? 0;
+				if (totalQty > remaining + 0.0001) throw new Error(`для «${title}» осталось распределить ${remaining}, выбрано ${totalQty}`);
 			}
 			const transferByProductStore = new Map<string, number>();
 			for (const line of lines.filter((item) => item.action === 'transfer')) {

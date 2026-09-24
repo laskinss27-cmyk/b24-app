@@ -51,6 +51,25 @@ export function decisionLinesForOrder(order: SupplyOrderRow, decisions: Decision
 	});
 }
 
+/** Check a reviewed plan against a freshly loaded request before writing documents. */
+export function decisionPlanFitsCurrentRequest(
+	previous: SupplyOrderRow,
+	current: SupplyOrderRow | undefined,
+	lines: SupplyDecisionLine[],
+): boolean {
+	if (!current || current.requestKey !== previous.requestKey || current.toStore !== previous.toStore || current.closed) return false;
+	const remaining = new Map<number, number>();
+	for (const item of requestItemsForOrder(current)) {
+		remaining.set(item.productId, (remaining.get(item.productId) ?? 0) + item.qty);
+	}
+	for (const line of lines) {
+		const available = remaining.get(line.productId) ?? 0;
+		if (line.qty > available + 0.0001) return false;
+		remaining.set(line.productId, available - line.qty);
+	}
+	return true;
+}
+
 export function decisionGroups(lines: SupplyDecisionLine[], action: SupplyDecisionAction): Array<{ key: string; lines: SupplyDecisionLine[] }> {
 	const groups = new Map<string, SupplyDecisionLine[]>();
 	for (const line of lines.filter((item) => item.action === action)) {

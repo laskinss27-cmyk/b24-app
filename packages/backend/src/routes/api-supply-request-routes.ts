@@ -151,6 +151,11 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			|| (!removeRemainder && (!Number.isInteger(nextProductId) || nextProductId <= 0 || !Number.isFinite(nextQty) || nextQty <= 0))) {
 			return reply.code(400).send({ ok: false, error: 'некорректные данные строки заявки' });
 		}
+		const lockKey = `${normalizeDomain(b.domain ?? '')}:${requestKey}`;
+		if (supplyCreationLocks.has(lockKey)) {
+			return reply.code(200).send({ ok: false, error: 'Заявка сейчас изменяется. Дождись завершения операции и повтори.' });
+		}
+		supplyCreationLocks.add(lockKey);
 		try {
 			await ensureTransfersEntity(client);
 			const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
@@ -177,10 +182,12 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 					nextQty,
 				});
 			app.log.info({ requestName, productId, nextProductId, nextQty, removeRemainder, requestQty: result.requestQty }, '[api/supply/request-line] updated independently');
-			return { ok: true, requestQty: result.requestQty, ...('removed' in result ? { removed: result.removed } : {}) };
+			return { ok: true, ...result };
 		} catch (err) {
 			app.log.error({ requestName, productId, nextProductId }, `[api/supply/request-line] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			supplyCreationLocks.delete(lockKey);
 		}
 	});
 }
