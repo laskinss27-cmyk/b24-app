@@ -440,7 +440,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 			{data.quoteVariants.enabled && <DealQuoteVariantTabs quoteVariants={data.quoteVariants} activeVariantId={activeVariantId} onActiveVariant={onActiveVariant} />}
 
 			<DealActionsBar
-				showAddProduct={!data.quoteVariants.enabled || proposalEditable}
+				showAddProduct={workingMode || proposalEditable}
 				quoteVariantsEnabled={data.quoteVariants.enabled}
 				activeVariant={activeVariant ? { name: activeVariant.name, itemCount: activeVariant.items.length } : null}
 				proposalEditable={proposalEditable}
