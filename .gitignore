@@ -37,3 +37,23 @@ secrets.local.json
 
 # Local order inbox, test credentials and SQLite WAL sidecars.
 /.local/orders/
+
+# Generated release bundles, local audits, worktrees and catalog research data.
+/.deploy/
+/.pnpm-store/
+/.tmp/
+/tmp/
+/catalog-audit-v2/
+/contract-review/
+/local-artifacts/
+/outputs/
+/work-catalog-*/
+/scripts/__pycache__/
+*.pyc
+
+# This application uses npm and package-lock.json; these are local pnpm experiments.
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
+
+# Generated document artifact; the editable user guide is docs/user-guide.md.
+/docs/Umny_Dom_User_Guide.docx
