@@ -10,7 +10,8 @@ Object.defineProperty(globalThis, 'window', {
 
 const {
 	addProductToDeal,
-	createDealReturn,
+	createDealReturnRequest,
+	deleteCoreRealizationDrafts,
 	fetchDealRealizationsCore,
 	realizeCoreDraft,
 	realizeCoreSubmit,
@@ -55,19 +56,27 @@ test('core realization draft and submit preserve actions and payloads', async ()
 	]);
 });
 
-test('deal return and product addition preserve endpoint-specific responses', async () => {
+test('core realization draft deletion sends only the selected deal drafts', async () => {
+	const requests = captureResponses([{ ok: true, deleted: ['DN-1', 'DN-2'] }]);
+	assert.deepEqual(await deleteCoreRealizationDrafts(501, ['DN-1', 'DN-2']), ['DN-1', 'DN-2']);
+	assert.deepEqual(requests[0]?.body, {
+		domain: 'core.example', accessToken: 'core-token', action: 'delete-draft', dealId: 501, names: ['DN-1', 'DN-2'],
+	});
+});
+
+test('deal return request and product addition preserve endpoint-specific responses', async () => {
 	const lines = [{ productId: 42, qty: 1, store: 'Main' }];
 	const requests = captureResponses([
-		{ ok: true, returns: ['RET-1'] },
+		{ ok: true, requestId: 17 },
 		{ ok: true, row: { id: 9, name: 'Product', price: 1250, quantity: 3 } },
 	]);
 
-	assert.deepEqual(await createDealReturn(501, 'opened box', lines), ['RET-1']);
+	assert.equal(await createDealReturnRequest(501, 'opened box', lines), 17);
 	assert.deepEqual(await addProductToDeal(501, 42, 3, 1250), { id: 9, name: 'Product', price: 1250, quantity: 3 });
 	assert.deepEqual(requests, [
 		{
-			url: '/api/deal/realize-core',
-			body: { domain: 'core.example', accessToken: 'core-token', action: 'return', dealId: 501, note: 'opened box', lines },
+			url: '/api/deal/return-requests/create',
+			body: { domain: 'core.example', accessToken: 'core-token', dealId: 501, note: 'opened box', lines },
 		},
 		{
 			url: '/api/deal/add-product',

@@ -55,7 +55,7 @@ export function registerTransferCreateRoutes(
 					.map((l) => ({ productId: Number(l['productId']), name: String(l['name'] ?? ''), qty: Number(l['qty']) }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 				if (!fromStore || fromStore === toStore || !lines.length) continue;
-				await validateTransferReservation(erp, client, 0, fromStore, lines);
+				await validateTransferReservation(erp, client, 0, fromStore, lines, app.reservationRuntime);
 
 				const supplyRequest = String(b['supplyRequest'] ?? '').trim();
 				const supplyRequestKey = String(b['supplyRequestKey'] ?? '').trim();

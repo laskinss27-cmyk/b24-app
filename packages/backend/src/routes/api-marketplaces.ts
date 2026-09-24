@@ -13,7 +13,8 @@ import {
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import { invalidateCatalogCache } from './api-catalog.js';
-import { canManageStock, validateFreeStock } from './api-stock.js';
+import { validateFreeStock } from './api-stock.js';
+import { canManageMarketplace } from './api-stock-access.js';
 
 interface AuthBody {
 	domain?: string;
@@ -100,7 +101,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		try {
 			const [stores, legacyCanCreate] = await Promise.all([
 				listActiveStoreTitles(erp),
-				canManageStock(client),
+				canManageMarketplace(client),
 			]);
 			const canCreate = appPermission(req, 'marketplaces.create_sale', legacyCanCreate)
 				|| appPermission(req, 'marketplaces.create_return', legacyCanCreate)
@@ -181,7 +182,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			const legacyCanManage = await canManageStock(client);
+			const legacyCanManage = await canManageMarketplace(client);
 			if (
 				!appPermission(req, 'marketplaces.create_sale', legacyCanManage)
 				|| !appPermission(req, 'marketplaces.post_sale', legacyCanManage)
@@ -221,7 +222,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				productId: line.productId,
 				qty: line.qty,
 				fromStore: resolvedStore,
-			})));
+			})), [], app.reservationRuntime);
 			const result = await createMarketplaceSale(erp, {
 				marketplace,
 				storeTitle: resolvedStore,
@@ -243,7 +244,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			const legacyCanManage = await canManageStock(client);
+			const legacyCanManage = await canManageMarketplace(client);
 			if (
 				!appPermission(req, 'marketplaces.create_return', legacyCanManage)
 				|| !appPermission(req, 'marketplaces.post_return', legacyCanManage)
@@ -301,7 +302,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада недоступно' });
 		try {
-			const legacyCanManage = await canManageStock(client);
+			const legacyCanManage = await canManageMarketplace(client);
 			if (!appPermission(req, 'marketplaces.create_bundle', legacyCanManage)) {
 				return reply.code(403).send({ ok: false, error: 'нет доступа к формированию комплектов маркетплейса' });
 			}
@@ -330,7 +331,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			const sourceItemName = source.name;
 			const bundleItemName = marketplaceBundleItemName(source.model, unitsPerBundle);
 			const sourceQty = unitsPerBundle * bundleQty;
-			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }]);
+			await validateFreeStock(client, erp, [{ productId: sourceProductId, qty: sourceQty, fromStore: storeTitle }], [], app.reservationRuntime);
 			const bundleProductId = await ensureBundleProduct(client, bundleItemName);
 			const result = await createMarketplaceBundle(erp, {
 				sourceProductId,

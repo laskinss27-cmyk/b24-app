@@ -1,0 +1,69 @@
+.appearance-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	box-sizing: border-box;
+	width: 100%;
+	padding: 8px 18px 0;
+}
+
+@media screen {
+	html[data-theme="dark"] {
+		--app-text: #e5edf8;
+		--app-muted: #aebdd0;
+		--app-link: #8cc5ff;
+		--app-line: #34445a;
+		--app-surface: #202c3d;
+		color-scheme: dark;
+		background: #111a28;
+	}
+	html[data-theme="dark"] body { background: #111a28; color: #e5edf8; }
+	html[data-theme="dark"] :where(input, textarea, select) {
+		color-scheme: dark;
+	}
+	html[data-theme="dark"] .stock-ledger-shell :where(input, textarea, select) {
+		background: var(--app-surface);
+		color: var(--app-text);
+		border-color: var(--app-line);
+	}
+	html[data-theme="dark"] .stock-ledger-shell a { color: var(--app-link); }
+	html[data-theme="dark"] :where(input, textarea)::placeholder { color: #91a4bb; opacity: 1; }
+	html[data-theme="dark"] :where(.inventory-registry, .base, .inv, .deal-products-tab, .supply-shell) {
+		--inv-blue-soft: #1d3455;
+		--inv-line: #34445a;
+		--inv-text: #e5edf8;
+		--inv-muted: #aebdd0;
+	}
+	html[data-theme="dark"] .rb-app {
+		--rb-ink: #e5edf8;
+		--rb-muted: #aebdd0;
+		--rb-line: #34445a;
+	}
+	html[data-theme="dark"] .appearance-toolbar { background: #111a28; }
+	html[data-theme="dark"] .low-vision-toggle {
+		background: #202c3d;
+		border-color: #526178;
+		color: #e5edf8;
+		box-shadow: 0 4px 18px rgba(0, 0, 0, .25);
+	}
+	html[data-theme="dark"] .low-vision-toggle:hover { background: #29384d; border-color: #84b8ff; }
+	html[data-theme="dark"] .low-vision-toggle.active { background: #15384c; border-color: #72b5dc; }
+}
+
+@media (max-width: 620px) {
+	.appearance-toolbar { padding: 6px 10px 0; }
+}
+
+@media print {
+	.appearance-toolbar { display: none !important; }
+	html[data-theme="dark"] { color-scheme: light; background: #fff; }
+	html[data-theme="dark"] {
+		--app-text: #1a2231;
+		--app-muted: #7a8699;
+		--app-link: #185fa5;
+		--app-line: #e3e8ef;
+		--app-surface: #fff;
+	}
+	html[data-theme="dark"] body { background: #fff; color: #111; }
+}

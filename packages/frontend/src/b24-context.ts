@@ -17,8 +17,11 @@ export interface B24Context {
 	linkTarget?: 'manager' | 'supply' | null;
 	/** Ремонт, который нужно открыть сразу (переход из сообщения в чате точки). */
 	repairId?: number | null;
+	/** Заявка на возврат и решение, открытые из личного сообщения согласующему. */
+	returnRequestId?: number | null;
+	returnDecision?: 'approve' | 'reject' | null;
 	/** какой экран рендерить. 'inventory' — модуль (левое меню); 'mobileCount' — мобильный подсчёт (/m); 'salesReport' — отчёт по продажам (меню сделок); 'repairs' — ремонты (левое меню). */
-	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder' | null;
+	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder' | 'returnApproval' | null;
 	domain: string | null;
 	memberId: string | null;
 	/** Legacy-мобильный режим: старые страницы могли получать access_token в контексте. */

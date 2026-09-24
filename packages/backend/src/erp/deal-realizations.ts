@@ -1,9 +1,10 @@
 import { ErpClient } from './client.js';
 import { DEAL_STAGES_FIELD, findDealPlan, parseDealStages } from './deal-plan-state.js';
 import { DEAL_FIELD, TECH_CUSTOMER, ensureErpSetup } from './erp-setup.js';
-import { REALIZATION_SEGMENT_FIELD, ensureCoreItem } from './stock-catalog.js';
+import { REALIZATION_SEGMENT_FIELD, ensureCoreDealServiceAliasItem, ensureCoreItem } from './stock-catalog.js';
 import { NOTE_FIELD, ensureNoteField } from './stock-movements.js';
 import { b24StoreTitle, erpContext, erpWarehouse } from './warehouse-context.js';
+import { dealProductIdFromCoreItemCode, dealServiceAliasItemCode } from '../deal-service-product-ids.js';
 
 export const REALIZATION_BASE_SEGMENT = 'base';
 
@@ -141,10 +142,10 @@ function deliveryNoteItemCopy(
 	keepIdentity = false,
 ): Record<string, unknown> {
 	const out = pickDefined(item, DELIVERY_NOTE_ITEM_COPY_FIELDS);
-	const productId = Number(item['item_code']);
+	const productId = dealProductIdFromCoreItemCode(item['item_code']);
 	const segmentId = itemSegmentId(item);
 	out[REALIZATION_SEGMENT_FIELD] = segmentId;
-	const nextRate = prices.get(segmentPriceKey(productId, segmentId));
+	const nextRate = productId === null ? undefined : prices.get(segmentPriceKey(productId, segmentId));
 	if (nextRate !== undefined) {
 		out['rate'] = nextRate;
 		out['price_list_rate'] = nextRate;
@@ -254,11 +255,11 @@ async function assignRealizationSegments(
 	for (const document of orderedSales) {
 		const nextItems: Array<Record<string, unknown>> = [];
 		for (const item of document.items) {
-			const productId = Number(item['item_code']);
+			const productId = dealProductIdFromCoreItemCode(item['item_code']);
 			const qty = Math.abs(Number(item['qty'] ?? 0));
 			const sourceRow = String(item['name'] ?? '');
 			const explicitSegment = String(item[REALIZATION_SEGMENT_FIELD] ?? '').trim();
-			const productBudgets = budgets.get(productId) ?? [];
+			const productBudgets = productId === null ? [] : budgets.get(productId) ?? [];
 			if (explicitSegment) {
 				const budget = productBudgets.find((entry) => entry.segmentId === explicitSegment);
 				if (budget) budget.remaining = Math.max(0, budget.remaining - qty);
@@ -380,7 +381,8 @@ async function assignRealizationSegments(
 
 function hasChangedPrice(snapshot: DeliveryNoteSnapshot, prices: ReadonlyMap<string, number>): boolean {
 	return snapshot.items.some((item) => {
-		const next = prices.get(segmentPriceKey(Number(item['item_code']), itemSegmentId(item)));
+		const productId = dealProductIdFromCoreItemCode(item['item_code']);
+		const next = productId === null ? undefined : prices.get(segmentPriceKey(productId, itemSegmentId(item)));
 		return next !== undefined && Math.abs(next - Number(item['rate'] ?? 0)) >= 0.005;
 	});
 }
@@ -583,9 +585,19 @@ export async function createRealizationDraft(
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	if (!args.lines.length) throw new Error('пустая партия');
+	const itemCodes = new Map<number, string>();
 	for (const line of args.lines) {
 		if (!line.isService && !line.storeTitle?.trim()) throw new Error(`для товара #${line.productId} не выбран склад реализации`);
-		await ensureCoreItem(erp, { productId: line.productId, name: `#${line.productId}`, isService: Boolean(line.isService) });
+		const aliasCode = line.isService ? dealServiceAliasItemCode(line.productId) : null;
+		if (aliasCode) {
+			itemCodes.set(line.productId, await ensureCoreDealServiceAliasItem(erp, {
+				productId: line.productId,
+				name: `Услуга Б24 #${line.productId}`,
+			}));
+		} else {
+			await ensureCoreItem(erp, { productId: line.productId, name: `#${line.productId}`, isService: Boolean(line.isService) });
+			itemCodes.set(line.productId, String(line.productId));
+		}
 	}
 	const doc = await erp.create('Delivery Note', {
 		company: ctx.company,
@@ -594,7 +606,7 @@ export async function createRealizationDraft(
 		...(args.postingDate ? { posting_date: args.postingDate } : {}),
 		[DEAL_FIELD]: String(args.dealId),
 		items: args.lines.map((l) => ({
-			item_code: String(l.productId),
+			item_code: itemCodes.get(l.productId) ?? String(l.productId),
 			qty: l.qty,
 			[REALIZATION_SEGMENT_FIELD]: l.segmentId?.trim() || REALIZATION_BASE_SEGMENT,
 			...(!l.isService && l.storeTitle ? { warehouse: erpWarehouse(ctx, l.storeTitle) } : {}),
@@ -618,6 +630,16 @@ export async function createRealizationDraft(
 
 export async function submitRealization(erp: ErpClient, name: string): Promise<void> {
 	await erp.submit('Delivery Note', name);
+}
+
+/** Удаляет только непроведённую обычную реализацию указанной сделки. */
+export async function deleteRealizationDraft(erp: ErpClient, dealId: number, name: string): Promise<void> {
+	const document = await erp.get<Record<string, unknown>>('Delivery Note', name);
+	if (!document || String(document[DEAL_FIELD] ?? '') !== String(dealId)
+		|| Number(document['is_return'] ?? 0) !== 0 || Number(document['docstatus'] ?? 0) !== 0) {
+		throw new Error(`черновик ${name} не принадлежит сделке №${dealId} или уже проведён`);
+	}
+	await erp.delete('Delivery Note', name);
 }
 
 
@@ -731,8 +753,7 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 	const ctx = await erpContext(erp);
 	const documents = (await activeDealDeliveryNotes(erp, dealId)).filter((document) =>
 		document.items.some((item) => {
-			const productId = Number(item['item_code']);
-			return Number.isInteger(productId) && productId > 0;
+			return dealProductIdFromCoreItemCode(item['item_code']) !== null;
 		}));
 	await assignRealizationSegments(erp, dealId, documents);
 	const out: ErpRealization[] = [];
@@ -741,8 +762,8 @@ export async function listDealRealizations(erp: ErpClient, dealId: number): Prom
 		// коммерческой строкой сделки. Не пропускаем его в движок реализаций, где productId
 		// по архитектуре всегда является положительным числом из каталога.
 		const items = document.items.flatMap((it) => {
-			const productId = Number(it['item_code']);
-			if (!Number.isInteger(productId) || productId <= 0) return [];
+			const productId = dealProductIdFromCoreItemCode(it['item_code']);
+			if (productId === null) return [];
 			return [{
 				productId,
 				itemName: String(it['item_name'] ?? ''),

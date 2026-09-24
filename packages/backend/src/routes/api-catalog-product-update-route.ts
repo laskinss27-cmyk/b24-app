@@ -11,6 +11,7 @@ import {
 } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { appPermission } from '../access-policy.js';
+import {STOCK_CONDITIONS} from '@b24-app/shared';
 import type { AuthBody } from './api-catalog-types.js';
 import { catalogAccess, catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
 import { baseCache } from './api-catalog-cache.js';
@@ -77,6 +78,8 @@ export function registerCatalogProductUpdateRoute(app: FastifyInstance): void {
 		try {
 			before = await erp.get<Record<string, unknown>>('Item', String(productId));
 			if (!before) return reply.code(404).send({ ok: false, error: 'товар не найден в ядре' });
+			const oldStatuses=splitCatalogProductNameStatus(String(before['item_name']??''),before['b24_product_status']).status.split(',').map(cleanText);
+			if(statuses.some(value=>(STOCK_CONDITIONS as readonly string[]).includes(value)&&!oldStatuses.includes(value)))return reply.code(400).send({ok:false,error:'Состояние количества назначается через «Изменить состояние части остатка», а не всей карточке'});
 			const currentContent = parseCatalogContent(before['b24_catalog_content'])
 				?? createCatalogContent(before['description'], []);
 			const content = applyCatalogContentEdits(currentContent, body['summary'], body['attributeEdits']);

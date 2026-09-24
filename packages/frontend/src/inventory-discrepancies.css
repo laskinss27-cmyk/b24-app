@@ -20,6 +20,40 @@
 	margin-bottom: 8px;
 	font-weight: 600;
 }
+.inventory-money-summary {
+	margin: 0 0 12px;
+}
+.inventory-money-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.inventory-money-card {
+	padding: 10px 12px;
+	border: 1px solid #dbe5f0;
+	border-radius: 8px;
+	background: #fff;
+}
+.inventory-money-card span,
+.inventory-money-card strong { display: block; }
+.inventory-money-card span { color: #5d6c7e; font-size: 12px; }
+.inventory-money-card strong { margin-top: 3px; font-size: 17px; font-variant-numeric: tabular-nums; }
+.inventory-money-card.surplus strong { color: #136d51; }
+.inventory-money-card.shortage strong { color: #ac3434; }
+.inventory-money-card.total { background: #f1f6fc; }
+.inventory-money-note {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 4px 12px;
+	margin-top: 6px;
+	color: #657487;
+	font-size: 11px;
+}
+.inventory-money-note span:first-child { color: #334155; font-weight: 600; }
+@media (max-width: 600px) {
+	.inventory-money-grid { grid-template-columns: 1fr; }
+}
 .disc-table {
 	width: 100%;
 	border-collapse: collapse;

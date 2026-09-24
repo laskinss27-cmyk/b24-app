@@ -9,10 +9,18 @@ import {
 import { b24StoreTitle, erpContext } from './warehouse-context.js';
 import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
+import { dealServiceAliasItemCode } from '../deal-service-product-ids.js';
 
 export const ITEM_GROUP = 'Каталог Б24';
 export const REALIZATION_SEGMENT_FIELD = 'b24_deal_segment';
 export const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
+
+async function ensureCatalogItemPrerequisites(erp: ErpClient): Promise<void> {
+	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
+	if (!(await erp.get('Item Group', ITEM_GROUP))) {
+		await erp.create('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
+	}
+}
 
 /** Завести товар в ЯДРЕ — зеркало нового продукта Б24 (code = productId). Идемпотентно: уже есть → ничего.
  *  Для «Создать товар» в форме прихода: продукт сперва создан в каталоге Б24 (получил productId), тут — Item ядра. */
@@ -31,7 +39,11 @@ export async function ensureCoreItem(erp: ErpClient, args: {
 	if (existing) {
 		const patch: Record<string, unknown> = {};
 		const hasStructuredMeta = args.model !== undefined || args.article !== undefined || args.brand !== undefined || args.section !== undefined || args.description !== undefined;
-		if (args.isService && Number(existing['is_stock_item'] ?? 1) !== 0) patch['is_stock_item'] = 0;
+		// Исторические складские карточки с движениями ERPNext запрещает переводить
+		// в услуги. Для таких позиций Delivery Note использует отдельную alias-Item.
+		if (args.isService && !dealServiceAliasItemCode(args.productId) && Number(existing['is_stock_item'] ?? 1) !== 0) {
+			patch['is_stock_item'] = 0;
+		}
 		if (hasStructuredMeta && args.name && String(existing['item_name'] ?? '') !== args.name) patch['item_name'] = args.name.slice(0, 140);
 		if (args.model !== undefined) patch['b24_model'] = args.model;
 		if (args.article !== undefined) patch['b24_article'] = args.article;
@@ -41,8 +53,7 @@ export async function ensureCoreItem(erp: ErpClient, args: {
 		if (Object.keys(patch).length) await erp.update('Item', code, patch);
 		return;
 	}
-	if (!(await erp.get('UOM', UOM))) await erp.create('UOM', { uom_name: UOM });
-	if (!(await erp.get('Item Group', ITEM_GROUP))) await erp.create('Item Group', { item_group_name: ITEM_GROUP, parent_item_group: 'All Item Groups', is_group: 0 });
+	await ensureCatalogItemPrerequisites(erp);
 	const isService = Boolean(args.isService) || args.productId === CORE_ENGINEER_VISIT_SERVICE_ID;
 	await erp.create('Item', {
 		item_code: code,
@@ -56,6 +67,35 @@ export async function ensureCoreItem(erp: ErpClient, args: {
 		b24_brand: args.brand ?? '',
 		b24_section: args.section ?? '',
 	});
+}
+
+/**
+ * Гарантирует отдельную нескладскую Item для реализации исторической позиции,
+ * которую нельзя безопасно переводить из складской в услугу.
+ */
+export async function ensureCoreDealServiceAliasItem(
+	erp: ErpClient,
+	args: { productId: number; name: string },
+): Promise<string> {
+	const code = dealServiceAliasItemCode(args.productId);
+	if (!code) throw new Error(`для позиции #${args.productId} не настроена служебная карточка реализации`);
+	const existing = await erp.get<Record<string, unknown>>('Item', code);
+	if (existing) {
+		if (Number(existing['is_stock_item'] ?? 0) !== 0) {
+			throw new Error(`служебная карточка ${code} должна быть нескладской`);
+		}
+		return code;
+	}
+	await ensureCatalogItemPrerequisites(erp);
+	await erp.create('Item', {
+		item_code: code,
+		item_name: args.name || `Услуга Б24 #${args.productId}`,
+		item_group: ITEM_GROUP,
+		stock_uom: UOM,
+		is_stock_item: 0,
+		description: `Нескладская строка реализации Б24 productId=${args.productId}`,
+	});
+	return code;
 }
 
 /** Найти/создать поставщика по имени (выбор из списка Б24-контрагентов / ввод нового в форме «Приход»). Возвращает имя в ядре. */

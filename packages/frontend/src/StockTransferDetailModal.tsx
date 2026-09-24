@@ -6,12 +6,12 @@ import { TRANSFER_STATUS, transferStatusText } from './StockTransferStatus.js';
 import { transferNumberLabel } from './transfer-number.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
+const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
-const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: '#1a2231' };
-const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
+const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)' };
+const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
 const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '36px 16px', zIndex: 1000, overflow: 'auto' };
-const modalCard: CSSProperties = { background: '#fff', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
+const modalCard: CSSProperties = { background: 'var(--app-surface)', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
 
 /** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
 export function StockTransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onLinesChange, onDelete, onClose }: {
@@ -69,7 +69,7 @@ export function StockTransferDetailModal({ t, stores, editable, canDelete, busy,
 		<div style={{ ...overlay, zIndex: 1100 }}>
 			<div style={modalCard}>
 				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-					<div><div style={{ color: '#7a8699', fontSize: 12 }}>Перемещение {transferNumberLabel(t)}</div><h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2></div>
+					<div><div style={{ color: 'var(--app-muted)', fontSize: 12 }}>Перемещение {transferNumberLabel(t)}</div><h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2></div>
 					<div style={{ display: 'flex', gap: 8 }}>
 						{canDelete && <button className="btn-danger" disabled={busy} onClick={onDelete}>Удалить</button>}
 						<button style={btnGhost} onClick={() => setHistoryOpen((open) => !open)}>История</button>
@@ -85,7 +85,7 @@ export function StockTransferDetailModal({ t, stores, editable, canDelete, busy,
 						: <strong>{t.toStore}</strong>}</div>
 					{canEditDestination && <button className="transfer-destination-save" type="button" disabled={saving || !toStore || toStore === t.toStore} onClick={() => void saveDestination()}>{saving ? 'Сохраняю...' : 'Изменить'}</button>}
 				</div>
-				<div style={{ color: '#7a8699', fontSize: 13, margin: '8px 0' }}>{transferStatusText(t)}{t.note ? ` · 📝 ${t.note}` : ''}</div>
+				<div style={{ color: 'var(--app-muted)', fontSize: 13, margin: '8px 0' }}>{transferStatusText(t)}{t.note ? ` · 📝 ${t.note}` : ''}</div>
 				{destinationError && <p className="error">⛔ {destinationError}</p>}
 				{lineError && <p className="error">⛔ {lineError}</p>}
 				<StockBlank doc={transferToPrint(t)} />
@@ -97,7 +97,7 @@ export function StockTransferDetailModal({ t, stores, editable, canDelete, busy,
 				{canEditLines && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}><button className="btn-primary" disabled={busy || savingLines || !linesDirty} onClick={() => void saveLines()}>{savingLines ? 'Сохраняю...' : 'Сохранить количество'}</button></div>}
 				{t.receivedLines?.length ? (
 					<div style={{ marginTop: 10 }}>
-						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>Принято на склад:</div>
+						<div style={{ fontSize: 12, color: 'var(--app-muted)', marginBottom: 2 }}>Принято на склад:</div>
 						{t.receivedLines.map((l, i) => <div key={i} style={{ fontSize: 13 }}>✓ {l.name || ('#' + l.productId)} × {l.qty}</div>)}
 					</div>
 				) : null}
@@ -110,8 +110,8 @@ export function StockTransferDetailModal({ t, stores, editable, canDelete, busy,
 				{t.shortageReturnEntry ? <div style={{ marginTop: 10, fontSize: 13, color: '#1a7f37' }}>Хвост возвращен на склад отправки: {t.shortageReturnEntry}</div> : null}
 				{historyOpen && t.history && t.history.length > 0 ? (
 					<div style={{ marginTop: 10 }}>
-						<div style={{ fontSize: 12, color: '#7a8699', marginBottom: 2 }}>История:</div>
-						{[...t.history].reverse().map((h, i) => <div key={i} style={{ fontSize: 13, marginBottom: 6 }}><b>{new Date(h.at).toLocaleString('ru-RU')} · {h.byName || 'Система'}</b><div>{h.note || TRANSFER_STATUS[h.status] || h.status}</div>{h.changes?.length ? <div style={{ color: '#7a8699' }}>{h.changes.map((change) => `${change.name}: ${change.from} → ${change.to}`).join(' · ')}</div> : null}</div>)}
+						<div style={{ fontSize: 12, color: 'var(--app-muted)', marginBottom: 2 }}>История:</div>
+						{[...t.history].reverse().map((h, i) => <div key={i} style={{ fontSize: 13, marginBottom: 6 }}><b>{new Date(h.at).toLocaleString('ru-RU')} · {h.byName || 'Система'}</b><div>{h.note || TRANSFER_STATUS[h.status] || h.status}</div>{h.changes?.length ? <div style={{ color: 'var(--app-muted)' }}>{h.changes.map((change) => `${change.name}: ${change.from} → ${change.to}`).join(' · ')}</div> : null}</div>)}
 					</div>
 				) : null}
 			</div>

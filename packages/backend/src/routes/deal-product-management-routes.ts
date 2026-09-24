@@ -112,7 +112,9 @@ export function registerDealProductManagementRoutes(
 				}
 				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
-				const savedPlan = await upsertDealPlan(erp, dealId, lines, today);
+				const savedPlan = await upsertDealPlan(erp, dealId, lines, today, {
+					allowExpansionAfterSale: addingToStage,
+				});
 				const stageItems = priced.map((item) => ({ productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, price: item.price, discountPercent: 0, isService: item.isService }));
 				if (targetStageId) {
 					await appendDealStageItems(erp, dealId, targetStageId, stageItems);

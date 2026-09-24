@@ -1,5 +1,6 @@
 import type { CoreRealization } from './b24.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
+import { matchesDealProductRealizationItem } from './deal-product-fulfillment-values.js';
 
 export interface DealProductRealizationPart {
 	name: string;
@@ -11,9 +12,7 @@ export interface DealProductRealizationPart {
 
 /** Партии строки — реализации из ядра (черновики и проведённые), связь по productId. */
 export function dealProductRealizationParts(row: EnrichedRow, realizations: CoreRealization[]): DealProductRealizationPart[] {
-	const segmentId = row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : 'base';
-	const matchesRow = (item: CoreRealization['items'][number]): boolean =>
-		item.productId === row.productId && (!row.segmentKind || (item.segmentId || 'base') === segmentId);
+	const matchesRow = (item: CoreRealization['items'][number]): boolean => matchesDealProductRealizationItem(row, item);
 	const linkedReturns = new Map<string, number>();
 	let unlinkedReturns = 0;
 	for (const document of realizations.filter((item) => item.isReturn && item.submitted)) {

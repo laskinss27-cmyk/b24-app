@@ -1,5 +1,44 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildCatalogView, indexCatalogRows } from './catalog-product-view.js';
+import { MOCK_CATALOG_ROWS, MOCK_CATALOG_STORES } from './catalog-product-mock-data.js';
+
+function catalogView(overrides: Partial<Parameters<typeof buildCatalogView>[0]> = {}) {
+	return buildCatalogView({
+		indexedRows: indexCatalogRows(MOCK_CATALOG_ROWS, [], new Set(MOCK_CATALOG_STORES.map((store) => store.id)), false, 9814),
+		query: '', onlyStock: true, kind: 'goods', sectionIds: [], storeIds: [],
+		sortKey: 'id', sortDirection: 1, restrictStores: false, visibleStores: MOCK_CATALOG_STORES,
+		...overrides,
+	});
+}
+
+test('catalog combines warehouses and sections with OR within each filter and AND between filters', () => {
+	const result = catalogView({ storeIds: [10, 22], sectionIds: [101, 103] });
+	assert.deepEqual(result.map(({ d, qty }) => [d.id, qty]), [[1924, 6], [2050, 300]]);
+	assert.equal(catalogView({ storeIds: [8, 10] }).find((row) => row.d.id === 1924)?.qty, 18);
+	assert.deepEqual(catalogView({ storeIds: [10], sectionIds: [103] }), []);
+});
+
+test('catalog resets to all warehouses and sections and sorts by selected warehouse totals', () => {
+	assert.deepEqual(catalogView().map(({ d, qty }) => [d.id, qty]), [[1810, 8], [1811, 9], [1924, 18], [2050, 814]]);
+	assert.deepEqual(catalogView({ storeIds: [10, 22], sortKey: 'stock', sortDirection: -1 }).map(({ qty }) => qty), [300, 6, 4, 4]);
+	assert.equal(catalogView({ storeIds: [10], sectionIds: [103], onlyStock: false })[0]?.qty, 0);
+});
+
+test('catalog keeps services available explicitly and preserves text search with multiple filters', () => {
+	assert.deepEqual(catalogView({ kind: 'services', storeIds: [10, 22] }).map(({ d }) => d.id), [3001]);
+	assert.equal(catalogView({ kind: 'all' }).length, 5);
+	assert.deepEqual(catalogView({ storeIds: [10, 22], sectionIds: [101, 102], query: 'камера redline' }).map(({ d }) => d.id), [1924]);
+});
+
+test('catalog never counts warehouses outside a restricted picker even with selected IDs', () => {
+	const visibleStores = MOCK_CATALOG_STORES.filter((store) => store.id === 10);
+	const indexedRows = indexCatalogRows(MOCK_CATALOG_ROWS, [visibleStores[0]!.title], new Set([10]), false, 9814);
+	const restricted = { visibleStores, indexedRows, restrictStores: true };
+	assert.deepEqual(catalogView(restricted).map(({ d, qty }) => [d.id, qty]), [[1811, 4], [1924, 6]]);
+	assert.deepEqual(catalogView({ ...restricted, storeIds: [8, 10] }).map(({ qty }) => qty), [4, 6]);
+	assert.deepEqual(catalogView({ ...restricted, storeIds: [8] }), []);
+});
 
 interface CapturedRequest {
 	url: string;

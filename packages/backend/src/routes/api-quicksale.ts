@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { B24Client, B24ApiError } from '../b24/client.js';
 import { normalizeDomain } from '../security.js';
+import {ErpClient} from '../erp/client.js';
+import {createRealizationDraft,upsertDealPlan,listActiveStoreTitles,fetchErpPurchasing} from '../erp/operations.js';
+import {validateFreeStock} from './api-stock-availability.js';
 
 /**
  * «Быстрая продажа» — создание сделки в категории 6 из корзины Базы товаров.
@@ -19,6 +22,7 @@ interface AuthBody {
 	accessToken?: string;
 }
 interface CartItem {
+	stockTitle?:string;
 	productId?: number;
 	name?: string;
 	price?: number;
@@ -79,17 +83,36 @@ export function registerApiQuicksaleRoute(app: FastifyInstance): void {
 						price: Number(it.price ?? 0),
 						quantity: Number(it.quantity ?? 0),
 						discountPercent: Math.min(99, Math.max(0, Number(it.discountPercent) || 0)),
+						stockTitle:String(it.stockTitle??'').trim(),
 					}))
 					.filter((it) => it.productId > 0 && it.quantity > 0)
 			: [];
 		if (!items.length) return reply.code(400).send({ ok: false, error: 'пустая корзина' });
+		if(items.some(i=>!Number.isSafeInteger(i.productId)||!Number.isFinite(i.quantity)||!Number.isFinite(i.price)||i.price<0)||new Set(items.map(i=>i.productId)).size!==items.length)return reply.code(400).send({ok:false,error:'Неверные или повторяющиеся строки корзины'});
 
 		const title = (b.title && String(b.title).trim()) || `Быстрая продажа ${new Date().toLocaleDateString('ru-RU')}`;
 		const assignedById = Number(b.assignedById ?? 0) || undefined;
 		// Источник = точка продажи по выбранному складу (пусто, если склад не выбран/без пары).
 		const sourceId = b.storeId ? STORE_TO_SOURCE[Number(b.storeId)] : undefined;
 
+		let createdDealId:number|undefined;
 		try {
+			// Explicit condition selection is persisted as draft Delivery Notes, never only as a label.
+			const withStockSelection=items.some(i=>i.stockTitle);
+			const erp=withStockSelection?ErpClient.fromEnv():null;
+			const services=new Set<number>();
+			if(withStockSelection){
+				if(!erp)throw new Error('Ядро склада недоступно; выбранное состояние нельзя сохранить');
+				const active=new Set(await listActiveStoreTitles(erp));
+				for(const item of items){
+					const core=await erp.get('Item',String(item.productId));
+					if(!core||Number(core['disabled'])===1)throw new Error(`Товар #${item.productId} недоступен`);
+					if(Number(core['is_stock_item'])!==1){services.add(item.productId);continue;}
+					if(!item.stockTitle||!active.has(item.stockTitle))throw new Error(`Выберите состояние и склад для #${item.productId}`);
+				}
+				await validateFreeStock(client,erp,items.filter(i=>!services.has(i.productId)).map(i=>({productId:i.productId,qty:i.quantity,fromStore:i.stockTitle})), [], app.reservationRuntime);
+				await fetchErpPurchasing(erp,items.map(i=>i.productId));
+			}
 			// 1. Сделка: категория 6, стартовая стадия, розничный покупатель, источник=точка.
 			const dealId = await client.call<number>('crm.deal.add', {
 				fields: {
@@ -103,6 +126,7 @@ export function registerApiQuicksaleRoute(app: FastifyInstance): void {
 				},
 			});
 			if (!dealId || dealId <= 0) throw new Error('crm.deal.add не вернул ID');
+			createdDealId=dealId;
 
 			// 2. Корзина → строки. Скидка % НА КАЖДУЮ позицию: PRICE=розница×(1−pct/100) (итог),
 			// DISCOUNT_TYPE_ID=2 + DISCOUNT_RATE — Битрикс восстановит нетто=розница и сумму скидки.
@@ -120,11 +144,17 @@ export function registerApiQuicksaleRoute(app: FastifyInstance): void {
 				}),
 			});
 
+			if(erp){
+				await upsertDealPlan(erp,dealId,items.map(i=>({productId:i.productId,itemName:i.name,qty:i.quantity,priceListRate:i.price,discountPercent:i.discountPercent,isService:services.has(i.productId)})),new Date().toISOString().slice(0,10));
+				const linesByStore=new Map<string,typeof items>();
+				for(const item of items){const title=services.has(item.productId)?'':item.stockTitle;linesByStore.set(title,[...(linesByStore.get(title)??[]),item]);}
+				for(const [storeTitle,lines] of linesByStore)await createRealizationDraft(erp,{dealId,lines:lines.map(i=>({productId:i.productId,qty:i.quantity,rate:round2(i.price*(1-i.discountPercent/100)),storeTitle,isService:services.has(i.productId)}))});
+			}
 			app.log.info({ dealId, items: items.length, assignedById, sourceId }, '[api/quicksale/create] ok');
 			return { ok: true, dealId };
 		} catch (err) {
 			app.log.error({ items: items.length }, `[api/quicksale/create] failed — ${errInfo(err)}`);
-			return reply.code(200).send({ ok: false, error: errInfo(err) });
+			return reply.code(200).send({ ok: false, error: errInfo(err),...(createdDealId?{dealId:createdDealId,partial:true}:{}) });
 		}
 	});
 }

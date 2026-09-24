@@ -8,7 +8,7 @@ Object.defineProperty(globalThis, 'window', {
 	value: { __B24_CONTEXT__: { dealId: null, domain: 'mobile.example', memberId: null, accessToken: 'documents-token' } } as Window,
 });
 
-const { createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } = await import('./b24.js');
+const { amendStockDocument, createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } = await import('./b24.js');
 
 function captureResponses(responses: unknown[]): CapturedRequest[] {
 	const requests: CapturedRequest[] = [];
@@ -23,7 +23,7 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 
 test('stock form data preserves empty and boolean fallbacks', async () => {
 	const requests = captureResponses([{ ok: true, canCreate: 1 }]);
-	assert.deepEqual(await fetchStockFormData(), { stores: [], suppliers: [], canCreate: true, isSupply: false });
+	assert.deepEqual(await fetchStockFormData(), { stores: [], suppliers: [], canCreate: true, canEditSubmitted: false, isSupply: false });
 	assert.deepEqual(requests[0], {
 		url: '/api/stock/form-data',
 		body: { domain: 'mobile.example', accessToken: 'documents-token' },
@@ -69,4 +69,17 @@ test('receipt, issue, and submit operations preserve shared endpoints and kind f
 			body: { domain: 'mobile.example', accessToken: 'documents-token', kind: 'receipt', name: 'STE-RECEIPT', doctype: 'Stock Entry' },
 		},
 	]);
+});
+
+test('submitted document amendment sends the complete replacement payload', async () => {
+	const requests = captureResponses([{ ok: true, previousName: 'STE-1', name: 'STE-2', kind: 'issue' }]);
+	const input = {
+		doctype: 'Stock Entry', name: 'STE-1', date: '2026-09-22', reason: 'Недостача', note: 'Исправлено',
+		lines: [{ rowId: 'ROW-1', sourceRow: '', productId: 17, qty: 3, store: 'Основной' }],
+	};
+	assert.deepEqual(await amendStockDocument(input), { previousName: 'STE-1', name: 'STE-2', kind: 'issue' });
+	assert.deepEqual(requests[0], {
+		url: '/api/stock/amend',
+		body: { domain: 'mobile.example', accessToken: 'documents-token', ...input },
+	});
 });

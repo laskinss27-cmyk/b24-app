@@ -11,6 +11,9 @@ import {
 
 type DealNotice = { kind: 'ok' | 'err'; text: string } | null;
 
+const samePlanLine = (row: EnrichedRow, line: TableData['plan'][number]): boolean =>
+	row.planLineKey ? line.lineKey === row.planLineKey : line.productId === row.productId;
+
 export function createDealProductRowEditActions({
 	dealId,
 	data,
@@ -52,16 +55,16 @@ export function createDealProductRowEditActions({
 			} else if (r.segmentKind === 'stage' && r.stageId) {
 				await updateDealStageItem(dealId, r.stageId, r.productId, q, p, d);
 			} else if (r.segmentKind === 'base') {
-				const planLine = data.plan.find((item) => item.productId === r.productId);
+				const planLine = data.plan.find((item) => samePlanLine(r, item));
 				if (!planLine) throw new Error('Состав старой сделки ещё не перенесён в ядро. Обнови вкладку и повтори действие.');
-				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId
+				await setDealPlan(dealId, data.plan.map((x) => (samePlanLine(r, x)
 					? { ...x, qty: x.qty - r.quantity + q, priceListRate: p, discountPercent: d }
 					: x)));
 			} else if (isPlanRow(r)) {
 				if (data.stages.length) throw new Error('Для изменения цены выберите «Вид по этапам» и измените нужную строку.');
 				// Товар плана: пишем НОВЫЙ состав в ядро (база p + скидка d% — скидка сохраняется, цену вернуть можно)
 				// + пересчёт служебной строки с общей суммой в Б24.
-				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
+				await setDealPlan(dealId, data.plan.map((x) => (samePlanLine(r, x) ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
 			} else {
 				throw new Error('Историческую строку нельзя редактировать: текущий состав сделки хранится только в ядре.');
 			}

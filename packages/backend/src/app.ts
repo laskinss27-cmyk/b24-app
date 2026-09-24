@@ -36,11 +36,14 @@ import { registerAccessPolicyHook } from './access-policy-hook.js';
 import { registerAppHandlerRoute } from './routes/app-handler.js';
 import { registerMobileRoute } from './routes/mobile.js';
 import { registerOperationLog } from './operation-log/register.js';
+import type { ReservationRuntime } from './reservations/sql-runtime.js';
+import { registerApiReservationsRoute } from './routes/api-reservations-sql.js';
 import { registerApiAdminRepairDiagnosticsRoute } from './routes/api-admin-repair-diagnostics.js';
 import { registerApiAdminDealDocumentsRoute } from './routes/api-admin-deal-documents.js';
 import { registerApiAdminDealFulfillmentRoute } from './routes/api-admin-deal-fulfillment.js';
 import { registerApiAdminControlRoute } from './routes/api-admin-control.js';
 import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
+import { loadOrdersConfig } from './integrations/umniydom/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,9 +56,10 @@ const FRONTEND_DIST = resolve(__dirname, '..', '..', 'frontend', 'dist');
 
 export interface AppOptions {
 	config: Config;
+	reservations?: ReservationRuntime;
 }
 
-export async function buildApp({ config }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ config, reservations }: AppOptions): Promise<FastifyInstance> {
 	const app = Fastify({
 		// Фото ремонтов едут data-URL'ами в JSON (превью ужимается на клиенте), поэтому поднимаем
 		// лимит тела с дефолтных 1МБ. Документы (Word/Excel/PDF) грузятся на Диск Б24 ссылкой
@@ -101,6 +105,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	}
 
 	app.decorate('config', config);
+	app.decorate('reservationRuntime', reservations ?? null);
 	app.decorate('frontendDist', FRONTEND_DIST);
 	app.decorate('readFrontendIndex', async () => {
 		if (!existsSync(FRONTEND_DIST)) return null;
@@ -112,6 +117,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerMobileSessionAuthHook(app);
 	registerAccessPolicyHook(app);
 	registerOperationLog(app);
+	if (reservations) app.addHook('onClose', async () => reservations.close());
 
 	registerHealthRoute(app);
 	registerInstallRoute(app);
@@ -138,6 +144,7 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerPlacementStockRoute(app);
 	registerPlacementSupplyRoute(app);
 	registerApiSupplyRoute(app);
+	registerApiReservationsRoute(app, reservations);
 	registerApiMarketplacesRoute(app);
 	registerApiContractsRoute(app);
 	registerApiAccessControlRoute(app);
@@ -146,11 +153,18 @@ export async function buildApp({ config }: AppOptions): Promise<FastifyInstance>
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
 
+	const ordersConfig = loadOrdersConfig();
+	if (ordersConfig) {
+		const { registerOrdersIntegration } = await import('./integrations/umniydom/register.js');
+		await registerOrdersIntegration(app, ordersConfig);
+	}
+
 	return app;
 }
 
 declare module 'fastify' {
 	interface FastifyInstance {
+		reservationRuntime: ReservationRuntime | null;
 		config: Config;
 		frontendDist: string;
 		readFrontendIndex: () => Promise<string | null>;

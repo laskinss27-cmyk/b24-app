@@ -13,7 +13,7 @@ function formatDate(value: string): string {
 }
 
 function operationLabel(operation: string): string {
-	return ({ draft: 'Черновик', submit: 'Проведение', return: 'Возврат' } as Record<string, string>)[operation] ?? operation;
+	return ({ draft: 'Черновик', delete_draft: 'Удаление черновика', submit: 'Проведение', return: 'Возврат' } as Record<string, string>)[operation] ?? operation;
 }
 
 export function OperationLog({ onBack, backLabel = '← База товаров' }: OperationLogProps): JSX.Element {

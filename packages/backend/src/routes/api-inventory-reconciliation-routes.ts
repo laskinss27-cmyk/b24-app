@@ -28,6 +28,10 @@ function draftRecord(name: string, lines: number, savedAt: string): InventoryDoc
 	return { name, status: 'draft', lines, savedAt };
 }
 
+function pointReadyForDocuments(point: Record<string, unknown>): boolean {
+	return ['reconciled', 'submitted', 'act'].includes(String(point['status'] ?? ''));
+}
+
 async function updateInventoryItem(
 	client: ReturnType<typeof inventoryClientFrom> & {},
 	loaded: Awaited<ReturnType<typeof loadInventoryPoint>>,
@@ -57,7 +61,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
 			const { pt } = await loadInventoryPoint(client, body.inventoryId, Number(body.storeId));
-			if (String(pt['status']) !== 'reconciled') return reply.code(200).send({ ok: false, error: 'документы ядра — только по сверенной точке' });
+			if (!pointReadyForDocuments(pt)) return reply.code(200).send({ ok: false, error: 'проведение доступно после отправки отчёта менеджером' });
 			const { lines, storeName } = await computeInventoryReconciliationLines(erp, pt);
 			app.log.info({ storeId: body.storeId, lines: lines.length }, '[api/inventory/erp-doc-preview] ok');
 			return {
@@ -85,7 +89,9 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		try {
 			const saved = await withInventoryUpdateLock(body.inventoryId, async () => {
 				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
-				if (String(loaded.pt['status']) !== 'reconciled') throw new Error('документы ядра — только по сверенной точке');
+				if (!pointReadyForDocuments(loaded.pt)) throw new Error('проведение доступно после отправки отчёта менеджером');
+				// Старые точки могли остаться на удалённых этапах «отправлено»/«акт».
+				loaded.pt['status'] = 'reconciled';
 
 				const legacy = legacyInventoryDocument(loaded.pt);
 				if (legacy) {

@@ -60,7 +60,7 @@ export function registerStockDocumentCreationRoute(app: FastifyInstance): void {
 				.map((l) => ({ productId: Number(l['productId']), qty: Number(l['qty']) }))
 				.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 			if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
-			await validateFreeStock(client, erp, lines.map((line) => ({ ...line, fromStore })));
+			await validateFreeStock(client, erp, lines.map((line) => ({ ...line, fromStore })), [], app.reservationRuntime);
 			const { name } = await createWriteOffDraft(erp, {
 				...(reason ? { reason } : {}),
 				...(note ? { note } : {}),

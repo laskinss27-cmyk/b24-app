@@ -1,8 +1,8 @@
 import { useState, type CSSProperties } from 'react';
 import { searchStockItems, type StockItem } from './b24.js';
 
-const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: '#1a2231' };
-const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
+const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)' };
+const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
 
 /** Склады с остатком (qty>0) по убыванию. */
 export const stockEntries = (it: StockItem): Array<[string, number]> => Object.entries(it.stocks ?? {}).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]);
@@ -27,21 +27,21 @@ export function StockProductFilter({ value, onChange, placeholder }: { value: St
 	if (value) return (
 		<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: '#eef3fb', border: '1px solid #cdd9ee', borderRadius: 16, fontSize: 13 }}>
 			📦 {value.name || ('#' + value.productId)}
-			<a href="#" onClick={(e) => { e.preventDefault(); onChange(null); setQ(''); setRes(null); }} style={{ color: '#7a8699', textDecoration: 'none' }}>✕</a>
+			<a href="#" onClick={(e) => { e.preventDefault(); onChange(null); setQ(''); setRes(null); }} style={{ color: 'var(--app-muted)', textDecoration: 'none' }}>✕</a>
 		</span>
 	);
 	return (
-		<div style={{ position: 'relative', flex: '1 1 260px' }}>
+		<div style={{ flex: '1 1 260px', minWidth: 0 }}>
 			<div style={{ display: 'flex', gap: 6 }}>
 				<input style={{ ...inp, flex: 1 }} placeholder={placeholder || '🔎 товар: id / название / артикул'} value={q}
 					onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void search(); } }} />
 				<button style={btnGhost} disabled={busy} onClick={() => void search()}>{busy ? '…' : 'Найти'}</button>
 			</div>
 			{res && (res.length ? (
-				<div style={{ position: 'absolute', zIndex: 5, left: 0, right: 0, background: '#fff', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: 200, overflow: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
+				<div style={{ width: '100%', marginTop: 4, background: 'var(--app-surface)', border: '1px solid #e3e8ef', borderRadius: 8, maxHeight: 'min(420px, 55vh)', overflowY: 'auto', overscrollBehavior: 'contain', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
 					{res.map((it) => (
 						<div key={it.productId} onClick={() => { onChange(it); setRes(null); }} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
-							{it.name || ('#' + it.productId)} <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
+							{it.name || ('#' + it.productId)} <span style={{ color: 'var(--app-muted)', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
 							<div><StockHint it={it} /></div>
 						</div>
 					))}

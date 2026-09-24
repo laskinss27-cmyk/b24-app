@@ -7,13 +7,13 @@ import { StockHint, stockEntries } from './StockProductFilter.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
+const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
-const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: '#1a2231' };
-const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
-const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
+const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)' };
+const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
+const fieldLabel: CSSProperties = { fontSize: 12, color: 'var(--app-muted)', display: 'block', margin: '8px 0 4px' };
 const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '36px 16px', zIndex: 1000, overflow: 'auto' };
-const modalCard: CSSProperties = { background: '#fff', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
+const modalCard: CSSProperties = { background: 'var(--app-surface)', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
 const storeSelect = (value: string, onChange: (v: string) => void, stores: string[], placeholder: string): JSX.Element => (
 	<select style={{ ...inp, width: '100%' }} value={value} onChange={(e) => onChange(e.target.value)}>
 		<option value="">{placeholder}</option>
@@ -44,7 +44,7 @@ function ItemPicker({ onPick }: { onPick: (it: StockItem) => void }): JSX.Elemen
 				<div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid #e3e8ef', borderRadius: 8, marginTop: 6 }}>
 					{res.map((it) => (
 						<div key={it.productId} onClick={() => onPick(it)} style={{ padding: 8, borderBottom: '1px solid #f0f2f5', cursor: 'pointer' }}>
-							<b>{it.name || ('#' + it.productId)}</b> <span style={{ color: '#7a8699', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
+							<b>{it.name || ('#' + it.productId)}</b> <span style={{ color: 'var(--app-muted)', fontSize: 12 }}>{[it.article, it.brand, 'id ' + it.productId].filter(Boolean).join(' · ')}</span>
 							<div><StockHint it={it} /></div>
 						</div>
 					))}
@@ -87,7 +87,7 @@ function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPric
 					<div>
 						<label style={fieldLabel}>Название нового товара</label>
 						<input autoFocus style={{ ...inp, width: '100%' }} placeholder="например: Видеорегистратор XYZ-8" value={newName} onChange={(e) => setNewName(e.target.value)} />
-						<p style={{ fontSize: 12, color: '#7a8699', margin: '4px 0 0' }}>Заведём в каталоге Б24 и в ядре. Цены укажешь в приходе.</p>
+						<p style={{ fontSize: 12, color: 'var(--app-muted)', margin: '4px 0 0' }}>Заведём в каталоге Б24 и в ядре. Цены укажешь в приходе.</p>
 						<div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
 							<button style={btnGhost} onClick={() => setCreating(false)}>← назад к поиску</button>
 							<button className="btn-primary" disabled={cbusy} onClick={() => void createNew()}>{cbusy ? '…' : 'Создать товар'}</button>
@@ -96,20 +96,20 @@ function AddItemModal({ withPrices, highlightStore, onAdd, onClose }: { withPric
 				) : (
 					<>
 						<ItemPicker onPick={setSel} />
-						<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Нет в базе? <a href="#" onClick={(e) => { e.preventDefault(); setCreating(true); }} style={{ color: '#185fa5' }}>Создать новый товар</a></p>
+						<p style={{ fontSize: 12, color: 'var(--app-muted)', margin: '8px 0 0' }}>Нет в базе? <a href="#" onClick={(e) => { e.preventDefault(); setCreating(true); }} style={{ color: 'var(--app-link)' }}>Создать новый товар</a></p>
 					</>
 				)) : (
 					<>
 						<div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 6px' }}>
-							<span>✅ <b>{sel.name || ('#' + sel.productId)}</b> <span style={{ color: '#7a8699', fontSize: 12 }}>id {sel.productId}</span></span>
+							<span>✅ <b>{sel.name || ('#' + sel.productId)}</b> <span style={{ color: 'var(--app-muted)', fontSize: 12 }}>id {sel.productId}</span></span>
 							<button style={btnGhost} onClick={() => setSel(null)}>сменить</button>
 						</div>
 						<div style={{ fontSize: 13, margin: '0 0 4px' }}>
 							Остатки: {stockEntries(sel).length
-								? stockEntries(sel).map(([s, q]) => <span key={s} style={{ marginRight: 10, ...(s === highlightStore ? { fontWeight: 700, color: '#185fa5' } : {}) }}>{s}: {q}</span>)
+								? stockEntries(sel).map(([s, q]) => <span key={s} style={{ marginRight: 10, ...(s === highlightStore ? { fontWeight: 700, color: 'var(--app-link)' } : {}) }}>{s}: {q}</span>)
 								: <span style={{ color: '#c0392b' }}>нет на складах</span>}
 						</div>
-						{highlightStore ? <div style={{ fontSize: 12, color: (sel.stocks?.[highlightStore] ?? 0) < qty ? '#c0392b' : '#7a8699', marginBottom: 4 }}>На «{highlightStore}»: {sel.stocks?.[highlightStore] ?? 0}{(sel.stocks?.[highlightStore] ?? 0) < qty ? ` — меньше, чем вводишь (${qty})` : ''}</div> : null}
+						{highlightStore ? <div style={{ fontSize: 12, color: (sel.stocks?.[highlightStore] ?? 0) < qty ? '#c0392b' : 'var(--app-muted)', marginBottom: 4 }}>На «{highlightStore}»: {sel.stocks?.[highlightStore] ?? 0}{(sel.stocks?.[highlightStore] ?? 0) < qty ? ` — меньше, чем вводишь (${qty})` : ''}</div> : null}
 						<label style={fieldLabel}>Количество</label>
 						<input type="number" min="0" step="any" autoFocus style={{ ...inp, width: 120 }} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
 						{withPrices && (
@@ -166,7 +166,7 @@ export function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClos
 				<label style={fieldLabel}>Поставщик (необязательно)</label>
 				<input list="stock-suppliers" style={{ ...inp, width: '100%' }} placeholder="выбери из списка или впиши нового" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
 				<datalist id="stock-suppliers">{form.suppliers.map((s) => <option key={s} value={s} />)}</datalist>
-				<p style={{ fontSize: 12, color: '#7a8699', margin: '4px 0 0' }}>Список — контрагенты Б24 (воронка «Поставщики»). Нового можно вписать — заведём в ядре. Пусто → «Б24 Снабжение».</p>
+				<p style={{ fontSize: 12, color: 'var(--app-muted)', margin: '4px 0 0' }}>Список — контрагенты Б24 (воронка «Поставщики»). Нового можно вписать — заведём в ядре. Пусто → «Б24 Снабжение».</p>
 				<label style={fieldLabel}>Товары</label>
 				<button style={btnGhost} onClick={() => setAddOpen(true)}>➕ Добавить товар</button>
 				{lines.length > 0 && (
@@ -187,7 +187,7 @@ export function ReceiptForm({ form, onClose, onDone }: { form: StockForm; onClos
 				)}
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
-				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Розничная цена (если заполнена) станет текущей ценой каталога. Пусто — текущую цену не меняем.</p>
+				<p style={{ fontSize: 12, color: 'var(--app-muted)', margin: '8px 0 0' }}>Розничная цена (если заполнена) станет текущей ценой каталога. Пусто — текущую цену не меняем.</p>
 				{addOpen && <AddItemModal withPrices onAdd={add} onClose={() => setAddOpen(false)} />}
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
@@ -316,7 +316,7 @@ export function TransferForm({ form, onClose, onDone }: { form: StockForm; onClo
 				)}
 				<label style={fieldLabel}>Примечание (необязательно)</label>
 				<input style={{ ...inp, width: '100%' }} placeholder="любой комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
-				<p style={{ fontSize: 12, color: '#7a8699', margin: '8px 0 0' }}>Создаётся статус «Запрошено». Снабжение проведёт «В пути» → «Получено» (честный транзит).</p>
+				<p style={{ fontSize: 12, color: 'var(--app-muted)', margin: '8px 0 0' }}>Создаётся статус «Запрошено». Снабжение проведёт «В пути» → «Получено» (честный транзит).</p>
 				{addOpen && <AddItemModal withPrices={false} {...(fromStore ? { highlightStore: fromStore } : {})} onAdd={add} onClose={() => setAddOpen(false)} />}
 				{err && <p className="error">⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>

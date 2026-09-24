@@ -123,13 +123,13 @@ export function registerTransferEditRoutes(
 				return reply.code(400).send({ ok: false, error: 'до отправки в перемещении должна остаться хотя бы одна позиция' });
 			}
 			if (doc.status === 'draft' || doc.status === 'collected' || doc.status === 'requested') {
-				await validateTransferReservation(erp, client, id, doc.fromStore, nextLines);
+				await validateTransferReservation(erp, client, id, doc.fromStore, nextLines, app.reservationRuntime);
 			} else if (doc.status === 'accepted') {
 				const shipped = transferLineMap(doc.shippedLines.length ? doc.shippedLines : doc.lines);
 				const extraLines = nextLines
 					.map((line) => ({ ...line, qty: Math.max(line.qty - (shipped.get(line.productId)?.qty ?? 0), 0) }))
 					.filter((line) => line.qty > 0);
-				if (extraLines.length) await validateTransferReservation(erp, client, id, doc.fromStore, extraLines);
+				if (extraLines.length) await validateTransferReservation(erp, client, id, doc.fromStore, extraLines, app.reservationRuntime);
 			}
 			const nextMap = transferLineMap(nextLines);
 			const changes: TransferHistoryChange[] = [];

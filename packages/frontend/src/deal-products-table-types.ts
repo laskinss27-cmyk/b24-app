@@ -10,6 +10,10 @@ import type {
 } from './b24.js';
 
 export interface EnrichedRow extends DealProductRow {
+	/** Stable identity of a row in the ERP deal plan. */
+	planLineKey?: string;
+	/** Legacy `base` realizations can belong here only when this product has one plan line. */
+	legacyBaseFallback?: boolean;
 	stocks: Array<{ storeId: number; storeName: string; amount: number }>;
 	purchasingPrice: number | null;
 	/** В режиме по этапам одна агрегированная строка плана раскладывается на отдельные партии. */

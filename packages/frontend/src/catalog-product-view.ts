@@ -44,9 +44,8 @@ export function buildCatalogView({
 	query,
 	onlyStock,
 	kind,
-	section,
-	isAll,
-	storeId,
+	sectionIds,
+	storeIds,
 	sortKey,
 	sortDirection,
 	restrictStores,
@@ -56,9 +55,8 @@ export function buildCatalogView({
 	query: string;
 	onlyStock: boolean;
 	kind: 'all' | 'goods' | 'services';
-	section: string;
-	isAll: boolean;
-	storeId: number | null;
+	sectionIds: number[];
+	storeIds: number[];
 	sortKey: CatalogSortKey;
 	sortDirection: 1 | -1;
 	restrictStores: boolean;
@@ -69,18 +67,21 @@ export function buildCatalogView({
 	// Фильтр остатка к услугам не применяем — у работ остатка нет (иначе «Услуги» давали бы пусто).
 	if (kind === 'goods') list = list.filter((row) => !row.d.isService);
 	else if (kind === 'services') list = list.filter((row) => row.d.isService);
-	if (section !== 'all') list = list.filter((row) => row.d.sectionId === Number(section));
+	if (sectionIds.length) list = list.filter((row) => sectionIds.includes(row.d.sectionId ?? 0));
 	if (words.length) list = list.filter((row) => words.every((word) => row.search.includes(word)));
-	const allStoresQty = (row: BaseRow): number =>
-		restrictStores
+	const selectedStores = visibleStores.filter((store) => storeIds.includes(store.id));
+	const quantity = (row: BaseRow): number => {
+		if (storeIds.length) return selectedStores.reduce((sum, store) => sum + Number(row.stockByStore[store.id] ?? 0), 0);
+		return restrictStores
 			? visibleStores.reduce((sum, item) => sum + Number(row.stockByStore[item.id] ?? 0), 0)
 			: row.total;
+	};
 	if (onlyStock && kind !== 'services') {
-		list = list.filter((row) => (isAll ? allStoresQty(row.d) : (row.d.stockByStore[storeId as number] ?? 0)) > 0 || row.d.isService);
+		list = list.filter((row) => quantity(row.d) > 0 || row.d.isService);
 	}
 	const withQty = list.map((row) => ({
 		d: row.d,
-		qty: isAll ? allStoresQty(row.d) : (row.d.stockByStore[storeId as number] ?? 0),
+		qty: quantity(row.d),
 		others: row.stockEntries,
 	}));
 	const value = (row: { d: BaseRow; qty: number }): string | number => {

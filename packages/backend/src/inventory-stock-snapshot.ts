@@ -15,6 +15,10 @@ export interface FrozenInventoryDifference {
 	diff: number;
 }
 
+export function inventoryStoreAllowed(title: string): boolean {
+	return title.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е') !== 'железноводская, секция 23';
+}
+
 export async function captureInventoryPointSnapshots(
 	rawPoints: unknown[],
 	capturedAt: string,
@@ -33,6 +37,7 @@ export async function captureInventoryPointSnapshots(
 		const storeTitle = deps.storeTitles.find((title) => deps.storeIdForTitle(title) === storeId)
 			?? deps.storeTitles.find((title) => title.toLocaleLowerCase('ru-RU') === requestedTitle);
 		if (!storeTitle) throw new Error(`склад «${String(point['storeName'] ?? storeId)}» не найден — инвентаризация не создана`);
+		if (!inventoryStoreAllowed(storeTitle)) throw new Error(`склад «${storeTitle}» исключён из инвентаризаций`);
 		const stock = await deps.loadStock(storeTitle);
 		points.push({
 			...point,

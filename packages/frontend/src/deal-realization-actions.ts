@@ -1,4 +1,4 @@
-import { realizeCoreDraft, realizeCoreSubmit, type RealizeCoreGroup } from './b24.js';
+import { deleteCoreRealizationDrafts, realizeCoreDraft, realizeCoreSubmit, type RealizeCoreGroup } from './b24.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
 type DealNotice = { kind: 'ok' | 'err'; text: string } | null;
@@ -60,7 +60,7 @@ export function createDealRealizationActions({
 				productId: r.productId,
 				qty: qtyOf(r),
 				rate: r.price,
-				segmentId: r.segmentKind === 'stage' && r.stageId ? `stage:${r.stageId}` : 'base',
+				segmentId: r.segmentKind === 'stage' && r.stageId ? `stage:${r.stageId}` : r.planLineKey ? `line:${r.planLineKey}` : 'base',
 			})),
 		}));
 		if (readyWorks.length) {
@@ -68,7 +68,7 @@ export function createDealRealizationActions({
 				productId: row.productId,
 				qty: qtyOf(row),
 				rate: row.price,
-				segmentId: row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : 'base',
+				segmentId: row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : row.planLineKey ? `line:${row.planLineKey}` : 'base',
 				isService: true,
 			}));
 			if (groups[0]) groups[0].lines.push(...serviceLines);
@@ -106,5 +106,25 @@ export function createDealRealizationActions({
 		}
 	};
 
-	return { doDraft, doSubmit };
+	const doDeleteDrafts = async (): Promise<void> => {
+		if (dealId == null || busy || supplyBusy || !pendingDraftNames.length) return;
+		const names = pendingDraftNames.map((name) => `• ${name}`).join('\n');
+		if (!window.confirm(`Удалить черновики реализации?\n\n${names}\n\nПроведённые документы и складские остатки не изменятся.`)) return;
+		setBusy(true);
+		setNotice(null);
+		try {
+			const deleted = await deleteCoreRealizationDrafts(dealId, pendingDraftNames);
+			setDraftNames([]);
+			setNotice({ kind: 'ok', text: `Черновиков удалено: ${deleted.length}. Можно создать реализацию заново.` });
+			await onReload();
+		} catch (error) {
+			setDraftNames([]);
+			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
+			await onReload().catch(() => undefined);
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return { doDraft, doSubmit, doDeleteDrafts };
 }

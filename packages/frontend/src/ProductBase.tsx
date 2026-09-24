@@ -3,7 +3,6 @@ import { APP_OWNER_USER_ID, type AccessPermissionId } from '@b24-app/shared';
 import { getContext, type B24Context } from './b24-context.js';
 import {
 	fetchProductBase,
-	downloadCatalogComparison,
 	downloadMarketplaceCatalogSelection,
 	updateCatalogProduct,
 	updateCatalogPrices,
@@ -30,6 +29,7 @@ import { CatalogProductTable, type CatalogSortKey as SortKey } from './CatalogPr
 import { buildCatalogView, catalogSections, indexCatalogRows } from './catalog-product-view.js';
 import { MOCK_CATALOG_ROWS, MOCK_CATALOG_STORES } from './catalog-product-mock-data.js';
 import { AdminConsole } from './AdminConsole.js';
+import { CatalogMultiSelect } from './CatalogMultiSelect.js';
 
 /**
  * База товаров — единый каталог-браузер склада (замена «складского учёта» Битрикса как
@@ -44,7 +44,6 @@ import { AdminConsole } from './AdminConsole.js';
 type Gate = 'checking' | 'ready' | 'error';
 type Mode = 'loading' | 'base' | 'report' | 'admin';
 
-const ALL = 'all';
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
 
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
@@ -94,8 +93,6 @@ export function ProductBase({
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [meta, setMeta] = useState<{ generatedAt: string; cached: boolean } | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
-	const [exportingComparison, setExportingComparison] = useState(false);
-	const [comparisonError, setComparisonError] = useState('');
 	const [exportingMarketplaceCatalog, setExportingMarketplaceCatalog] = useState(false);
 	const [marketplaceExportError, setMarketplaceExportError] = useState('');
 	const [uid, setUid] = useState('');
@@ -107,6 +104,7 @@ export function ProductBase({
 	const [cardRow, setCardRow] = useState<BaseRow | null>(null);
 	// Корзина быстрой продажи: productId → количество.
 	const [cart, setCart] = useState<Map<number, number>>(() => new Map());
+	const [saleStores,setSaleStores]=useState<Record<number,string>>({});
 	const [showCart, setShowCart] = useState(false);
 	const [creatingSale, setCreatingSale] = useState(false);
 	const [saleErr, setSaleErr] = useState<string | null>(null);
@@ -119,13 +117,13 @@ export function ProductBase({
 	const [showPriceTags, setShowPriceTags] = useState(false);
 
 	// тулбар
-	const [store, setStore] = useState<string>(ALL);
-	const [section, setSection] = useState<string>(ALL);
+	const [storeIds, setStoreIds] = useState<number[]>([]);
+	const [sectionIds, setSectionIds] = useState<number[]>([]);
 	const [q, setQ] = useState('');
 	const deferredQ = useDeferredValue(q);
 	const [onlyStock, setOnlyStock] = useState(picker?.onlyStockDefault ?? true);
 	/** Фильтр вида позиции для удобства подбора: все / только товары / только услуги (работы). */
-	const [kind, setKind] = useState<'all' | 'goods' | 'services'>(picker?.kindFilter ?? 'all');
+	const [kind, setKind] = useState<'all' | 'goods' | 'services'>(picker?.kindFilter ?? (pickMode ? 'all' : 'goods'));
 	const [sortKey, setSortKey] = useState<SortKey>('name');
 	const [sortDir, setSortDir] = useState<1 | -1>(1);
 
@@ -185,8 +183,8 @@ export function ProductBase({
 		[stores, allowedStoreTitles],
 	);
 	const visibleStoreIds = useMemo(() => new Set(visibleStores.map((item) => item.id)), [visibleStores]);
-	const isAll = store === ALL;
-	const sid = isAll ? null : Number(store);
+	const isAll = storeIds.length === 0;
+	const sid = storeIds.length === 1 ? storeIds[0]! : null;
 	const indexedRows = useMemo(
 		() => indexCatalogRows(rows, allowedStoreTitles, visibleStoreIds, marketplaceMode, B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID),
 		[rows, allowedStoreTitles, visibleStoreIds, marketplaceMode],
@@ -197,14 +195,13 @@ export function ProductBase({
 		query: deferredQ,
 		onlyStock,
 		kind,
-		section,
-		isAll,
-		storeId: sid,
+		sectionIds,
+		storeIds,
 		sortKey,
 		sortDirection: sortDir,
 		restrictStores: allowedStoreTitles.length > 0,
 		visibleStores,
-	}), [indexedRows, deferredQ, onlyStock, kind, section, isAll, sid, sortKey, sortDir, allowedStoreTitles, visibleStores]);
+	}), [indexedRows, deferredQ, onlyStock, kind, sectionIds, storeIds, sortKey, sortDir, allowedStoreTitles, visibleStores]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
@@ -216,6 +213,7 @@ export function ProductBase({
 		try {
 			const base = await withTimeout(fetchProductBase(true, marketplaceMode), 90000, 'catalog/browse');
 			setRows(base.rows);
+			setCardRow(current=>current?base.rows.find(row=>row.id===current.id)??current:null);
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
 			setCanEditCard(base.canEditCard);
@@ -236,7 +234,6 @@ export function ProductBase({
 	const canQuickSale = !readOnly && permissionAllows('realizations.create', QUICKSALE_USER_IDS.includes(uid));
 	const canPrintPriceTags = permissionAllows('catalog.print_price_tags', true);
 	const canCreateCatalogProduct = permissionAllows('catalog.create', pickMode || allowCreateProduct || canEditPrices);
-	const canExportComparison = permissionAllows('catalog.export_comparison', canEditPrices || canQuickSale);
 	const canViewSalesReport = permissionAllows('reports.sales', !readOnly);
 	const canUseAdminConsole = uid === APP_OWNER_USER_ID;
 	const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
@@ -304,33 +301,19 @@ export function ProductBase({
 		if (!pickMode) setCardRow(row);
 	}
 
-	async function exportComparison(): Promise<void> {
-		setComparisonError('');
-		setExportingComparison(true);
-		try {
-			await withTimeout(downloadCatalogComparison(), 120000, 'catalog/export-comparison');
-		} catch (error) {
-			setComparisonError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setExportingComparison(false);
-		}
-	}
-
 	async function exportMarketplaceCatalog(): Promise<void> {
 		setMarketplaceExportError('');
 		setExportingMarketplaceCatalog(true);
 		try {
 			const exportStores = isAll
 				? visibleStores
-				: visibleStores.filter((item) => item.id === sid);
-			const selectedSection = sections.find((item) => item.id === Number(section));
+				: visibleStores.filter((item) => storeIds.includes(item.id));
+			const selectedSections = sections.filter((item) => sectionIds.includes(item.id));
 			await withTimeout(downloadMarketplaceCatalogSelection({
 				productIds: view.filter((item) => !item.d.isService).map((item) => item.d.id),
 				storeIds: exportStores.map((item) => item.id),
-				selectedStoreLabel: isAll
-					? exportStores.map((item) => item.title).join(', ')
-					: exportStores[0]?.title ?? 'Склад не выбран',
-				selectedSectionLabel: section === ALL ? 'Все группы' : selectedSection?.name ?? 'Группа не выбрана',
+				selectedStoreLabel: exportStores.map((item) => item.title).join(', ') || 'Склад не выбран',
+				selectedSectionLabel: sectionIds.length ? selectedSections.map((item) => item.name).join(', ') : 'Все группы',
 				search: q.trim(),
 				onlyStock,
 			}), 120000, 'catalog/export-marketplace-selection');
@@ -367,8 +350,15 @@ export function ProductBase({
 
 	async function createSale(): Promise<void> {
 		setSaleErr(null);
-		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty, discountPercent: discOf(c.row.id) }));
+		const items = cartList.map((c) => ({ productId: c.row.id, name: c.row.name, price: c.row.retail ?? 0, quantity: c.qty, discountPercent: discOf(c.row.id), ...(saleStores[c.row.id]?{stockTitle:saleStores[c.row.id]}:{}) }));
 		if (!items.length) return;
+		for(const item of items){
+			const row=rowById.get(item.productId);
+			if(row&&!row.isService){
+				const source=stores.find(s=>s.title===item.stockTitle);
+				if(!source||Number(row.stockByStore[source.id]??0)<item.quantity){setSaleErr(`Для «${item.name}» выберите состояние и склад с достаточным остатком.`);return;}
+			}
+		}
 		if (ctx.__mock) { setSaleErr('dev-мок: продажа создаётся только на проде.'); return; }
 		setCreatingSale(true);
 		try {
@@ -379,8 +369,11 @@ export function ProductBase({
 			);
 			clearCart();
 			setShowCart(false);
+			setSaleStores({});
 			openDeal(dealId);
 		} catch (e) {
+			const partialId=Number((e as {createdDealId?:number})?.createdDealId);
+			if(partialId>0){clearCart();setSaleStores({});setShowCart(false);openDeal(partialId);}
 			setSaleErr(String(e instanceof Error ? e.message : e));
 		} finally {
 			setCreatingSale(false);
@@ -466,25 +459,15 @@ export function ProductBase({
 			</header>
 
 			<div className="base-toolbar">
-				<label className="tb-field">Склад
-					<select value={store} onChange={(e) => setStore(e.target.value)}>
-						<option value={ALL}>Все склады</option>
-						{visibleStores.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-					</select>
-				</label>
-				<label className="tb-field">Раздел
-					<select value={section} onChange={(e) => setSection(e.target.value)}>
-						<option value={ALL}>Все разделы</option>
-						{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-					</select>
-				</label>
+				<CatalogMultiSelect label="Склад" allLabel="Все склады" options={visibleStores.map((store) => ({ id: store.id, label: store.title }))} value={storeIds} onChange={setStoreIds} />
+				<CatalogMultiSelect label="Раздел" allLabel="Все разделы" options={sections.map((section) => ({ id: section.id, label: section.name }))} value={sectionIds} onChange={setSectionIds} />
 				<label className="tb-field tb-search">Поиск ({marketplaceMode ? 'ID · Старый ID · название · артикул · бренд · модель' : 'ID · название · артикул · бренд · модель'})
 					<input type="search" value={q} placeholder="2050, камера, vizit, УКП…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
 				</label>
 				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
 				{!picker?.kindFilter && <div className="tb-seg" role="group" aria-label="Вид позиции">
 					{([['all', 'Все'], ['goods', 'Товары'], ['services', 'Услуги']] as const).map(([k, lbl]) => (
-						<button key={k} type="button" className={`tb-seg-btn${kind === k ? ' active' : ''}`} onClick={() => setKind(k)}>{lbl}</button>
+						<button key={k} type="button" aria-pressed={kind === k} className={`tb-seg-btn${kind === k ? ' active' : ''}`} onClick={() => setKind(k)}>{lbl}</button>
 					))}
 				</div>}
 				<div className="tb-spacer" />
@@ -503,16 +486,10 @@ export function ProductBase({
 						{exportingMarketplaceCatalog ? 'Готовлю Excel…' : 'Выгрузить Excel'}
 					</button>
 				)}
-				{!pickMode && canExportComparison && (
-					<button className="btn-secondary" type="button" onClick={() => void exportComparison()} disabled={exportingComparison}>
-						{exportingComparison ? 'Готовлю сверку…' : 'Сверка с Битрикс'}
-					</button>
-				)}
 				<button className="btn-secondary" onClick={() => void refresh()} disabled={refreshing} title="Пересобрать базу из Битрикса (свежие остатки и цены)">{refreshing ? 'Обновляю…' : '↻ Обновить'}</button>
 				{!pickMode && canViewSalesReport && <button className="btn-secondary" onClick={() => setMode('report')}>📊 Отчёт по продажам</button>}
 				{!pickMode && canUseAdminConsole && <button className="btn-secondary" onClick={() => setMode('admin')}>Админка</button>}
 			</div>
-			{comparisonError && <p className="cart-err">{comparisonError}</p>}
 			{marketplaceExportError && <p className="cart-err">{marketplaceExportError}</p>}
 
 			<CatalogProductTable
@@ -523,7 +500,7 @@ export function ProductBase({
 				pickMode={pickMode}
 				canEditPrices={canEditPrices}
 				priceTagMode={priceTagMode}
-				sid={sid}
+				storeIds={storeIds}
 				cart={cart}
 				priceTagQty={priceTagQty}
 				sortMark={sortMark}
@@ -566,6 +543,7 @@ export function ProductBase({
 				canEditMarketplaceOldId={canEditMarketplaceOldId}
 				onSave={saveCatalogProduct}
 				onSaveMarketplaceOldId={saveMarketplaceOldId}
+				{...(!ctx.__mock&&!readOnly&&!pickMode?{onStockChanged:refresh}:{})}
 				onClose={() => setCardRow(null)}
 			/>}
 
@@ -573,6 +551,9 @@ export function ProductBase({
 
 			{!pickMode && showCart && <QuickSaleCartModal
 				items={cartList}
+				stores={visibleStores}
+				selectedStores={saleStores}
+				onStoreChange={(id,title)=>setSaleStores(current=>({...current,[id]:title}))}
 				discountPercent={discOf}
 				lineFinal={lineFinal}
 				cartSum={cartSum}

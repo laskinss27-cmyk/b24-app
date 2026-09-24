@@ -46,6 +46,7 @@ export async function fetchStores(): Promise<StoreInfo[]> {
 	});
 	const json = (await res.json()) as { ok?: boolean; error?: string; stores?: StoreInfo[] };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить склады ядра');
+	_storeTitleToId=new Map((json.stores??[]).map(store=>[store.title,store.id]));
 	return json.stores ?? [];
 }
 
@@ -95,7 +96,10 @@ export async function fetchStockPreferCore(productIds: number[]): Promise<Record
 		});
 		const j = (await res.json()) as { ok?: boolean; byProduct?: Record<string, { stocks: Record<string, number>; purchasing: number }> };
 		if (j?.ok && j.byProduct) {
-			const t2id = await storeTitleToId();
+			let t2id = await storeTitleToId();
+			if(Object.values(j.byProduct).some(product=>Object.keys(product.stocks??{}).some(title=>!t2id.has(title)))){
+				const fresh=await fetchStores();t2id=new Map(fresh.map(store=>[store.title,store.id]));
+			}
 			const out: Record<number, ProductEnrichment> = {};
 			for (const [pid, v] of Object.entries(j.byProduct)) {
 				const stocks = Object.entries(v.stocks ?? {})

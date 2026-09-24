@@ -13,14 +13,17 @@ export function buildDealProductsTableView(data: TableData, workingMode: boolean
 	for (const stage of data.stages) {
 		for (const item of stage.items) stageQtyByProduct.set(item.productId, (stageQtyByProduct.get(item.productId) ?? 0) + item.qty);
 	}
+	const unallocatedStageQty = new Map(stageQtyByProduct);
 	const basePlanRows = !workingMode ? data.planRows : data.planRows.flatMap((row): EnrichedRow[] => {
-		const quantity = Math.max(0, row.quantity - (stageQtyByProduct.get(row.productId) ?? 0));
+		const staged = Math.min(row.quantity, unallocatedStageQty.get(row.productId) ?? 0);
+		unallocatedStageQty.set(row.productId, Math.max(0, (unallocatedStageQty.get(row.productId) ?? 0) - staged));
+		const quantity = Math.max(0, row.quantity - staged);
 		if (quantity <= 0.000001) return [];
 		// Реальные строки старой сделки ещё живут в Б24 и должны редактироваться своим
 		// строковым API. Нельзя выдавать их за строки плана ядра: при уходе фокуса это
 		// превращало отсутствующий data.plan в plan-set(items=[]), стирая весь состав.
 		if (!String(row.id).startsWith('plan-')) return [{ ...row, quantity }];
-		return [{ ...row, id: `base-${row.productId}`, quantity, segmentKind: 'base' }];
+		return [{ ...row, id: `base-${row.planLineKey ?? row.id}`, quantity, segmentKind: 'base' }];
 	});
 	const stageSections = data.stages.map((stage, index) => ({
 		stage,

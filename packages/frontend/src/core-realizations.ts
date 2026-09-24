@@ -67,16 +67,28 @@ export async function realizeCoreSubmit(dealId: number, names: string[]): Promis
 	return json.submitted;
 }
 
-/** Возврат ОТ КЛИЕНТА: создать в ядре возвраты (Delivery Note is_return) по выбранным позициям. */
-export async function createDealReturn(dealId: number, note: string, lines: Array<{ productId: number; qty: number; store: string }>): Promise<string[]> {
+/** Удалить только непроведённые черновики реализации указанной сделки. */
+export async function deleteCoreRealizationDrafts(dealId: number, names: string[]): Promise<string[]> {
 	const res = await fetch('/api/deal/realize-core', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), action: 'return', dealId, note, lines }),
+		body: JSON.stringify({ ...bx24Auth(), action: 'delete-draft', dealId, names }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; returns?: string[] };
-	if (!json.ok || !json.returns) throw new Error(json.error ?? 'не удалось оформить возврат');
-	return json.returns;
+	const json = (await res.json()) as { ok: boolean; error?: string; deleted?: string[] };
+	if (!json.ok || !json.deleted) throw new Error(json.error ?? 'не удалось удалить черновики реализации');
+	return json.deleted;
+}
+
+/** Отправить Владимиру заявку на возврат. Складских документов этот вызов не создаёт. */
+export async function createDealReturnRequest(dealId: number, note: string, lines: Array<{ productId: number; qty: number; store: string }>): Promise<number> {
+	const res = await fetch('/api/deal/return-requests/create', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId, note, lines }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; requestId?: number };
+	if (!json.ok || !json.requestId) throw new Error(json.error ?? 'не удалось отправить заявку на возврат');
+	return json.requestId;
 }
 
 /** Добавить товарную строку в сделку (crm.item.productrow.add; существующие строки не трогает). */

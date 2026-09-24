@@ -2,7 +2,15 @@ import type { CoreRealization } from './b24.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 
 function rowSegmentId(row: EnrichedRow): string {
-	return row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : 'base';
+	return row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : row.planLineKey ? `line:${row.planLineKey}` : 'base';
+}
+
+export function matchesDealProductRealizationItem(row: EnrichedRow, item: CoreRealization['items'][number]): boolean {
+	if (item.productId !== row.productId) return false;
+	if (!row.segmentKind && !row.planLineKey) return true;
+	const segment = item.segmentId || 'base';
+	return segment === rowSegmentId(row)
+		|| (row.legacyBaseFallback === true && row.segmentKind !== 'stage' && segment === 'base');
 }
 
 export function dealProductRealizedProductQuantity(productId: number, realizations: CoreRealization[]): number {
@@ -13,30 +21,17 @@ export function dealProductRealizedProductQuantity(productId: number, realizatio
 }
 
 export function dealProductRealizedQuantity(row: EnrichedRow, realizations: CoreRealization[]): number {
-	if (!row.segmentKind) {
-		return dealProductRealizedProductQuantity(row.productId, realizations);
-	}
-
-	const segmentId = rowSegmentId(row);
 	return realizations.reduce((total, realization) =>
 		total + realization.items
-			.filter((item) => item.productId === row.productId && (item.segmentId || 'base') === segmentId)
+			.filter((item) => matchesDealProductRealizationItem(row, item))
 			.reduce((sum, item) => sum + item.qty, 0), 0);
 }
 
 export function dealProductShippedQuantity(row: EnrichedRow, realizations: CoreRealization[]): number {
 	const submitted = realizations.filter((realization) => realization.submitted);
-	if (!row.segmentKind) {
-		return Math.max(0, submitted.reduce((total, realization) =>
-			total + realization.items
-				.filter((item) => item.productId === row.productId)
-				.reduce((sum, item) => sum + item.qty, 0), 0));
-	}
-
-	const segmentId = rowSegmentId(row);
 	return Math.max(0, submitted.reduce((total, realization) =>
 		total + realization.items
-			.filter((item) => item.productId === row.productId && (item.segmentId || 'base') === segmentId)
+			.filter((item) => matchesDealProductRealizationItem(row, item))
 			.reduce((sum, item) => sum + item.qty, 0), 0));
 }
 

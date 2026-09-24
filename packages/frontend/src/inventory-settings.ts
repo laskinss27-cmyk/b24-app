@@ -2,6 +2,11 @@ import { call } from './bitrix-client.js';
 
 /** Инициаторы по умолчанию: Дранишников (1), Бекасов (986). Дальше ведут сами через app.option. */
 const DEFAULT_INITIATORS = ['1', '986'];
+const EXCLUDED_INVENTORY_STORES = new Set(['железноводская, секция 23']);
+
+export function inventoryStoreVisible(title: string): boolean {
+	return !EXCLUDED_INVENTORY_STORES.has(title.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е'));
+}
 
 export async function getInitiators(): Promise<string[]> {
 	try {

@@ -7,13 +7,13 @@ import {
 import type { StockForm } from './StockWorkspaceTypes.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
+const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
-const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: '#1a2231' };
-const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
-const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
+const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)' };
+const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
+const fieldLabel: CSSProperties = { fontSize: 12, color: 'var(--app-muted)', display: 'block', margin: '8px 0 4px' };
 const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(20,30,50,.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '36px 16px', zIndex: 1000, overflow: 'auto' };
-const modalCard: CSSProperties = { background: '#fff', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
+const modalCard: CSSProperties = { background: 'var(--app-surface)', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
 const storeSelect = (value: string, onChange: (v: string) => void, stores: string[], placeholder: string): JSX.Element => (
 	<select style={{ ...inp, width: '100%' }} value={value} onChange={(e) => onChange(e.target.value)}>
 		<option value="">{placeholder}</option>
@@ -89,7 +89,7 @@ export function SupplyTtRequestForm({ form, onClose, onDone }: { form: StockForm
 					<button style={btnGhost} onClick={addManual}>Добавить строку</button>
 				</div>
 				{lines.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}><thead><tr><th style={TH}>Позиция</th><th style={TH}>Кол-во</th><th style={TH}>Ссылка</th><th style={TH}>Комментарий</th><th style={TH}></th></tr></thead><tbody>{lines.map((line, index) => <tr key={`${line.productId ?? 'manual'}-${index}`}>
-					<td style={TD}><b>{line.name}</b>{line.productId ? <div style={{ color: '#7a8699', fontSize: 12 }}>#{line.productId}</div> : null}</td>
+					<td style={TD}><b>{line.name}</b>{line.productId ? <div style={{ color: 'var(--app-muted)', fontSize: 12 }}>#{line.productId}</div> : null}</td>
 					<td style={TD}><input type="number" min="0" step="any" style={{ ...inp, width: 80 }} value={line.qty} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, qty: event.target.value === '' ? '' : Number(event.target.value) } : row))} /></td>
 					<td style={TD}><input style={{ ...inp, width: 180 }} value={line.link} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, link: event.target.value } : row))} /></td>
 					<td style={TD}><input style={{ ...inp, width: 220 }} value={line.note} onChange={(event) => setLines((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, note: event.target.value } : row))} /></td>
@@ -195,7 +195,7 @@ export function ConvertTransferRequestForm({ form, request, onClose, onDone }: {
 		<div style={overlay}>
 			<div style={modalCard}>
 				<h2 style={{ fontSize: 17, margin: '0 0 3px' }}>Перемещение по заказу #{request.id}</h2>
-				<div style={{ color: '#7a8699', fontSize: 12, marginBottom: 8 }}>{request.createdByName} · {request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : ''}</div>
+				<div style={{ color: 'var(--app-muted)', fontSize: 12, marginBottom: 8 }}>{request.createdByName} · {request.createdAt ? new Date(request.createdAt).toLocaleString('ru-RU') : ''}</div>
 				<div style={{ display: 'flex', gap: 12 }}>
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Откуда</label>{storeSelect(fromStore, setFromStore, form.stores, '— склад-источник —')}</div>
 					<div style={{ flex: 1 }}><label style={fieldLabel}>Куда</label>{storeSelect(toStore, setToStore, form.stores.filter((store) => store !== fromStore), '— склад-получатель —')}</div>

@@ -7,7 +7,12 @@ export function DealProductRealizationRow({ row, part }: { row: EnrichedRow; par
 		<tr className="part-row">
 			<td className="check-col"></td>
 			<td className="part-name">↳ {row.name}</td>
-			<td className="num">{rub(row.price)}</td>
+			<td className="num">
+				{rub(row.price)}
+				{row.purchasingPrice != null
+					? <div className={`purchase-hint${row.price <= row.purchasingPrice ? ' danger' : ''}`}>закуп {rub(row.purchasingPrice)}{row.price <= row.purchasingPrice ? ' ⚠' : ''}</div>
+					: <div className="purchase-hint muted-hint">закуп —</div>}
+			</td>
 			<td className="num"><span className="none">—</span></td>
 			<td className="num"><span className="none">—</span></td>
 			<td className="num">{part.submitted ? `${part.qty} ${row.measure}` : <span className="none">—</span>}</td>

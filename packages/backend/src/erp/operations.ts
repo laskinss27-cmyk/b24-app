@@ -48,6 +48,7 @@ export {
 	REALIZATION_BASE_SEGMENT,
 	createClientReturns,
 	createRealizationDraft,
+	deleteRealizationDraft,
 	listDealRealizations,
 	submitRealization,
 	syncDealRealizationPrices,
@@ -79,6 +80,7 @@ export type {
 export {
 	createInventoryRecoDraft,
 	deleteInventoryRecoDraft,
+	fetchInventoryPurchasePrices,
 	fetchErpItemNames,
 	fetchErpStoreStock,
 	fetchErpStoreStockFull,
@@ -125,6 +127,7 @@ export type {
 export {
 	REALIZATION_SEGMENT_FIELD,
 	coreStoreId,
+	ensureCoreDealServiceAliasItem,
 	ensureCoreItem,
 	ensureSupplier,
 	fetchCoreCatalogItems,
@@ -140,8 +143,10 @@ export {
 } from './stock-catalog.js';
 export type { CoreCatalogItem, CoreCatalogPrices } from './stock-catalog.js';
 export { createReceiptDraft, createWriteOffDraft, submitDoc } from './stock-document-drafts.js';
-export { fetchCoreDocDetail, itemStockLedger, listCoreMovements } from './stock-movements.js';
-export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement } from './stock-movements.js';
+export { amendSubmittedStockDocument, editableStockDocumentDescriptor } from './stock-document-amendments.js';
+export type { EditableStockDocumentKind, StockDocumentAmendInput, StockDocumentAmendResult } from './stock-document-amendments.js';
+export { fetchCoreDocDetail, itemPendingDeals, itemStockLedger, listCoreMovements } from './stock-movements.js';
+export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement, ItemPendingDeal } from './stock-movements.js';
 export {
 	SUPPLY_PURCHASE_EXPECTED_AT_FIELD,
 	SUPPLY_PURCHASE_ORDERED_AT_FIELD,

@@ -14,7 +14,7 @@ import { buildDealProductsTableView } from './deal-products-table-view.js';
 import { buildDealProductsWorkspaceMode } from './deal-products-workspace-mode.js';
 import { useDealSupplyOrderFormState } from './useDealSupplyOrderFormState.js';
 import { useDealRealizationDrafts } from './useDealRealizationDrafts.js';
-import { useDealProductSelection } from './useDealProductSelection.js';
+import { selectionForRows, useDealProductSelection } from './useDealProductSelection.js';
 import { useDealDocumentsState } from './useDealDocumentsState.js';
 import { useDealNameDialogsState } from './useDealNameDialogsState.js';
 import { useDealProductRowMutationState } from './useDealProductRowMutationState.js';
@@ -257,6 +257,13 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		profitability,
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
+	const selectableRows = [...visibleGoods, ...visibleWorks].filter((row) => remaining(row) > 0);
+	const allRowsSelected = selectableRows.length > 0 && selectableRows.every(isSel);
+	const someRowsSelected = selectableRows.some(isSel);
+	const selectionDisabled = hasPendingDrafts || busy || supplyBusy || selectableRows.length === 0;
+	const toggleAllRows = (): void => {
+		setSelected((current) => selectionForRows(current, selectableRows.map((row) => row.id), !allRowsSelected));
+	};
 
 	const { realizationDocuments, returnDocuments, dealDocumentCount } = buildDealDocumentsView(data, dealTransfers.length);
 	const renderWorkRow = createDealWorkRowRenderer({
@@ -495,6 +502,10 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 			<DealProductsPlanningTable
 				workingMode={workingMode}
+				allRowsSelected={allRowsSelected}
+				someRowsSelected={someRowsSelected}
+				selectionDisabled={selectionDisabled}
+				onToggleAllRows={toggleAllRows}
 				summaryView={summaryView}
 				goods={goods}
 				works={realWorks}

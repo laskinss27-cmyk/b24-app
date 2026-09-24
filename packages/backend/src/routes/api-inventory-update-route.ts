@@ -7,6 +7,7 @@ import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-h
 import { synchronizeInventoryStatus } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
 import { withInventoryUpdateLock } from './api-inventory-update-lock.js';
+import { sendInventoryReviewNotification } from './inventory-review-notification.js';
 
 export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 	app.post('/api/inventory/update', async (req, reply) => {
@@ -110,7 +111,8 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 						pt['startedAt'] = pt['startedAt'] ?? now;
 					}
 				} else if (b.action === 'submit') {
-					pt['status'] = status === 'act' ? 'reconciled' : 'submitted';
+					// Отчёт менеджера сразу готов к проведению: отдельный раунд акта больше не нужен.
+					pt['status'] = 'reconciled';
 					pt['submittedAt'] = now;
 					pt['result'] = b.result ?? null;
 					if (b.facts && typeof b.facts === 'object') pt['draft'] = b.facts;
@@ -140,6 +142,33 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 					NAME: item['NAME'],
 					DETAIL_TEXT: JSON.stringify(data),
 				});
+				if (b.action === 'submit' && !pt['reviewNotificationSentAt']) {
+					try {
+						if (app.config.inventoryNotify !== 'on') throw new Error('INVENTORY_NOTIFY=off');
+						if (!app.config.autozadachiWebhook) throw new Error('AUTOZADACHI_WEBHOOK не настроен');
+						await sendInventoryReviewNotification({
+							webhook: app.config.autozadachiWebhook,
+							inventoryId: String(b.inventoryId),
+							storeName: String(pt['storeName'] ?? b.storeId),
+							managerName: String(b.userName ?? pt['responsibleName'] ?? ''),
+							result: b.result && typeof b.result === 'object' ? b.result as Record<string, unknown> : null,
+							appUrl: app.config.appSectionUrl,
+						});
+						pt['reviewNotificationSentAt'] = new Date().toISOString();
+						delete pt['reviewNotificationError'];
+					} catch (notificationError) {
+						pt['reviewNotificationError'] = inventoryErrorInfo(notificationError);
+						app.log.warn({ inventoryId: b.inventoryId, storeId: b.storeId }, `[api/inventory/update] review notification failed — ${inventoryErrorInfo(notificationError)}`);
+					}
+					await client.call('entity.item.update', {
+						ENTITY: INVENTORY_ENTITY,
+						ID: b.inventoryId,
+						NAME: item['NAME'],
+						DETAIL_TEXT: JSON.stringify(data),
+					}).catch((metadataError) => {
+						app.log.warn({ inventoryId: b.inventoryId, storeId: b.storeId }, `[api/inventory/update] notification metadata save failed — ${inventoryErrorInfo(metadataError)}`);
+					});
+				}
 				app.log.info({ action: b.action, storeId: b.storeId }, '[api/inventory/update] ok');
 				return { ok: true, draftUpdatedAt: pt['draftUpdatedAt'] ?? null };
 			} catch (err) {

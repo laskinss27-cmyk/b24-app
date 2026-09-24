@@ -18,6 +18,7 @@ import { SupplyMetrics, SupplyOrdersView } from './SupplyOrdersView.js';
 import { SupplyRegistryView } from './SupplyRegistryView.js';
 import { SupplyStandaloneDocumentModal, type StandaloneDocumentKind } from './SupplyStandaloneDocumentModal.js';
 import { SupplyApprovalPrint } from './SupplyPrintViews.js';
+import { SupplyReservationsView } from './SupplyReservationsView.js';
 import { useSupplyAccessState } from './useSupplyAccessState.js';
 import { useSupplyDeepLinks } from './useSupplyDeepLinks.js';
 import { useSupplyDecisionActions } from './useSupplyDecisionActions.js';
@@ -47,7 +48,7 @@ export function Supply(): JSX.Element {
 	const [notice, setNotice] = useState<string | null>(null);
 	const [createKind, setCreateKind] = useState<StandaloneDocumentKind | null>(null);
 	const [printApprovalOrder, setPrintApprovalOrder] = useState<SupplyOrderRow | null>(null);
-	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', 'report-builder': '', inventory: '' });
+	const [searches, setSearches] = useState<Record<ViewKey, string>>({ orders: '', incoming: '', reservations: '', purchase: '', logistics: '', stocks: '', marketplaces: '', issue: '', receipt: '', delivery: '', return: '', ledger: '', turnover: '', matrix: '', 'report-builder': '', inventory: '' });
 	const [stockRefresh, setStockRefresh] = useState(0);
 	const {
 		sort,
@@ -166,12 +167,13 @@ export function Supply(): JSX.Element {
 	if (phase === 'denied' && (requestId > 0 || transferDeepLinkId > 0)) return <StockLedger />;
 	if (phase === 'denied' && dealSupplyId > 0) return <DealSupplyFallback dealId={dealSupplyId} />;
 	if (phase === 'denied') return <div className="supply-proto-state">Нет доступа к разделам снабжения и маркетплейсов.</div>;
+	if (phase === 'unavailable') return <div className="supply-proto-state">Bitrix временно не ответил при проверке доступа. <button type="button" onClick={() => window.location.reload()}>Повторить</button></div>;
 	const canOpenReportBuilder = Boolean(ctx.__mock) || currentUserId === '1' || isPortalAdmin();
 
 	return (
 		<div className="supply-proto-shell">
 			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} canOpenReportBuilder={canOpenReportBuilder} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={setView} onToggleReports={() => setReportsOpen((current) => !current)} />
-			<main className={`supply-proto-main${view === 'stocks' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'report-builder' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
+			<main className={`supply-proto-main${view === 'stocks' || view === 'reservations' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'report-builder' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
 				{view !== 'report-builder' && <SupplyPageHeader view={view} onCreate={setCreateKind} />}
 				{(view === 'orders' || view === 'purchase' || view === 'logistics') && <SupplyMetrics orders={orders} view={view} />}
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
@@ -180,6 +182,7 @@ export function Supply(): JSX.Element {
 				{view === 'orders' && <SupplyOrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { cancelReview(); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={startReview} onCancelReview={cancelReview} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
 				{view === 'purchase' && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
+				{view === 'reservations' && <SupplyReservationsView />}
 				{view === 'logistics' && <>
 					<div className="supply-proto-card supply-stock-card"><StockTransfersTab key={`transfers-${stockRefresh}`} form={stockForm} showCreate={false} supplyMode /></div>
 				</>}

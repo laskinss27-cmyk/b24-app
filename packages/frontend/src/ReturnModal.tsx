@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { createDealReturn, type StoreInfo } from './b24.js';
+import { createDealReturnRequest, type StoreInfo } from './b24.js';
 import { splitCard, splitFld, splitGhost, splitOv } from './deal-modal-inline-styles.js';
 
-/** Возврат от клиента: модалка со списком ОТГРУЖЕННЫХ позиций — отметить, указать кол-во и склад возврата,
- *  причину, «Вернуть». Создаёт в ядре Delivery Note is_return (товар обратно на склад, сторно реализации). */
+/** Менеджер выбирает возвращаемые позиции и отправляет Владимиру заявку. Складские документы создаются только после одобрения. */
 export function ReturnModal({ dealId, stores, returnable, onClose, onDone }: {
 	dealId: number;
 	stores: StoreInfo[];
@@ -27,18 +26,18 @@ export function ReturnModal({ dealId, stores, returnable, onClose, onDone }: {
 		.map((r) => ({ productId: r.productId, qty: qtyOf(r), store: store[r.productId] ?? firstStore }))
 		.filter((l) => l.qty > 0 && l.store);
 	const confirm = async (): Promise<void> => {
-		if (!lines.length || busy) return;
+		if (!lines.length || !note.trim() || busy) return;
 		setBusy(true); setErr(null);
 		try {
-			const names = await createDealReturn(dealId, note.trim(), lines);
-			await onDone(`✅ Возврат оформлен: ${names.length} ${names.length === 1 ? 'документ' : 'документа'}, позиций ${lines.length}. Товар вернулся на склад.`);
+			const requestId = await createDealReturnRequest(dealId, note.trim(), lines);
+			await onDone(`✅ Заявка на возврат #${requestId} отправлена Владимиру Дранишникову.`);
 		} catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
 	};
 	return (
 		<div style={splitOv}>
 			<div style={{ ...splitCard, maxWidth: 720 }}>
-				<h2 style={{ fontSize: 17, margin: '0 0 4px' }}>↩️ Возврат от клиента · сделка #{dealId}</h2>
-				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 10 }}>Отметь отгруженные позиции, укажи кол-во и склад возврата.</div>
+				<h2 style={{ fontSize: 17, margin: '0 0 4px' }}>↩️ Запрос на возврат · сделка #{dealId}</h2>
+				<div style={{ fontSize: 13, color: '#7a8699', marginBottom: 10 }}>Отметьте позиции, укажите количество, склад и обязательный комментарий. Возврат проведёт Владимир после одобрения.</div>
 				{!returnable.length ? <p style={{ color: '#c0392b', fontSize: 13 }}>По сделке нет отгруженных позиций — возвращать нечего.</p> : (
 					<table className="products-table" style={{ minWidth: 0 }}>
 						<thead><tr><th className="check-col"></th><th>Товар</th><th className="num">Возврат</th><th>Склад возврата</th></tr></thead>
@@ -58,13 +57,13 @@ export function ReturnModal({ dealId, stores, returnable, onClose, onDone }: {
 						</tbody>
 					</table>
 				)}
-				<label style={{ display: 'block', fontSize: 13, color: '#1a2231', marginTop: 12 }}>Причина / комментарий
-					<input type="text" value={note} placeholder="напр.: запас монтажнику, не пригодилось" onChange={(e) => setNote(e.target.value)} style={{ ...splitFld, width: '100%', marginTop: 4 }} />
+				<label style={{ display: 'block', fontSize: 13, color: '#1a2231', marginTop: 12 }}>Комментарий к заявке
+					<input type="text" required maxLength={500} value={note} placeholder="Причина возврата" onChange={(e) => setNote(e.target.value)} style={{ ...splitFld, width: '100%', marginTop: 4 }} />
 				</label>
 				{err && <p style={{ color: '#c0392b', fontSize: 13 }}>⛔ {err}</p>}
 				<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
 					<button onClick={onClose} style={splitGhost} disabled={busy}>Отмена</button>
-					<button className="btn-primary" disabled={!lines.length || busy} onClick={() => void confirm()}>{busy ? '…' : `Вернуть${lines.length ? ` (${lines.length})` : ''}`}</button>
+					<button className="btn-primary" disabled={!lines.length || !note.trim() || busy} onClick={() => void confirm()}>{busy ? '…' : `Отправить запрос${lines.length ? ` (${lines.length})` : ''}`}</button>
 				</div>
 			</div>
 		</div>

@@ -1,10 +1,13 @@
 import 'dotenv/config';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { loadReservationConfig } from './reservations/sql-config.js';
+import { createReservationRuntime } from './reservations/sql-runtime.js';
 
 const config = loadConfig();
+const reservations = createReservationRuntime(loadReservationConfig());
 
-const app = await buildApp({ config });
+const app = await buildApp({ config, reservations });
 
 try {
 	const address = await app.listen({ port: config.port, host: config.host });

@@ -28,7 +28,7 @@ export function DealQuoteVariantTabs({
 					</div>;
 				})}
 			</div>
-			{!quoteVariants.selectedId && <div className="deal-variant-notice">До выбора клиента это варианты расчёта. Складские действия и этапы пока недоступны.</div>}
+			{!quoteVariants.selectedId && <div className="deal-variant-notice">Чтобы появились галочки и можно было провести реализацию, откройте нужный вариант и нажмите «Выбран клиентом».</div>}
 		</section>
 	);
 }

@@ -34,6 +34,8 @@ export const PlacementQuerySchema = z.object({
 	dealSupply: z.coerce.number().int().positive().optional(),
 	target: z.enum(['manager', 'supply']).optional(),
 	repairId: z.coerce.number().int().positive().optional(),
+	returnRequest: z.coerce.number().int().positive().optional(),
+	returnDecision: z.enum(['approve', 'reject']).optional(),
 });
 
 export type PlacementQuery = z.infer<typeof PlacementQuerySchema>;
@@ -79,8 +81,10 @@ export interface PlacementContext {
 	dealSupplyId?: number | null;
 	linkTarget?: 'manager' | 'supply' | null;
 	repairId?: number | null;
+	returnRequestId?: number | null;
+	returnDecision?: 'approve' | 'reject' | null;
 	/** Экран приложения, который должен открыть placement. */
-	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder';
+	view?: 'inventory' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder' | 'returnApproval';
 	domain: string | null;
 	memberId: string | null;
 	placement: string | null;
@@ -113,6 +117,16 @@ function parseTargetFromOptions(raw: string | undefined): 'manager' | 'supply' |
 	}
 }
 
+function parseReturnDecisionFromOptions(raw: string | undefined): 'approve' | 'reject' | null {
+	if (!raw) return null;
+	try {
+		const value = String((JSON.parse(raw) as Record<string, unknown>)['returnDecision'] ?? '').toLowerCase();
+		return value === 'approve' || value === 'reject' ? value : null;
+	} catch {
+		return null;
+	}
+}
+
 export function parsePlacementOptions(raw: string | undefined): {
 	dealId: number | null;
 	requestId: number | null;
@@ -120,6 +134,8 @@ export function parsePlacementOptions(raw: string | undefined): {
 	dealSupplyId: number | null;
 	linkTarget: 'manager' | 'supply' | null;
 	repairId: number | null;
+	returnRequestId: number | null;
+	returnDecision: 'approve' | 'reject' | null;
 } {
 	return {
 		dealId: parseIdFromOptions(raw, ['ID']),
@@ -128,6 +144,8 @@ export function parsePlacementOptions(raw: string | undefined): {
 		dealSupplyId: parseIdFromOptions(raw, ['dealSupply', 'DEAL_SUPPLY']),
 		linkTarget: parseTargetFromOptions(raw),
 		repairId: parseIdFromOptions(raw, ['repairId', 'REPAIR_ID']),
+		returnRequestId: parseIdFromOptions(raw, ['returnRequest', 'RETURN_REQUEST']),
+		returnDecision: parseReturnDecisionFromOptions(raw),
 	};
 }
 
@@ -179,11 +197,14 @@ export function buildSalesReportContext(body: PlacementBody): PlacementContext {
 
 /** Контекст для placement левого меню — модуль ремонтов (view='repairs'). */
 export function buildRepairsContext(body: PlacementBody): PlacementContext {
+	const options = parsePlacementOptions(body.PLACEMENT_OPTIONS);
 	return {
 		dealId: null,
 		taskId: null,
-		repairId: parseIdFromOptions(body.PLACEMENT_OPTIONS, ['repairId', 'REPAIR_ID']),
-		view: 'repairs',
+		repairId: options.repairId,
+		returnRequestId: options.returnRequestId,
+		returnDecision: options.returnDecision,
+		view: options.returnRequestId && options.returnDecision ? 'returnApproval' : 'repairs',
 		domain: body.DOMAIN ?? null,
 		memberId: body.member_id ?? null,
 		placement: body.PLACEMENT ?? null,

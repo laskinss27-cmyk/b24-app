@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 
-const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: '#1a2231' };
-const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
+const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)' };
+const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
 
 /** Период без явных undefined (exactOptionalPropertyTypes). */
 export const mkPeriod = (from: string, to: string): { from?: string; to?: string } => ({ ...(from ? { from } : {}), ...(to ? { to } : {}) });
@@ -21,11 +21,11 @@ export function StockListFilterBar(props: {
 			<select style={inp} value={status} onChange={(e) => onStatus(e.target.value)}>
 				{statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
 			</select>
-			<label style={{ fontSize: 12, color: '#7a8699', display: 'flex', alignItems: 'center', gap: 4 }}>с<input type="date" style={inp} value={from} onChange={(e) => onFrom(e.target.value)} /></label>
-			<label style={{ fontSize: 12, color: '#7a8699', display: 'flex', alignItems: 'center', gap: 4 }}>по<input type="date" style={inp} value={to} onChange={(e) => onTo(e.target.value)} /></label>
+			<label style={{ fontSize: 12, color: 'var(--app-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>с<input type="date" style={inp} value={from} onChange={(e) => onFrom(e.target.value)} /></label>
+			<label style={{ fontSize: 12, color: 'var(--app-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>по<input type="date" style={inp} value={to} onChange={(e) => onTo(e.target.value)} /></label>
 			<button className="btn-primary" disabled={loading} onClick={onApply}>{loading ? '…' : 'Применить'}</button>
 			<button style={btnGhost} onClick={onReset}>Сброс</button>
-			<span style={{ fontSize: 12, color: '#7a8699', marginLeft: 'auto' }}>{shown} из {total}</span>
+			<span style={{ fontSize: 12, color: 'var(--app-muted)', marginLeft: 'auto' }}>{shown} из {total}</span>
 		</div>
 	);
 }

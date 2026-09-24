@@ -7,6 +7,8 @@ export interface InvLine {
 	name: string;
 	/** Учётный остаток на складе (что система думает, есть). */
 	book: number;
+	/** Закупочная цена ядра. */
+	purchase?: number | undefined;
 	/** Артикул/модель варианта (property360) — главный различитель SKU-дублей (заполнен ~85%). */
 	article?: string | undefined;
 	sectionId?: number | undefined;
@@ -205,7 +207,12 @@ export async function buildAddedLine(productId: number): Promise<InvLine> {
 
 /** Строки акта: ТОЛЬКО расхождения 1-го раунда (учёт из line) + опознание по productId. */
 export async function fetchActLines(lines: InvResult['lines']): Promise<InvLine[]> {
-	return lines.map((line) => ({ productId: line.productId, book: line.book, name: line.name }));
+	return lines.map((line) => ({
+		productId: line.productId,
+		book: line.book,
+		name: line.name,
+		...(line.purchase !== undefined ? { purchase: line.purchase } : {}),
+	}));
 }
 
 /**

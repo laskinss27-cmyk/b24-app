@@ -9,7 +9,7 @@ import type { StockForm, StockMovementKind } from './StockWorkspaceTypes.js';
 
 const KIND_DOCTYPE: Record<StockMovementKind, string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note', return: 'Delivery Note' };
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
+const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
 
 const MOVE_STATUS_OPTS = [
@@ -31,8 +31,10 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const [showForm, setShowForm] = useState(false);
 	const [busyDoc, setBusyDoc] = useState<string | null>(null);
 	const [prod, setProd] = useState<StockItem | null>(null);
-	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string } | null>(null);
+	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string; edit?: boolean } | null>(null);
 	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
+	const canEditSubmitted = Boolean(form?.canEditSubmitted) && (kind === 'issue' || kind === 'receipt' || kind === 'return');
+	const showActions = canPost || canEditSubmitted;
 
 	useEffect(() => {
 		let alive = true; setList(null); setErr(null); setLoading(true);
@@ -74,7 +76,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 				</div>
 			)}
 			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
+				<span style={{ fontSize: 13, color: 'var(--app-muted)' }}>Товар:</span>
 				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
 			<StockListFilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={MOVE_STATUS_OPTS}
@@ -82,18 +84,21 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
 			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
-					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Сделка / ответственный</th><th style={TH}>Инфо</th><th style={TH}>Статус</th>{canPost && <th style={TH}></th>}</tr></thead>
+					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Сделка / ответственный</th><th style={TH}>Инфо</th><th style={TH}>Статус</th>{showActions && <th style={TH}></th>}</tr></thead>
 					<tbody>
 						{shown.map((m) => (
 							<tr key={m.name}>
-								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind] }); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
-								{canPost && <td style={TD}>{!m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}</td>}
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind] }); }} style={{ color: 'var(--app-link)', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
+								{showActions && <td style={TD}>
+									{canPost && !m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}
+									{canEditSubmitted && m.submitted && <button className="btn-secondary" onClick={() => setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind], edit: true })}>✎ Редактировать</button>}
+								</td>}
 							</tr>
 						))}
 					</tbody>
 				</table>
 			)}
-			{openDoc && <StockDocumentDetailModal doctype={openDoc.doctype} name={openDoc.name} {...(kind === 'issue' || kind === 'receipt' ? { printKind: kind } : {})} onClose={() => setOpenDoc(null)} />}
+			{openDoc && <StockDocumentDetailModal doctype={openDoc.doctype} name={openDoc.name} form={form} editInitially={Boolean(openDoc.edit)} {...(kind === 'issue' || kind === 'receipt' ? { printKind: kind } : {})} onChanged={(nextName) => { setOpenDoc({ name: nextName, doctype: openDoc.doctype }); setBump((b) => b + 1); }} onClose={() => setOpenDoc(null)} />}
 			{showForm && form && kind === 'receipt' && <ReceiptForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 			{showForm && form && kind === 'issue' && <IssueForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 		</>

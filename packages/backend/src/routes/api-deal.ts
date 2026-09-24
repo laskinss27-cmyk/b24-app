@@ -19,6 +19,7 @@ import { registerDealQuoteVariantRoutes } from './deal-quote-variant-routes.js';
 import { registerDealStageRoutes } from './deal-stage-routes.js';
 import { registerDealSupplyRoutes } from './deal-supply-routes.js';
 import { registerDealTechnicalFieldsRoute } from './deal-technical-fields-route.js';
+import { registerDealReturnRequestRoutes } from './deal-return-request-route.js';
 
 /**
  * API вкладки сделки — «Добавить товар» (пункт 2) и «Реализовать» (черновик реализации).
@@ -52,6 +53,9 @@ function errInfo(err: unknown): string {
 
 
 export function registerApiDealRoute(app: FastifyInstance): void {
+	const systemClient = (): B24Client | null => app.config.devWebhook
+		? new B24Client({ auth: { kind: 'webhook', url: app.config.devWebhook } })
+		: null;
 	const clientFrom = (body: AuthBody): B24Client | null => {
 		if (!body.domain || !body.accessToken) return null;
 		if (normalizeDomain(body.domain) !== normalizeDomain(app.config.portalDomain)) return null;
@@ -75,6 +79,7 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 	registerDealTechnicalFieldsRoute(app, clientFrom);
 
 	registerDealCoreRealizationRoute(app, clientFrom, syncDealTechnicalFields);
+	registerDealReturnRequestRoutes(app, clientFrom, systemClient, syncDealTechnicalFields);
 
 	registerDealProductSearchRoute(app, clientFrom);
 

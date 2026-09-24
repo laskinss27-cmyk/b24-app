@@ -15,7 +15,7 @@ export const DIRECT_MARKETPLACE_USER_IDS = ['760', '3608'] as const;
 export const APP_OWNER_USER_ID = '1858';
 export const OPERATION_LOG_VIEWER_USER_ID = APP_OWNER_USER_ID;
 /** ID действующего отдела «Снабжение» в Bitrix24. */
-export const SUPPLY_DEPARTMENT_ID = 12;
+export const SUPPLY_DEPARTMENT_ID = 10;
 
 export function hasDirectMarketplaceAccess(userId: unknown): boolean {
 	return (DIRECT_MARKETPLACE_USER_IDS as readonly string[]).includes(String(userId ?? '').trim());
@@ -69,6 +69,7 @@ export const ACCESS_PERMISSIONS = [
 	{ id: 'stock.create_receipt', group: 'Склад', label: 'Создавать приход товара', dangerous: true },
 	{ id: 'stock.create_issue', group: 'Склад', label: 'Создавать списание товара', dangerous: true },
 	{ id: 'stock.edit_draft', group: 'Склад', label: 'Редактировать черновики документов', dangerous: true },
+	{ id: 'stock.edit_submitted', group: 'Склад', label: 'Исправлять проведённые документы', dangerous: true },
 	{ id: 'stock.post_documents', group: 'Склад', label: 'Проводить складские документы', dangerous: true },
 	{ id: 'stock.cancel_documents', group: 'Склад', label: 'Отменять складские документы', dangerous: true },
 	{ id: 'stock.create_product', group: 'Склад', label: 'Создавать товар из складского документа', dangerous: true },

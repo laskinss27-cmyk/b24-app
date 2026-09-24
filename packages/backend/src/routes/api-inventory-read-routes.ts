@@ -3,12 +3,13 @@ import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import {
 	coreStoreId,
+	fetchInventoryPurchasePrices,
 	fetchErpSnapshotStockFull,
 	fetchErpStoreStockFull,
 	listActiveStoreTitles,
 	searchErpItems,
 } from '../erp/operations.js';
-import { inventorySnapshotQuantities } from '../inventory-stock-snapshot.js';
+import { inventorySnapshotQuantities, inventoryStoreAllowed } from '../inventory-stock-snapshot.js';
 import { loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { inventoryStatusForPoints } from './api-inventory-status.js';
@@ -20,6 +21,7 @@ async function resolveCurrentStoreTitle(erp: ErpClient, storeId: number, storeNa
 	const storeTitle = storeTitles.find((title) => coreStoreId(title) === storeId)
 		?? storeTitles.find((title) => title.toLocaleLowerCase('ru-RU') === requestedTitle);
 	if (!storeTitle) throw new Error('склад ядра не найден');
+	if (!inventoryStoreAllowed(storeTitle)) throw new Error(`склад «${storeTitle}» исключён из инвентаризаций`);
 	return storeTitle;
 }
 
@@ -50,6 +52,25 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 					sectionIds: Array.isArray(parsed['sectionIds']) ? parsed['sectionIds'] : [],
 				};
 			});
+			const resultLines = inventories.flatMap((inventory) => inventory.points.flatMap((point) => {
+				const result = point['result'];
+				return result && typeof result === 'object' && Array.isArray((result as Record<string, unknown>)['lines'])
+					? (result as { lines: Array<Record<string, unknown>> }).lines
+					: [];
+			}));
+			const priceIds = resultLines.map((line) => Number(line['productId'])).filter((id) => Number.isInteger(id) && id > 0);
+			const erp = ErpClient.fromEnv();
+			if (erp && priceIds.length) {
+				try {
+					const prices = await fetchInventoryPurchasePrices(erp, priceIds);
+					for (const line of resultLines) {
+						const productId = Number(line['productId']);
+						if (!Number.isFinite(Number(line['purchase']))) line['purchase'] = prices.get(productId) ?? 0;
+					}
+				} catch (error) {
+					app.log.warn({}, `[api/inventory/list] purchase prices unavailable — ${inventoryErrorInfo(error)}`);
+				}
+			}
 			inventories.sort((a, b) => Number(b.id) - Number(a.id));
 			app.log.info({ entity: ent.status, count: inventories.length }, '[api/inventory/list] ok');
 			return { ok: true, entity: ent.status, inventories };
@@ -84,10 +105,12 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 				const storeTitle = await resolveCurrentStoreTitle(erp, Number(b.storeId), b.storeName);
 				core = await fetchErpStoreStockFull(erp, storeTitle);
 			}
+			const prices = await fetchInventoryPurchasePrices(erp, core.map((line) => line.productId));
 			const lines = core.map((l) => ({
 					productId: l.productId,
 					name: l.name,
 					book: l.book,
+					purchase: prices.get(l.productId) ?? 0,
 					article: l.article || undefined,
 					model: (l.article || l.model) || undefined,
 					manufacturer: l.brand || undefined,

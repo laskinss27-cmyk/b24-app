@@ -386,6 +386,53 @@ test('deal realization draft keeps product, service and explicit-submit payloads
 	assert.equal(erp.active().find((document) => document.name === created.name)?.docstatus, 1);
 });
 
+test('legacy stock-classified service uses a non-stock alias without changing the original Item', async () => {
+	const erp = new FakeErp([]);
+	const client = erp.asClient();
+	const originalGet = client.get.bind(client);
+	const originalCreate = client.create.bind(client);
+	const originalUpdate = client.update.bind(client);
+	const createdItems: Array<Record<string, unknown>> = [];
+	const itemUpdates: Array<{ name: string; fields: Record<string, unknown> }> = [];
+
+	client.get = async <T = Record<string, unknown>>(doctype: string, name: string): Promise<T | null> => {
+		if (doctype === 'Item' && name === '18816') return { name, is_stock_item: 1 } as T;
+		if (doctype === 'Item' && name === 'B24-SERVICE-18816') return null;
+		return originalGet(doctype, name);
+	};
+	client.create = async (doctype: string, fields: Record<string, unknown>) => {
+		if (doctype === 'Item') {
+			createdItems.push(structuredClone(fields));
+			return { name: String(fields['item_code']), ...structuredClone(fields) };
+		}
+		return originalCreate(doctype, fields);
+	};
+	client.update = async (doctype: string, name: string, fields: Record<string, unknown>) => {
+		if (doctype === 'Item') itemUpdates.push({ name, fields: structuredClone(fields) });
+		return originalUpdate(doctype, name, fields);
+	};
+
+	const created = await createRealizationDraft(client, {
+		dealId: 38272,
+		lines: [{ productId: 18816, qty: 1, isService: true, rate: 1500 }],
+	});
+	assert.deepEqual(createdItems, [{
+		item_code: 'B24-SERVICE-18816',
+		item_name: 'Услуга Б24 #18816',
+		item_group: 'Каталог Б24',
+		stock_uom: 'шт',
+		is_stock_item: 0,
+		description: 'Нескладская строка реализации Б24 productId=18816',
+	}]);
+	assert.deepEqual(itemUpdates, []);
+
+	const draft = erp.active().find((document) => document.name === created.name);
+	assert.equal(draft?.items[0]?.['item_code'], 'B24-SERVICE-18816');
+	assert.equal(draft?.items[0]?.['warehouse'], undefined);
+	const listed = await listDealRealizations(client, 38272);
+	assert.equal(listed[0]?.items[0]?.productId, 18816);
+});
+
 test('client return keeps source row, segment, sale rate and remaining-quantity limit', async () => {
 	const erp = new FakeErp([{
 		name: 'DN-SALE',
@@ -549,6 +596,61 @@ test('repair delivery notes never enter the commercial deal plan as NaN', async 
 	assert.deepEqual(codes, ['19108']);
 });
 
+test('deal plan preserves duplicate product lines with separate prices and line keys', async () => {
+	const erp = new FakeErp([]);
+	const saved = await upsertDealPlan(erp.asClient(), 36986, [
+		{ productId: 8, itemName: 'Монтаж оборудования', qty: 1, priceListRate: 91247.5, discountPercent: 0, isService: true, lineKey: 'legacy-b24-row-12926' },
+		{ productId: 8, itemName: 'Монтаж оборудования', qty: 1, priceListRate: 28120, discountPercent: 0, isService: true, lineKey: 'legacy-b24-row-12924' },
+	], '2026-09-21');
+
+	assert.deepEqual(saved.lines.map((line) => ({ productId: line.productId, price: line.priceListRate, lineKey: line.lineKey })), [
+		{ productId: 8, price: 91247.5, lineKey: 'legacy-b24-row-12926' },
+		{ productId: 8, price: 28120, lineKey: 'legacy-b24-row-12924' },
+	]);
+	const plan = erp.active().find((document) => document._doctype === 'Sales Order');
+	assert.deepEqual(plan?.items.map((line) => ({ code: line['item_code'], price: line['price_list_rate'], lineKey: line['b24_line_key'] })), [
+		{ code: '8', price: 91247.5, lineKey: 'legacy-b24-row-12926' },
+		{ code: '8', price: 28120, lineKey: 'legacy-b24-row-12924' },
+	]);
+});
+
+test('deal plan cannot be expanded after a submitted sale even when its draft still exists', async () => {
+	const erp = new FakeErp([
+		{ name: 'DN-SALE', docstatus: 1, b24_deal_id: '38484', items: [item('SALE-ROW', 12668, 2, 2100)] },
+		{ name: 'DN-RETURN-1', docstatus: 1, is_return: 1, return_against: 'DN-SALE', b24_deal_id: '38484', items: [item('RETURN-1', 12668, -1, 2100)] },
+		{ name: 'DN-RETURN-2', docstatus: 1, is_return: 1, return_against: 'DN-SALE', b24_deal_id: '38484', items: [item('RETURN-2', 12668, -1, 2100)] },
+	], {
+		name: 'SO-38484', docstatus: 0, b24_deal_id: '38484',
+		items: [item('PLAN-ROW', 12668, 1, 2500, { price_list_rate: 2500, b24_line_key: 'existing-line' })],
+	});
+
+	await assert.rejects(() => upsertDealPlan(erp.asClient(), 38484, [
+		{ productId: 12668, qty: 2, priceListRate: 2100, discountPercent: 0, lineKey: 'existing-line' },
+	], '2026-09-21'), /нельзя увеличивать количество/);
+	await assert.rejects(() => upsertDealPlan(erp.asClient(), 38484, [
+		{ productId: 777, qty: 1, priceListRate: 100, discountPercent: 0 },
+	], '2026-09-21'), /нельзя добавлять новые позиции/);
+});
+
+test('an explicit new stage may expand the plan after a submitted sale', async () => {
+	const erp = new FakeErp([
+		{ name: 'DN-SALE', docstatus: 1, b24_deal_id: '32712', items: [item('SALE-ROW', 16498, 2, 2100)] },
+	], {
+		name: 'SO-32712', docstatus: 0, b24_deal_id: '32712',
+		items: [item('PLAN-ROW', 16498, 2, 2500, { price_list_rate: 2500, b24_line_key: 'existing-line' })],
+	});
+
+	const saved = await upsertDealPlan(erp.asClient(), 32712, [
+		{ productId: 16498, qty: 3, priceListRate: 2500, discountPercent: 0, lineKey: 'existing-line' },
+		{ productId: 18612, qty: 1, priceListRate: 100, discountPercent: 0 },
+	], '2026-09-23', { allowExpansionAfterSale: true });
+
+	assert.deepEqual(saved.lines.map((line) => ({ productId: line.productId, qty: line.qty })), [
+		{ productId: 16498, qty: 3 },
+		{ productId: 18612, qty: 1 },
+	]);
+});
+
 test('selected quote stays active while editable alternatives are created and maintained', async () => {
 	const selectedId = 'selected';
 	const alternativeId = 'alternative';
@@ -646,6 +748,7 @@ test('deal plan reader and staged totals keep ERP quantities, discounts and serv
 		items: [
 			item('SO-ROW-1', 101, 3, 100, { delivered_qty: 1, b24_line_key: 'line-101' }),
 			item('SO-ROW-2', 9814001, 1, 500, { warehouse: '', delivered_qty: 0, b24_line_key: 'line-service' }),
+			item('SO-ROW-3', 18816, 1, 700, { warehouse: '', delivered_qty: 0, b24_line_key: 'line-legacy-service' }),
 		],
 	});
 
@@ -659,9 +762,10 @@ test('deal plan reader and staged totals keep ERP quantities, discounts and serv
 	})), [
 		{ productId: 101, qty: 3, delivered: 1, isService: false, lineKey: 'line-101' },
 		{ productId: 9814001, qty: 1, delivered: 0, isService: true, lineKey: 'line-service' },
+		{ productId: 18816, qty: 1, delivered: 0, isService: true, lineKey: 'line-legacy-service' },
 	]);
-	assert.equal(await calculateDealPlanTotal(erp.asClient(), 90), 835);
-	assert.equal(await calculateDealPlanTotal(erp.asClient(), 90, true), 500);
+	assert.equal(await calculateDealPlanTotal(erp.asClient(), 90), 1535);
+	assert.equal(await calculateDealPlanTotal(erp.asClient(), 90, true), 1200);
 });
 
 test('deal stage lifecycle keeps stage JSON and aggregated plan quantity in sync', async () => {
@@ -1151,6 +1255,7 @@ test('ERP item and supplier helpers keep their current create and update payload
 	const client = {
 		get: async (doctype: string, name: string) => {
 			if (doctype === 'Item' && name === '101') return { name, item_name: 'Old name', is_stock_item: 1 };
+			if (doctype === 'Item' && name === '18816') return { name, item_name: 'Legacy stock service', is_stock_item: 1 };
 			if (doctype === 'Supplier' && name === 'Existing supplier') return { name: 'Existing supplier' };
 			return null;
 		},
@@ -1175,6 +1280,7 @@ test('ERP item and supplier helpers keep their current create and update payload
 		description: 'Description',
 	});
 	await ensureCoreItem(client, { productId: 202, name: 'New item' });
+	await ensureCoreItem(client, { productId: 18816, name: 'Legacy stock service', isService: true });
 
 	assert.deepEqual(updated, [{
 		doctype: 'Item',
@@ -1992,9 +2098,10 @@ test('stock document detail keeps header fields and warehouse-name conversion', 
 	assert.deepEqual(await fetchCoreDocDetail(client, 'Stock Entry', 'STE-1'), {
 		name: 'STE-1', doctype: 'Stock Entry', date: '2026-08-03', submitted: true, dealId: '7',
 		supplier: 'Поставщик', reason: 'брак', note: 'проверено',
+		kind: null, amendedFrom: '', editBlockedReason: 'Этот тип документа не поддерживает ручное исправление.', allowAddLines: false,
 		items: [
-			{ productId: 101, itemName: 'Relay', qty: -2, store: 'Main', rate: 125 },
-			{ productId: 202, itemName: 'Sensor', qty: 3, store: 'Reserve', rate: 40 },
+			{ rowId: '', sourceRow: '', productId: 101, itemName: 'Relay', qty: 2, store: 'Main', rate: 125 },
+			{ rowId: '', sourceRow: '', productId: 202, itemName: 'Sensor', qty: 3, store: 'Reserve', rate: 40 },
 		],
 	});
 	await assert.rejects(fetchCoreDocDetail(client, 'Sales Invoice', 'SI-1'), /недопустимый тип документа/);

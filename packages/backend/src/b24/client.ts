@@ -53,6 +53,30 @@ export interface B24SuccessResponse<T> {
 
 type B24Response<T> = B24SuccessResponse<T> | B24Error;
 
+const TRANSIENT_B24_ERROR = /INTERNAL_SERVER_ERROR|QUERY_LIMIT_EXCEEDED|TOO_MANY_REQUESTS|OPERATION_TIME_LIMIT/i;
+
+function isSafeReadMethod(method: string): boolean {
+	return method === 'user.current'
+		|| method === 'user.admin'
+		|| method.endsWith('.get')
+		|| method.endsWith('.list')
+		|| method.endsWith('.fields')
+		|| method.endsWith('.getforapp')
+		|| method.endsWith('.findbycomm');
+}
+
+function isTransientReadError(error: unknown): boolean {
+	if (error instanceof B24ApiError) {
+		return error.httpStatus === 429
+			|| error.httpStatus >= 500
+			|| TRANSIENT_B24_ERROR.test(`${error.code} ${error.description ?? ''}`);
+	}
+	return error instanceof TypeError;
+}
+
+const retryDelay = (attempt: number): Promise<void> =>
+	new Promise((resolve) => setTimeout(resolve, [0, 250, 750, 1_500][attempt] ?? 1_500));
+
 function isB24Error(response: unknown): response is B24Error {
 	return typeof response === 'object' && response !== null && 'error' in response;
 }
@@ -129,14 +153,33 @@ export class B24Client {
 		);
 	}
 
+	private async invoke<T>(
+		method: string,
+		params: Record<string, unknown>,
+		retryable = isSafeReadMethod(method),
+	): Promise<B24SuccessResponse<T>> {
+		const attempts = retryable ? 4 : 1;
+		let lastError: unknown;
+		for (let attempt = 1; attempt <= attempts; attempt += 1) {
+			try {
+				return await this.throttled<T>(method, params);
+			} catch (error) {
+				lastError = error;
+				if (attempt >= attempts || !isTransientReadError(error)) throw error;
+				await retryDelay(attempt);
+			}
+		}
+		throw lastError;
+	}
+
 	/** Вызов одного метода Б24. */
 	async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-		return (await this.throttled<T>(method, params)).result;
+		return (await this.invoke<T>(method, params)).result;
 	}
 
 	/** Вызов списочного метода вместе с серверными next/total для надёжной пагинации. */
-	callWithMeta<T>(method: string, params: Record<string, unknown> = {}): Promise<B24SuccessResponse<T>> {
-		return this.throttled<T>(method, params);
+	async callWithMeta<T>(method: string, params: Record<string, unknown> = {}): Promise<B24SuccessResponse<T>> {
+		return this.invoke<T>(method, params);
 	}
 
 	/**
@@ -165,7 +208,8 @@ export class B24Client {
 				const query = params ? toQueryString(params) : '';
 				cmd[key] = query ? `${method}?${query}` : method;
 			}
-			const result = await this.call<BatchResult>('batch', { halt: halt ? 1 : 0, cmd });
+			const readOnly = Object.values(chunk).every((item) => isSafeReadMethod(item.method));
+			const result = (await this.invoke<BatchResult>('batch', { halt: halt ? 1 : 0, cmd }, readOnly)).result;
 			Object.assign(merged.result, result.result);
 			Object.assign(merged.result_error, result.result_error);
 			Object.assign(merged.result_total, result.result_total);

@@ -22,6 +22,12 @@ const browserWindow = {} as Window;
 Object.defineProperty(globalThis, 'window', { value: browserWindow, configurable: true });
 
 const { getInitiators, setInitiators } = await import('./b24.js');
+const { inventoryStoreVisible } = await import('./inventory-settings.js');
+
+test('inventory store list excludes Железноводская, секция 23', () => {
+	assert.equal(inventoryStoreVisible('Железноводская, секция 23'), false);
+	assert.equal(inventoryStoreVisible('Железноводская, секция 34'), true);
+});
 
 test('inventory initiators preserve saved values and string conversion', async () => {
 	browserWindow.BX24 = makeSdk((_method, _params, callback) => {

@@ -1,9 +1,11 @@
-import type { BaseRow } from './b24.js';
+import type { BaseRow,StoreInfo } from './b24.js';
+import {stockChoiceLabel} from '@b24-app/shared';
 import { formatCatalogNumber as fmt } from './catalog-product-display.js';
 import { CatalogQuantityInput } from './CatalogQuantityInput.js';
 
 export function QuickSaleCartModal({
 	items,
+	stores,selectedStores,onStoreChange,
 	discountPercent,
 	lineFinal,
 	cartSum,
@@ -18,6 +20,9 @@ export function QuickSaleCartModal({
 	onCreate,
 }: {
 	items: Array<{ row: BaseRow; qty: number }>;
+	stores:StoreInfo[];
+	selectedStores:Record<number,string>;
+	onStoreChange:(id:number,title:string)=>void;
 	discountPercent: (id: number) => number;
 	lineFinal: (row: BaseRow, qty: number) => number;
 	cartSum: number;
@@ -43,7 +48,7 @@ export function QuickSaleCartModal({
 						<div className="cart-items">
 							{items.map((item) => (
 								<div className="cart-item" key={item.row.id}>
-									<span className="cart-nm">{item.row.name}</span>
+									<span className="cart-nm">{item.row.name}{!item.row.isService&&<select aria-label={`Состояние и склад: ${item.row.name}`} disabled={creatingSale} value={selectedStores[item.row.id]??''} onChange={e=>onStoreChange(item.row.id,e.target.value)}><option value="">Выберите состояние и склад</option>{stores.filter(s=>Number(item.row.stockByStore[s.id]??0)>0).map(s=><option key={s.id} value={s.title}>{stockChoiceLabel(s.title,Number(item.row.stockByStore[s.id]??0))}</option>)}</select>}</span>
 									<span className="cart-unit money">{fmt(item.row.retail)} ₽</span>
 									<div className="qty-stepper">
 										<button onClick={() => onQuantityChange(item.row.id, item.qty - 1)} aria-label="меньше">−</button>
@@ -66,7 +71,7 @@ export function QuickSaleCartModal({
 							<button className="btn-secondary" onClick={onClose}>Закрыть</button>
 							<button className="btn-primary" disabled={creatingSale} onClick={() => void onCreate()}>{creatingSale ? 'Создаю…' : 'Создать продажу'}</button>
 						</div>
-						<p className="cart-hint muted">Создастся сделка в воронке «Быстрая продажа» (стадия «Подбор оборудования») с этими позициями и сразу откроется. Оплату/кассу проводишь в сделке нативно, клиента добавишь в карточке.</p>
+						<p className="cart-hint muted">Создастся сделка и черновик реализации с выбранным состоянием каждого товара. Остаток спишется после проведения реализации в сделке. Оплата и касса — отдельно.</p>
 					</>
 				) : (
 					<p className="muted">Корзина пуста.</p>

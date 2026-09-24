@@ -5,6 +5,7 @@ import { registerCatalogCommercialFieldRoutes } from './api-catalog-commercial-f
 import { registerCatalogProductUpdateRoute } from './api-catalog-product-update-route.js';
 import { registerCatalogProductCreateRoute } from './api-catalog-product-create-route.js';
 import { registerCatalogErpStockRoute } from './api-catalog-erp-stock-route.js';
+import { registerStockConditionRoutes } from './api-stock-conditions.js';
 
 export { invalidateCatalogCache } from './api-catalog-cache.js';
 
@@ -26,4 +27,5 @@ export function registerApiCatalogRoute(app: FastifyInstance): void {
 	registerCatalogProductUpdateRoute(app);
 	registerCatalogProductCreateRoute(app);
 	registerCatalogErpStockRoute(app);
+	registerStockConditionRoutes(app);
 }

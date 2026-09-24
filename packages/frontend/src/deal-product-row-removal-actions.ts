@@ -4,6 +4,9 @@ import { isPlanRow, isVariantRow } from './deal-product-row-values.js';
 
 type DealNotice = { kind: 'ok' | 'err'; text: string } | null;
 
+const samePlanLine = (row: EnrichedRow, line: DealPlanItem): boolean =>
+	row.planLineKey ? line.lineKey === row.planLineKey : line.productId === row.productId;
+
 export function createDealProductRowRemovalActions({
 	dealId,
 	data,
@@ -40,14 +43,14 @@ export function createDealProductRowRemovalActions({
 				await removeDealStageItem(dealId, r.stageId, r.productId);
 			} else if (r.segmentKind === 'base') {
 				const next = data.plan.flatMap((x): DealPlanItem[] => {
-					if (x.productId !== r.productId) return [x];
+					if (!samePlanLine(r, x)) return [x];
 					const qty = x.qty - r.quantity;
 					return qty > 0.000001 ? [{ ...x, qty }] : [];
 				});
 				await setDealPlan(dealId, next);
 			} else if (isPlanRow(r)) {
 				// Товар плана: убираем из состава ядра + пересчёт служебной строки с общей суммой в Б24.
-				await setDealPlan(dealId, data.plan.filter((x) => x.productId !== r.productId));
+				await setDealPlan(dealId, data.plan.filter((x) => !samePlanLine(r, x)));
 			} else {
 				throw new Error('Историческую строку нельзя удалить: текущий состав сделки хранится только в ядре.');
 			}

@@ -72,12 +72,6 @@ export function DealGoodsRow({
 						onClick={onRemove}
 						title={row.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
 					>{removingThisRow ? '…' : '✕'}</button>}
-					{workingMode && editable && row.segmentKind !== 'stage' && <button
-						className="row-del-x"
-						disabled={controlsDisabled}
-						onClick={onReplace}
-						title="Заменить товар только в сделке. Заявка снабжению не изменится"
-					>↔</button>}
 					{workingMode && <input
 						type="checkbox"
 						className="row-check"

@@ -2,6 +2,8 @@ import { ErpClient } from './client.js';
 import { DEAL_FIELD } from './erp-setup.js';
 import { INV_FIELD } from './inventory-reconciliation.js';
 import { b24StoreTitle, erpContext } from './warehouse-context.js';
+import { editableStockDocumentDescriptor, type EditableStockDocumentKind } from './stock-document-amendments.js';
+import { dealProductIdFromCoreItemCode } from '../deal-service-product-ids.js';
 
 /** Причина списания — custom-поле на Stock Entry (показываем в журнале). */
 export const WRITEOFF_REASON_FIELD = 'b24_reason';
@@ -92,10 +94,12 @@ export async function listCoreMovements(
 
 // ── Детали документа + история движений по товару (для окна «Складской учёт») ──
 
-export interface CoreDocItem { productId: number; itemName: string; qty: number; store: string; rate: number }
+export interface CoreDocItem { rowId: string; sourceRow: string; productId: number; itemName: string; qty: number; store: string; rate: number }
 export interface CoreDocDetail {
 	name: string; doctype: string; date: string; submitted: boolean; dealId: string;
 	supplier: string; reason: string; note: string; items: CoreDocItem[];
+	kind: EditableStockDocumentKind | null; amendedFrom: string; editBlockedReason: string;
+	allowAddLines: boolean;
 }
 
 /** Допустимые типы документов для детального просмотра (защита от произвольного doctype). */
@@ -111,22 +115,99 @@ export async function fetchCoreDocDetail(erp: ErpClient, doctype: string, name: 
 	const items: CoreDocItem[] = raw.map((it) => {
 		const wh = String(it['warehouse'] ?? it['t_warehouse'] ?? it['s_warehouse'] ?? '');
 		return {
+			rowId: String(it['name'] ?? ''), sourceRow: String(it['dn_detail'] ?? ''),
 			productId: Number(it['item_code']),
 			itemName: String(it['item_name'] ?? ''),
-			qty: Number(it['qty'] ?? 0),
+			qty: Math.abs(Number(it['qty'] ?? 0)),
 			store: wh ? b24StoreTitle(ctx, wh) : '',
-			rate: Number(it['rate'] ?? it['valuation_rate'] ?? 0),
+			rate: Number(doctype === 'Stock Entry'
+				? it['basic_rate'] ?? it['valuation_rate'] ?? it['rate'] ?? 0
+				: it['rate'] ?? it['valuation_rate'] ?? 0),
 		};
 	});
+	const editable = editableStockDocumentDescriptor(doctype, doc);
 	return {
 		name: String(doc['name']), doctype, date: String(doc['posting_date'] ?? ''),
 		submitted: Number(doc['docstatus']) === 1, dealId: String(doc[DEAL_FIELD] ?? ''),
 		supplier: String(doc['supplier'] ?? ''), reason: String(doc[WRITEOFF_REASON_FIELD] ?? ''),
 		note: String(doc[NOTE_FIELD] ?? ''), items,
+		kind: editable.kind, amendedFrom: String(doc['amended_from'] ?? ''), editBlockedReason: editable.blockedReason,
+		allowAddLines: Boolean(editable.kind && editable.kind !== 'return' && !String(doc['b24_purchase_order'] ?? '')),
 	};
 }
 
 export interface ItemMovement { date: string; doctype: string; voucherNo: string; kind: string; qty: number; store: string }
+
+export interface ItemPendingDeal {
+	dealId: string;
+	planName: string;
+	plannedQty: number;
+	shippedQty: number;
+	pendingQty: number;
+	deliveryDate: string;
+}
+
+const movementQty = (value: unknown): number => {
+	const qty = Number(value ?? 0);
+	return Number.isFinite(qty) ? qty : 0;
+};
+const roundedMovementQty = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
+
+/**
+ * Актуальные планы сделок, в которых товар ещё не отгружен полностью.
+ * Черновики реализаций не уменьшают остаток: товар считается отгруженным только
+ * после проведения Delivery Note. Проведённые возвраты уменьшают чистую отгрузку.
+ */
+export async function itemPendingDeals(erp: ErpClient, productId: number): Promise<ItemPendingDeal[]> {
+	const planHeads = await erp.list('Sales Order', ['name', DEAL_FIELD, 'delivery_date', 'creation'], [
+		['docstatus', '=', 0],
+		['Sales Order Item', 'item_code', '=', String(productId)],
+	], 0, 'creation desc');
+	const plans = new Map<string, { planName: string; plannedQty: number; deliveryDate: string }>();
+	for (const head of planHeads) {
+		const dealId = String(head[DEAL_FIELD] ?? '').trim();
+		const planName = String(head['name'] ?? '').trim();
+		if (!/^\d+$/.test(dealId) || !planName || plans.has(dealId)) continue;
+		const doc = await erp.get<Record<string, unknown>>('Sales Order', planName);
+		if (!doc) continue;
+		const plannedQty = ((doc['items'] as Array<Record<string, unknown>> | undefined) ?? [])
+			.filter((item) => dealProductIdFromCoreItemCode(item['item_code']) === productId)
+			.reduce((sum, item) => sum + Math.max(0, movementQty(item['qty'])), 0);
+		if (plannedQty <= 0.000001) continue;
+		plans.set(dealId, {
+			planName,
+			plannedQty,
+			deliveryDate: String(doc['delivery_date'] ?? head['delivery_date'] ?? ''),
+		});
+	}
+	if (!plans.size) return [];
+
+	const dealIds = [...plans.keys()];
+	const deliveryHeads = await erp.list('Delivery Note', ['name', DEAL_FIELD], [
+		[DEAL_FIELD, 'in', dealIds],
+		['docstatus', '=', 1],
+		['Delivery Note Item', 'item_code', '=', String(productId)],
+	], 0, 'posting_date asc, creation asc');
+	const shippedByDeal = new Map<string, number>();
+	for (const head of deliveryHeads) {
+		const dealId = String(head[DEAL_FIELD] ?? '').trim();
+		const name = String(head['name'] ?? '').trim();
+		if (!plans.has(dealId) || !name) continue;
+		const doc = await erp.get<Record<string, unknown>>('Delivery Note', name);
+		if (!doc || Number(doc['docstatus'] ?? 1) !== 1) continue;
+		const qty = ((doc['items'] as Array<Record<string, unknown>> | undefined) ?? [])
+			.filter((item) => dealProductIdFromCoreItemCode(item['item_code']) === productId)
+			.reduce((sum, item) => sum + movementQty(item['qty']), 0);
+		shippedByDeal.set(dealId, (shippedByDeal.get(dealId) ?? 0) + qty);
+	}
+
+	return [...plans.entries()].flatMap(([dealId, plan]) => {
+		const plannedQty = roundedMovementQty(plan.plannedQty);
+		const shippedQty = roundedMovementQty(Math.max(0, shippedByDeal.get(dealId) ?? 0));
+		const pendingQty = roundedMovementQty(Math.max(0, plannedQty - shippedQty));
+		return pendingQty > 0.000001 ? [{ dealId, ...plan, plannedQty, shippedQty, pendingQty }] : [];
+	}).sort((left, right) => left.deliveryDate.localeCompare(right.deliveryDate) || Number(left.dealId) - Number(right.dealId));
+}
 
 /** История движений ОДНОГО товара по всем типам — родной Stock Ledger Entry ядра.
  *  kind: человекочитаемый тип (оприходование/списание/перемещение/реализация/инвентаризация). */

@@ -89,7 +89,7 @@ export {
 	updateTransferLines,
 } from './stock-transfers.js';
 export { fetchDocDetail, fetchItemHistory, fetchMovements } from './stock-history.js';
-export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemMovement } from './stock-history.js';
+export type { CoreDocDetail, CoreDocItem, CoreMovement, ItemHistoryReport, ItemMovement, ItemPendingDeal } from './stock-history.js';
 export {
 	deleteAssortmentMatrixTemplate,
 	downloadTurnoverReportXlsx,
@@ -108,7 +108,10 @@ export type {
 	TurnoverReportRow,
 	TurnoverStatus,
 } from './stock-analytics.js';
-export { createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } from './stock-documents.js';
+export { amendStockDocument, createIssueDoc, createReceiptDoc, createStockProduct, fetchStockFormData, searchStockItems, submitStockDoc } from './stock-documents.js';
+export type { StockDocumentAmendInput } from './stock-documents.js';
+export { fetchReservations } from './reservations-api.js';
+export type { ReservationNotificationStatus, ReservationRow, ReservationsResult, ReservationStatus } from './reservations-api.js';
 export type { IssueDraftInput, ReceiptDraftInput, StockItem } from './stock-documents.js';
 export {
 	createDealSupplyRequest,
@@ -157,10 +160,11 @@ export type {
 } from './marketplace-api.js';
 export {
 	addProductToDeal,
-	createDealReturn,
+	createDealReturnRequest,
 	fetchDealRealizationsCore,
 	realizeCoreDraft,
 	realizeCoreSubmit,
+	deleteCoreRealizationDrafts,
 } from './core-realizations.js';
 export type { CoreRealization, CoreRealizationItem, RealizeCoreGroup } from './core-realizations.js';
 export { downloadDealKpDocx, downloadDealXlsx, fetchDealKp } from './deal-commercial-proposals.js';

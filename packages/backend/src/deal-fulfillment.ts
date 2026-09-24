@@ -20,10 +20,11 @@ export function calculateDealFulfillment(plan: PlanItem[], realizations: ErpReal
 	const allCurrentLinesRealized = plan.every((item) =>
 		(realizedByProduct.get(item.productId) ?? 0) + 0.000001 >= item.qty,
 	);
-	// После полного возврата последняя позиция удаляется из плана. Наличие проведённой истории
-	// отличает такую сделку от новой пустой сделки, которая ещё не должна считаться завершённой.
-	const hasSubmittedHistory = submitted.some((document) => document.items.length > 0);
-	return allCurrentLinesRealized && (plan.length > 0 || hasSubmittedHistory) ? 'ДА' : 'НЕТ';
+	// Старые версии уменьшали план при возврате. Поэтому пустой план считается выполненным
+	// только пока после всех возвратов осталось положительное реализованное количество.
+	// Полный возврат всегда переводит признак в «НЕТ».
+	const hasPositiveNetRealization = [...realizedByProduct.values()].some((qty) => qty > 0.000001);
+	return allCurrentLinesRealized && (plan.length > 0 || hasPositiveNetRealization) ? 'ДА' : 'НЕТ';
 }
 
 /** Записывает поле только при реальном изменении, чтобы не запускать робота повторно без причины. */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { receivingChatStore, storeChat } from './chats.js';
+import { receivingChatStore, reservationStoreChat, storeChat } from './chats.js';
 
 test('routes stores to the new Админка по ТТ chats', () => {
 	assert.equal(storeChat('Железноводская, секция 23'), 'chat4150');
@@ -17,4 +17,10 @@ test('normalizes a store name and selects the point that receives the transfer',
 	assert.equal(receivingChatStore('Склад прихода', 'Максидом Дунайский 64'), 'Максидом Дунайский 64');
 	assert.equal(receivingChatStore('Максидом Тельмана 31', 'Склад прихода'), 'Максидом Тельмана 31');
 	assert.equal(receivingChatStore('Склад прихода', 'Маркетплейс'), null);
+});
+
+test('routes native reservation store ids even when the catalog title changed', () => {
+	assert.equal(reservationStoreChat(22, 'Фаворского 12'), 'chat17412');
+	assert.equal(reservationStoreChat(8, 'Точка переименована'), 'chat17422');
+	assert.equal(reservationStoreChat(999, 'Маркетплейс'), null);
 });

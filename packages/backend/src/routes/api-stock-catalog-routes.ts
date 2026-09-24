@@ -20,8 +20,9 @@ export function registerStockCatalogRoutes(app: FastifyInstance): void {
 			]);
 			const canCreate = appPermission(req, 'stock.create_receipt', access.canManage)
 				|| appPermission(req, 'stock.create_issue', access.canManage);
+			const canEditSubmitted = appPermission(req, 'stock.edit_submitted', access.canManage);
 			const isSupply = appPermission(req, 'supply.view', access.isSupply);
-			return { ok: true, stores, suppliers, canCreate, isSupply };
+			return { ok: true, stores, suppliers, canCreate, canEditSubmitted, isSupply };
 		} catch (e) {
 			app.log.error({}, `[api/stock/form-data] failed — ${stockErrorInfo(e)}`);
 			return reply.code(200).send({ ok: false, error: stockErrorInfo(e) });

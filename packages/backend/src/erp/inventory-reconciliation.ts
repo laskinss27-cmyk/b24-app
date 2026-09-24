@@ -112,6 +112,26 @@ export async function fetchErpItemNames(erp: ErpClient, productIds: number[]): P
 	return out;
 }
 
+/** Закупочные цены для отчёта инвентаризации: Standard Buying, затем valuation_rate. */
+export async function fetchInventoryPurchasePrices(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+	const out = new Map<number, number>();
+	const ids = [...new Set(productIds.filter((id) => Number.isInteger(id) && id > 0))];
+	for (let index = 0; index < ids.length; index += 200) {
+		const chunk = ids.slice(index, index + 200).map(String);
+		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
+			['item_code', 'in', chunk],
+			['price_list', '=', 'Standard Buying'],
+		]);
+		for (const row of prices) out.set(Number(row['item_code']), Number(row['price_list_rate'] ?? 0));
+		const items = await erp.list('Item', ['name', 'valuation_rate'], [['name', 'in', chunk]]);
+		for (const row of items) {
+			const productId = Number(row['name']);
+			if (!out.has(productId)) out.set(productId, Number(row['valuation_rate'] ?? 0));
+		}
+	}
+	return out;
+}
+
 export interface InventoryRecoLine {
 	productId: number;
 	/** Фактический остаток (абсолют, не дельта) — Stock Reco выставляет qty В ЛОБ. */

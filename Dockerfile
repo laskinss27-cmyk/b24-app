@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:20-alpine AS base
+ARG NODE_IMAGE=node:20-alpine
+FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 
 # ── Слой 1: зависимости.
@@ -18,6 +19,8 @@ COPY packages ./packages
 # Bundle that workspace for plain Node.js and point only the container copy at it.
 RUN npm -w @b24-app/frontend run build \
  && npm -w @b24-app/backend run build \
+ && test -s packages/backend/dist/catalog-mirror/reader.js \
+ && test -s packages/backend/dist/catalog-mirror/live-stock.js \
  && npx esbuild packages/shared/src/index.ts --bundle --platform=node --format=esm --outfile=packages/shared/dist/index.js \
  && sed -i 's#\./src/index\.ts#./dist/index.js#g' packages/shared/package.json
 

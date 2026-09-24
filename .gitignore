@@ -34,3 +34,6 @@ secrets.local.json
 
 # Локальные настройки Claude Code (содержат токены в allowlist) — НЕ коммитить
 .claude/settings.local.json
+
+# Local order inbox, test credentials and SQLite WAL sidecars.
+/.local/orders/

@@ -105,7 +105,7 @@ export function DealActionsBar({
 						title={variantSelectionLocked ? 'По основному варианту уже начались этапы, снабжение, реализации или перемещения' : undefined}
 					>{variantSelectionLocked ? 'Основной зафиксирован' : viewingSelected ? 'Отменить основной' : selectedVariantExists ? 'Сделать основным' : 'Выбран клиентом'}</button>
 				)}
-				{workingMode && <button className="btn-secondary" disabled={!canReturn || dev} onClick={onReturn} title={canReturn ? 'Оформить возврат отгруженного товара на склад' : 'Нет доступа к возврату'}>Возврат</button>}
+				{workingMode && <button className="btn-secondary" disabled={!canReturn || dev} onClick={onReturn} title={canReturn ? 'Отправить Владимиру заявку на возврат' : 'Нет доступа к заявке на возврат'}>Запрос на возврат</button>}
 				{workingMode && <button className={`btn-secondary${showDealDocuments ? ' active' : ''}`} onClick={onToggleDocuments}>Документы по сделке{dealDocumentCount ? ` (${dealDocumentCount})` : ''}</button>}
 			</div>
 			<span className="hint">{workingMode ? 'Склад реализации выбирается на строке товара. КП формируется из текущего состава сделки.' : alternativeView ? 'Альтернативный вариант можно редактировать и печатать независимо от основного.' : 'КП формируется только из открытого варианта.'}</span>

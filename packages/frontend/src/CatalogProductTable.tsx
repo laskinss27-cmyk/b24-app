@@ -20,7 +20,7 @@ export function CatalogProductTable({
 	pickMode,
 	canEditPrices,
 	priceTagMode,
-	sid,
+	storeIds,
 	cart,
 	priceTagQty,
 	sortMark,
@@ -39,7 +39,7 @@ export function CatalogProductTable({
 	pickMode: boolean;
 	canEditPrices: boolean;
 	priceTagMode: boolean;
-	sid: number | null;
+	storeIds: number[];
 	cart: ReadonlyMap<number, number>;
 	priceTagQty: ReadonlyMap<number, number>;
 	sortMark: (key: CatalogSortKey) => string;
@@ -65,7 +65,7 @@ export function CatalogProductTable({
 							<th onClick={() => toggleSort('section')}>Раздел{sortMark('section')}</th>
 							<th className="num" onClick={() => toggleSort('retail')}>Розница ₽{sortMark('retail')}</th>
 							<th className="num" onClick={() => toggleSort('purchase')}>Закупка ₽{sortMark('purchase')}</th>
-							<th className="num c-store" onClick={() => toggleSort('stock')}>Остаток{sortMark('stock')}</th>
+							<th className="num c-store" onClick={() => toggleSort('stock')}>{storeIds.length > 1 ? 'Остаток выбранных' : 'Остаток'}{sortMark('stock')}</th>
 							<th onClick={() => toggleSort('total')}>Остатки по складам{sortMark('total')}</th>
 							{(canQuickSale || pickMode) && <th className="sale-col">{pickMode ? 'Кол-во' : 'В продажу'}</th>}
 							{priceTagMode && <th className="sale-col">Ценники</th>}
@@ -103,7 +103,7 @@ export function CatalogProductTable({
 									<td className="num c-store"><span className={`stock${qty > 0 ? '' : ' zero'}`}>{isAll ? '' : qty}</span></td>
 									<td>
 										<div className="whs">
-											{others.length ? others.map((o) => <span className={`wh${o.id === sid ? ' sel' : ''}`} key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
+											{others.length ? others.map((o) => <span className={`wh${storeIds.includes(o.id) ? ' sel' : ''}`} key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
 										</div>
 									</td>
 									{(canQuickSale || pickMode) && (

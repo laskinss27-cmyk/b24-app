@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import {StockConditionEditor} from './StockConditionEditor.js';
+import {STOCK_CONDITIONS} from '@b24-app/shared';
 import { photoFullUrl, type BaseRow, type CatalogProductUpdateInput, type StoreInfo } from './b24.js';
 import { formatCatalogNumber as fmt, productStatuses, PRODUCT_STATUS_OPTIONS } from './catalog-product-display.js';
 import { prepareCatalogPhoto, type PreparedCatalogPhoto } from './catalog-product-photo.js';
@@ -14,6 +16,7 @@ export function CatalogProductCard({
 	onSave,
 	onSaveMarketplaceOldId,
 	onClose,
+	onStockChanged,
 }: {
 	row: BaseRow;
 	stores: StoreInfo[];
@@ -25,6 +28,7 @@ export function CatalogProductCard({
 	onSave: (input: CatalogProductUpdateInput) => Promise<void>;
 	onSaveMarketplaceOldId: (oldId: string) => Promise<void>;
 	onClose: () => void;
+	onStockChanged?: () => Promise<void>;
 }): JSX.Element {
 	const [editing, setEditing] = useState(false);
 	const [name, setName] = useState(row.name);
@@ -191,6 +195,7 @@ export function CatalogProductCard({
 						</div>
 					</aside>
 					<main className="catalog-product-content">
+						{!row.isService&&onStockChanged&&<StockConditionEditor key={row.id} productId={row.id} onChanged={onStockChanged}/>}
 						<section>
 							<h3>Основная информация</h3>
 							{editing ? (
@@ -204,8 +209,9 @@ export function CatalogProductCard({
 									<label>Закупочная цена, ₽<input inputMode="decimal" value={purchase} disabled={!canEditPrices} onChange={(event) => setPurchase(event.target.value)} /></label>
 									{!canEditPrices && <div className="wide catalog-price-permission-note">Цены показаны только для справки — право на их изменение настраивается отдельно.</div>}
 									<fieldset className="wide catalog-status-editor">
-										<legend>Статус товара</legend>
-										<div>{PRODUCT_STATUS_OPTIONS.map((status) => <label key={status}>
+										<legend>Общие метки карточки (не распределяют количество)</legend>
+										<small>Сток, ремонт и другие состояния количества назначаются инструментом «Изменить состояние части остатка». Старые общие метки можно снять здесь.</small>
+										<div>{PRODUCT_STATUS_OPTIONS.filter(status=>!(STOCK_CONDITIONS as readonly string[]).includes(status)||productStatuses(row.status).includes(status)).map((status) => <label key={status}>
 											<input
 												type="checkbox"
 												checked={statuses.includes(status)}

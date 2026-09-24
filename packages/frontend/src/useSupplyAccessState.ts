@@ -1,4 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { hasDirectMarketplaceAccess } from '@b24-app/shared';
 import {
 	fetchCurrentAppAccess,
 	fetchCurrentUserId,
@@ -6,13 +7,41 @@ import {
 	fetchSupplyOrders,
 	fetchSupplySuppliers,
 	type SupplyOrderRow,
+	withRetry,
 	withTimeout,
 } from './b24.js';
 import { MOCK_ORDERS } from './supply-mock-orders.js';
 import type { SupplyViewKey } from './SupplyNavigation.js';
 
-type SupplyPhase = 'init' | 'denied' | 'manager-link' | 'ready';
+type SupplyPhase = 'init' | 'denied' | 'unavailable' | 'manager-link' | 'ready';
 type SupplyStockForm = Awaited<ReturnType<typeof fetchStockFormData>>;
+
+const supplyAccessCacheKey = (userId: string): string => `b24:supply-access:${userId}`;
+
+function readCachedStockForm(userId: string): SupplyStockForm | null {
+	if (!userId) return null;
+	try {
+		const raw = localStorage.getItem(supplyAccessCacheKey(userId));
+		if (!raw) return null;
+		const cached = JSON.parse(raw) as { expiresAt?: number; value?: SupplyStockForm };
+		if (!cached.value || Number(cached.expiresAt ?? 0) <= Date.now()) return null;
+		return cached.value;
+	} catch {
+		return null;
+	}
+}
+
+function cacheStockForm(userId: string, value: SupplyStockForm): void {
+	if (!userId) return;
+	try {
+		localStorage.setItem(supplyAccessCacheKey(userId), JSON.stringify({
+			expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+			value,
+		}));
+	} catch {
+		// В некоторых iframe localStorage закрыт; текущая сессия продолжит работать без кеша.
+	}
+}
 
 type UseSupplyAccessStateOptions = {
 	mock: boolean;
@@ -56,7 +85,7 @@ export function useSupplyAccessState({
 	const [marketplaceOnly, setMarketplaceOnly] = useState(false);
 	const [canOpenMarketplaces, setCanOpenMarketplaces] = useState(mock);
 	const [stockForm, setStockForm] = useState<SupplyStockForm | null>(mock
-		? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: defaultSuppliers, canCreate: true, isSupply: true }
+			? { stores: ['Максидом Дунайский 64', 'Максидом Богатырский 15', 'Максидом ул. Фаворского 12'], suppliers: defaultSuppliers, canCreate: true, canEditSubmitted: true, isSupply: true }
 		: null);
 
 	useEffect(() => {
@@ -71,14 +100,23 @@ export function useSupplyAccessState({
 		bx.init(() => {
 			void (async () => {
 				const [uid, appAccess] = await Promise.all([
-					withTimeout(fetchCurrentUserId(), 15000, 'user.current'),
+					withRetry(() => fetchCurrentUserId(), 3, 15000, 'user.current'),
 					withTimeout(fetchCurrentAppAccess(), 20000, 'access-control/me').catch(() => null),
 				]);
 				const supplyDecision = appAccess?.decisions['supply.view'] ?? 'inherit';
 				const marketplaceDecision = appAccess?.decisions['marketplaces.view'] ?? 'inherit';
-				const access = supplyDecision === 'deny'
-					? null
-					: await withTimeout(fetchStockFormData(), 15000, 'stock.form-data').catch(() => null);
+				const directMarketplaceAccess = hasDirectMarketplaceAccess(uid);
+				let access: SupplyStockForm | null = null;
+				let accessUnavailable = false;
+				if (supplyDecision !== 'deny') {
+					try {
+						access = await withRetry(() => fetchStockFormData(), 3, 15000, 'stock.form-data');
+						cacheStockForm(uid, access);
+					} catch {
+						access = readCachedStockForm(uid);
+						accessUnavailable = !access;
+					}
+				}
 				setCurrentUserId(uid);
 				if (access) setStockForm(access);
 				const deleteDecision = appAccess?.decisions['supply.delete_documents'] ?? 'inherit';
@@ -91,9 +129,14 @@ export function useSupplyAccessState({
 					return;
 				}
 				const canOpenSupply = supplyDecision === 'allow' || (supplyDecision === 'inherit' && Boolean(access?.canCreate));
-				const canOpenMarketplace = marketplaceDecision === 'allow'
+				const canOpenMarketplace = directMarketplaceAccess || marketplaceDecision === 'allow'
 					|| (marketplaceDecision === 'inherit' && canOpenSupply);
 				setCanOpenMarketplaces(canOpenMarketplace);
+				if (accessUnavailable && !canOpenSupply && !canOpenMarketplace) {
+					setLoading(false);
+					setPhase('unavailable');
+					return;
+				}
 				if (!canOpenSupply && !canOpenMarketplace) { setLoading(false); setPhase('denied'); return; }
 				if (!canOpenSupply && canOpenMarketplace) {
 					setMarketplaceOnly(true);
@@ -113,7 +156,7 @@ export function useSupplyAccessState({
 				} finally {
 					setLoading(false);
 				}
-			})().catch(() => setPhase('denied'));
+			})().catch(() => { setLoading(false); setPhase('unavailable'); });
 		});
 	}, [dealSupplyId, defaultSuppliers, linkTarget, mock, requestId, setOrders, setView, transferDeepLinkId]);
 

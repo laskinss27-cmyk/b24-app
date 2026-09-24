@@ -455,6 +455,29 @@ export async function ensureTransferRequestsEntity(client: B24Client): Promise<{
 	}
 }
 
+/** Заявки менеджеров на возврат. Складские документы появляются только после решения согласующего. */
+export const RETURN_REQUESTS_ENTITY = 'ctv_ret_requests';
+
+let returnRequestsEntityEnsured = false;
+
+export async function ensureReturnRequestsEntity(client: B24Client): Promise<{ status: string }> {
+	if (returnRequestsEntityEnsured) return { status: 'cached' };
+	try {
+		await client.call('entity.add', { ENTITY: RETURN_REQUESTS_ENTITY, NAME: 'CTV Заявки на возврат', ACCESS: { AU: 'W' } });
+		returnRequestsEntityEnsured = true;
+		return { status: 'created' };
+	} catch (err) {
+		if (err instanceof B24ApiError) {
+			if (/exist/i.test(err.code + ' ' + (err.description ?? ''))) {
+				returnRequestsEntityEnsured = true;
+				return { status: 'exists' };
+			}
+			return { status: `${err.code}: ${err.description ?? ''}` };
+		}
+		return { status: String(err) };
+	}
+}
+
 /**
  * Пункт ЛЕВОГО МЕНЮ «Ремонты» — вход в наш модуль приёма оборудования (view='repairs').
  * Обработчик /placement/repairs. LEFT_MENU допускает несколько привязок с разными HANDLER —

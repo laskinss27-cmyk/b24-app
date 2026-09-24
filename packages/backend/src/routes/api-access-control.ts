@@ -4,6 +4,7 @@ import { B24ApiError, B24Client } from '../b24/client.js';
 import {
 	ACCESS_MANAGER_IDS,
 	ACCESS_POLICY_EDITOR_ENABLED,
+	ACCESS_POLICY_ENFORCEMENT_ENABLED,
 	ACCESS_POLICY_OPTION,
 	accessClientFrom,
 	cacheAccessPolicy,
@@ -58,6 +59,15 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AccessAuthBody;
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'нет авторизации' });
+		if (!ACCESS_POLICY_ENFORCEMENT_ENABLED && !ACCESS_POLICY_EDITOR_ENABLED) {
+			return {
+				ok: true,
+				user: null,
+				policyMode: 'draft' as const,
+				decisions: {},
+				canManageAccess: false,
+			};
+		}
 		try {
 			const access = await resolveCurrentAccess(app, body);
 			if (!access) return reply.code(403).send({ ok: false, error: 'нет авторизации' });

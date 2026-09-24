@@ -19,6 +19,7 @@ import {
 	writeInventoryLocalDraft,
 	type InventoryLocalDraft,
 } from './inventory-draft.js';
+import { buildInventoryResult } from './inventory-result.js';
 
 /**
  * Экран подсчёта ОДНОЙ точки инвентаризации. Точка уже выбрана инициатором/менеджером
@@ -321,7 +322,8 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 		return v !== undefined && v !== '';
 	};
 	const counted = list.filter(isCounted).length;
-	const discrepancies = list.filter((i) => isCounted(i) && Number(counts[i.productId]) !== i.book).length;
+	const unfilled = list.length - counted;
+	const discrepancies = list.filter((i) => Number(isCounted(i) ? counts[i.productId] : 0) !== i.book).length;
 
 	const draftObj = (): Record<number, number> => {
 		return countsToDraft(countsRef.current);
@@ -347,26 +349,11 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 
 	async function onSubmit(): Promise<void> {
 		setActionErr(null);
-		// пустое поле = 0; расхождение считаем по ВСЕМ позициям (непосчитанное с учётом>0 = недостача)
-		const factOf = (i: InvLine): number => {
-			const v = counts[i.productId];
-			return v === undefined || v === '' ? 0 : Number(v);
-		};
-		const lines: InvResult['lines'] = list
-			.filter((i) => factOf(i) !== i.book)
-			.map((i) => ({
-				productId: i.productId,
-				name: i.name,
-				book: i.book,
-				fact: factOf(i),
-				diff: factOf(i) - i.book,
-				...(comments[i.productId]?.trim() ? { comment: comments[i.productId]!.trim().slice(0, 500) } : {}),
-			}));
-		// режим акта → слияние в финал: total и совпавшие берём из 1-го раунда, расхождения = оставшиеся после сверки
-		const result: InvResult =
-			mode === 'act'
-				? { total: total1 ?? list.length, counted: (total1 ?? list.length) - lines.length, discrepancies: lines.length, lines }
-				: { counted, total: list.length, discrepancies: lines.length, lines };
+		if (unfilled > 0 && !window.confirm(`Не заполнено позиций: ${unfilled}. Они будут рассчитаны как нулевой остаток и попадут в недостачу. Отправить отчёт?`)) return;
+		const result = buildInventoryResult(list, counts, comments, {
+			...(mode ? { mode } : {}),
+			...(total1 !== undefined ? { total: total1 } : {}),
+		});
 		const facts = draftObj(); // все факты раунда — чтобы предзаполнить 2-й раунд (акт)
 		const savedComments = commentsObj();
 		if (mock) {
@@ -421,7 +408,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				<h1>{mode === 'act' ? 'Акт разногласий' : 'Инвентаризация'} — {storeName}</h1>
 				<p className="subtitle">
 					{me.name} · посчитано {counted}/{list.length}
-					{list.length - counted > 0 ? ` · не введено ${list.length - counted}` : ''} · расхождений {discrepancies}
+					{unfilled > 0 ? ` · не заполнено ${unfilled} (считается как 0)` : ''} · расхождений {discrepancies}
 					{!mobile && (
 						<>
 							{' '}·{' '}
@@ -438,6 +425,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 			{mode === 'act' && (
 				<div className="beta-banner">📝 Сверка акта разногласий: перепроверь спорные позиции, досчитай упущенное — затем «Отправить».</div>
 			)}
+			{unfilled > 0 && <div className="beta-banner">Незаполненные позиции считаются как нулевой фактический остаток и отдельно отмечаются в отчёте.</div>}
 
 			<div className="inv-toolbar">
 				<input
@@ -491,7 +479,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 												type="text"
 												className="count-comment"
 												maxLength={500}
-												placeholder="Комментарий: не найден, повреждён, мыши съели…"
+												aria-label="Комментарий к позиции"
 												value={comments[i.productId] ?? ''}
 												onChange={(event) => {
 													const next = { ...commentsRef.current, [i.productId]: event.target.value };
@@ -531,7 +519,7 @@ export function InventoryCount(props: InventoryCountProps): JSX.Element {
 				<button className="btn-secondary" disabled={saving || done === 'sent'} onClick={() => void onSave()}>
 					{saving ? 'Сохраняю…' : 'Сохранить черновик'}
 				</button>
-				<button className="btn-primary" disabled={saving || done === 'sent' || !counted} onClick={() => void onSubmit()}>
+				<button className="btn-primary" disabled={saving || done === 'sent' || !list.length} onClick={() => void onSubmit()}>
 					{saving ? 'Отправляю…' : 'Отправить отчёт'}
 				</button>
 				{done === 'draft' && <span className="hint ok">✅ Черновик сохранён — можно вернуться позже.</span>}

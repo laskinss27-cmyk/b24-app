@@ -34,8 +34,8 @@ const TABS: Array<{ key: Tab; label: string }> = [
 	{ key: 'inventory', label: 'Инвентаризация' },
 ];
 const tabStyle = (active: boolean): CSSProperties => ({
-	padding: '9px 16px', border: 'none', borderBottom: active ? '2px solid #185fa5' : '2px solid transparent',
-	background: 'none', cursor: 'pointer', fontSize: 14, fontWeight: active ? 600 : 400, color: active ? '#185fa5' : '#1a2231',
+	padding: '9px 16px', border: 'none', borderBottom: active ? '2px solid var(--app-link)' : '2px solid transparent',
+	background: 'none', cursor: 'pointer', fontSize: 14, fontWeight: active ? 600 : 400, color: active ? 'var(--app-link)' : 'var(--app-text)',
 });
 
 type Phase = { k: 'init' } | { k: 'denied' } | { k: 'ready' };
@@ -51,7 +51,7 @@ export function StockLedger(): JSX.Element {
 	// Все сотрудники видят весь складской учёт. Опасные действия отдельно защищены правами API.
 	useEffect(() => {
 		if (ctx.__mock) {
-			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true });
+			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true, canEditSubmitted: true });
 			setPhase({ k: 'ready' });
 			return;
 		}
@@ -68,13 +68,13 @@ export function StockLedger(): JSX.Element {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ctx]);
 
-	if (phase.k === 'init') return <div style={{ padding: 24, color: '#7a8699' }}>Загрузка…</div>;
-	if (phase.k === 'denied') return <div style={{ padding: 24, color: '#7a8699' }}>Не удалось определить права доступа. Обновите страницу.</div>;
+	if (phase.k === 'init') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Загрузка…</div>;
+	if (phase.k === 'denied') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Не удалось определить права доступа. Обновите страницу.</div>;
 	const tabs = TABS;
 	return (
-		<div style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: '#1a2231' }}>
+		<div className="stock-ledger-shell" style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: 'var(--app-text)' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
-			<div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e3e8ef', marginBottom: 14, flexWrap: 'wrap' }}>
+			<div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--app-line)', marginBottom: 14, flexWrap: 'wrap' }}>
 				{tabs.map((t) => (
 					<button key={t.key} style={tabStyle(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
 				))}

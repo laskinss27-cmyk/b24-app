@@ -1650,6 +1650,112 @@
 	font-size: 13px;
 }
 
+.supply-reservations-card {
+	border: 1px solid #d9dee7;
+	border-radius: 10px;
+	background: #fff;
+}
+
+.supply-reservations-head button {
+	border: 1px solid #cdd5e0;
+	border-radius: 8px;
+	padding: 8px 13px;
+	background: #fff;
+	cursor: pointer;
+	font: inherit;
+}
+
+.supply-reservations-head button:disabled {
+	opacity: .55;
+	cursor: wait;
+}
+
+.supply-reservation-filters {
+	display: grid;
+	grid-template-columns: minmax(260px, 1fr) minmax(190px, 240px) minmax(230px, 290px);
+	gap: 12px;
+	padding: 14px 16px;
+	border-bottom: 1px solid #e3e8ef;
+	background: #fbfcfe;
+}
+
+.supply-reservation-filters label {
+	display: grid;
+	gap: 5px;
+	color: #647286;
+	font-size: 12px;
+}
+
+.supply-reservation-filters input,
+.supply-reservation-filters select {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	border: 1px solid #cdd5e0;
+	border-radius: 7px;
+	padding: 8px 10px;
+	background: #fff;
+	color: #1a2231;
+	font: inherit;
+	font-size: 13px;
+}
+
+.supply-reservation-warning,
+.supply-reservation-error,
+.supply-reservation-loading {
+	padding: 11px 16px;
+	font-size: 13px;
+}
+
+.supply-reservation-warning {
+	border-bottom: 1px solid #f1d08a;
+	background: #fff8e7;
+	color: #79520c;
+}
+
+.supply-reservation-error {
+	border-bottom: 1px solid #efb4b4;
+	background: #fff0f0;
+	color: #9b1c1c;
+}
+
+.supply-reservation-loading {
+	color: #647286;
+}
+
+.supply-reservations-table td:nth-child(4),
+.supply-reservations-table td:nth-child(5) {
+	white-space: nowrap;
+}
+
+.reservation-status {
+	display: inline-flex !important;
+	width: max-content;
+	border-radius: 999px;
+	padding: 4px 9px;
+	font-size: 11px;
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.reservation-status.active { background: #eaf4ff; color: #185fa5; }
+.reservation-status.ending_today { background: #fff1d6; color: #8a5600; }
+.reservation-status.expired { background: #ffe8e8; color: #a51d1d; }
+.reservation-status.released { background: #edf0f4; color: #596579; }
+
+.reservation-notifications {
+	min-width: 145px;
+}
+
+.reservation-notifications span {
+	margin-bottom: 3px;
+	font-size: 12px;
+}
+
+@media (max-width: 900px) {
+	.supply-reservation-filters { grid-template-columns: 1fr; }
+}
+
 .supply-proto-notice-over-modal {
 	position: fixed;
 	top: 16px;

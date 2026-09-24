@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
-import { fetchCoreDocDetail, itemStockLedger, listCoreMovements } from '../erp/operations.js';
-import { resolveDealOwners } from '../b24/deal-info.js';
+import { fetchCoreDocDetail, itemPendingDeals, itemStockLedger, listCoreMovements } from '../erp/operations.js';
+import { resolveDealOwners, resolveDealSummaries } from '../b24/deal-info.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody } from './api-stock-types.js';
+import { appPermission } from '../access-policy.js';
+import { stockAccess } from './api-stock-access.js';
+import { stockDocumentHistory } from './api-stock-document-amend-route.js';
 
 export function registerStockMovementRoutes(app: FastifyInstance): void {
 	app.post('/api/stock/movements', async (req, reply) => {
@@ -39,9 +42,12 @@ export function registerStockMovementRoutes(app: FastifyInstance): void {
 		const name = String(body.name ?? '').trim();
 		if (!doctype || !name) return reply.code(400).send({ ok: false, error: 'нужны doctype и name' });
 		try {
-			const detail = await fetchCoreDocDetail(erp, doctype, name);
+			const [detail, access, history] = await Promise.all([
+				fetchCoreDocDetail(erp, doctype, name), stockAccess(client), stockDocumentHistory(app, name),
+			]);
 			const owners = await resolveDealOwners(client, [detail.dealId]);
-			return { ok: true, detail: { ...detail, ownerName: owners.get(detail.dealId) ?? '' } };
+			const canEdit = Boolean(detail.kind) && appPermission(req, 'stock.edit_submitted', access.canManage);
+			return { ok: true, detail: { ...detail, ownerName: owners.get(detail.dealId) ?? '', canEdit, history } };
 		} catch (error) {
 			app.log.error({}, `[api/stock/doc] failed — ${stockErrorInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: stockErrorInfo(error) });
@@ -57,7 +63,17 @@ export function registerStockMovementRoutes(app: FastifyInstance): void {
 		const productId = Number(body.productId);
 		if (!Number.isInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'bad productId' });
 		try {
-			return { ok: true, movements: await itemStockLedger(erp, productId) };
+			const [movements, pending] = await Promise.all([
+				itemStockLedger(erp, productId),
+				itemPendingDeals(erp, productId),
+			]);
+			const deals = await resolveDealSummaries(client, pending.map((item) => item.dealId));
+			const pendingDeals = pending.flatMap((item) => {
+				const deal = deals.get(item.dealId);
+				if (!deal || deal.closed) return [];
+				return [{ ...item, title: deal.title, ownerName: deal.ownerName }];
+			});
+			return { ok: true, movements, pendingDeals };
 		} catch (error) {
 			app.log.error({}, `[api/stock/item-history] failed — ${stockErrorInfo(error)}`);
 			return reply.code(200).send({ ok: false, error: stockErrorInfo(error) });

@@ -1,4 +1,5 @@
 import type { StoreInfo, SupplyCard, TransferDoc } from './b24.js';
+import {stockChoiceLabel} from '@b24-app/shared';
 import { stageLabel } from './deal-display-formatters.js';
 import type { DealProductAvailabilityStatus } from './deal-product-availability.js';
 
@@ -41,10 +42,11 @@ export function DealGoodsStatusCell({
 				<select
 					className="store-select" value={selectedStoreId} disabled={selectionDisabled}
 					onChange={(event) => onStoreChange(Number(event.target.value))}
-					title="Склад, с которого отгружаем эту строку"
+					title="Состояние и склад остатка, который будет списан при отгрузке"
+					aria-label="Состояние и склад для продажи"
 				>
 					{stores.map((store) => (
-						<option key={store.id} value={store.id}>{store.title} ({storeAmount(store.id)})</option>
+						<option key={store.id} value={store.id}>{stockChoiceLabel(store.title,storeAmount(store.id))}</option>
 					))}
 				</select>
 				{activeTransfer ? (

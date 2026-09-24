@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AccessPermissionId } from '@b24-app/shared';
-import { hasAppPermissions, type AccessAuthBody } from './access-policy.js';
+import { ACCESS_POLICY_ENFORCEMENT_ENABLED, hasAppPermissions, type AccessAuthBody } from './access-policy.js';
 
 const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>> = {
 	'/api/catalog/stores': ['catalog.view'],
@@ -52,6 +52,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 
 	'/api/stock/movements': ['stock.view_movements'],
 	'/api/stock/doc': ['stock.view'],
+	'/api/stock/amend': ['stock.edit_submitted'],
 	'/api/stock/item-history': ['stock.view_movements'],
 	'/api/stock/turnover-report': ['reports.stock_movements'],
 	'/api/stock/turnover-report.xlsx': ['reports.stock_movements', 'reports.export'],
@@ -96,6 +97,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/supply/purchase-stage': ['supply.change_purchase_stage'],
 	'/api/supply/purchase-receive': ['supply.receive_purchase'],
 	'/api/supply/purchase-transfer': ['supply.receive_purchase', 'transfers.create'],
+	'/api/reservations/list': ['supply.view'],
 
 	'/api/repairs/list': ['repairs.view'],
 	'/api/repairs/create': ['repairs.create'],
@@ -134,6 +136,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 };
 
 function permissionsFor(route: string, body: Record<string, unknown>): readonly AccessPermissionId[] {
+	if(route==='/api/stock/conditions')return body['action']==='change'?['transfers.create','transfers.post']:['catalog.view'];
 	if (route === '/api/stock/create') {
 		return body['kind'] === 'receipt' ? ['stock.create_receipt'] : ['stock.create_issue'];
 	}
@@ -144,6 +147,9 @@ function permissionsFor(route: string, body: Record<string, unknown>): readonly 
 export function registerAccessPolicyHook(app: FastifyInstance): void {
 	app.decorateRequest('appAccess', null);
 	app.addHook('preHandler', async (req, reply) => {
+		// Пока новая модель прав отключена, не обращаемся к Bitrix на каждом API-запросе.
+		// Маршруты продолжают использовать прежние проверки доступа.
+		if (!ACCESS_POLICY_ENFORCEMENT_ENABLED) return;
 		const route = String(req.routeOptions.url ?? '');
 		if (!route.startsWith('/api/') || route.startsWith('/api/access-control/')) return;
 		const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};

@@ -37,6 +37,10 @@ export interface InvResultLine {
 	book: number;
 	fact: number;
 	diff: number;
+	/** Закупочная цена, зафиксированная при отправке отчёта. */
+	purchase?: number;
+	/** Поле факта не было заполнено; для расчёта принято за ноль. */
+	unfilled?: boolean;
 	/** Пояснение проверяющего к конкретной позиции. */
 	comment?: string;
 }
@@ -44,6 +48,8 @@ export interface InvResult {
 	counted: number;
 	total: number;
 	discrepancies: number;
+	/** Сколько позиций не заполнили и рассчитали как ноль. */
+	unfilled?: number;
 	lines: InvResultLine[];
 }
 

@@ -17,8 +17,9 @@ import {
 } from './deal-plan-state.js';
 import { listDealRealizations } from './deal-realizations.js';
 import { DEAL_FIELD, TECH_CUSTOMER, ensureErpSetup } from './erp-setup.js';
-import { CORE_ENGINEER_VISIT_SERVICE_ID, ensureCoreItem } from './stock-catalog.js';
+import { ensureCoreItem } from './stock-catalog.js';
 import { erpContext } from './warehouse-context.js';
+import { isDealServiceProductId } from '../deal-service-product-ids.js';
 
 // ── ПЛАН СДЕЛКИ = черновик Sales Order с b24_deal_id ──────────────────────────────────────
 // Что менеджер собрал в сделку (реальные товары) живёт ЗДЕСЬ, а не в Б24 (Б24 несёт свёрнутую
@@ -26,7 +27,9 @@ import { erpContext } from './warehouse-context.js';
 // ERPNext считает сам (delivered_qty/per_delivered). Источник правды о составе сделки.
 /** Уже проведённая часть сделки не должна исчезнуть из накопительного плана при следующем изменении. */
 async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanLine[]): Promise<PlanLine[]> {
-	const byId = new Map(lines.map((line) => [line.productId, { ...line }]));
+	// Product ID is not a line identity: one deal may legitimately contain the same
+	// service more than once with different prices. Preserve every requested line.
+	const durable = lines.map((line) => ({ ...line }));
 	const history = new Map<number, { itemName: string; qty: number; amount: number }>();
 	for (const document of await listDealRealizations(erp, dealId)) {
 		for (const item of document.items) {
@@ -40,13 +43,15 @@ async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanL
 	}
 	for (const [productId, item] of history) {
 		if (item.qty <= 0.000001) continue;
-		const existing = byId.get(productId);
-		if (existing) {
-			// Менеджер может удалить ещё не отгруженный остаток, но уже проведённое стереть нельзя.
-			existing.qty = Math.max(existing.qty, item.qty);
+		const existing = durable.filter((line) => line.productId === productId);
+		if (existing.length) {
+			// Сравниваем реализацию с суммой одноимённых строк. Иначе Map(productId)
+			// схлопывал дубликаты и одна из услуг исчезала из плана.
+			const planned = existing.reduce((sum, line) => sum + line.qty, 0);
+			if (planned + 0.000001 < item.qty) existing[0]!.qty += item.qty - planned;
 			continue;
 		}
-		byId.set(productId, {
+		durable.push({
 			productId,
 			itemName: item.itemName,
 			qty: item.qty,
@@ -55,16 +60,49 @@ async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanL
 			isService: false,
 		});
 	}
-	return [...byId.values()];
+	return durable;
+}
+
+async function assertPlanDoesNotExpandAfterSale(erp: ErpClient, dealId: number, existing: string | null, lines: PlanLine[]): Promise<void> {
+	const hadSubmittedSale = (await listDealRealizations(erp, dealId)).some((document) =>
+		document.submitted && !document.isReturn && document.items.some((item) => item.qty > 0.000001));
+	if (!hadSubmittedSale || !lines.length) return;
+	if (!existing) throw new Error('по сделке уже была проведена реализация — новый план нужно оформить новой сделкой');
+
+	const previous = await listDealPlan(erp, dealId);
+	const unused = new Set(previous.map((_, index) => index));
+	for (const line of lines) {
+		let index = line.lineKey
+			? previous.findIndex((candidate, candidateIndex) => unused.has(candidateIndex) && candidate.lineKey === line.lineKey)
+			: -1;
+		if (index < 0 && !line.lineKey) {
+			index = previous.findIndex((candidate, candidateIndex) => unused.has(candidateIndex) && candidate.productId === line.productId);
+		}
+		if (index < 0) throw new Error('после проведённой реализации нельзя добавлять новые позиции в эту сделку — создайте новую сделку');
+		const current = previous[index]!;
+		unused.delete(index);
+		if (line.qty > current.qty + 0.000001) {
+			throw new Error(`после проведённой реализации нельзя увеличивать количество товара #${line.productId} — создайте новую сделку`);
+		}
+	}
 }
 
 /** Перезаписать накопительный план сделки актуальным составом.
  *  Нет черновика — создаёт; есть — заменяет строки. Новые товары заводит в ядре (ensureCoreItem). */
-export async function upsertDealPlan(erp: ErpClient, dealId: number, lines: PlanLine[], deliveryDate: string): Promise<{ name: string | null; lines: PlanLine[] }> {
+export async function upsertDealPlan(
+	erp: ErpClient,
+	dealId: number,
+	lines: PlanLine[],
+	deliveryDate: string,
+	options: { allowExpansionAfterSale?: boolean } = {},
+): Promise<{ name: string | null; lines: PlanLine[] }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensurePlanField(erp);
 	const existing = await findDealPlan(erp, dealId);
+	// Обычный состав проведённой сделки остаётся зафиксированным. Новый этап — явная
+	// следующая партия той же сделки, поэтому он может расширить накопительный план.
+	if (!options.allowExpansionAfterSale) await assertPlanDoesNotExpandAfterSale(erp, dealId, existing, lines);
 	const durableLines = await withRealizedBaseline(erp, dealId, lines);
 	if (!durableLines.length) {
 		if (existing) await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(existing)}`);
@@ -129,7 +167,7 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 			priceListRate: Number(it['price_list_rate'] ?? it['rate'] ?? 0),
 			discountPercent: Number(it['discount_percentage'] ?? 0),
 			delivered: Number(it['delivered_qty'] ?? 0),
-			isService: productId === CORE_ENGINEER_VISIT_SERVICE_ID || serviceById.get(String(it['item_code'] ?? '')) === true,
+			isService: isDealServiceProductId(productId) || serviceById.get(String(it['item_code'] ?? '')) === true,
 			lineKey: String(it[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(it['name'] ?? '').trim(),
 		}];
 	});
@@ -373,15 +411,23 @@ export async function listDealStages(erp: ErpClient, dealId: number): Promise<De
 /** Сумма рабочего состава с отдельными ценами основной сделки и каждого этапа. */
 export async function calculateDealPlanTotal(erp: ErpClient, dealId: number, onlyServices = false): Promise<number> {
 	const [plan, stages] = await Promise.all([listDealPlan(erp, dealId), listDealStages(erp, dealId)]);
+	const remainingStageItems = new Map<number, Array<{ qty: number; rate: number }>>();
+	for (const stage of stages) for (const item of stage.items) {
+		const rate = item.price * (1 - (item.discountPercent ?? 0) / 100);
+		remainingStageItems.set(item.productId, [...(remainingStageItems.get(item.productId) ?? []), { qty: item.qty, rate }]);
+	}
 	let total = 0;
 	for (const line of plan) {
 		if (onlyServices && !line.isService) continue;
-		const stageItems = stages.flatMap((stage) => stage.items.filter((item) => item.productId === line.productId));
-		const stagedQty = stageItems.reduce((sum, item) => sum + item.qty, 0);
-		const baseQty = Math.max(0, line.qty - stagedQty);
-		total += baseQty * line.rate;
-		total += stageItems.reduce((sum, item) =>
-			sum + item.qty * item.price * (1 - (item.discountPercent ?? 0) / 100), 0);
+		let baseQty = line.qty;
+		for (const stageItem of remainingStageItems.get(line.productId) ?? []) {
+			if (baseQty <= 0.000001 || stageItem.qty <= 0.000001) continue;
+			const allocated = Math.min(baseQty, stageItem.qty);
+			total += allocated * stageItem.rate;
+			baseQty -= allocated;
+			stageItem.qty -= allocated;
+		}
+		total += Math.max(0, baseQty) * line.rate;
 	}
 	return Math.round(total * 100) / 100;
 }
@@ -395,8 +441,14 @@ export async function reduceDealPlanForReturns(
 ): Promise<PlanItem[]> {
 	const [plan, stages] = await Promise.all([listDealPlan(erp, dealId), listDealStages(erp, dealId)]);
 	const returnedByProduct = new Map<number, number>();
+	const returnedByLine = new Map<string, number>();
 	for (const line of returned) {
-		returnedByProduct.set(line.productId, (returnedByProduct.get(line.productId) ?? 0) + line.qty);
+		if (line.segmentId.startsWith('line:')) {
+			const lineKey = line.segmentId.slice('line:'.length);
+			returnedByLine.set(lineKey, (returnedByLine.get(lineKey) ?? 0) + line.qty);
+		} else {
+			returnedByProduct.set(line.productId, (returnedByProduct.get(line.productId) ?? 0) + line.qty);
+		}
 		if (!line.segmentId.startsWith('stage:')) continue;
 		const stageId = line.segmentId.slice('stage:'.length);
 		const stage = stages.find((entry) => entry.id === stageId);
@@ -405,9 +457,15 @@ export async function reduceDealPlanForReturns(
 		item.qty = Math.max(0, item.qty - line.qty);
 		stage.items = stage.items.filter((entry) => entry.qty > 0.000001);
 	}
-	const nextPlan = plan
-		.map((item) => ({ ...item, qty: Math.max(0, item.qty - (returnedByProduct.get(item.productId) ?? 0)) }))
-		.filter((item) => item.qty > 0.000001);
+	const remainingByProduct = new Map(returnedByProduct);
+	const nextPlan = plan.flatMap((item): PlanItem[] => {
+		const exact = item.lineKey ? returnedByLine.get(item.lineKey) ?? 0 : 0;
+		const generic = remainingByProduct.get(item.productId) ?? 0;
+		const appliedGeneric = Math.min(item.qty, generic);
+		remainingByProduct.set(item.productId, Math.max(0, generic - appliedGeneric));
+		const qty = Math.max(0, item.qty - exact - appliedGeneric);
+		return qty > 0.000001 ? [{ ...item, qty }] : [];
+	});
 	const saved = await upsertDealPlan(erp, dealId, nextPlan.map((item) => ({
 		productId: item.productId,
 		itemName: item.itemName,
@@ -415,6 +473,7 @@ export async function reduceDealPlanForReturns(
 		priceListRate: item.priceListRate,
 		discountPercent: item.discountPercent,
 		isService: item.isService,
+		lineKey: item.lineKey,
 	})), deliveryDate);
 	if (saved.name) await erp.update('Sales Order', saved.name, { [DEAL_STAGES_FIELD]: JSON.stringify(stages) });
 	return listDealPlan(erp, dealId);

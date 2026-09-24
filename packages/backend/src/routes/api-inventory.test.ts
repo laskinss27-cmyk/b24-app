@@ -15,8 +15,14 @@ import {
 	createInventoryStockSnapshot,
 	captureInventoryPointSnapshots,
 	frozenInventoryDifferences,
+	inventoryStoreAllowed,
 	inventorySnapshotQuantities,
 } from '../inventory-stock-snapshot.js';
+
+test('Железноводская, секция 23 is excluded only from inventories', () => {
+	assert.equal(inventoryStoreAllowed('Железноводская, секция 23'), false);
+	assert.equal(inventoryStoreAllowed('Железноводская, секция 34'), true);
+});
 
 const mobileConfig: Config = {
 	port: 3000,

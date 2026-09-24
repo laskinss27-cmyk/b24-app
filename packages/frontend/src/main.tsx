@@ -9,7 +9,9 @@ import { Repairs } from './Repairs.js';
 import { StockLedger } from './StockLedger.js';
 import { Supply } from './Supply.js';
 import { ReportBuilder } from './ReportBuilder.js';
+import { ReturnApproval } from './ReturnApproval.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
+import { initializeDarkTheme } from './DarkThemeMode.js';
 import './global.css';
 import './low-vision.css';
 import './deal-products-layout.css';
@@ -48,6 +50,8 @@ import './access-control.css';
 import './operation-log.css';
 import './admin-console.css';
 import './print.css';
+import './dark-theme.generated.css';
+import './dark-theme.css';
 
 const root = document.getElementById('root');
 if (!root) {
@@ -63,10 +67,13 @@ const ctx = getContext();
 const repairId = Number(new URLSearchParams(window.location.search).get('repairId') ?? 0);
 const opensRepair = (Number.isInteger(repairId) && repairId > 0) || (Number.isInteger(ctx.repairId) && Number(ctx.repairId) > 0);
 const lowVisionEnabled = initializeLowVisionMode();
+initializeDarkTheme();
 
 createRoot(root).render(
 	<StrictMode>
-		<LowVisionMode initialEnabled={lowVisionEnabled} />
-		{opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'reportBuilder' ? <ReportBuilder /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
+		<div className="appearance-toolbar no-print">
+			<LowVisionMode initialEnabled={lowVisionEnabled} />
+		</div>
+		{ctx.view === 'returnApproval' ? <ReturnApproval /> : opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'reportBuilder' ? <ReportBuilder /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
 	</StrictMode>,
 );

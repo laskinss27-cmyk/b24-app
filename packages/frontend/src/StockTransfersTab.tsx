@@ -16,14 +16,14 @@ import { transferNumberLabel, transferNumberSearchValues } from './transfer-numb
 import type { StockForm } from './StockWorkspaceTypes.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
+const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
 
 function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc; onOpenTransfer: (id: number) => void }): JSX.Element {
 	const requestMatch = /^transfer-request:(\d+)$/.exec(transfer.supplyRequestKey ?? '');
 	let basis: JSX.Element;
 	if (transfer.correctionOf) {
-		basis = <a href="#" onClick={(event) => { event.preventDefault(); onOpenTransfer(transfer.correctionOf as number); }} style={{ color: '#185fa5', textDecoration: 'none' }}>Перемещение #{transfer.correctionOf}</a>;
+		basis = <a href="#" onClick={(event) => { event.preventDefault(); onOpenTransfer(transfer.correctionOf as number); }} style={{ color: 'var(--app-link)', textDecoration: 'none' }}>Перемещение #{transfer.correctionOf}</a>;
 	} else if (requestMatch?.[1]) {
 		basis = <span>Заказ на перемещение #{requestMatch[1]}</span>;
 	} else if (transfer.dealId) {
@@ -35,7 +35,7 @@ function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc
 	} else {
 		basis = <span>Самостоятельное перемещение</span>;
 	}
-	return <div><b>Перемещение {transferNumberLabel(transfer)}</b><div>{basis}</div><div style={{ color: '#7a8699', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
+	return <div><b>Перемещение {transferNumberLabel(transfer)}</b><div>{basis}</div><div style={{ color: 'var(--app-muted)', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
 }
 
 const transferHasFinalDiscrepancy = (transfer: TransferDoc): boolean => {
@@ -176,7 +176,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 				</div>
 			)}
 			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-				<span style={{ fontSize: 13, color: '#7a8699' }}>Товар:</span>
+				<span style={{ fontSize: 13, color: 'var(--app-muted)' }}>Товар:</span>
 				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
 			<StockListFilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={TRANSFER_STATUS_OPTS}
@@ -190,7 +190,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 						{shown.map((t) => (
 							<tr key={t.id}>
 								<td style={TD}><TransferBasisCell transfer={t} onOpenTransfer={(id) => { const source = list?.find((row) => row.id === id); if (source) setOpenT(source); }} /></td>
-								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenT(t); }} style={{ color: '#185fa5', textDecoration: 'none' }}>{t.fromStore} → {t.toStore}</a>{t.note ? <div style={{ color: '#7a8699', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenT(t); }} style={{ color: 'var(--app-link)', textDecoration: 'none' }}>{t.fromStore} → {t.toStore}</a>{t.note ? <div style={{ color: 'var(--app-muted)', fontSize: 12 }}>📝 {t.note}</div> : null}</td>
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{transferStatusText(t)}</td>
 								<td style={TD}>

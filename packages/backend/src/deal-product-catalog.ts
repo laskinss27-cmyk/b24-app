@@ -5,6 +5,7 @@ import {
 	B24_COLLAPSE_SERVICE_PRODUCT_ID,
 	setDealB24CollapsedService,
 } from './deal-service.js';
+import { isDealServiceProductId } from './deal-service-product-ids.js';
 
 export const VYEZD_PRODUCT_ID = B24_COLLAPSE_SERVICE_PRODUCT_ID;
 export const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
@@ -41,7 +42,9 @@ export async function fetchBasePrices(client: B24Client, ids: number[]): Promise
 
 export async function fetchServiceProductIds(client: B24Client, ids: number[]): Promise<Set<number>> {
 	const out = new Set<number>();
-	const uniq = [...new Set(ids.filter((x) => x > 0 && x !== CORE_ENGINEER_VISIT_SERVICE_ID))];
+	const requested = [...new Set(ids.filter((x) => x > 0))];
+	for (const id of requested) if (isDealServiceProductId(id)) out.add(id);
+	const uniq = requested.filter((id) => !isDealServiceProductId(id));
 	if (!uniq.length) return out;
 	const calls: Record<string, BatchCall> = {};
 	for (const id of uniq) calls[`p${id}`] = { method: 'catalog.product.get', params: { id } };
@@ -50,6 +53,5 @@ export async function fetchServiceProductIds(client: B24Client, ids: number[]): 
 		const product = (res.result[`p${id}`] as { product?: Record<string, unknown> } | undefined)?.product;
 		if (Number(product?.['type'] ?? 0) === 7) out.add(id);
 	}
-	out.add(CORE_ENGINEER_VISIT_SERVICE_ID);
 	return out;
 }

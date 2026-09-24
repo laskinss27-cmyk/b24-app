@@ -5,11 +5,11 @@ import {
 } from './b24.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
-const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: '#7a8699' };
+const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
 const TD: CSSProperties = { padding: '8px', borderBottom: '1px solid #f0f2f5', fontSize: 14, verticalAlign: 'top' };
-const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: '#1a2231' };
-const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: '#fff' };
-const fieldLabel: CSSProperties = { fontSize: 12, color: '#7a8699', display: 'block', margin: '8px 0 4px' };
+const inp: CSSProperties = { padding: '6px 8px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)' };
+const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
+const fieldLabel: CSSProperties = { fontSize: 12, color: 'var(--app-muted)', display: 'block', margin: '8px 0 4px' };
 
 const TURNOVER_STATUS: Record<TurnoverStatus, { label: string; color: string; bg: string }> = {
 	ending: { label: 'Заканчивается', color: '#b42318', bg: '#fee4e2' },
@@ -17,7 +17,7 @@ const TURNOVER_STATUS: Record<TurnoverStatus, { label: string; color: string; bg
 	normal: { label: 'Норма', color: '#17603a', bg: '#dcfce7' },
 	excess: { label: 'Избыток', color: '#6941c6', bg: '#eee8ff' },
 	no_movement: { label: 'Нет движения', color: '#475467', bg: '#eef1f5' },
-	no_stock: { label: 'Нет остатка', color: '#7a8699', bg: '#f5f6f8' },
+	no_stock: { label: 'Нет остатка', color: 'var(--app-muted)', bg: '#f5f6f8' },
 };
 
 const reportDate = (date: Date): string => {
@@ -148,7 +148,7 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 				<label style={fieldLabel}>Склад<select style={{ ...inp, display: 'block', minWidth: 180 }} value={store} onChange={(e) => setStore(e.target.value)}><option value="">Все склады</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label>
 				<button className="btn-primary" disabled={loading} onClick={() => void load()}>{loading ? 'Считаю…' : 'Построить отчёт'}</button>
 			</div>
-			<p style={{ margin: '0 0 12px', fontSize: 12, color: '#7a8699' }}>Приход, расход и оборачиваемость — за выбранные {days} дн. Остаток, резерв и заказано — на сегодня. Перемещения между складами не считаются расходом.</p>
+			<p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--app-muted)' }}>Приход, расход и оборачиваемость — за выбранные {days} дн. Остаток, резерв и заказано — на сегодня. Перемещения между складами не считаются расходом.</p>
 			{err && <p className="error">⛔ {err}</p>}
 			{!err && <>
 				<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 12 }}>
@@ -158,7 +158,7 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 						['Оприходовано', qtyText(summary.received)],
 						['Заканчивается', qtyText(summary.ending)],
 						['Без движения', qtyText(summary.noMovement)],
-					].map(([label, value]) => <div key={label} style={{ padding: '10px 12px', border: '1px solid #e3e8ef', borderRadius: 8, background: '#fff' }}><div style={{ fontSize: 12, color: '#7a8699' }}>{label}</div><b style={{ fontSize: 18 }}>{value}</b></div>)}
+					].map(([label, value]) => <div key={label} style={{ padding: '10px 12px', border: '1px solid #e3e8ef', borderRadius: 8, background: 'var(--app-surface)' }}><div style={{ fontSize: 12, color: 'var(--app-muted)' }}>{label}</div><b style={{ fontSize: 18 }}>{value}</b></div>)}
 				</div>
 				<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
 					<input style={{ ...inp, flex: '1 1 250px' }} placeholder="🔎 товар, ID, артикул или бренд" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
@@ -171,16 +171,16 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 					<button style={btnGhost} type="button" disabled={loading || exporting || !filtered.length} onClick={() => void downloadExcel()}>{exporting ? 'Готовлю Excel…' : '⬇ Excel'}</button>
 					<details style={{ position: 'relative' }}>
 						<summary style={{ ...btnGhost, listStyle: 'none', userSelect: 'none' }}>⚙ Колонки</summary>
-						<div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 5, minWidth: 230, padding: 10, border: '1px solid #d0d5dd', borderRadius: 8, background: '#fff', boxShadow: '0 8px 24px rgba(16,24,40,.12)' }}>
+						<div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 5, minWidth: 230, padding: 10, border: '1px solid #d0d5dd', borderRadius: 8, background: 'var(--app-surface)', boxShadow: '0 8px 24px rgba(16,24,40,.12)' }}>
 							<label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}><input type="checkbox" checked={costColumns.average} onChange={(e) => setCostColumns((value) => ({ ...value, average: e.target.checked }))} />Средняя цена остатка</label>
 							<label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={costColumns.total} onChange={(e) => setCostColumns((value) => ({ ...value, total: e.target.checked }))} />Стоимость остатка</label>
 						</div>
 					</details>
-					<span style={{ fontSize: 12, color: '#7a8699', alignSelf: 'center' }}>Показано {shown.length} из {filtered.length}</span>
+					<span style={{ fontSize: 12, color: 'var(--app-muted)', alignSelf: 'center' }}>Показано {shown.length} из {filtered.length}</span>
 				</div>
 				{!loading && !filtered.length ? <p className="empty">По выбранным условиям позиций нет.</p> : (
 					<div style={{ overflowX: 'auto', border: '1px solid #e3e8ef', borderRadius: 8 }}>
-						<table style={{ width: '100%', minWidth: 1320, borderCollapse: 'collapse', background: '#fff' }}>
+						<table style={{ width: '100%', minWidth: 1320, borderCollapse: 'collapse', background: 'var(--app-surface)' }}>
 							<thead><tr>
 								<th style={TH}>Товар</th><th style={TH}>Состояние</th><th style={TH}>Начало → конец<br />средний</th>
 								<th style={TH}>Приход</th><th style={TH}>Реализация<br />возврат</th><th style={TH}>Списано</th>
@@ -190,17 +190,17 @@ export function TurnoverReportTab({ stores, mock = false }: { stores: string[]; 
 								<th style={TH}>Резерв</th><th style={TH}>Заказано</th><th style={TH}>Последние движения</th>
 							</tr></thead>
 							<tbody>{shown.map((row) => <tr key={row.productId}>
-								<td style={{ ...TD, minWidth: 250 }}><b>{row.name}</b><div style={{ color: '#7a8699', fontSize: 12 }}>#{row.productId}{row.article ? ` · ${row.article}` : ''}{row.brand ? ` · ${row.brand}` : ''}</div>{row.section && <div style={{ color: '#98a2b3', fontSize: 11 }}>{row.section}</div>}</td>
+								<td style={{ ...TD, minWidth: 250 }}><b>{row.name}</b><div style={{ color: 'var(--app-muted)', fontSize: 12 }}>#{row.productId}{row.article ? ` · ${row.article}` : ''}{row.brand ? ` · ${row.brand}` : ''}</div>{row.section && <div style={{ color: '#98a2b3', fontSize: 11 }}>{row.section}</div>}</td>
 								<td style={TD}><TurnoverStatusBadge status={row.status} /></td>
-								<td style={TD}>{qtyText(row.openingQty)} → {qtyText(row.closingQty)}<div style={{ color: '#7a8699', fontSize: 12 }}>ср. {qtyText(row.averageQty)}</div></td>
+								<td style={TD}>{qtyText(row.openingQty)} → {qtyText(row.closingQty)}<div style={{ color: 'var(--app-muted)', fontSize: 12 }}>ср. {qtyText(row.averageQty)}</div></td>
 								<td style={{ ...TD, color: '#17603a', fontWeight: 600 }}>+{qtyText(row.receivedQty)}</td>
-								<td style={TD}><b>{qtyText(row.soldQty)}</b>{row.returnedQty > 0 && <div style={{ color: '#7a8699', fontSize: 12 }}>возврат {qtyText(row.returnedQty)}</div>}</td>
+								<td style={TD}><b>{qtyText(row.soldQty)}</b>{row.returnedQty > 0 && <div style={{ color: 'var(--app-muted)', fontSize: 12 }}>возврат {qtyText(row.returnedQty)}</div>}</td>
 								<td style={TD}>{qtyText(row.writtenOffQty)}</td>
 								<td style={TD}>{row.turns === null ? '—' : qtyText(row.turns)}</td>
 								<td style={TD}>{row.daysOfStock === null ? '—' : qtyText(row.daysOfStock)}</td>
-								<td style={TD}><b>{qtyText(row.currentQty)}</b><div style={{ color: row.availableQty <= 0 ? '#b42318' : '#7a8699', fontSize: 12 }}>своб. {qtyText(row.availableQty)}</div></td>
-								{costColumns.average && <td style={{ ...TD, whiteSpace: 'nowrap', color: row.averagePurchasePrice === null ? '#98a2b3' : '#1a2231' }}>{moneyText(row.averagePurchasePrice)}</td>}
-								{costColumns.total && <td style={{ ...TD, whiteSpace: 'nowrap', color: row.stockValue === null ? '#98a2b3' : '#1a2231' }}>{moneyText(row.stockValue)}</td>}
+								<td style={TD}><b>{qtyText(row.currentQty)}</b><div style={{ color: row.availableQty <= 0 ? '#b42318' : 'var(--app-muted)', fontSize: 12 }}>своб. {qtyText(row.availableQty)}</div></td>
+								{costColumns.average && <td style={{ ...TD, whiteSpace: 'nowrap', color: row.averagePurchasePrice === null ? '#98a2b3' : 'var(--app-text)' }}>{moneyText(row.averagePurchasePrice)}</td>}
+								{costColumns.total && <td style={{ ...TD, whiteSpace: 'nowrap', color: row.stockValue === null ? '#98a2b3' : 'var(--app-text)' }}>{moneyText(row.stockValue)}</td>}
 								<td style={TD}>{qtyText(row.reservedQty)}</td>
 								<td style={TD}>{qtyText(row.orderedQty)}</td>
 								<td style={{ ...TD, fontSize: 12 }}><div>приход: {row.lastReceiptDate || '—'}</div><div>продажа: {row.lastSaleDate || '—'}</div></td>

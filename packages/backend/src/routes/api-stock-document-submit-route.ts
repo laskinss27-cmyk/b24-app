@@ -36,7 +36,7 @@ export function registerStockDocumentSubmitRoute(app: FastifyInstance): void {
 					})
 					.filter((line) => Number.isInteger(line.productId) && line.productId > 0 && line.qty > 0 && line.fromStore);
 				if (lines.length !== rawLines.length) throw new Error('не удалось проверить склад строк списания');
-				await validateFreeStock(client, erp, lines);
+				await validateFreeStock(client, erp, lines, [], app.reservationRuntime);
 			}
 			if (b.kind === 'receipt' && doctype === 'Stock Entry') {
 				const document = await erp.get<Record<string, unknown>>('Stock Entry', name);

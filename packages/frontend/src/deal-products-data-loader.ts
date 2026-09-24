@@ -14,8 +14,7 @@ import {
 	type StoredDealContractDocument,
 } from './b24.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
-
-const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
+import { isDealServiceProductId } from './deal-service-product-ids.js';
 
 export async function loadDealProductsData(dealId: number): Promise<TableData> {
 	// Критические данные ядра завершают загрузку явной ошибкой. Для второстепенных данных остаются
@@ -45,18 +44,26 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		(enrich[pid]?.stocks ?? []).map((s) => ({ storeId: s.storeId, amount: s.amount, storeName: storeMap.get(s.storeId) ?? `Склад #${s.storeId}` }));
 	// Товары сделки = строки ПЛАНА (ядро), приведённые к формату строки таблицы — чтобы весь движок
 	// реализации (чекбоксы/склад/статусы/партии/«Реализовать») работал на них без изменений.
-	const planRowsFromCore: EnrichedRow[] = plan.map((p) => ({
-		id: `plan-${p.productId}`,
-		productId: p.productId,
-		name: p.itemName || `#${p.productId}`,
-		type: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? 7 : 1,
-		price: p.rate,                                                  // итог за ед. (после скидки)
-		quantity: p.qty,
-		discountSum: Math.round((p.priceListRate - p.rate) * 100) / 100, // скидка ₽/ед = база − итог (база восстановима)
-		measure: 'шт',
-		stocks: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? [] : mkStocks(p.productId),
-		purchasingPrice: p.isService || p.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? null : (enrich[p.productId]?.purchasingPrice ?? null),
-	}));
+	const planProductCounts = new Map<number, number>();
+	for (const line of plan) planProductCounts.set(line.productId, (planProductCounts.get(line.productId) ?? 0) + 1);
+	const planRowsFromCore: EnrichedRow[] = plan.map((p, index) => {
+		const isService = Boolean(p.isService) || isDealServiceProductId(p.productId);
+		const lineIdentity = p.lineKey?.trim() || `${p.productId}-${index}`;
+		return {
+			id: `plan-${lineIdentity}`,
+			...(p.lineKey ? { planLineKey: p.lineKey } : {}),
+			legacyBaseFallback: (planProductCounts.get(p.productId) ?? 0) === 1,
+			productId: p.productId,
+			name: p.itemName || `#${p.productId}`,
+			type: isService ? 7 : 1,
+			price: p.rate,                                                  // итог за ед. (после скидки)
+			quantity: p.qty,
+			discountSum: Math.round((p.priceListRate - p.rate) * 100) / 100, // скидка ₽/ед = база − итог (база восстановима)
+			measure: 'шт',
+			stocks: isService ? [] : mkStocks(p.productId),
+			purchasingPrice: isService ? null : (enrich[p.productId]?.purchasingPrice ?? null),
+		};
+	});
 	const planIdsSet = new Set(planRowsFromCore.map((r) => r.productId));
 	const visibleProductIds = planIdsSet;
 	const realizedHistory = new Map<number, { itemName: string; qty: number; amount: number }>();
@@ -90,19 +97,20 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		}];
 	});
 	const planRows = [...planRowsFromCore, ...historicalGoods];
-	const variantRows = Object.fromEntries(quoteVariants.variants.map((variant) => [variant.id, variant.items.map((item) => {
+	const variantRows = Object.fromEntries(quoteVariants.variants.map((variant) => [variant.id, variant.items.map((item, index) => {
 		const rate = Math.round(item.priceListRate * (1 - item.discountPercent / 100) * 100) / 100;
+		const isService = Boolean(item.isService) || isDealServiceProductId(item.productId);
 		return {
-			id: `variant-${variant.id}-${item.productId}`,
+			id: `variant-${variant.id}-${item.productId}-${index}`,
 			productId: item.productId,
 			name: item.itemName || `#${item.productId}`,
-			type: item.isService || item.productId === CORE_ENGINEER_VISIT_SERVICE_ID ? 7 : 1,
+			type: isService ? 7 : 1,
 			price: rate,
 			quantity: item.qty,
 			discountSum: Math.round((item.priceListRate - rate) * 100) / 100,
 			measure: 'шт',
-			stocks: item.isService ? [] : mkStocks(item.productId),
-			purchasingPrice: item.isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
+			stocks: isService ? [] : mkStocks(item.productId),
+			purchasingPrice: isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
 		} satisfies EnrichedRow;
 	})]));
 	return { rows, planRows, coef, coreReals, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };

@@ -56,13 +56,15 @@ export function registerDealPlanUpdateRoute(
 			const previousPlan = await listDealPlan(erp, dealId);
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const today = new Date().toISOString().slice(0, 10);
-			const previousByProduct = new Map(previousPlan.map((line) => [line.productId, line.rate]));
-			const changedPrices: Array<{ productId: number; segmentId: string; rate: number }> = [];
+			const planIdentity = (line: { productId: number; lineKey?: string }): string =>
+				line.lineKey ? `line:${line.lineKey}` : `product:${line.productId}`;
+			const previousByIdentity = new Map(previousPlan.map((line) => [planIdentity(line), line.rate]));
+			const changedPrices: Array<{ productId: number; segmentId: string; rate: number; previousRate: number }> = [];
 			for (const line of lines) {
-				const previousRate = previousByProduct.get(line.productId);
+				const previousRate = previousByIdentity.get(planIdentity(line));
 				const nextRate = Math.round(line.priceListRate * (1 - line.discountPercent / 100) * 100) / 100;
 				if (previousRate !== undefined && Math.abs(nextRate - previousRate) >= 0.005) {
-					changedPrices.push({ productId: line.productId, segmentId: 'base', rate: nextRate });
+					changedPrices.push({ productId: line.productId, segmentId: line.lineKey ? `line:${line.lineKey}` : 'base', rate: nextRate, previousRate });
 				}
 			}
 			if (changedPrices.length) await syncDealRealizationPrices(erp, dealId, changedPrices);
@@ -72,10 +74,7 @@ export function registerDealPlanUpdateRoute(
 			} catch (error) {
 				await upsertDealPlan(erp, dealId, previousPlan, today).catch(() => undefined);
 				if (changedPrices.length) {
-					const rollbackPrices = changedPrices.flatMap(({ productId }) => {
-						const previousRate = previousByProduct.get(productId);
-						return previousRate === undefined ? [] : [{ productId, segmentId: 'base', rate: previousRate }];
-					});
+					const rollbackPrices = changedPrices.map(({ productId, segmentId, previousRate }) => ({ productId, segmentId, rate: previousRate }));
 					await syncDealRealizationPrices(erp, dealId, rollbackPrices);
 				}
 				throw error;

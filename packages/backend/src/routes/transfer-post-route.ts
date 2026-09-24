@@ -58,7 +58,7 @@ export function registerTransferPostRoute(
 			const extraLines = doc.lines
 				.map((line) => ({ ...line, qty: Math.max(line.qty - (shippedMapForValidation.get(line.productId)?.qty ?? 0), 0) }))
 				.filter((line) => line.qty > 0);
-			if (extraLines.length) await validateTransferReservation(erp, client, id, doc.fromStore, extraLines);
+			if (extraLines.length) await validateTransferReservation(erp, client, id, doc.fromStore, extraLines, app.reservationRuntime);
 			const did = Number(doc.dealId) || 0;
 			const completion = await completeTransferFromTransit(erp, {
 				transferId: id,

@@ -1,4 +1,9 @@
 :root {
+	--app-text: #1a2231;
+	--app-muted: #7a8699;
+	--app-link: #185fa5;
+	--app-line: #e3e8ef;
+	--app-surface: #fff;
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	color: #1a1a1a;
 	background: #fff;

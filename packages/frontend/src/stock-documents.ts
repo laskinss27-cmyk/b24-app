@@ -3,14 +3,34 @@ import { bx24Auth } from './bitrix-auth.js';
 export interface StockItem { productId: number; name: string; article: string; brand: string; stocks?: Record<string, number>; total?: number }
 
 /** Справочники для форм и ролевое право на складские документы. */
-export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean; isSupply: boolean }> {
+export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean; canEditSubmitted: boolean; isSupply: boolean }> {
 	const res = await fetch('/api/stock/form-data', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean; isSupply?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean; canEditSubmitted?: boolean; isSupply?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить справочники');
-	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate), isSupply: Boolean(json.isSupply) };
+	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate), canEditSubmitted: Boolean(json.canEditSubmitted), isSupply: Boolean(json.isSupply) };
+}
+
+export interface StockDocumentAmendInput {
+	doctype: string;
+	name: string;
+	date: string;
+	supplier?: string;
+	reason?: string;
+	note?: string;
+	lines: Array<{ rowId?: string; sourceRow?: string; productId: number; qty: number; store: string; rate?: number }>;
+}
+
+export async function amendStockDocument(input: StockDocumentAmendInput): Promise<{ previousName: string; name: string; kind: 'issue' | 'receipt' | 'return' }> {
+	const res = await fetch('/api/stock/amend', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), ...input }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; previousName?: string; name?: string; kind?: 'issue' | 'receipt' | 'return' };
+	if (!json.ok || !json.previousName || !json.name || !json.kind) throw new Error(json.error ?? 'не удалось исправить документ');
+	return { previousName: json.previousName, name: json.name, kind: json.kind };
 }
 
 /** Создать НОВЫЙ товар (нет в каталоге): заводим в каталоге Б24 + ядре, возвращаем как StockItem для прихода. */
