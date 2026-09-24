@@ -11,7 +11,7 @@ candidate=$(mktemp)
 missing=$(mktemp)
 trap 'rm -f "$current" "$candidate" "$missing"' EXIT
 
-roots='/app/packages/backend/src /app/packages/frontend/src /app/packages/shared/src'
+roots='/app/packages/backend/src /app/packages/backend/assets /app/packages/frontend/src /app/packages/frontend/public /app/packages/frontend/scripts /app/packages/shared/src'
 docker exec "$CONTAINER" sh -c "find $roots -type f | sed 's#^/app/##' | sort" > "$current"
 docker run --rm --network none --entrypoint sh "$IMAGE" -c "find $roots -type f | sed 's#^/app/##' | sort" > "$candidate"
 comm -23 "$current" "$candidate" > "$missing"
