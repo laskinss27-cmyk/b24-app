@@ -1,4 +1,4 @@
-import { ErpClient } from '../erp/client.js';
+import { ErpApiError, ErpClient } from '../erp/client.js';
 import {
 	b24StoreTitle,
 	erpContext,
@@ -35,6 +35,28 @@ export function transferBelongsToRequest(transfer: TransferProgress, request: Su
 		&& belongsToRequest(request, transfer.supplyRequestKey);
 }
 
+const PURCHASE_CHILD_BATCH_SIZE = 25;
+
+async function listChildHeaders(
+	erp: ErpClient,
+	doctype: 'Purchase Receipt' | 'Purchase Order',
+	fields: string[],
+	requestNames: string[],
+): Promise<Array<Record<string, unknown>>> {
+	const headers: Array<Record<string, unknown>> = [];
+	for (let start = 0; start < requestNames.length; start += PURCHASE_CHILD_BATCH_SIZE) {
+		const batch = requestNames.slice(start, start + PURCHASE_CHILD_BATCH_SIZE);
+		headers.push(...await erp.list<Record<string, unknown>>(
+			doctype,
+			fields,
+			[[SUPPLY_REQUEST_FIELD, 'in', batch], ['docstatus', '!=', 2]],
+			0,
+			'creation desc',
+		));
+	}
+	return headers;
+}
+
 export async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): Promise<Map<string, PurchaseChild[]>> {
 	const out = new Map<string, PurchaseChild[]>();
 	if (!requests.length) return out;
@@ -43,12 +65,11 @@ export async function listPurchaseChildren(erp: ErpClient, requests: SupplyReque
 	try {
 		const ctx = await erpContext(erp);
 		const receipts = new Map<string, PurchaseReceiptChild[]>();
-		const receiptHeaders = await erp.list<Record<string, unknown>>(
+		const receiptHeaders = await listChildHeaders(
+			erp,
 			'Purchase Receipt',
 			['name', 'status', 'docstatus', SUPPLY_REQUEST_FIELD, SUPPLY_PURCHASE_ORDER_FIELD],
-			[[SUPPLY_REQUEST_FIELD, 'in', requestNames], ['docstatus', '!=', 2]],
-			0,
-			'creation desc',
+			requestNames,
 		);
 		for (const h of receiptHeaders) {
 			const requestName = String(h[SUPPLY_REQUEST_FIELD] ?? '');
@@ -68,12 +89,11 @@ export async function listPurchaseChildren(erp: ErpClient, requests: SupplyReque
 			};
 			receipts.set(request.requestKey, [...(receipts.get(request.requestKey) ?? []), child]);
 		}
-		const headers = await erp.list<Record<string, unknown>>(
+		const headers = await listChildHeaders(
+			erp,
 			'Purchase Order',
 			['name', 'supplier', 'status', SUPPLY_REQUEST_FIELD],
-			[[SUPPLY_REQUEST_FIELD, 'in', requestNames], ['docstatus', '!=', 2]],
-			0,
-			'creation desc',
+			requestNames,
 		);
 		for (const h of headers) {
 			const requestName = String(h[SUPPLY_REQUEST_FIELD] ?? '');
@@ -114,8 +134,11 @@ export async function listPurchaseChildren(erp: ErpClient, requests: SupplyReque
 			}
 			else out.set(requestName, [{ name: 'Приходы без заказа поставщику', supplier: '', status: 'Received', supplyStage: 'received', orderedAt: '', expectedAt: '', total: 0, lines: [], receipts: rows }]);
 		}
-	} catch {
-		// Старые инсталляции без поля b24_supply_request просто не покажут дочерние закупки.
+	} catch (error) {
+		// Прятать ошибку нельзя: тогда все оформленные позиции снова выглядят
+		// необработанными и их можно попытаться распределить повторно.
+		const detail = error instanceof ErpApiError ? `ERPNext HTTP ${error.status}` : error instanceof Error ? error.message : String(error);
+		throw new Error(`Не удалось загрузить документы заявок снабжения: ${detail}`);
 	}
 	return out;
 }
