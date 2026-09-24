@@ -58,6 +58,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 	const canPrintIssue = !presale && (repair.status === 'ready_tt' || repair.status === 'issued');
 	// Заморозка: с «принято в офисе» КЛИЕНТСКУЮ карточку трогает только снабжение+. Предпродажный не замораживаем.
 	const locked = isLockedStatus(repair.status) && !canEditPrice;
+	const canIssue = !presale && repair.status === 'ready_tt';
 	// Финальная точка: для клиентского — «склад выдачи» (при «Готово к выдаче»); для предпродажного — «склад точки»
 	// (выбрать перед «Отправлено на точку», туда вернётся при «Принято на ТТ»).
 	const needsIssueStore = (s: RepairStatus): boolean => presale ? (s === 'pre_to_point' || s === 'pre_at_tt') : s === 'ready_tt';
@@ -162,7 +163,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 					<button className="btn-danger" disabled={busy || locked} onClick={() => void remove()} title={locked ? 'Принят в офисе — удалить может только снабжение' : 'Удалить ремонт (необратимо)'}>🗑 Удалить</button>
 				</div>
 			</div>
-			{locked && <p className="muted small">🔒 Ремонт принят в офисе — изменения (поля, цены, статус) доступны только снабжению.</p>}
+			{locked && <p className="muted small">🔒 Ремонт принят в офисе — остальные изменения доступны снабжению.{canIssue ? ' Выдачу клиенту можно отметить ниже.' : ''}</p>}
 			{(repair.taskId || !presale) && <div className="rc-related-links">
 				{repair.taskId ? <button type="button" className="rc-related-link" onClick={() => openTask(repair.taskId!)}><span>Задача</span><b>#{repair.taskId}</b></button> : null}
 				{!presale && repair.dealId ? <button type="button" className="rc-related-link" onClick={() => openDeal(repair.dealId!)}><span>Сделка</span><b>#{repair.dealId}</b></button> : null}
@@ -176,6 +177,7 @@ export function RepairCard({ repair, mock, canEditPrice, onBack, onEdit, onSaveI
 				<select value={repair.status} disabled={busy || locked} onChange={(e) => void change(e.target.value as RepairStatus)}>
 					{flowFor(repair.kind).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
 				</select>
+				{locked && canIssue && <button type="button" className="btn-primary" disabled={busy} onClick={() => void change('issued')}>Выдано клиенту</button>}
 				{busy && <span className="muted small">сохраняю…</span>}
 				{mock && <span className="muted small">(dev: статус не пишется)</span>}
 			</div>

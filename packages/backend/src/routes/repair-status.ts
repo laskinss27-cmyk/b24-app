@@ -17,6 +17,11 @@ export function isLocked(s: RepairStatus): boolean {
 	return i >= 0 && i >= LOCK_FROM_INDEX;
 }
 
+/** После возврата на точку сотрудник может отметить только фактическую выдачу клиенту. */
+export function isReadyRepairIssue(kind: RepairKind, current: RepairStatus, next: RepairStatus): boolean {
+	return kind === 'client' && current === 'ready_tt' && next === 'issued';
+}
+
 /** Маппинг старых статусов (до разделения приёма ТТ/офис) на новые — чтобы прежние карточки не сломались. */
 const LEGACY_STATUS: Record<string, RepairStatus> = {
 	received: 'received_tt',

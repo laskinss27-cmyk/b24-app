@@ -8,6 +8,7 @@ import {
 	CLIENT_ORDER,
 	PRESALE_ORDER,
 	isLocked,
+	isReadyRepairIssue,
 	normalizeStatus,
 	statusOrder,
 	type RepairKind,
@@ -58,10 +59,12 @@ export function registerRepairStatusUpdateRoute(
 			const kind: RepairKind = data.kind === 'presale' ? 'presale' : 'client';
 			if (!statusOrder(kind).includes(status)) return reply.code(400).send({ ok: false, error: 'статус не из цепочки этого ремонта' });
 			const me = await currentUser(client);
-			// Заморозка (только клиентский): с «принято в офисе» двигать статус может только снабжение+.
-			// presale не замораживаем — isLocked для его статусов = false.
-			if (isLocked(normalizeStatus(data.status, kind)) && !appPermission(req, 'repairs.change_status', me.canEditPrice)) {
-				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — статус двигает только снабжение' });
+			// В закрытой части цепочки сотрудник может только выдать готовый ремонт клиенту.
+			// Все остальные переходы остаются у снабжения; предпродажный поток не заморожен.
+			const currentStatus = normalizeStatus(data.status, kind);
+			if (isLocked(currentStatus) && !appPermission(req, 'repairs.change_status', me.canEditPrice)
+				&& !(me.id && isReadyRepairIssue(kind, currentStatus, status))) {
+				return reply.code(403).send({ ok: false, error: 'Ремонт принят в офисе — статус двигает снабжение; готовый ремонт можно отметить выданным' });
 			}
 			data.status = status;
 			data.history = Array.isArray(data.history) ? data.history : [];
