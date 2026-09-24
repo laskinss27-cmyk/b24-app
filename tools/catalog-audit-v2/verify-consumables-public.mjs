@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
+const hash=b=>createHash('sha256').update(b).digest('hex');
+const html=fs.readFileSync('/app/packages/frontend/dist/index.html','utf8');
+const asset=html.match(/src="(\/assets\/[^" ]+\.js)"/)?.[1];
+if(!asset)throw Error('Frontend asset not found');
+const base=String(process.env.PUBLIC_BASE_URL??'').replace(/\/$/,'');
+const response=await fetch(base+asset);if(!response.ok)throw Error('Public frontend unavailable');
+const served=Buffer.from(await response.arrayBuffer());
+const local=fs.readFileSync('/app/packages/frontend/dist'+asset);
+if(hash(served)!==hash(local))throw Error('Public frontend differs from release');
+if(!served.toString('utf8').includes('По цене продажи'))throw Error('Consumables rule missing from public frontend');
+process.stdout.write(JSON.stringify({generatedAt:new Date().toISOString(),summary:{publicFrontendVerified:true,asset,sha256:hash(served)}}));

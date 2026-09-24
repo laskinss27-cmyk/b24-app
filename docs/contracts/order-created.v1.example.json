@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "eventType": "order.created",
+  "eventId": "11111111-1111-4111-8111-111111111111",
+  "sourceId": "22222222-2222-4222-8222-222222222222",
+  "occurredAt": "2026-09-14T10:00:00.000Z",
+  "order": {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "number": "UD-000001",
+    "channel": "storefront",
+    "test": true,
+    "contact": { "name": "Тестовый покупатель", "phone": "+70000000000", "email": "test@example.invalid", "comment": "Вымышленный заказ для проверки интеграции" },
+    "business": { "name": "ООО «Тестовый покупатель»", "inn": "7812345678", "kpp": "781201001", "details": "р/с 40702810000000000001 в тестовом банке" },
+    "fulfillment": { "method": "delivery", "address": "Санкт-Петербург, Невский проспект, дом 1" },
+    "consent": true,
+    "currency": "RUB",
+    "items": [{ "productId": "16060", "origin": "catalog", "name": "Тестовая камера", "brand": "Test", "quantity": 2, "unitPriceMinor": 150000, "totalMinor": 300000, "availability": "in_stock", "stockWarning": "" }],
+    "totals": { "subtotalMinor": 300000, "discountMinor": 30000, "totalMinor": 270000, "knownSubtotalMinor": 300000 },
+    "promo": { "id": "44444444-4444-4444-8444-444444444444", "code": "TEST10", "kind": "percent", "value": 10 },
+    "attribution": {
+      "first": { "kind": "utm", "source": "yandex", "medium": "maps", "campaign": "test-branch", "content": "", "term": "", "referrerHost": "yandex.ru", "landingPath": "/", "at": "2026-09-14T09:00:00.000Z" },
+      "last": { "kind": "utm", "source": "yandex", "medium": "maps", "campaign": "test-branch", "content": "", "term": "", "referrerHost": "yandex.ru", "landingPath": "/", "at": "2026-09-14T09:00:00.000Z" }
+    },
+    "attributionTrust": "browser_reported",
+    "payment": "not_requested",
+    "reservation": "not_reserved"
+  }
+}

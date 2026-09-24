@@ -27,10 +27,11 @@
 npm ci
 npm run typecheck
 npm -w @b24-app/backend test
+npm -w @b24-app/frontend test
 npm run build
 ```
 
-Незакоммиченные пользовательские файлы не включаются в коммит и образ случайно.
+Релиз собирается из зафиксированного коммита в чистой копии Git. Нельзя брать работающий Docker-образ за основу нового приложения и подкладывать в него отдельные исходники: после этого образ нельзя воспроизвести по Git, а следующая полная сборка может убрать уже работающие функции. Перед переключением контейнера сравнить список исходников текущего и нового образа через `scripts/b24-release-source-guard.sh b24-app:<COMMIT>`; отсутствующие файлы требуют отдельного разбора.
 
 ## Деплой backend
 
@@ -80,6 +81,7 @@ docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' b24-backend 
 test -s "$ENV_SNAPSHOT"
 
 docker build -t "b24-app:$COMMIT" .
+bash scripts/b24-release-source-guard.sh "b24-app:$COMMIT"
 
 restore_previous() {
   docker rm -f b24-backend >/dev/null 2>&1 || true

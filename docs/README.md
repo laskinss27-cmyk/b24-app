@@ -26,6 +26,8 @@
 
 Эти файлы сохраняют причины отдельных решений, но не заменяют runbook:
 
+- [umniydom-orders.md](umniydom-orders.md) — production-приёмник и обработчик заказов магазина; отправка включается на стороне сайта отдельно;
+- [umniydom-orders-fulfillment-deployment-20260918.md](umniydom-orders-fulfillment-deployment-20260918.md) — включение pickup/delivery в production и разрешение на обновление магазина;
 - [native-deal-status.md](native-deal-status.md);
 - [montage-service-sum.md](montage-service-sum.md);
 - [sozvony-razbor-2026-06.md](sozvony-razbor-2026-06.md).

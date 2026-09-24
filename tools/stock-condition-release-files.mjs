@@ -1,0 +1,25 @@
+export const changedFiles=[
+'packages/backend/src/access-policy-hook.ts',
+'packages/backend/src/routes/api-catalog.ts',
+'packages/backend/src/routes/api-catalog-product-update-route.ts',
+'packages/backend/src/routes/api-quicksale.ts',
+'packages/backend/src/routes/api-stock-availability.ts',
+'packages/backend/src/routes/deal-core-realization-route.ts',
+'packages/backend/src/erp/stock-transfers.ts',
+'packages/frontend/src/CatalogProductCard.tsx',
+'packages/frontend/src/DealGoodsStatusCell.tsx',
+'packages/frontend/src/ProductBase.tsx',
+'packages/frontend/src/QuickSaleCartModal.tsx',
+'packages/frontend/src/catalog-product-card.css',
+'packages/frontend/src/deal-product-actions.ts',
+'packages/frontend/src/deal-stock.ts',
+'packages/shared/src/index.ts',
+];
+export const addedFiles=[
+'packages/backend/src/erp/stock-conditions.ts',
+'packages/backend/src/erp/stock-reservations.ts',
+'packages/backend/src/routes/api-stock-conditions.ts',
+'packages/frontend/src/StockConditionEditor.tsx',
+'packages/frontend/src/stock-conditions.ts',
+'packages/shared/src/stock-conditions.ts',
+];

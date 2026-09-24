@@ -1,0 +1,13 @@
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import fs from 'node:fs/promises';
+import {changedFiles} from './stock-condition-release-files.mjs';
+const hash=text=>createHash('sha256').update(text.replaceAll('\r\n','\n')).digest('hex');
+const baseline=Object.fromEntries(changedFiles.map(file=>{const r=spawnSync('git',['show',`HEAD:${file}`],{encoding:'utf8',windowsHide:true});if(r.status)throw Error(r.stderr);return[file,hash(r.stdout)];}));
+const script=`import fs from 'node:fs';import {createHash} from 'node:crypto';const files=${JSON.stringify(changedFiles)};console.log(JSON.stringify(Object.fromEntries(files.map(f=>{try{return [f,createHash('sha256').update(fs.readFileSync('/app/'+f,'utf8').replaceAll('\\r\\n','\\n')).digest('hex')]}catch{return[f,null]}}))));`;
+const r=spawnSync('ssh',['-i','C:/Users/LapTOP/.ssh/b24_company','-o','IdentitiesOnly=yes','-o','BatchMode=yes','root@201.51.12.57','docker exec -i b24-backend node --input-type=module -'],{input:script,encoding:'utf8',windowsHide:true});
+if(r.status)throw Error(r.stderr);
+const remote=JSON.parse(r.stdout);
+const result={generatedAt:new Date().toISOString(),matches:changedFiles.every(f=>baseline[f]===remote[f]),differences:changedFiles.filter(f=>baseline[f]!==remote[f]),baseline,remote};
+await fs.writeFile('outputs/stock-conditions/release-base-check.json',JSON.stringify(result,null,2));
+console.log(JSON.stringify({matches:result.matches,differences:result.differences}));

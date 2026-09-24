@@ -1,0 +1,25 @@
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import {ErpClient} from '/app/packages/backend/dist/erp/client.js';
+import {readConditionBalances,readConditionHistory} from '/app/packages/backend/dist/erp/stock-conditions.js';
+import {dealLinePurchasingPrice,stockChoiceLabel} from '/app/packages/shared/dist/index.js';
+const erp=ErpClient.fromEnv();if(!erp)throw Error('ERP unavailable');
+const publicBase=String(process.env.PUBLIC_BASE_URL??'').replace(/\/$/,'');
+const healthStatuses=await Promise.all(['http://127.0.0.1:8080/health',publicBase+'/health'].map(async url=>{const response=await fetch(url,{signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('Health check failed');return response.status;}));
+// Expose only reads to the newly deployed condition reader.
+const readOnly={get:erp.get.bind(erp),list:erp.list.bind(erp)};
+const balances=await readConditionBalances(readOnly,18612);
+const history=await readConditionHistory(readOnly,18612);
+if(!balances.length||balances.some(b=>!Number.isFinite(b.actual)||!Number.isFinite(b.available)))throw Error('Condition balances invalid');
+const conditionWarehouses=await erp.list('Warehouse',['name'],[['warehouse_name','like','%Состояние:%']],0);
+const fields=[];
+for(const name of ['Stock Entry-b24_condition_operation','Stock Entry-b24_condition_details','Warehouse-b24_condition_base','Warehouse-b24_stock_condition'])fields.push({name,present:Boolean(await erp.get('Custom Field',name))});
+const html=fs.readFileSync('/app/packages/frontend/dist/index.html','utf8');
+const asset=html.match(/src="(\/assets\/[^" ]+\.js)"/)?.[1];if(!asset)throw Error('No frontend asset');
+const response=await fetch(String(process.env.PUBLIC_BASE_URL??'').replace(/\/$/,'')+asset);if(!response.ok)throw Error('Public frontend failed');
+const served=Buffer.from(await response.arrayBuffer()),local=fs.readFileSync('/app/packages/frontend/dist'+asset);
+const hash=b=>createHash('sha256').update(b).digest('hex');
+if(hash(served)!==hash(local))throw Error('Public frontend differs');
+for(const label of ['Изменить состояние части остатка','Остаток по состояниям','По цене продажи'])if(!served.toString('utf8').includes(label))throw Error('Missing feature in public frontend');
+if(dealLinePurchasingPrice(18612,10000,100)!==10000)throw Error('Consumables regression');
+process.stdout.write(JSON.stringify({generatedAt:new Date().toISOString(),summary:{healthStatuses,publicFrontendVerified:true,asset,sha256:hash(served),readOnlyBalancesVerified:true,balanceRows:balances.length,positiveBalances:balances.filter(b=>b.actual>0),historyRows:history.length,conditionWarehouses:conditionWarehouses.length,fields,consumablesPreserved:true,saleChoices:[stockChoiceLabel('Тестовый склад',9),stockChoiceLabel('Тестовый склад · Состояние: Сток',1)]}}));

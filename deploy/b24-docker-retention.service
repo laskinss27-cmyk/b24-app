@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep two b24-app rollbacks and bounded Docker build cache
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/b24-docker-retention.py --apply
+TimeoutStartSec=30min
+Nice=10
+UMask=0077

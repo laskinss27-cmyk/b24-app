@@ -2,6 +2,8 @@
 
 ## Production deployment
 
+- Build application releases from a committed Git revision in a clean checkout. Never base a release image on the currently running application image or copy only selected source files into it: that hides missing Git files and can drop features at the next full rebuild.
+- Before switching containers, run the backend and frontend test suites, including the deal control regression tests, and run `scripts/b24-release-source-guard.sh` against the candidate image. Reconcile any production source files absent from the candidate before deploying.
 - Always run `b24-backend` with `--network erpnext_frappe_network`. The backend resolves ERPNext through the Docker hostname `frontend`; without this network, deal plans and other core-backed data appear empty even though the data is intact.
 - Preserve the currently running backend container as the rollback container before switching versions.
 - Treat every filesystem path in `docs/runbook.md` as a placeholder unless private production configuration confirms it. When updating an existing `b24-backend`, derive its effective environment, `/app/state` source, and public URL from the running container as documented; never assume an env-file path.

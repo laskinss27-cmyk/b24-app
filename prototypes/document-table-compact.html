@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Макет — компактный журнал документов</title>
+  <style>
+    :root {
+      --ink: #10213d;
+      --muted: #71809a;
+      --line: #e3e9f2;
+      --surface: #ffffff;
+      --canvas: #f4f7fb;
+      --blue: #1468bb;
+      --blue-soft: #eaf3fd;
+      --green: #16875a;
+      --green-soft: #e8f7ef;
+      --amber: #a9690c;
+      --amber-soft: #fff5df;
+      --red: #bd3a43;
+      --red-soft: #fff0f1;
+      --shadow: 0 18px 44px rgba(26, 54, 93, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 940px;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 1fr; }
+    .side {
+      display: none;
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 24px 14px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 24px; }
+    .brand-mark {
+      width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px;
+      color: #fff; font-weight: 800; background: linear-gradient(145deg, #1882d7, #125aa5);
+    }
+    .brand b { display: block; font-size: 15px; }
+    .brand small { color: var(--muted); }
+    .nav-label { padding: 0 10px 8px; color: #96a2b5; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .nav { display: grid; gap: 4px; }
+    .nav button {
+      border: 0; background: transparent; border-radius: 9px; padding: 10px 12px; text-align: left; cursor: pointer;
+    }
+    .nav button.active { color: #0e5fae; background: #eaf2fb; font-weight: 700; }
+    .nav .split { height: 1px; background: var(--line); margin: 8px 5px; }
+    main { padding: 24px 28px 50px; }
+    .workspace { width: 100%; max-width: none; margin: 0; }
+    .heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    h1 { margin: 0 0 5px; font-size: 24px; font-weight: 500; letter-spacing: -.025em; }
+    .heading p { margin: 0; color: var(--muted); }
+    .mock-badge {
+      display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border: 1px solid #bed6ef;
+      border-radius: 99px; color: #1b609e; background: #f5faff; font-size: 12px; font-weight: 700;
+    }
+    .toolbar {
+      display: grid; grid-template-columns: minmax(300px, 1fr) auto auto; gap: 9px; align-items: center;
+      margin-bottom: 11px;
+    }
+    .search { position: relative; }
+    .search svg { position: absolute; left: 12px; top: 10px; color: #8190a5; }
+    .search input {
+      width: 100%; height: 38px; border: 1px solid #ccd6e4; border-radius: 9px; background: #fff;
+      padding: 0 12px 0 37px; outline: none;
+    }
+    .search input:focus { border-color: #73a9db; box-shadow: 0 0 0 3px rgba(20, 104, 187, .09); }
+    .button {
+      height: 38px; border: 1px solid #ccd6e4; border-radius: 9px; background: #fff; padding: 0 13px;
+      cursor: pointer; font-weight: 400;
+    }
+    .button:hover { border-color: #9db5ce; background: #fbfdff; }
+    .button.primary { color: #fff; background: var(--blue); border-color: var(--blue); padding-inline: 16px; }
+    .filter-panel {
+      display: none; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; padding: 12px;
+      margin: -2px 0 11px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+    }
+    .filter-panel.open { display: grid; }
+    .filter-panel label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .filter-panel select { height: 34px; border: 1px solid #d3dce9; border-radius: 8px; padding: 0 8px; color: var(--ink); background: #fff; }
+    .segments { display: flex; gap: 6px; margin: 0 0 12px; }
+    .segments button {
+      border: 0; border-radius: 99px; padding: 7px 11px; color: #63718a; background: transparent; cursor: pointer;
+      font-size: 13px;
+    }
+    .segments button.active { color: #125fa8; background: var(--blue-soft); font-weight: 500; }
+    .segments b { margin-left: 4px; font-size: 11px; }
+    .card { border: 1px solid #dce4ef; border-radius: 12px; background: var(--surface); overflow: hidden; box-shadow: 0 4px 14px rgba(35, 62, 98, .035); }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    col.doc { width: 25%; } col.context { width: 32%; } col.items { width: 13%; }
+    col.amount { width: 12%; } col.status { width: 14%; } col.menu { width: 4%; }
+    thead th {
+      padding: 10px 13px; color: #8490a3; background: #f8fafc; border-bottom: 1px solid var(--line);
+      text-align: left; font-size: 10px; font-weight: 500; line-height: 1.2; text-transform: uppercase; letter-spacing: .055em;
+    }
+    thead th.num, td.num { text-align: right; }
+    tbody tr { cursor: pointer; transition: background .12s ease; background: #fff; }
+    tbody tr.stripe { background: #f3f5f7; }
+    tbody tr:hover { background: #eaf4fe; }
+    tbody tr + tr td { border-top: 1px solid #e6ebf1; }
+    td { height: 40px; padding: 5px 12px; vertical-align: middle; }
+    .doc-main { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .type-icon {
+      flex: 0 0 26px; height: 26px; display: grid; place-items: center; border-radius: 7px;
+      background: #edf3fb; color: #326997; font-size: 12px; font-weight: 500;
+    }
+    .type-icon.out { color: #a3484e; background: #fff0f1; }
+    .type-icon.in { color: #17704e; background: #eaf8f1; }
+    .type-icon.move { color: #7556ad; background: #f3eefc; }
+    .type-icon.inv { color: #9a6417; background: #fff4df; }
+    .doc-text, .context-text { min-width: 0; }
+    .doc-text b, .context-text b { display: inline; font-size: 13px; font-weight: 400; }
+    .doc-text small, .context-text small { display: inline; color: var(--muted); font-size: 12px; }
+    .doc-text small::before, .context-text small::before { content: " · "; }
+    .doc-text, .context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .items-cell { color: #526179; white-space: nowrap; }
+    .amount-cell { font-weight: 400; white-space: nowrap; }
+    .status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; font-weight: 500; }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .status.done { color: var(--green); }
+    .status.draft { color: #6d7d94; }
+    .status.wait { color: var(--amber); }
+    .status.problem { color: var(--red); }
+    .kebab {
+      width: 30px; height: 30px; display: grid; place-items: center; margin-left: auto; border: 0;
+      border-radius: 7px; background: transparent; color: #697991; cursor: pointer; font-size: 19px;
+    }
+    .kebab:hover { background: #eaf1f9; color: var(--ink); }
+    .empty { padding: 38px; text-align: center; color: var(--muted); }
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between; padding: 10px 13px;
+      color: var(--muted); border-top: 1px solid var(--line); background: #fbfcfe; font-size: 12px;
+    }
+    .legend { margin-top: 12px; color: #7b889d; font-size: 12px; }
+    .legend strong { color: #52627b; }
+    .scrim { position: fixed; inset: 0; display: none; background: rgba(16, 33, 61, .18); z-index: 10; }
+    .scrim.open { display: block; }
+    .drawer {
+      position: fixed; top: 0; right: 0; z-index: 11; width: min(430px, 44vw); height: 100vh;
+      transform: translateX(102%); transition: transform .2s ease; background: #fff; box-shadow: var(--shadow);
+      display: grid; grid-template-rows: auto 1fr auto;
+    }
+    .drawer.open { transform: translateX(0); }
+    .drawer-head { padding: 22px 22px 17px; border-bottom: 1px solid var(--line); }
+    .drawer-head-top { display: flex; align-items: center; justify-content: space-between; }
+    .drawer-head h2 { margin: 10px 0 4px; font-size: 20px; font-weight: 500; }
+    .drawer-head p { margin: 0; color: var(--muted); }
+    .close { width: 34px; height: 34px; border: 0; border-radius: 8px; background: #f2f5f9; cursor: pointer; font-size: 20px; }
+    .drawer-body { padding: 18px 22px; overflow: auto; }
+    .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .fact { min-height: 65px; padding: 11px; border: 1px solid var(--line); border-radius: 9px; }
+    .fact span { display: block; color: var(--muted); font-size: 11px; }
+    .fact b { display: block; margin-top: 5px; font-size: 13px; font-weight: 400; }
+    .drawer h3 { margin: 22px 0 9px; font-size: 13px; font-weight: 500; }
+    .line-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 0; border-bottom: 1px solid #edf1f5; }
+    .line-item b { font-size: 12px; font-weight: 400; }
+    .line-item small { display: block; color: var(--muted); margin-top: 3px; }
+    .drawer-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--line); }
+    .menu-pop {
+      position: fixed; z-index: 20; display: none; width: 178px; padding: 5px; border: 1px solid #d9e1ec;
+      border-radius: 9px; background: #fff; box-shadow: 0 12px 30px rgba(27, 50, 82, .15);
+    }
+    .menu-pop.open { display: grid; }
+    .menu-pop button { border: 0; border-radius: 6px; background: transparent; padding: 8px 9px; text-align: left; cursor: pointer; }
+    .menu-pop button:hover { background: #f1f5fa; }
+    @media (max-width: 1050px) {
+      .app { grid-template-columns: 1fr; }
+      main { padding-inline: 20px; }
+      col.context { width: 27%; }
+      col.items { width: 13%; }
+      .amount-col, .amount-cell { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><span class="brand-mark">C</span><div><b>Снаб</b><small>рабочий сценарий</small></div></div>
+      <div class="nav-label">Операции</div>
+      <nav class="nav">
+        <button>Обеспечение и заказы</button>
+        <button>Входящие заявки</button>
+        <button>Резервы</button>
+        <button>Закупки</button>
+        <button>Логистика</button>
+        <div class="split"></div>
+        <button class="active">Документы</button>
+        <button>Инвентаризация</button>
+        <button>Остатки</button>
+      </nav>
+    </aside>
+
+    <main>
+      <div class="workspace">
+        <header class="heading">
+          <div><h1>Документы</h1><p>Все движения склада в одном компактном журнале.</p></div>
+          <span class="mock-badge">МАКЕТ</span>
+        </header>
+
+        <div class="toolbar">
+          <label class="search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="search" type="search" placeholder="Документ, склад, поставщик или сделка" />
+          </label>
+          <button class="button" id="filterButton">Фильтры <span id="filterMark">▾</span></button>
+          <button class="button primary">+ Новый документ</button>
+        </div>
+
+        <div class="filter-panel" id="filterPanel">
+          <label>Тип<select><option>Все документы</option><option>Оприходование</option><option>Списание</option><option>Перемещение</option><option>Закупка</option></select></label>
+          <label>Склад<select><option>Все склады</option><option>Shelly</option><option>Маркетплейс</option><option>Богатырский 15</option></select></label>
+          <label>Период<select><option>Последние 30 дней</option><option>Сегодня</option><option>Эта неделя</option><option>Этот месяц</option></select></label>
+          <button class="button" style="align-self:end">Сбросить</button>
+        </div>
+
+        <div class="segments" id="segments">
+          <button class="active" data-status="all">Все <b>28</b></button>
+          <button data-status="work">В работе <b>4</b></button>
+          <button data-status="attention">Требуют внимания <b>2</b></button>
+          <button data-status="done">Проведены <b>22</b></button>
+        </div>
+
+        <section class="card">
+          <table aria-label="Компактный журнал документов">
+            <colgroup><col class="doc"><col class="context"><col class="items"><col class="amount"><col class="status"><col class="menu"></colgroup>
+            <thead><tr><th>Документ</th><th>Контекст</th><th>Состав</th><th class="num amount-col">Сумма</th><th>Состояние</th><th></th></tr></thead>
+            <tbody id="rows">
+              <tr data-status="work" data-search="закупка pur-2026-00128 умный дом поставщик shelly">
+                <td><div class="doc-main"><span class="type-icon in">З</span><div class="doc-text"><b>Закупка PUR-00128</b><small>22 сентября · 12:18</small></div></div></td>
+                <td><div class="context-text"><b>ООО «Умный дом»</b><small>на склад Shelly · без сделки</small></div></td>
+                <td class="items-cell">8 поз. · 34 шт.</td><td class="num amount-cell">184 900 ₽</td><td><span class="status wait">Ожидает приёмки</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+              <tr data-status="attention" data-search="перемещение ste-2026-00419 shelly маркетплейс сделка 9821">
+                <td><div class="doc-main"><span class="type-icon move">→</span><div class="doc-text"><b>Перемещение STE-00419</b><small>22 сентября · 11:46</small></div></div></td>
+                <td><div class="context-text"><b>Shelly → Маркетплейс</b><small>сделка #9821 · Николай М.</small></div></td>
+                <td class="items-cell">3 поз. · 5 шт.</td><td class="num amount-cell">—</td><td><span class="status problem">Есть расхождение</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+              <tr data-status="done" data-search="реализация dn-2026-00984 озон ihome shop маркетплейс">
+                <td><div class="doc-main"><span class="type-icon out">Р</span><div class="doc-text"><b>Реализация DN-00984</b><small>21 сентября · 18:32</small></div></div></td>
+                <td><div class="context-text"><b>Озон ihome-shop</b><small>склад Маркетплейс</small></div></td>
+                <td class="items-cell">3 поз. · 5 шт.</td><td class="num amount-cell">2 450 ₽</td><td><span class="status done">Проведён</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+              <tr data-status="done" data-search="оприходование rec-2026-00308 инвентаризация shelly">
+                <td><div class="doc-main"><span class="type-icon in">+</span><div class="doc-text"><b>Оприходование REC-00308</b><small>21 сентября · 16:07</small></div></div></td>
+                <td><div class="context-text"><b>Инвентаризация #146</b><small>склад Shelly · Алексей Л.</small></div></td>
+                <td class="items-cell">6 поз. · 11 шт.</td><td class="num amount-cell">38 640 ₽</td><td><span class="status done">Проведён</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+              <tr data-status="work" data-search="списание iss-2026-00177 богатырский 15 повреждение">
+                <td><div class="doc-main"><span class="type-icon out">−</span><div class="doc-text"><b>Списание ISS-00177</b><small>21 сентября · 14:23</small></div></div></td>
+                <td><div class="context-text"><b>Богатырский 15</b><small>повреждение · Константин Л.</small></div></td>
+                <td class="items-cell">2 поз. · 2 шт.</td><td class="num amount-cell">7 120 ₽</td><td><span class="status draft">Черновик</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+              <tr data-status="done" data-search="инвентаризация inv-00146 shelly закрыта">
+                <td><div class="doc-main"><span class="type-icon inv">И</span><div class="doc-text"><b>Инвентаризация #146</b><small>20 сентября · 19:04</small></div></div></td>
+                <td><div class="context-text"><b>Shelly</b><small>ответственный Алексей Л.</small></div></td>
+                <td class="items-cell">412 поз.</td><td class="num amount-cell">+31 520 ₽</td><td><span class="status done">Закрыта</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+              <tr data-status="attention" data-search="возврат ret-2026-00051 озон shelly">
+                <td><div class="doc-main"><span class="type-icon in">↩</span><div class="doc-text"><b>Возврат RET-00051</b><small>20 сентября · 15:44</small></div></div></td>
+                <td><div class="context-text"><b>Озон И-ОН Шелли</b><small>на склад Shelly</small></div></td>
+                <td class="items-cell">2 поз. · 3 шт.</td><td class="num amount-cell">16 700 ₽</td><td><span class="status problem">Нужна проверка</span></td><td><button class="kebab" aria-label="Действия">⋮</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="empty" id="empty" hidden>Документы не найдены</div>
+          <footer class="card-footer"><span id="count">Показано 7 из 28</span><span>Строк на странице: 25　‹　1　2　›</span></footer>
+        </section>
+        <p class="legend"><strong>Идея:</strong> дата объединена с номером, склад и связь — в «Контексте», постоянные действия спрятаны в ⋮, полный состав открывается кликом по строке.</p>
+      </div>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <header class="drawer-head">
+      <div class="drawer-head-top"><span class="status wait" id="drawerStatus">Ожидает приёмки</span><button class="close" id="closeDrawer" aria-label="Закрыть">×</button></div>
+      <h2 id="drawerTitle">Закупка PUR-00128</h2><p id="drawerSubtitle">22 сентября · 12:18</p>
+    </header>
+    <div class="drawer-body">
+      <div class="facts">
+        <div class="fact"><span>Маршрут / контрагент</span><b id="drawerContext">ООО «Умный дом» → Shelly</b></div>
+        <div class="fact"><span>Ответственный</span><b>Алексей Литвинов</b></div>
+        <div class="fact"><span>Состав</span><b id="drawerItems">8 позиций · 34 шт.</b></div>
+        <div class="fact"><span>Сумма</span><b id="drawerAmount">184 900 ₽</b></div>
+      </div>
+      <h3>Позиции</h3>
+      <div class="line-item"><div><b>Реле Shelly Plus 1PM</b><small>ID 18421 · Shelly</small></div><b>12 шт.</b></div>
+      <div class="line-item"><div><b>Датчик движения Aqara P1</b><small>ID 19640 · Shelly</small></div><b>8 шт.</b></div>
+      <div class="line-item"><div><b>Термостат Heatit Z-TRM6</b><small>ID 17782 · Shelly</small></div><b>6 шт.</b></div>
+      <div class="line-item"><div><b>Ещё 5 позиций</b><small>Показать весь состав</small></div><b>8 шт.</b></div>
+      <h3>История</h3>
+      <div class="line-item"><div><b>Документ создан</b><small>22 сентября, 12:18 · Алексей Литвинов</small></div></div>
+    </div>
+    <footer class="drawer-foot"><button class="button">Открыть журнал</button><button class="button primary">Принять на склад</button></footer>
+  </aside>
+
+  <div class="menu-pop" id="menuPop"><button>Открыть документ</button><button>Показать историю</button><button>Скопировать номер</button></div>
+
+  <script>
+    const rows = [...document.querySelectorAll('#rows tr')];
+    const search = document.getElementById('search');
+    const segments = [...document.querySelectorAll('#segments button')];
+    const empty = document.getElementById('empty');
+    const count = document.getElementById('count');
+    let status = 'all';
+
+    function applyFilters() {
+      const query = search.value.trim().toLocaleLowerCase('ru-RU');
+      let visible = 0;
+      rows.forEach((row) => {
+        const matchesStatus = status === 'all' || row.dataset.status === status;
+        const matchesSearch = !query || row.dataset.search.includes(query);
+        row.hidden = !(matchesStatus && matchesSearch);
+        row.classList.toggle('stripe', !row.hidden && visible % 2 === 1);
+        if (!row.hidden) visible += 1;
+      });
+      empty.hidden = visible !== 0;
+      count.textContent = `Показано ${visible} из 28`;
+    }
+    search.addEventListener('input', applyFilters);
+    segments.forEach((button) => button.addEventListener('click', () => {
+      segments.forEach((item) => item.classList.remove('active'));
+      button.classList.add('active');
+      status = button.dataset.status;
+      applyFilters();
+    }));
+
+    const panel = document.getElementById('filterPanel');
+    document.getElementById('filterButton').addEventListener('click', () => {
+      panel.classList.toggle('open');
+      document.getElementById('filterMark').textContent = panel.classList.contains('open') ? '▴' : '▾';
+    });
+
+    const drawer = document.getElementById('drawer');
+    const scrim = document.getElementById('scrim');
+    function closeDrawer() { drawer.classList.remove('open'); scrim.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
+    function openDrawer(row) {
+      document.getElementById('drawerTitle').textContent = row.querySelector('.doc-text b').textContent;
+      document.getElementById('drawerSubtitle').textContent = row.querySelector('.doc-text small').textContent;
+      document.getElementById('drawerContext').textContent = row.querySelector('.context-text b').textContent;
+      document.getElementById('drawerItems').textContent = row.querySelector('.items-cell').textContent;
+      document.getElementById('drawerAmount').textContent = row.querySelector('.amount-cell').textContent;
+      const sourceStatus = row.querySelector('.status');
+      const drawerStatus = document.getElementById('drawerStatus');
+      drawerStatus.textContent = sourceStatus.textContent;
+      drawerStatus.className = sourceStatus.className;
+      drawer.classList.add('open'); scrim.classList.add('open'); drawer.setAttribute('aria-hidden', 'false');
+    }
+    rows.forEach((row) => row.addEventListener('click', (event) => {
+      if (event.target.closest('.kebab')) return;
+      openDrawer(row);
+    }));
+    document.getElementById('closeDrawer').addEventListener('click', closeDrawer);
+    scrim.addEventListener('click', closeDrawer);
+    window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeDrawer(); });
+
+    const menu = document.getElementById('menuPop');
+    document.querySelectorAll('.kebab').forEach((button) => button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const rect = button.getBoundingClientRect();
+      menu.style.top = `${Math.min(rect.bottom + 4, innerHeight - 130)}px`;
+      menu.style.left = `${rect.right - 178}px`;
+      menu.classList.add('open');
+    }));
+    document.addEventListener('click', () => menu.classList.remove('open'));
+    menu.addEventListener('click', (event) => event.stopPropagation());
+    applyFilters();
+  </script>
+</body>
+</html>

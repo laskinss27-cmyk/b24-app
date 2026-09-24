@@ -33,6 +33,8 @@ docs/        документация
 ## Разработка
 
 Требуется Node.js 20 или новее.
+Для интеграции заказов интернет-магазина и полного набора backend-тестов нужен Node.js 24 или новее.
+Настройка и sandbox-проверка описаны в [docs/umniydom-orders.md](docs/umniydom-orders.md).
 
 ```bash
 npm ci
