@@ -56,6 +56,8 @@ type UseSupplyAccessStateOptions = {
 
 type SupplyAccessState = {
 	phase: SupplyPhase;
+	ordersError: string | null;
+	setOrdersError: Dispatch<SetStateAction<string | null>>;
 	suppliers: string[];
 	setSuppliers: Dispatch<SetStateAction<string[]>>;
 	loading: boolean;
@@ -78,6 +80,7 @@ export function useSupplyAccessState({
 	setView,
 }: UseSupplyAccessStateOptions): SupplyAccessState {
 	const [phase, setPhase] = useState<SupplyPhase>('init');
+	const [ordersError, setOrdersError] = useState<string | null>(null);
 	const [suppliers, setSuppliers] = useState<string[]>(defaultSuppliers);
 	const [loading, setLoading] = useState(!mock);
 	const [currentUserId, setCurrentUserId] = useState('');
@@ -148,11 +151,13 @@ export function useSupplyAccessState({
 				setMarketplaceOnly(false);
 				setPhase('ready');
 				try {
-					const [loaded, supplierList] = await Promise.all([fetchSupplyOrders(), fetchSupplySuppliers()]);
+					const loaded = await fetchSupplyOrders();
 					setOrders(loaded);
+					setOrdersError(null);
+					const supplierList = await fetchSupplySuppliers().catch(() => []);
 					setSuppliers([...new Set([...supplierList, ...defaultSuppliers])].filter(Boolean));
-				} catch {
-					setOrders([]);
+				} catch (error) {
+					setOrdersError(error instanceof Error ? error.message : 'Не удалось загрузить заявки снабжения.');
 				} finally {
 					setLoading(false);
 				}
@@ -162,6 +167,8 @@ export function useSupplyAccessState({
 
 	return {
 		phase,
+		ordersError,
+		setOrdersError,
 		suppliers,
 		setSuppliers,
 		loading,

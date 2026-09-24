@@ -59,6 +59,8 @@ export function Supply(): JSX.Element {
 	} = useSupplyOrderFiltering(orders, searches.orders);
 	const {
 		phase,
+		ordersError,
+		setOrdersError,
 		suppliers,
 		setSuppliers,
 		loading,
@@ -105,8 +107,14 @@ export function Supply(): JSX.Element {
 	}, [printApprovalOrder]);
 
 	const reload = async (): Promise<void> => {
-		const loaded = await fetchSupplyOrders();
-		setOrders(loaded);
+		try {
+			const loaded = await fetchSupplyOrders();
+			setOrders(loaded);
+			setOrdersError(null);
+		} catch (error) {
+			setOrdersError(error instanceof Error ? error.message : 'Не удалось загрузить заявки снабжения.');
+			throw error;
+		}
 	};
 	const {
 		decisions,
@@ -175,12 +183,13 @@ export function Supply(): JSX.Element {
 			<SupplyNavigation view={view} reportsOpen={reportsOpen} marketplaceOnly={marketplaceOnly} canOpenMarketplaces={canOpenMarketplaces} canOpenReportBuilder={canOpenReportBuilder} currentUserId={currentUserId} mock={Boolean(ctx.__mock)} onViewChange={setView} onToggleReports={() => setReportsOpen((current) => !current)} />
 			<main className={`supply-proto-main${view === 'stocks' || view === 'reservations' || view === 'marketplaces' || view === 'turnover' || view === 'matrix' || view === 'report-builder' || view === 'inventory' ? ' supply-proto-main-wide' : ''}`}>
 				{view !== 'report-builder' && <SupplyPageHeader view={view} onCreate={setCreateKind} />}
-				{(view === 'orders' || view === 'purchase' || view === 'logistics') && <SupplyMetrics orders={orders} view={view} />}
+				{(view === 'orders' || view === 'purchase' || view === 'logistics') && !loading && !ordersError && <SupplyMetrics orders={orders} view={view} />}
 				{(view === 'orders' || view === 'purchase') && <SupplySearch value={searches[view]} onChange={(value) => setSearches((current) => ({ ...current, [view]: value }))} />}
 				{notice && <div className={`supply-proto-notice${openDocument ? ' supply-proto-notice-over-modal' : ''}`}><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
+				{ordersError && (view === 'orders' || view === 'purchase' || view === 'logistics') && <div className="supply-proto-notice" role="alert"><span>Заявки и документы не загружены: {ordersError}</span><button type="button" onClick={() => void reload().catch(() => undefined)}>Повторить</button></div>}
 				{loading && <div className="supply-proto-card empty">Загрузка заявок из ядра...</div>}
-				{view === 'orders' && <SupplyOrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { cancelReview(); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={startReview} onCancelReview={cancelReview} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
-				{view === 'purchase' && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
+				{view === 'orders' && !loading && !ordersError && <SupplyOrdersView orders={filteredOrders} stores={stockForm?.stores ?? []} sort={sort} statusFilter={orderStatusFilter} search={searches.orders} expanded={expanded} decisions={decisions} suppliers={suppliers} onCreateSupplier={addSupplier} busy={busy} reviewing={reviewing} creationErrors={creationErrors} onSort={setSort} onStatusFilter={setOrderStatusFilter} onToggle={(name) => { cancelReview(); setExpanded((current) => current === name ? '' : name); }} onPatch={patchDecision} onAdd={addDecision} onRemove={removeDecision} onReview={startReview} onCancelReview={cancelReview} onCreate={(order) => void createDocs(order)} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} onPrintApproval={setPrintApprovalOrder} onSaveNote={saveOrderNote} onSaveStore={saveOrderStore} onEditLine={refreshAfterRequestLineEdit} />}
+				{view === 'purchase' && !loading && !ordersError && <SupplyRegistryView orders={orders} kind="purchase" search={searches.purchase} onOpenPurchase={(order, purchase) => setOpenDocument({ kind: 'purchase', order, purchase })} onOpenTransfer={(order, transfer) => setOpenDocument({ kind: 'transfer', order, transfer })} />}
 				{view === 'incoming' && <div className="supply-proto-card supply-stock-card"><TransferRequestsTab key={`requests-${stockRefresh}`} form={stockForm} mode="supply" {...(requestId > 0 ? { initialRequestId: requestId } : {})} onChanged={() => setStockRefresh((value) => value + 1)} /></div>}
 				{view === 'reservations' && <SupplyReservationsView />}
 				{view === 'logistics' && <>

@@ -24,7 +24,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 		const client = supplyClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const erp = ErpClient.fromEnv();
-		if (!erp) return { ok: true, orders: [] as unknown[] };
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
 			const reqs = await listSupplyRequests(erp);
 			const standaloneToStore = String(process.env['SUPPLY_RECEIPT_STORE'] ?? '').trim() || 'Склад Прихода';
