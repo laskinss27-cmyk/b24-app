@@ -24,9 +24,17 @@ export function DealRealizationBar({
 	busy,
 	supplyBusy,
 	supplyGoodsCount,
+	reserveGoodsCount,
+	reservationBusy,
+	reservationStatus,
+	canRequestReservation,
+	canRequestRelease,
 	notice,
 	onRealize,
+	onDeleteDrafts,
 	onOrderSupply,
+	onReserve,
+	onReleaseReservation,
 }: {
 	hasPendingDrafts: boolean;
 	pendingDraftCount: number;
@@ -40,12 +48,21 @@ export function DealRealizationBar({
 	busy: boolean;
 	supplyBusy: boolean;
 	supplyGoodsCount: number;
+	reserveGoodsCount: number;
+	reservationBusy: boolean;
+	reservationStatus: string | null;
+	canRequestReservation: boolean;
+	canRequestRelease: boolean;
 	notice: { kind: 'ok' | 'err'; text: string } | null;
 	onRealize: () => void;
+	onDeleteDrafts: () => void;
 	onOrderSupply: () => void;
+	onReserve: () => void;
+	onReleaseReservation: () => void;
 }): JSX.Element {
 	return (
 		<div className="realize-bar">
+			{reservationStatus && <div className="deal-reservation-status">{reservationStatus}</div>}
 			{hasPendingDrafts ? (
 				<div className="realize-plan">
 					<b>Черновики в ядре: {pendingDraftCount} — проверь партии ниже и проведи.</b>
@@ -74,9 +91,22 @@ export function DealRealizationBar({
 				>
 					{busy ? '…' : hasPendingDrafts ? '✓ Провести' : `Реализация${realizationDocumentCount ? ` (${realizationDocumentCount})` : ''}`}
 				</button>
+				{hasPendingDrafts && <button
+					type="button"
+					className="btn-delete-realization-drafts"
+					disabled={dev || busy || supplyBusy || pendingDraftCount === 0}
+					onClick={onDeleteDrafts}
+				>{pendingDraftCount === 1 ? 'Удалить черновик' : `Удалить черновики (${pendingDraftCount})`}</button>}
 				{!hasPendingDrafts && supplyGoodsCount > 0 && (
 					<button className="btn-order-supply" disabled={dev || busy || supplyBusy} title="Сформировать заказ по отмеченным товарам для дисплея снабжения" onClick={onOrderSupply}>{supplyBusy ? '…' : `Заказать (${supplyGoodsCount})`}</button>
 				)}
+				{!hasPendingDrafts && canRequestReservation && <button
+					className="btn-reservation"
+					disabled={dev || busy || supplyBusy || reservationBusy || reserveGoodsCount === 0}
+					title={reserveGoodsCount === 0 ? 'Отметьте товар с доступным остатком и выберите склад в строке' : 'Запросить резерв отмеченных товаров'}
+					onClick={onReserve}
+				>{reservationBusy ? '…' : `В резерв${reserveGoodsCount ? ` (${reserveGoodsCount})` : ''}`}</button>}
+				{canRequestRelease && <button className="btn-reservation-release" disabled={reservationBusy} onClick={onReleaseReservation}>Запросить снятие</button>}
 			</div>
 			{notice && <span className={notice.kind === 'ok' ? 'realize-ok' : 'error'}>{notice.text}</span>}
 		</div>

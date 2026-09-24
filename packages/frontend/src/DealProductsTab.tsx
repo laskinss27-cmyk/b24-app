@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { KpDocument, type DealPrintKind } from './Kp.js';
 import { buildDealProductsActiveView } from './deal-products-active-view.js';
+import { dealAddPickerRequest } from './deal-add-picker-request.js';
 import { loadDealProductsData } from './deal-products-data-loader.js';
 import {
 	DealProductsPicker,
@@ -78,5 +79,5 @@ export function DealProductsTab(): JSX.Element {
 	}
 
 	const { activeVariant, viewingSelected, displayData, workingVariantHasActivity } = buildDealProductsActiveView(state.data, activeVariantId);
-	return <DealProductsWorkspace data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} workingVariantHasActivity={workingVariantHasActivity} onActiveVariant={setActiveVariantId} onAdd={() => activeVariant && !viewingSelected ? setAdding({ kind: 'variant', variantId: activeVariant.id, variantName: activeVariant.name }) : setAdding({ kind: 'deal' })} onReplace={(row) => setReplacing({ productId: row.productId, name: row.name })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
+	return <DealProductsWorkspace data={displayData} viewer={state.viewer} dev={state.dev} canReturn={state.canReturn} dealId={ctx.dealId} activeVariantId={activeVariantId} workingVariantHasActivity={workingVariantHasActivity} onActiveVariant={setActiveVariantId} onAdd={() => setAdding(dealAddPickerRequest(state.data, activeVariant, viewingSelected))} onReplace={(row) => setReplacing({ productId: row.productId, name: row.name })} onStage={(stageName) => setAdding({ kind: 'new-stage', stageName })} onAddToStage={(stageId, stageName) => setAdding({ kind: 'stage', stageId, stageName })} onPrintDocument={(kind, variantId) => { setKpVariantId(variantId ?? (activeVariantId && activeVariantId !== state.data.quoteVariants.selectedId ? activeVariantId : null)); setPrintKind(kind); }} onReload={reload} />;
 }
