@@ -383,6 +383,15 @@ export async function listActiveStoreTitles(erp: ErpClient): Promise<string[]> {
 		.sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
+/** Hide retired points from new selections while keeping their warehouse and history in ERPNext. */
+export function selectableStoreTitle(title: string): boolean {
+	return title.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е') !== 'железноводская, секция 23';
+}
+
+export async function listSelectableStoreTitles(erp: ErpClient): Promise<string[]> {
+	return (await listActiveStoreTitles(erp)).filter(selectableStoreTitle);
+}
+
 /** Стабильный числовой ID склада ядра для старых компонентов интерфейса, ожидающих number. */
 export function coreStoreId(title: string): number {
 	let hash = 0x811c9dc5;

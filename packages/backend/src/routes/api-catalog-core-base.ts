@@ -5,7 +5,7 @@ import {
 	fetchCoreCatalogItems,
 	fetchCoreCatalogPrices,
 	fetchErpStocks,
-	listActiveStoreTitles,
+	listSelectableStoreTitles,
 } from '../erp/operations.js';
 import type { CatalogStore, CoreProductBaseRow } from './api-catalog-types.js';
 import { coreSectionId, normalizedStoreTitle } from './api-catalog-value-helpers.js';
@@ -18,7 +18,7 @@ export async function buildCoreProductBase(erp: ErpClient, metadata: ProductBase
 		fetchCoreCatalogItems(erp),
 		fetchErpStocks(erp),
 		fetchCoreCatalogPrices(erp),
-		listActiveStoreTitles(erp),
+		listSelectableStoreTitles(erp),
 	]);
 	const stores = storeTitles.map((title) => ({ id: coreStoreId(title), title, active: true }));
 	const storeIdByTitle = new Map(stores.map((store) => [normalizedStoreTitle(store.title), store.id]));

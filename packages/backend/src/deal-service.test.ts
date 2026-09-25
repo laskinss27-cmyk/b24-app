@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { B24ApiError, type B24Client } from './b24/client.js';
+import { syncDealPaymentBalance } from './deal-payment-balance.js';
 import {
 	B24_COLLAPSE_SERVICE_NAME,
 	B24_COLLAPSE_SERVICE_PRODUCT_ID,
@@ -141,4 +142,33 @@ test('legacy shipped Bitrix rows stay as history and the deal receives the core 
 			},
 		},
 	]);
+});
+
+test('payment balance follows deal amount without changing the Kassa payment', async () => {
+	const updates: unknown[] = [];
+	const client = {
+		call: async (method: string, params: Record<string, unknown>) => {
+			if (method === 'crm.deal.get') return { OPPORTUNITY: '312200.00', UF_CRM_1765984372: '312200', UF_CRM_1765984397: '25000' };
+			if (method === 'crm.deal.update') { updates.push(params); return true; }
+			throw new Error(method);
+		},
+	} as unknown as B24Client;
+	assert.deepEqual(await syncDealPaymentBalance(client, 36264), { value: 0, changed: true });
+	assert.deepEqual(updates, [{ id: 36264, fields: { UF_CRM_1765984397: 0 } }]);
+});
+
+test('payment balance is idempotent and leaves deals without a Kassa amount untouched', async () => {
+	const updates: unknown[] = [];
+	let paid: string | null = '100';
+	const client = {
+		call: async (method: string, params: Record<string, unknown>) => {
+			if (method === 'crm.deal.get') return { OPPORTUNITY: '125', UF_CRM_1765984372: paid, UF_CRM_1765984397: '25' };
+			if (method === 'crm.deal.update') { updates.push(params); return true; }
+			throw new Error(method);
+		},
+	} as unknown as B24Client;
+	assert.deepEqual(await syncDealPaymentBalance(client, 7), { value: 25, changed: false });
+	paid = null;
+	assert.deepEqual(await syncDealPaymentBalance(client, 7), { value: null, changed: false });
+	assert.deepEqual(updates, []);
 });

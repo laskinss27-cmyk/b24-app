@@ -58,6 +58,8 @@ import {
 	itemStockLedger,
 	coreStoreId,
 	listActiveStoreTitles,
+	listSelectableStoreTitles,
+	selectableStoreTitle,
 	listDealPlan,
 	listDealRealizations,
 	listDealStages,
@@ -2246,6 +2248,7 @@ test('active store titles keep ERP filtering, sorting and stable legacy IDs', as
 				{ name: 'Goods In Transit - TEST', warehouse_type: '' },
 				{ name: 'Transit Point - TEST', warehouse_type: 'Transit' },
 				{ name: 'Alpha - TEST', warehouse_type: '' },
+				{ name: 'Железноводская, секция 23 - TEST', warehouse_type: '' },
 				{ name: 'Main - TEST', warehouse_type: '' },
 				{ name: '', warehouse_type: '' },
 			];
@@ -2253,7 +2256,10 @@ test('active store titles keep ERP filtering, sorting and stable legacy IDs', as
 		},
 	} as unknown as ErpClient;
 
-	assert.deepEqual(await listActiveStoreTitles(client), ['Alpha', 'Main', 'Zulu']);
+	assert.deepEqual(await listActiveStoreTitles(client), ['Alpha', 'Zulu', 'Железноводская, секция 23', 'Main'].sort((a, b) => a.localeCompare(b, 'ru')));
+	assert.deepEqual(await listSelectableStoreTitles(client), ['Alpha', 'Main', 'Zulu']);
+	assert.equal(selectableStoreTitle('Железноводская, секция 23'), false);
+	assert.equal(selectableStoreTitle('Железноводская, секция 34'), true);
 	const warehouseCall = calls.find((call) => call.doctype === 'Warehouse');
 	assert.ok(warehouseCall);
 	assert.deepEqual(warehouseCall.fields, ['name', 'warehouse_type']);

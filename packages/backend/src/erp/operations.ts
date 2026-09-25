@@ -137,6 +137,8 @@ export {
 	fetchErpStocks,
 	fetchErpStocksFor,
 	listActiveStoreTitles,
+	listSelectableStoreTitles,
+	selectableStoreTitle,
 	searchErpItems,
 	updateCoreCatalogPrices,
 	updateMarketplaceOldId,

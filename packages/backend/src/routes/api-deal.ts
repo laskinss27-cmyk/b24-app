@@ -4,6 +4,7 @@ import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
 import { syncDealFulfillmentStatus } from '../deal-fulfillment.js';
 import { syncDealServiceSum } from '../deal-service-sum.js';
+import { syncDealPaymentBalance } from '../deal-payment-balance.js';
 import { registerDealCoreRealizationRoute } from './deal-core-realization-route.js';
 import { registerDealCommercialProposalFileRoutes } from './deal-commercial-proposal-file-routes.js';
 import { registerDealCommercialProposalRoute } from './deal-commercial-proposal-route.js';
@@ -62,6 +63,12 @@ export function registerApiDealRoute(app: FastifyInstance): void {
 		return new B24Client({ auth: { kind: 'oauth', domain: body.domain, accessToken: body.accessToken } });
 	};
 	const syncDealTechnicalFields = async (client: B24Client, erp: ErpClient, dealId: number): Promise<void> => {
+		try {
+			const result = await syncDealPaymentBalance(systemClient() ?? client, dealId);
+			app.log.info({ dealId, ...result }, '[deal-payment-balance] synchronized');
+		} catch (err) {
+			app.log.error({ dealId }, `[deal-payment-balance] synchronization failed — ${errInfo(err)}`);
+		}
 		try {
 			const result = await syncDealFulfillmentStatus(client, erp, dealId);
 			app.log.info({ dealId, ...result }, '[deal-fulfillment] synchronized');

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { buildProductBase } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
-import { coreStoreId, listActiveStoreTitles } from '../erp/operations.js';
+import { coreStoreId, listSelectableStoreTitles } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import type { AuthBody } from './api-catalog-types.js';
@@ -17,7 +17,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро склада не подключено' });
 		try {
-			const titles = await listActiveStoreTitles(erp);
+			const titles = await listSelectableStoreTitles(erp);
 			return {
 				ok: true,
 				stores: titles.map((title) => ({ id: coreStoreId(title), title, active: true })),

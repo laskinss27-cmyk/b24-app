@@ -268,6 +268,7 @@ export function registerDealProductManagementRoutes(
 			if (!erp) throw new Error('ядро склада не подключено — сумму сделки нельзя определить');
 			const total = await calculateDealPlanTotal(erp, dealId);
 			await setDealB24Service(client, dealId, total);
+			await syncDealTechnicalFields(client, erp, dealId);
 			app.log.info({ dealId, total }, '[api/deal/collapse-service] core total synchronized');
 			return { ok: true, total };
 		} catch (err) {

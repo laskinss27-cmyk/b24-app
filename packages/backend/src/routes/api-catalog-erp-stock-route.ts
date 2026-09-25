@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
-import { fetchErpStocksFor, fetchErpPurchasing } from '../erp/operations.js';
+import { fetchErpStocksFor, fetchErpPurchasing, selectableStoreTitle } from '../erp/operations.js';
 import { normalizeDomain } from '../security.js';
 import { canonicalProductId } from '../product-aliases.js';
 import { appPermission } from '../access-policy.js';
@@ -35,7 +35,7 @@ export function registerCatalogErpStockRoute(app: FastifyInstance): void {
 			for (const requestedId of requestedIds) {
 				const pid = canonicalProductId(requestedId);
 				byProduct[requestedId] = {
-					stocks: stocks.get(pid) ?? {},
+					stocks: Object.fromEntries(Object.entries(stocks.get(pid) ?? {}).filter(([title]) => selectableStoreTitle(title))),
 					purchasing: canViewPurchasePrices ? purchasing.get(pid) ?? 0 : 0,
 				};
 			}
