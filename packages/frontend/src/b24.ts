@@ -160,6 +160,7 @@ export type {
 } from './marketplace-api.js';
 export {
 	addProductToDeal,
+	cancelCoreRealization,
 	createDealReturnRequest,
 	fetchDealRealizationsCore,
 	realizeCoreDraft,

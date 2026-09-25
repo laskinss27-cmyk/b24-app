@@ -173,6 +173,41 @@ export function registerDealCoreRealizationRoute(
 				await recordRealizationEvent(app, req, { operation: 'delete_draft', dealId, documents: loggedDocuments });
 				return { ok: true, deleted: names };
 			}
+			if (action === 'cancel') {
+				const dealId = Number(b.dealId);
+				const name = String(b.names && Array.isArray(b.names) ? b.names[0] ?? '' : '').trim();
+				if (!Number.isInteger(dealId) || dealId <= 0 || !name || (Array.isArray(b.names) && b.names.length !== 1)) {
+					return reply.code(400).send({ ok: false, error: 'укажите одну реализацию и номер сделки' });
+				}
+				const [user, admin] = await Promise.all([
+					client.call<{ ID?: string | number; ADMIN?: boolean | string }>('user.current', {}),
+					client.call<boolean>('user.admin', {}).catch(() => false),
+				]);
+				if (admin !== true && user.ADMIN !== true && String(user.ADMIN ?? '').toUpperCase() !== 'Y') {
+					return reply.code(403).send({ ok: false, error: 'отменить проведённую реализацию может только администратор' });
+				}
+				await client.call('crm.deal.get', { id: dealId });
+				const document = await erp.get<Record<string, unknown>>('Delivery Note', name);
+				if (!document || String(document[DEAL_FIELD] ?? '') !== String(dealId)
+					|| Number(document['is_return'] ?? 0) !== 0 || Number(document['docstatus'] ?? 0) !== 1) {
+					throw new Error(`реализация ${name} изменилась или не принадлежит сделке; обнови страницу`);
+				}
+				const linkedReturns = await erp.list('Delivery Note', ['name'], [['return_against', '=', name], ['docstatus', '!=', 2]], 1);
+				if (linkedReturns.length) throw new Error('у реализации есть возврат; сначала разберите связанный документ');
+				if (app.reservationRuntime?.enabled) {
+					const consumed = await app.reservationRuntime.query(async (connection) => connection.query<Array<{ count: number }>>(`
+						SELECT COUNT(*) AS count FROM stock_reservation_events e
+						JOIN stock_reservation_commands c ON c.id = e.command_id
+						WHERE c.idempotency_key = ? AND e.event_type = 'consumed'
+					`, [`consume:Delivery Note:${name}`]));
+					if (Number(consumed[0]?.count ?? 0) > 0) throw new Error('по реализации списан резерв; для отмены нужна сверка резерва снабжением');
+				}
+				await erp.cancel('Delivery Note', name);
+				loggedDocuments.push(name);
+				await recordRealizationEvent(app, req, { operation: 'cancel', dealId, documents: loggedDocuments });
+				await syncDealTechnicalFields(client, erp, dealId);
+				return { ok: true, canceled: name };
+			}
 			if (action === 'submit') {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
@@ -214,7 +249,7 @@ export function registerDealCoreRealizationRoute(
 		} catch (err) {
 			const error = errInfo(err);
 			app.log.error({ action }, `[api/deal/realize-core] failed — ${error}`);
-			if ((action === 'draft' || action === 'delete-draft' || action === 'submit' || action === 'return') && Number.isInteger(logDealId) && logDealId > 0) {
+			if ((action === 'draft' || action === 'delete-draft' || action === 'submit' || action === 'cancel' || action === 'return') && Number.isInteger(logDealId) && logDealId > 0) {
 				await recordRealizationEvent(app, req, { operation: action === 'delete-draft' ? 'delete_draft' : action, dealId: logDealId, documents: loggedDocuments, error });
 			}
 			return reply.code(200).send({ ok: false, error });

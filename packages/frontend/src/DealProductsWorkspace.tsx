@@ -485,6 +485,8 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 			/>
 
 			<DealDocumentsWorkspace
+				dealId={dealId}
+				onReload={onReload}
 				visible={workingMode && showDealDocuments}
 				contracts={data.contracts}
 				realizations={realizationDocuments}

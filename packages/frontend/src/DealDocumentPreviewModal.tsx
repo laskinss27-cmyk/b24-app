@@ -1,6 +1,7 @@
 import { useEffect, type CSSProperties } from 'react';
 import { rub, stageLabel, transferDocStatusLabel } from './deal-display-formatters.js';
 import type { CoreRealization, SupplyCard, TransferDoc } from './b24.js';
+import { isPortalAdmin } from './current-user.js';
 
 export type DealDocumentPreview = (
 	| { kind: 'realization'; document: CoreRealization }
@@ -16,9 +17,15 @@ export const documentPreviewAnchorY = (element: HTMLElement): number => {
 export function DealDocumentPreviewModal({
 	preview,
 	onClose,
+	onCancelRealization,
+	cancelBusy = false,
+	cancelError = null,
 }: {
 	preview: DealDocumentPreview;
 	onClose: () => void;
+	onCancelRealization?: (document: CoreRealization) => void;
+	cancelBusy?: boolean;
+	cancelError?: string | null;
 }): JSX.Element {
 	const previewHeight = Math.min(760, Math.max(460, window.screen.availHeight - 180));
 	const overlayStyle: CSSProperties = {
@@ -65,7 +72,12 @@ export function DealDocumentPreviewModal({
 							})}</tbody>
 						</table>
 					</div>
-					<footer><button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button></footer>
+					{cancelError && <p role="alert" className="deal-documents-empty">{cancelError}</p>}
+					<footer>
+						{document.submitted && !document.isReturn && isPortalAdmin() && onCancelRealization &&
+							<button type="button" className="btn-secondary" disabled={cancelBusy} onClick={() => onCancelRealization(document)}>{cancelBusy ? 'Отменяем…' : 'Отменить реализацию'}</button>}
+						<button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button>
+					</footer>
 				</section>
 			</div>
 		);

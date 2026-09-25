@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
-type RealizationOperation = 'draft' | 'delete_draft' | 'submit' | 'return';
+type RealizationOperation = 'draft' | 'delete_draft' | 'submit' | 'cancel' | 'return';
 
 interface RealizationEventInput {
 	operation: RealizationOperation;
@@ -13,6 +13,7 @@ const ACTION_TEXT: Record<RealizationOperation, { success: string; failure: stri
 	draft: { success: 'Созданы черновики реализации', failure: 'Не удалось создать черновики реализации' },
 	delete_draft: { success: 'Удалены черновики реализации', failure: 'Не удалось удалить черновики реализации' },
 	submit: { success: 'Проведена реализация', failure: 'Не удалось провести реализацию' },
+	cancel: { success: 'Отменено проведение реализации', failure: 'Не удалось отменить проведение реализации' },
 	return: { success: 'Оформлен возврат', failure: 'Не удалось оформить возврат' },
 };
 

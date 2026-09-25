@@ -79,6 +79,18 @@ export async function deleteCoreRealizationDrafts(dealId: number, names: string[
 	return json.deleted;
 }
 
+/** Отменить проведение одной реализации; сервер повторно проверяет документ и права администратора. */
+export async function cancelCoreRealization(dealId: number, name: string): Promise<string> {
+	const res = await fetch('/api/deal/realize-core', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), action: 'cancel', dealId, names: [name] }),
+	});
+	const json = (await res.json()) as { ok: boolean; error?: string; canceled?: string };
+	if (!json.ok || json.canceled !== name) throw new Error(json.error ?? 'не удалось отменить реализацию');
+	return json.canceled;
+}
+
 /** Отправить Владимиру заявку на возврат. Складских документов этот вызов не создаёт. */
 export async function createDealReturnRequest(dealId: number, note: string, lines: Array<{ productId: number; qty: number; store: string }>): Promise<number> {
 	const res = await fetch('/api/deal/return-requests/create', {

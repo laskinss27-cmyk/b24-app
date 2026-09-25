@@ -10,6 +10,7 @@ Object.defineProperty(globalThis, 'window', {
 
 const {
 	addProductToDeal,
+	cancelCoreRealization,
 	createDealReturnRequest,
 	deleteCoreRealizationDrafts,
 	fetchDealRealizationsCore,
@@ -62,6 +63,19 @@ test('core realization draft deletion sends only the selected deal drafts', asyn
 	assert.deepEqual(requests[0]?.body, {
 		domain: 'core.example', accessToken: 'core-token', action: 'delete-draft', dealId: 501, names: ['DN-1', 'DN-2'],
 	});
+});
+
+test('canceling a submitted realization sends one document and rejects server errors', async () => {
+	const requests = captureResponses([
+		{ ok: true, canceled: 'DN-1' },
+		{ ok: false, error: 'у реализации есть возврат' },
+	]);
+	assert.equal(await cancelCoreRealization(501, 'DN-1'), 'DN-1');
+	await assert.rejects(cancelCoreRealization(501, 'DN-2'), /у реализации есть возврат/);
+	assert.deepEqual(requests.map((item) => item.body), [
+		{ domain: 'core.example', accessToken: 'core-token', action: 'cancel', dealId: 501, names: ['DN-1'] },
+		{ domain: 'core.example', accessToken: 'core-token', action: 'cancel', dealId: 501, names: ['DN-2'] },
+	]);
 });
 
 test('deal return request and product addition preserve endpoint-specific responses', async () => {

@@ -5,6 +5,7 @@ import { calculateDealFulfillment } from './deal-fulfillment.js';
 import { newDealReturnRequestData, normalizeDealReturnRequestLines, parseDealReturnRequestItem } from './deal-return-request-model.js';
 import type { ErpRealization } from './erp/operations.js';
 import { registerDealCoreRealizationRoute } from './routes/deal-core-realization-route.js';
+import { ErpClient } from './erp/client.js';
 import { buildRepairsContext } from './handlers/placement-context.js';
 
 const realization = (name: string, qty: number, isReturn = false): ErpRealization => ({
@@ -59,4 +60,36 @@ test('legacy direct return endpoint is blocked before any ERP mutation', async (
 	assert.equal(response.statusCode, 403);
 	assert.match(String(response.json().error), /прямой возврат запрещён/);
 	await app.close();
+});
+
+test('submitted realization cancellation requires admin, deal ownership and no linked return', async () => {
+	const originalFromEnv = ErpClient.fromEnv;
+	const canceled: string[] = [];
+	const logged: string[] = [];
+	let admin = false;
+	let linkedReturn = false;
+	const erp = {
+		get: async () => ({ name: 'DN-1', b24_deal_id: '77', is_return: 0, docstatus: 1 }),
+		list: async () => linkedReturn ? [{ name: 'RET-1' }] : [],
+		cancel: async (_doctype: string, name: string) => { canceled.push(name); },
+	} as unknown as ErpClient;
+	ErpClient.fromEnv = () => erp;
+	const app = Fastify();
+	app.decorate('operationLog', { record: async (event: { operation: string }) => { logged.push(event.operation); } } as never);
+	registerDealCoreRealizationRoute(app, (() => ({ call: async (method: string) => method === 'user.admin' ? admin : method === 'user.current' ? { ID: '1' } : { ID: 77 } })) as never, async () => undefined);
+	const request = () => app.inject({ method: 'POST', url: '/api/deal/realize-core', payload: { domain: 'portal', accessToken: 'token', dealId: 77, action: 'cancel', names: ['DN-1'] } });
+	try {
+		assert.equal((await request()).statusCode, 403);
+		admin = true;
+		linkedReturn = true;
+		assert.match(String((await request()).json().error), /есть возврат/);
+		assert.deepEqual(canceled, []);
+		linkedReturn = false;
+		assert.equal((await request()).json().canceled, 'DN-1');
+		assert.deepEqual(canceled, ['DN-1']);
+		assert.ok(logged.includes('cancel'));
+	} finally {
+		ErpClient.fromEnv = originalFromEnv;
+		await app.close();
+	}
 });
