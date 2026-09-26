@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { kitSnapshotSchema } from './kit-schema.js';
 const text = (max: number) => z.string().trim().max(max).refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
 const contactSchema = z.object({ name: text(100).refine(value => value.length >= 2), phone: text(40).refine(value => /^\+?[0-9 ()-]+$/.test(value) && value.replace(/\D/g, '').length >= 7 && value.replace(/\D/g, '').length <= 15), email: z.union([z.literal(''), z.string().trim().email().max(254)]).default(''), comment: text(2000).default('') }).strict();
 const n = (min: number, max: number) => z.number().finite().min(min).max(max);
@@ -14,7 +15,7 @@ export const imageSchema = z.string().min(100).max(1400000).regex(/^[A-Za-z0-9+/
 export const requestSchema = z.object({ requestId: z.string().uuid(), project: projectSchema, images: z.object({ top: imageSchema, iso: imageSchema }).strict(), contact: contactSchema, consent: z.literal(true), website: z.literal('') }).strict();
 export type PlannerSubmission = z.infer<typeof requestSchema>;
 export const productsSchema = z.array(z.object({ id: z.string().max(80), name: z.string().max(1000), quantity: n(1, 8).int(), priceMinor: n(0, 1e12).int().nullable(), availability: z.enum(['in_stock', 'on_order', 'unavailable', 'unknown']) }).strict()).max(8);
-export const envelopeSchema = z.object({ schemaVersion: z.literal(1), eventType: z.literal('planner.requested'), sourceId: z.string().uuid(), requestId: z.string().uuid(), number: z.string().regex(/^PLAN-[0-9]{6,}$/), createdAt: z.string().datetime(), test: z.boolean(), project: projectSchema, images: z.object({ top: imageSchema, iso: imageSchema }).strict(), contact: contactSchema, consent: z.literal(true), products: productsSchema }).strict();
+export const envelopeSchema = z.object({ schemaVersion: z.literal(1), eventType: z.literal('planner.requested'), sourceId: z.string().uuid(), requestId: z.string().uuid(), number: z.string().regex(/^PLAN-[0-9]{6,}$/), createdAt: z.string().datetime(), test: z.boolean(), project: projectSchema, images: z.object({ top: imageSchema, iso: imageSchema }).strict(), contact: contactSchema, consent: z.literal(true), products: productsSchema, kit: kitSnapshotSchema.optional() }).strict();
 export type PlannerEnvelope = z.infer<typeof envelopeSchema>;
 export const PLANNER_PATH = '/api/integrations/umniydom/v1/planner-requests';
 export const MAX_REQUEST_BYTES = 3 * 1024 * 1024;

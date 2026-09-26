@@ -7,6 +7,7 @@ import { processPlanner } from './planner/worker.js';
 import { envelopeSchema } from './planner/schema.js';
 import { CrmRateLimited } from './crm.js';
 import type { OrdersConfig } from './config.js';
+import { plannerSummary } from './planner/message.js';
 function setup() {
     const db = new DatabaseSync(':memory:'), store = new PlannerInbox(db), requestId = randomUUID(), sourceId = randomUUID();
     const body = envelopeSchema.parse({ schemaVersion: 1, eventType: 'planner.requested', requestId, sourceId, number: 'PLAN-000001', createdAt: new Date().toISOString(), test: false,
@@ -17,6 +18,19 @@ function setup() {
     store.accept(body, payload, hash);
     return { db, store, body, payload, hash, config };
 }
+test('planner kit preserves cable metres, one box per camera and customer exclusions', t => {
+    const s = setup(); t.after(() => s.db.close());
+    const body = envelopeSchema.parse({ ...s.body, kit: { settings: { days: 14, entryWall: 0, indoor: 5 }, cableEstimateMeters: 100, items: [
+        { role: 'cable', id: null, name: 'Уличный кабель', quantity: 125, unit: 'м', priceMinor: null, availability: 'unknown', note: 'Метраж исправлен клиентом.' },
+        { role: 'box', id: '13', name: 'Монтажная коробка', quantity: 1, unit: 'шт.', priceMinor: 24000, availability: 'in_stock', note: 'Одна камера — одна коробка.' }
+    ], declined: ['power'] } });
+    const message = plannerSummary(body);
+    assert.match(message, /125 м/); assert.match(message, /240 ₽ \/ шт./);
+    assert.match(message, /Клиент исключил: блок питания/);
+    assert.match(message, /Расчётный метраж: 100 м/);
+    assert.match(message, /Одна камера — одна коробка/);
+    assert.equal(envelopeSchema.safeParse({ ...body, kit: { ...body.kit, items: [{ ...body.kit!.items[0], quantity: -1 }] } }).success, false);
+});
 test('planner inbox is idempotent and creates one lead with three private attachments and a chat link', async t => {
     const s = setup(); t.after(() => s.db.close());
     assert.equal(s.store.accept(s.body, s.payload, s.hash).duplicate, true);

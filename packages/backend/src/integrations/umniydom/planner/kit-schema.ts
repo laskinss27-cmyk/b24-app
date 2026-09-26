@@ -1,0 +1,11 @@
+import { z } from 'zod';
+export const kitRoles = ['recorder', 'storage', 'cable', 'switch', 'power', 'box', 'videoConnector', 'powerConnector'] as const;
+export const kitRole = z.enum(kitRoles);
+export const kitId = z.string().regex(/^(?:[1-9][0-9]{0,18}|manual-[a-f0-9-]{36})$/);
+export const kitSettingsSchema = z.object({ days: z.union([z.literal(7), z.literal(14), z.literal(30)]), entryWall: z.number().int().min(0).max(11), indoor: z.number().int().min(0).max(50) }).strict();
+export const kitSelectionSchema = z.object({ settings: kitSettingsSchema, items: z.array(z.object({ role: kitRole, id: kitId.nullable(), quantity: z.number().int().min(1).max(2000) }).strict()).max(8), declined: z.array(kitRole).max(8) }).strict().refine(value => new Set([...value.items.map(item => item.role), ...value.declined]).size === value.items.length + value.declined.length);
+export const kitSnapshotSchema = z.object({ settings: kitSettingsSchema, cableEstimateMeters: z.number().int().min(1).max(2000), items: z.array(z.object({ role: kitRole, id: kitId.nullable(), name: z.string().min(1).max(1000), quantity: z.number().int().min(1).max(2000), unit: z.enum(['шт.', 'м']), priceMinor: z.number().int().min(0).max(1e12).nullable(), availability: z.enum(['in_stock', 'on_order', 'unavailable', 'unknown']), note: z.string().max(1500) }).strict()).max(8), declined: z.array(kitRole).max(8) }).strict();
+export type KitRole = z.infer<typeof kitRole>;
+export type KitSettings = z.infer<typeof kitSettingsSchema>;
+export type KitSelection = z.infer<typeof kitSelectionSchema>;
+export type KitSnapshot = z.infer<typeof kitSnapshotSchema>;
