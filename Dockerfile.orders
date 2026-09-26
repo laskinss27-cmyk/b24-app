@@ -37,3 +37,4 @@ CMD ["node", "packages/backend/dist/server.js"]
 # Keep the standalone receiver and backup command paths compatible.
 RUN ln -s packages/backend/dist/integrations/umniydom /app/app
 CMD ["node", "app/cli.js", "serve"]
+COPY deploy/orders-healthcheck.mjs /app/healthcheck.mjs
