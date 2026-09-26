@@ -184,6 +184,7 @@ export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 		description: 'Полная рабочая зона каталога, склада, перемещений и закупок без административных настроек.',
 		decisions: allow(
 			...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение', 'Инвентаризация', 'Маркетплейсы'),
+			'realizations.cancel',
 			'reports.stock_movements', 'reports.export',
 		),
 	},

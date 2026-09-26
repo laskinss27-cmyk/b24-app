@@ -6,6 +6,7 @@ interface RealizationEventInput {
 	operation: RealizationOperation;
 	dealId: number;
 	documents: string[];
+	actor?: { id: string; name: string };
 	error?: string;
 }
 
@@ -35,7 +36,7 @@ export async function recordRealizationEvent(
 ): Promise<void> {
 	const failed = Boolean(input.error);
 	const text = ACTION_TEXT[input.operation][failed ? 'failure' : 'success'];
-	const actor = actorFrom(req);
+	const actor = input.actor ?? actorFrom(req);
 	await app.operationLog.record({
 		area: 'realizations',
 		operation: input.operation,

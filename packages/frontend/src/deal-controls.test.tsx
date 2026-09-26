@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createElement, type ComponentProps } from 'react';
+import React, { createElement, type ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DealProductsTable } from './DealProductsTable.js';
 import { DealRealizationBar } from './DealRealizationBar.js';
+import { DealDocumentPreviewModal } from './DealDocumentPreviewModal.js';
+
+// The test runner transpiles JSX with the classic runtime.
+Object.assign(globalThis, { React });
 
 const tableProps: ComponentProps<typeof DealProductsTable> = {
 	workingMode: true,
@@ -65,4 +69,22 @@ test('deal reserve button stays visible and enables after a product is selected'
 	assert.match(selected, /class="btn-reservation"/);
 	assert.doesNotMatch(selected, /class="btn-reservation" disabled=""/);
 	assert.match(selected, /В резерв \(2\)/);
+});
+
+test('deal document preview leaves realization cancellation to supply', () => {
+	const previousWindow = globalThis.window;
+	Object.defineProperty(globalThis, 'window', { configurable: true, value: { screen: { availHeight: 900 } } });
+	try {
+		const html = renderToStaticMarkup(createElement(DealDocumentPreviewModal, {
+			preview: { kind: 'realization', anchorY: 300, document: {
+				name: 'DN-1', postingDate: '2026-09-25', submitted: true, isReturn: false,
+				grandTotal: 100, items: [{ productId: 42, itemName: 'Товар', qty: 1, rate: 100, storeTitle: 'Склад' }],
+			} },
+			onClose: () => undefined,
+		}));
+		assert.match(html, /Реализация/);
+		assert.doesNotMatch(html, /Отменить реализацию/);
+	} finally {
+		Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+	}
 });

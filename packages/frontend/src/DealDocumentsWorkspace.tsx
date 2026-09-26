@@ -1,5 +1,4 @@
-import { cancelCoreRealization, openSupplyCard, type CoreRealization, type StoredDealContractDocument, type TransferDoc } from './b24.js';
-import { useState } from 'react';
+import { openSupplyCard, type StoredDealContractDocument, type TransferDoc } from './b24.js';
 import { DealContractDocumentModal } from './DealContractDocumentModal.js';
 import { DealDocumentPreviewModal, documentPreviewAnchorY, type DealDocumentPreview } from './DealDocumentPreviewModal.js';
 import { DealDocumentsPanel } from './DealDocumentsPanel.js';
@@ -21,8 +20,6 @@ export function DealDocumentsWorkspace({
 	onOpenContractPreview,
 	onCloseDocumentPreview,
 	onCloseContractPreview,
-	dealId,
-	onReload,
 }: {
 	visible: boolean;
 	contracts: TableData['contracts'];
@@ -37,25 +34,7 @@ export function DealDocumentsWorkspace({
 	onOpenContractPreview: (preview: ContractPreview) => void;
 	onCloseDocumentPreview: () => void;
 	onCloseContractPreview: () => void;
-	dealId: number | null;
-	onReload: () => Promise<void>;
 }): JSX.Element {
-	const [cancelBusy, setCancelBusy] = useState(false);
-	const [cancelError, setCancelError] = useState<string | null>(null);
-	const cancelRealization = async (document: CoreRealization): Promise<void> => {
-		if (dealId == null || cancelBusy || !window.confirm(`Отменить проведение реализации ${document.name}? Товар вернётся на склад, а позиции сделки снова станут неотгруженными.`)) return;
-		setCancelBusy(true);
-		setCancelError(null);
-		try {
-			await cancelCoreRealization(dealId, document.name);
-			onCloseDocumentPreview();
-			await onReload();
-		} catch (error) {
-			setCancelError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setCancelBusy(false);
-		}
-	};
 	return <>
 		{visible && (
 			<DealDocumentsPanel
@@ -74,7 +53,7 @@ export function DealDocumentsWorkspace({
 				onOpenTransfer={(document, anchor) => onOpenDocumentPreview({ kind: 'transfer', document, anchorY: documentPreviewAnchorY(anchor) })}
 			/>
 		)}
-		{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={onCloseDocumentPreview} onCancelRealization={(document) => void cancelRealization(document)} cancelBusy={cancelBusy} cancelError={cancelError} />}
+		{documentPreview && <DealDocumentPreviewModal preview={documentPreview} onClose={onCloseDocumentPreview} />}
 		{contractPreview && <DealContractDocumentModal preview={contractPreview} onClose={onCloseContractPreview} />}
 	</>;
 }

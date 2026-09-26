@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { B24ApiError, type B24Client } from '../b24/client.js';
+import { B24ApiError, B24Client } from '../b24/client.js';
+import { appPermission } from '../access-policy.js';
 import { listAllEntityItems } from '../b24/entity-items.js';
 import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { fetchServiceProductIds } from '../deal-product-catalog.js';
+import { dealProductIdFromCoreItemCode } from '../deal-service-product-ids.js';
 import { ErpClient } from '../erp/client.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import {
@@ -19,6 +21,7 @@ import { parseTransferItem } from '../transfers/model.js';
 import { recordRealizationEvent } from '../operation-log/realization-events.js';
 import { ReservationService } from '../reservations/sql-service.js';
 import {validateFreeStock} from './api-stock-availability.js';
+import { stockAccess } from './api-stock-access.js';
 import { assertDealRealizationQuantityAvailable } from './deal-realization-quantity.js';
 
 interface AuthBody {
@@ -179,18 +182,18 @@ export function registerDealCoreRealizationRoute(
 				if (!Number.isInteger(dealId) || dealId <= 0 || !name || (Array.isArray(b.names) && b.names.length !== 1)) {
 					return reply.code(400).send({ ok: false, error: 'укажите одну реализацию и номер сделки' });
 				}
-				const [user, admin] = await Promise.all([
-					client.call<{ ID?: string | number; ADMIN?: boolean | string }>('user.current', {}),
-					client.call<boolean>('user.admin', {}).catch(() => false),
-				]);
-				if (admin !== true && user.ADMIN !== true && String(user.ADMIN ?? '').toUpperCase() !== 'Y') {
-					return reply.code(403).send({ ok: false, error: 'отменить проведённую реализацию может только администратор' });
+				const access = await stockAccess(client);
+				if (!appPermission(req, 'stock.edit_submitted', access.canManage)) {
+					return reply.code(403).send({ ok: false, error: 'отменить проведённую реализацию может только снабжение или складской руководитель' });
 				}
-				await client.call('crm.deal.get', { id: dealId });
 				const document = await erp.get<Record<string, unknown>>('Delivery Note', name);
 				if (!document || String(document[DEAL_FIELD] ?? '') !== String(dealId)
 					|| Number(document['is_return'] ?? 0) !== 0 || Number(document['docstatus'] ?? 0) !== 1) {
 					throw new Error(`реализация ${name} изменилась или не принадлежит сделке; обнови страницу`);
+				}
+				if (!(Array.isArray(document['items']) && document['items'].some((item) =>
+					dealProductIdFromCoreItemCode((item as Record<string, unknown>)['item_code']) !== null))) {
+					throw new Error('этот документ не является товарной реализацией сделки');
 				}
 				const linkedReturns = await erp.list('Delivery Note', ['name'], [['return_against', '=', name], ['docstatus', '!=', 2]], 1);
 				if (linkedReturns.length) throw new Error('у реализации есть возврат; сначала разберите связанный документ');
@@ -204,8 +207,11 @@ export function registerDealCoreRealizationRoute(
 				}
 				await erp.cancel('Delivery Note', name);
 				loggedDocuments.push(name);
-				await recordRealizationEvent(app, req, { operation: 'cancel', dealId, documents: loggedDocuments });
-				await syncDealTechnicalFields(client, erp, dealId);
+				await recordRealizationEvent(app, req, { operation: 'cancel', dealId, documents: loggedDocuments, actor: access.actor });
+				const technicalClient = app.config?.autozadachiWebhook
+					? new B24Client({ auth: { kind: 'webhook', url: app.config.autozadachiWebhook } })
+					: client;
+				await syncDealTechnicalFields(technicalClient, erp, dealId);
 				return { ok: true, canceled: name };
 			}
 			if (action === 'submit') {

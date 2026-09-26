@@ -6,6 +6,7 @@ import { newDealReturnRequestData, normalizeDealReturnRequestLines, parseDealRet
 import type { ErpRealization } from './erp/operations.js';
 import { registerDealCoreRealizationRoute } from './routes/deal-core-realization-route.js';
 import { ErpClient } from './erp/client.js';
+import { SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
 import { buildRepairsContext } from './handlers/placement-context.js';
 
 const realization = (name: string, qty: number, isReturn = false): ErpRealization => ({
@@ -62,32 +63,40 @@ test('legacy direct return endpoint is blocked before any ERP mutation', async (
 	await app.close();
 });
 
-test('submitted realization cancellation requires admin, deal ownership and no linked return', async () => {
+test('submitted realization cancellation requires supply access, deal ownership and no linked return', async () => {
 	const originalFromEnv = ErpClient.fromEnv;
 	const canceled: string[] = [];
-	const logged: string[] = [];
-	let admin = false;
+	const logged: Array<{ operation: string; actor?: { id: string; name: string } }> = [];
+	let supply = false;
 	let linkedReturn = false;
+	let dealId = '77';
+	let itemCode = '42';
 	const erp = {
-		get: async () => ({ name: 'DN-1', b24_deal_id: '77', is_return: 0, docstatus: 1 }),
+		get: async () => ({ name: 'DN-1', b24_deal_id: dealId, is_return: 0, docstatus: 1, items: [{ item_code: itemCode }] }),
 		list: async () => linkedReturn ? [{ name: 'RET-1' }] : [],
 		cancel: async (_doctype: string, name: string) => { canceled.push(name); },
 	} as unknown as ErpClient;
 	ErpClient.fromEnv = () => erp;
 	const app = Fastify();
-	app.decorate('operationLog', { record: async (event: { operation: string }) => { logged.push(event.operation); } } as never);
-	registerDealCoreRealizationRoute(app, (() => ({ call: async (method: string) => method === 'user.admin' ? admin : method === 'user.current' ? { ID: '1' } : { ID: 77 } })) as never, async () => undefined);
+	app.decorate('operationLog', { record: async (event: { operation: string; actor?: { id: string; name: string } }) => { logged.push(event); } } as never);
+	registerDealCoreRealizationRoute(app, (() => ({ call: async (method: string) => method === 'user.current' ? { ID: '999', UF_DEPARTMENT: supply ? [SUPPLY_DEPARTMENT_ID] : [] } : { ID: 77 } })) as never, async () => undefined);
 	const request = () => app.inject({ method: 'POST', url: '/api/deal/realize-core', payload: { domain: 'portal', accessToken: 'token', dealId: 77, action: 'cancel', names: ['DN-1'] } });
 	try {
 		assert.equal((await request()).statusCode, 403);
-		admin = true;
+		supply = true;
+		dealId = '78';
+		assert.match(String((await request()).json().error), /не принадлежит сделке/);
+		dealId = '77';
+		itemCode = 'REPAIR-42';
+		assert.match(String((await request()).json().error), /не является товарной реализацией/);
+		itemCode = '42';
 		linkedReturn = true;
 		assert.match(String((await request()).json().error), /есть возврат/);
 		assert.deepEqual(canceled, []);
 		linkedReturn = false;
 		assert.equal((await request()).json().canceled, 'DN-1');
 		assert.deepEqual(canceled, ['DN-1']);
-		assert.ok(logged.includes('cancel'));
+		assert.ok(logged.some((event) => event.operation === 'cancel' && event.actor?.id === '999'));
 	} finally {
 		ErpClient.fromEnv = originalFromEnv;
 		await app.close();

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { fetchMovements, submitStockDoc, type CoreMovement, type StockItem } from './b24.js';
+import { cancelCoreRealization, fetchMovements, submitStockDoc, type CoreMovement, type StockItem } from './b24.js';
 import { StockDealCell } from './StockDealCell.js';
 import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
 import { IssueForm, ReceiptForm } from './StockDocumentForms.js';
@@ -34,7 +34,8 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string; edit?: boolean } | null>(null);
 	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
 	const canEditSubmitted = Boolean(form?.canEditSubmitted) && (kind === 'issue' || kind === 'receipt' || kind === 'return');
-	const showActions = canPost || canEditSubmitted;
+	const canCancelRealization = Boolean(form?.canEditSubmitted) && kind === 'delivery';
+	const showActions = canPost || canEditSubmitted || canCancelRealization;
 
 	useEffect(() => {
 		let alive = true; setList(null); setErr(null); setLoading(true);
@@ -54,6 +55,15 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 		setBusyDoc(m.name); setErr(null);
 		try { await submitStockDoc(kind, m.name, m.doctype === 'Stock Entry' ? 'Stock Entry' : 'Purchase Receipt'); setBump((b) => b + 1); }
 		catch (e) { setErr(errText(e)); }
+		finally { setBusyDoc(null); }
+	};
+	const cancelRealization = async (m: CoreMovement): Promise<void> => {
+		const dealId = Number(m.dealId);
+		if (!canCancelRealization || !m.submitted || !Number.isInteger(dealId) || dealId <= 0 || busyDoc) return;
+		if (!window.confirm(`Отменить проведение реализации ${m.name}? Товар вернётся на склад, а позиции сделки снова станут неотгруженными.`)) return;
+		setBusyDoc(m.name); setErr(null);
+		try { await cancelCoreRealization(dealId, m.name); setOpenDoc(null); setBump((b) => b + 1); }
+		catch (error) { setErr(errText(error)); }
 		finally { setBusyDoc(null); }
 	};
 
@@ -92,6 +102,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 								{showActions && <td style={TD}>
 									{canPost && !m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}
 									{canEditSubmitted && m.submitted && <button className="btn-secondary" onClick={() => setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind], edit: true })}>✎ Редактировать</button>}
+									{canCancelRealization && m.submitted && Number(m.dealId) > 0 && <button className="btn-secondary" disabled={busyDoc != null} onClick={() => void cancelRealization(m)}>{busyDoc === m.name ? 'Отмена…' : 'Отменить реализацию'}</button>}
 								</td>}
 							</tr>
 						))}
