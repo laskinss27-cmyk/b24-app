@@ -54,3 +54,14 @@ test('expired lead-send lease reconciles by origin before attaching; sandbox can
     await processPlanner(other.store, { ...other.config, mode: 'sandbox' }, async () => { called = true; return 1; });
     assert.equal(called, false);
 });
+test('rate limit while reconciling an uncertain lead never permits another lead creation', async t => {
+    const s = setup(); t.after(() => s.db.close()); const job = s.store.claim()!;
+    s.store.checkpoint(job, 'lead_sending'); s.db.prepare('UPDATE planner_inbox_v1 SET lease_until=0').run();
+    await processPlanner(s.store, s.config, async method => { assert.equal(method, 'crm.lead.list'); throw new CrmRateLimited(); });
+    assert.equal(s.store.get(s.body.requestId)!.stage, 'lead_sending');
+    s.db.prepare('UPDATE planner_inbox_v1 SET next_at=0').run();
+    const calls: string[] = [];
+    await processPlanner(s.store, s.config, async method => { calls.push(method); return method === 'crm.lead.list' ? [{ ID: '12' }] : 20; });
+    assert.deepEqual(calls, ['crm.lead.list', 'crm.timeline.comment.add', 'im.message.add']);
+    assert.equal(s.store.get(s.body.requestId)!.state, 'done');
+});
