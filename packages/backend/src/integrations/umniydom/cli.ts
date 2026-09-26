@@ -7,6 +7,9 @@ import { OrdersStore, type Customer } from './store.js';
 import { processOne } from './worker.js';
 import { BitrixOrderStatusCrm } from './order-status-crm.js';
 import { registerOrderStatusRoute } from './order-status-route.js';
+import { PlannerInbox } from './planner/store.js';
+import { registerPlannerRoute } from './planner/route.js';
+import { processPlanner } from './planner/worker.js';
 
 async function main(): Promise<void> {
 	const config = loadOrdersConfig();
@@ -14,12 +17,14 @@ async function main(): Promise<void> {
 	const command = process.argv[2];
 	if (!['serve', 'once', 'worker', 'list', 'resolve-customer', 'resolve-message'].includes(command ?? '')) throw new Error('Expected serve, once, worker, list, resolve-customer or resolve-message');
 	const store = new OrdersStore(config.database, config.mode, config.sourceId, config.statusMode !== 'off');
+	const planner = process.env['UMNIYDOM_PLANNER_ENABLED'] === '1' ? new PlannerInbox(store.db) : undefined;
 	try { store.bindDestination(config.portalDomain, config.chatId); }
 	catch (error) { store.close(); throw error; }
 	if (command === 'serve') {
 		const app = Fastify({ logger: false });
 		app.addHook('onClose', async () => store.close());
 		await registerOrdersRoute(app, config, store);
+		if (planner) await registerPlannerRoute(app, config, planner);
 		if (config.statusMode !== 'off') await registerOrderStatusRoute(app, config, store, new BitrixOrderStatusCrm(webhookCall(config.webhook!)));
 		app.get('/health', async () => ({ ok: true, integration: 'umniydom-orders', mode: config.mode }));
 		app.get('/ready', async () => { store.db.prepare('SELECT 1').get(); return { ok: true }; });
@@ -50,6 +55,7 @@ async function main(): Promise<void> {
 		}
 		if (config.processor === 'off') { console.log('Orders processor is off'); return; }
 		const crm = config.processor === 'mock' ? new MockOrdersCrm(store) : new BitrixOrdersCrm(config, webhookCall(config.webhook!));
+		const plannerCrm = planner && config.processor === 'live' ? webhookCall(config.webhook!) : undefined;
 		let stopped = false;
 		let wake: (() => void) | undefined;
 		const stop = () => { stopped = true; wake?.(); };
@@ -58,6 +64,7 @@ async function main(): Promise<void> {
 		try {
 			do {
 				const processed = await processOne(store, crm, config.portalDomain);
+				if (planner && plannerCrm) await processPlanner(planner, config, plannerCrm);
 				if (command === 'once' || stopped) break;
 				await new Promise<void>(resolve => {
 					const timer = setTimeout(resolve, processed ? 1000 : 15000);

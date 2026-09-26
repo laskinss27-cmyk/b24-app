@@ -69,7 +69,9 @@ export class BitrixOrdersCrm implements OrdersCrm {
 			PHONE: [{ VALUE: '+' + normalizePhone(contact.phone), VALUE_TYPE: 'WORK' }],
 			...(contact.email ? { EMAIL: [{ VALUE: normalizeEmail(contact.email), VALUE_TYPE: 'WORK' }] } : {}),
 			ASSIGNED_BY_ID: this.config.robotId, STATUS_ID: this.config.leadStatus,
-			ORIGINATOR_ID: 'umniydom:' + envelope.sourceId, ORIGIN_ID: envelope.order.id,
+				ORIGINATOR_ID: 'umniydom:' + envelope.sourceId, ORIGIN_ID: envelope.order.id,
+				// Preserve the production bridge marker: robot 34 skips its generic notification.
+				UF_CRM_UMNIYDOM_BRIDGE: 'umniydom-orders-v1',
 		} });
 		return { kind: 'LEAD', id: id(result) };
 	}
