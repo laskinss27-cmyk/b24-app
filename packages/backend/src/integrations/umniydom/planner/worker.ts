@@ -4,6 +4,7 @@ import { safeText } from '../message-format.js';
 import { PlannerInbox } from './store.js';
 import { envelopeSchema } from './schema.js';
 import { plannerSummary } from './message.js';
+import { plannerNotification } from './notification.js';
 function id(value: unknown) { if (!/^[1-9]\d*$/.test(String(value))) throw Error('INVALID_CRM_ID'); return String(value); }
 export async function processPlanner(inbox: PlannerInbox, config: OrdersConfig, call: CrmCall) {
     const job = inbox.claim(); if (!job) return false;
@@ -19,7 +20,7 @@ export async function processPlanner(inbox: PlannerInbox, config: OrdersConfig, 
             if (!Array.isArray(found) || found.length !== 1) { inbox.finish(job, 'manual', 'VERIFY_LEAD_OUTCOME'); return true; }
             inbox.checkpoint(job, 'attachments', { lead: id(found[0].ID) });
         }
-        if (['attachments_sending', 'notify_sending'].includes(job.stage)) { inbox.finish(job, 'manual', 'VERIFY_' + job.stage.toUpperCase()); return true; }
+        if (['attachments_sending', 'notify_sending', 'notify_iso_sending'].includes(job.stage)) { inbox.finish(job, 'manual', 'VERIFY_' + job.stage.toUpperCase()); return true; }
         if (job.stage === 'lead') {
             retryStage = 'lead';
             inbox.checkpoint(job, 'lead_sending');
@@ -32,11 +33,18 @@ export async function processPlanner(inbox: PlannerInbox, config: OrdersConfig, 
             const comment = await call('crm.timeline.comment.add', { fields: { ENTITY_ID: Number(job.lead_id), ENTITY_TYPE: 'lead', COMMENT: plannerSummary(body), FILES: [[`${body.number}-top.png`, body.images.top], [`${body.number}-isometry.png`, body.images.iso], [`${body.number}-project.json`, Buffer.from(JSON.stringify(body.project, null, 2)).toString('base64')]] } });
             inbox.checkpoint(job, 'notify', { comment: id(comment) });
         }
-        if (job.stage === 'notify') {
-            retryStage = 'notify';
-            inbox.checkpoint(job, 'notify_sending');
-            const message = await call('im.message.add', { DIALOG_ID: config.chatId, MESSAGE: `Новая заявка на расчёт видеонаблюдения ${body.number}\n${safeText(body.contact.name)} · ${safeText(body.contact.phone)}\nКамер на плане: ${body.project.cameras.length}. Вид сверху, изометрия и проект приложены к заявке.\n[URL=https://${config.portalDomain}/crm/lead/details/${job.lead_id}/]Открыть заявку и схему[/URL]`, SYSTEM: 'N', URL_PREVIEW: 'N' });
-            inbox.checkpoint(job, 'complete', { message: id(message) });
+        for (const view of ['top', 'iso'] as const) {
+            const stage = view === 'top' ? 'notify' : 'notify_iso';
+            if (job.stage !== stage) continue;
+            retryStage = stage;
+            inbox.checkpoint(job, stage + '_sending');
+            const url = `https://${config.portalDomain}/crm/lead/details/${job.lead_id}/`;
+            // Native private chat files: no public screenshot URLs and no separate text-only send.
+            const result = await call('im.v2.File.upload', { dialogId: config.chatId, fields: {
+                name: `${body.number}-${view === 'top' ? 'top' : 'isometry'}.png`, content: body.images[view],
+                message: view === 'top' ? plannerNotification(body, url) : `Изометрия · ${body.number}\n[URL=${url}]Открыть заявку[/URL]`,
+            } }) as { messageId?: unknown; file?: { id?: unknown } } | null;
+            inbox.checkpointImage(job, view, id(result?.messageId), id(result?.file?.id));
         }
         inbox.finish(job, 'done');
     } catch (error) {

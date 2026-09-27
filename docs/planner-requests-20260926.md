@@ -12,6 +12,7 @@ eventType planner.requested, источник и режим проверяютс
 для каждой заявки; условные камеры не превращаются в товары заказа.
 В комментарии таймлайна: перечень камер, пожелания, два PNG и JSON,
 открываемый существующим планировщиком. Чат получает ссылку на этот лид.
+Обновление: [два изображения и расширенная сводка в чате](planner-chat-images.md).
 Метод файлов — crm.timeline.comment.add, документированный CRM scope:
 https://apidocs.bitrix24.ru/api-reference/crm/timeline/comments/crm-timeline-comment-add.html
 
