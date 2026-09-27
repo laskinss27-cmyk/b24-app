@@ -192,8 +192,8 @@ npm -w @b24-app/backend run orders:admin -- resolve-message inbox-UUID 456
 6. Сначала production приёмник с PROCESSOR=off; live worker включать отдельным
    согласованным шагом после готовности настроек. Sandbox-БД не переносить в prod.
 
-Dockerfile поддерживает `--build-arg NODE_IMAGE=node:24-alpine`; значение по
-умолчанию остаётся прежним. Сама сборка/замена контейнера в этой задаче не выполнялась.
+Текущий Dockerfile использует Node 24 и обязательную сборку с Git SHA:
+[процедура релиза](release-provenance.md). Параметр `NODE_IMAGE` больше не используется.
 Для основного backend действует AGENTS.md: вывести effective env и `/app/state`
 из работающего контейнера, сохранить его как rollback, запускать с
 `--network erpnext_frappe_network`, проверить внутренний и внешний `/health`,

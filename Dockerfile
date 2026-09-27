@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 WORKDIR /app
 
 # ── Слой 1: зависимости.
@@ -15,6 +15,7 @@ RUN npm ci --ignore-scripts
 COPY tsconfig.base.json ./
 COPY Dockerfile .dockerignore ./
 COPY packages ./packages
+COPY docs/contracts/order-created.v1.example.json ./docs/contracts/order-created.v1.example.json
 COPY scripts/b24-release-integrity.mjs ./scripts/b24-release-integrity.mjs
 COPY .release/source.json ./.release/source.json
 ARG RELEASE_SHA

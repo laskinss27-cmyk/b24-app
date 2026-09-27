@@ -95,7 +95,7 @@ export function guard(cwd, image, expectedSha, bootstrapSha) {
     const oldSource = JSON.parse(run('docker', ['exec', current.Id, 'node', '-e', "process.stdout.write(require('fs').readFileSync('.release/source.json','utf8'))"]));
     compareFiles(oldExpected.files, oldSource.files, 'Production source manifest differs from its Git SHA');
   } else {
-    for (const path of ['Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs']) delete oldExpected.files[path];
+    for (const path of ['Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs', 'docs/contracts/order-created.v1.example.json']) delete oldExpected.files[path];
     // The old Dockerfile rewrites this package export after bundling shared code.
     const shared = run('git', ['show', `${baseline}:packages/shared/package.json`], { cwd });
     oldExpected.files['packages/shared/package.json'] = sha256(shared.replaceAll('./src/index.ts', './dist/index.js'));

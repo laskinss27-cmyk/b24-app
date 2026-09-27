@@ -15,6 +15,7 @@ function fixture(t) {
   };
   for (const name of ['package.json', 'package-lock.json', 'tsconfig.base.json']) write(name, '{}\n');
   for (const name of ['Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs']) write(name, '# fixture\n');
+  write('docs/contracts/order-created.v1.example.json', '{}\n');
   write('packages/backend/src/app.ts', 'export const marker = "committed";\n');
   return { root, write };
 }

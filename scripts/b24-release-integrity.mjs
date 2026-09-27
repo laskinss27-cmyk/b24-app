@@ -4,7 +4,7 @@ import { resolve, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const legacyRoots = ['package.json', 'package-lock.json', 'tsconfig.base.json', 'packages'];
-export const sourceRoots = [...legacyRoots, 'Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs'];
+export const sourceRoots = [...legacyRoots, 'Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs', 'docs/contracts/order-created.v1.example.json'];
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 export const validSha = (value) => /^[a-f0-9]{40}$/.test(value ?? '');
 
