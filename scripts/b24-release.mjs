@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { sourceRoots, isSourcePath, sha256, validSha, compareFiles } from './b24-release-integrity.mjs';
+import { sourceRoots, isSourcePath, sha256, sourceHash, validSha, compareFiles } from './b24-release-integrity.mjs';
 
 export function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, maxBuffer: 100 * 1024 * 1024, ...options });
@@ -12,7 +12,7 @@ export function run(command, args, options = {}) {
   return result.stdout;
 }
 
-export function gitManifest(cwd, ref) {
+export function gitManifest(cwd, ref, { normalizeEol = false } = {}) {
   const gitSha = run('git', ['rev-parse', `${ref}^{commit}`], { cwd }).trim();
   const gitTree = run('git', ['rev-parse', `${ref}^{tree}`], { cwd }).trim();
   const names = run('git', ['ls-tree', '-r', '--name-only', '-z', gitSha, '--', ...sourceRoots], { cwd })
@@ -26,7 +26,7 @@ export function gitManifest(cwd, ref) {
     const size = Number(header[2]);
     if (header[1] !== 'blob' || !Number.isSafeInteger(size)) throw new Error(`Invalid Git blob: ${name}`);
     offset = end + 1;
-    files[name] = sha256(blobs.subarray(offset, offset + size));
+    files[name] = sourceHash(blobs.subarray(offset, offset + size), normalizeEol);
     offset += size + 1;
   }
   if (!validSha(gitSha) || !validSha(gitTree) || !files['package-lock.json']) throw new Error('Incomplete Git release');
@@ -55,7 +55,7 @@ export function prepare(cwd, output) {
   if (existsSync(context)) throw new Error('Output directory must not exist');
   mkdirSync(context, { recursive: true });
   const archive = join(context, 'source.tar');
-  run('git', ['archive', '--format=tar', `--output=${archive}`, sha], { cwd });
+  run('git', ['-c', 'core.autocrlf=false', 'archive', '--format=tar', `--output=${archive}`, sha], { cwd });
   run('tar', ['-xf', archive, '-C', context]);
   rmSync(archive);
   // git archive is the only source; ignored files from the checkout never enter the context.
@@ -88,7 +88,7 @@ export function guard(cwd, image, expectedSha, bootstrapSha) {
   const baseline = currentSha || bootstrapSha;
   if (!validSha(baseline)) throw new Error('Legacy image has no SHA: supply a verified full baseline SHA as the fourth argument for first migration');
   run('git', ['merge-base', '--is-ancestor', baseline, expectedSha], { cwd });
-  const oldExpected = gitManifest(cwd, baseline);
+  const oldExpected = gitManifest(cwd, baseline, { normalizeEol: !currentSha });
   if (currentSha) {
     const oldMetadata = JSON.parse(run('docker', ['exec', current.Id, 'node', 'scripts/b24-release-integrity.mjs', 'verify']));
     validateImageIdentity(current, oldMetadata, baseline, oldExpected.gitTree);

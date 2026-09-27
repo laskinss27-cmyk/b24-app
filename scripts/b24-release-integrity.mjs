@@ -6,6 +6,14 @@ import { pathToFileURL } from 'node:url';
 const legacyRoots = ['package.json', 'package-lock.json', 'tsconfig.base.json', 'packages'];
 export const sourceRoots = [...legacyRoots, 'Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs', 'docs/contracts/order-created.v1.example.json'];
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
+export function sourceHash(data, normalizeEol = false) {
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  // Legacy Windows archives used CRLF. Only normalize valid UTF-8 text, never binaries.
+  if (normalizeEol && !buffer.includes(0) && Buffer.from(buffer.toString('utf8')).equals(buffer)) {
+    return sha256(buffer.toString('utf8').replaceAll('\r\n', '\n'));
+  }
+  return sha256(buffer);
+}
 export const validSha = (value) => /^[a-f0-9]{40}$/.test(value ?? '');
 
 // These paths are excluded by .dockerignore or produced by the build itself.
@@ -26,13 +34,13 @@ export function snapshot(root, { artifacts = false, legacy = false } = {}) {
       if (!artifacts && !isSourcePath(name)) continue;
       if (item.isSymbolicLink()) throw new Error(`Unexpected symlink in release: ${name}`);
       if (item.isDirectory()) visit(full);
-      else files[name] = sha256(readFileSync(full));
+      else files[name] = sourceHash(readFileSync(full), legacy);
     }
   }
   for (const name of legacy ? legacyRoots : sourceRoots) {
     const path = resolve(root, name);
     if (name === 'packages') visit(path);
-    else files[name] = sha256(readFileSync(path));
+    else files[name] = sourceHash(readFileSync(path), legacy);
   }
   if (artifacts) {
     for (const name of ['scripts/b24-release-integrity.mjs', '.release/source.json', 'release.json']) {

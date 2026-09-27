@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cleanHead, prepare, run, validateImageIdentity } from './b24-release.mjs';
-import { snapshot, checkInput, seal, verify } from './b24-release-integrity.mjs';
+import { snapshot, checkInput, seal, verify, sourceHash } from './b24-release-integrity.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'b24-release-test-'));
@@ -72,6 +72,13 @@ test('a release tag is insufficient when image labels or metadata have another S
   assert.throws(() => validateImageIdentity({ Config: {} }, { gitSha: sha, gitTree: tree }, sha, tree), /disagree/);
 });
 
+test('legacy comparison tolerates only text line endings while new images and binary data stay byte-exact', () => {
+  assert.equal(sourceHash('a\r\nb', true), sourceHash('a\nb', true));
+  assert.notEqual(sourceHash('a\r\nb'), sourceHash('a\nb'));
+  assert.notEqual(sourceHash('a\r\nc', true), sourceHash('a\nb', true));
+  assert.notEqual(sourceHash(Buffer.from([0, 13, 10]), true), sourceHash(Buffer.from([0, 10]), true));
+});
+
 test('prepare blocks dirty, staged and unpushed changes and archives only committed bytes', (t) => {
   const { root, write } = fixture(t);
   const remote = mkdtempSync(join(tmpdir(), 'b24-release-remote-'));
@@ -101,6 +108,7 @@ test('prepare blocks dirty, staged and unpushed changes and archives only commit
   assert.throws(() => cleanHead(root, sha), /Expected full SHA/);
   write('.env', 'secret must never enter archive');
   write('node_modules/ignored.js', 'local dependency');
+  git('config', 'core.autocrlf', 'true');
   const output = join(outputParent, 'context');
   const manifest = prepare(root, output);
   assert.equal(manifest.gitSha, cleanHead(root));
