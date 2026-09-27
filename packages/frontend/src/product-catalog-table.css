@@ -41,12 +41,31 @@
 }
 .base-table tbody tr {
 	cursor: pointer;
-	/* Браузер пропускает рендер/лейаут строк за пределами экрана — большой список
-	   (тысячи позиций) строится мгновенно, без виртуализации. contain-intrinsic-size
-	   — оценка высоты строки, чтобы скролл-бар был правильной длины. */
+	/* В DOM находится только текущая страница каталога. */
 	content-visibility: auto;
 	contain-intrinsic-size: auto 44px;
 }
+.base-pager {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 8px 2px;
+	color: #667085;
+	font-size: 12px;
+}
+.base-pager button {
+	border: 1px solid #cbd5e1;
+	border-radius: 6px;
+	padding: 6px 10px;
+	background: #fff;
+	color: #185fa5;
+	font: inherit;
+	cursor: pointer;
+}
+.base-pager button:disabled { opacity: .45; cursor: default; }
 .base-table tbody tr:hover {
 	background: #f8fbff;
 }

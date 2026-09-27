@@ -1,6 +1,7 @@
 import { photoFullUrl, type BaseRow } from './b24.js';
 import { formatCatalogNumber as fmt, productStatuses } from './catalog-product-display.js';
 import { CatalogQuantityInput } from './CatalogQuantityInput.js';
+import type { RefObject } from 'react';
 
 const CORE_ENGINEER_VISIT_SERVICE_ID = 9814001;
 
@@ -13,6 +14,7 @@ export interface CatalogTableRow {
 }
 
 export function CatalogProductTable({
+	scrollRef,
 	view,
 	marketplaceMode,
 	isAll,
@@ -32,6 +34,7 @@ export function CatalogProductTable({
 	addToCart,
 	setPriceTagCopies,
 }: {
+	scrollRef?: RefObject<HTMLDivElement>;
 	view: CatalogTableRow[];
 	marketplaceMode: boolean;
 	isAll: boolean;
@@ -52,7 +55,7 @@ export function CatalogProductTable({
 	setPriceTagCopies: (id: number, copies: number) => void;
 }): JSX.Element {
 	return (
-			<div className="base-tablewrap">
+			<div className="base-tablewrap" ref={scrollRef}>
 				<table className={`base-table${isAll ? ' hide-store' : ''}`}>
 					<thead>
 						<tr>

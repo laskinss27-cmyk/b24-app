@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_OWNER_USER_ID, type AccessPermissionId } from '@b24-app/shared';
 import { getContext, type B24Context } from './b24-context.js';
 import {
@@ -45,6 +45,7 @@ type Gate = 'checking' | 'ready' | 'error';
 type Mode = 'loading' | 'base' | 'report' | 'admin';
 
 const B24_COLLAPSE_ENGINEER_VISIT_PRODUCT_ID = 9814;
+const CATALOG_PAGE_SIZE = 150;
 
 /** Режим выбора товаров (пикер) — переиспользуем «Базу» как страницу-каталог для добавления в сделку. */
 export interface ProductPickItem {
@@ -126,6 +127,8 @@ export function ProductBase({
 	const [kind, setKind] = useState<'all' | 'goods' | 'services'>(picker?.kindFilter ?? (pickMode ? 'all' : 'goods'));
 	const [sortKey, setSortKey] = useState<SortKey>('name');
 	const [sortDir, setSortDir] = useState<1 | -1>(1);
+	const [page, setPage] = useState(0);
+	const tableScrollRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		if (ctx.__mock) {
@@ -202,6 +205,10 @@ export function ProductBase({
 		restrictStores: allowedStoreTitles.length > 0,
 		visibleStores,
 	}), [indexedRows, deferredQ, onlyStock, kind, sectionIds, storeIds, sortKey, sortDir, allowedStoreTitles, visibleStores]);
+	const pageCount = Math.max(1, Math.ceil(view.length / CATALOG_PAGE_SIZE));
+	const currentPage = Math.min(page, pageCount - 1);
+	const visibleRows = view.slice(currentPage * CATALOG_PAGE_SIZE, (currentPage + 1) * CATALOG_PAGE_SIZE);
+	useEffect(() => { if (tableScrollRef.current) tableScrollRef.current.scrollTop = 0; }, [currentPage, storeIds, sectionIds, deferredQ, onlyStock, kind, sortKey, sortDir]);
 
 	/** Принудительная пересборка базы из Битрикса (минуя кэш бэкенда). */
 	async function refresh(): Promise<void> {
@@ -419,6 +426,7 @@ export function ProductBase({
 	const sumPurchase = useMemo(() => view.reduce((s, r) => s + r.qty * (r.d.purchase ?? 0), 0), [view]);
 
 	function toggleSort(k: SortKey): void {
+		setPage(0);
 		if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1));
 		else { setSortKey(k); setSortDir(1); }
 	}
@@ -459,15 +467,15 @@ export function ProductBase({
 			</header>
 
 			<div className="base-toolbar">
-				<CatalogMultiSelect label="Склад" allLabel="Все склады" options={visibleStores.map((store) => ({ id: store.id, label: store.title }))} value={storeIds} onChange={setStoreIds} />
-				<CatalogMultiSelect label="Раздел" allLabel="Все разделы" options={sections.map((section) => ({ id: section.id, label: section.name }))} value={sectionIds} onChange={setSectionIds} />
+				<CatalogMultiSelect label="Склад" allLabel="Все склады" options={visibleStores.map((store) => ({ id: store.id, label: store.title }))} value={storeIds} onChange={(ids) => { setStoreIds(ids); setPage(0); }} />
+				<CatalogMultiSelect label="Раздел" allLabel="Все разделы" options={sections.map((section) => ({ id: section.id, label: section.name }))} value={sectionIds} onChange={(ids) => { setSectionIds(ids); setPage(0); }} />
 				<label className="tb-field tb-search">Поиск ({marketplaceMode ? 'ID · Старый ID · название · артикул · бренд · модель' : 'ID · название · артикул · бренд · модель'})
-					<input type="search" value={q} placeholder="2050, камера, vizit, УКП…" autoComplete="off" onChange={(e) => setQ(e.target.value)} />
+					<input type="search" value={q} placeholder="2050, камера, vizit, УКП…" autoComplete="off" onChange={(e) => { setQ(e.target.value); setPage(0); }} />
 				</label>
-				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> только остаток &gt; 0</label>
+				<label className="tb-chk"><input type="checkbox" checked={onlyStock} onChange={(e) => { setOnlyStock(e.target.checked); setPage(0); }} /> только остаток &gt; 0</label>
 				{!picker?.kindFilter && <div className="tb-seg" role="group" aria-label="Вид позиции">
 					{([['all', 'Все'], ['goods', 'Товары'], ['services', 'Услуги']] as const).map(([k, lbl]) => (
-						<button key={k} type="button" aria-pressed={kind === k} className={`tb-seg-btn${kind === k ? ' active' : ''}`} onClick={() => setKind(k)}>{lbl}</button>
+						<button key={k} type="button" aria-pressed={kind === k} className={`tb-seg-btn${kind === k ? ' active' : ''}`} onClick={() => { setKind(k); setPage(0); }}>{lbl}</button>
 					))}
 				</div>}
 				<div className="tb-spacer" />
@@ -493,7 +501,8 @@ export function ProductBase({
 			{marketplaceExportError && <p className="cart-err">{marketplaceExportError}</p>}
 
 			<CatalogProductTable
-				view={view}
+				scrollRef={tableScrollRef}
+				view={visibleRows}
 				marketplaceMode={marketplaceMode}
 				isAll={isAll}
 				canQuickSale={canQuickSale}
@@ -512,6 +521,12 @@ export function ProductBase({
 				addToCart={addToCart}
 				setPriceTagCopies={setPriceTagCopies}
 			/>
+			{pageCount > 1 && <nav className="base-pager" aria-label="Страницы каталога">
+				<span>Показаны {currentPage * CATALOG_PAGE_SIZE + 1}–{Math.min((currentPage + 1) * CATALOG_PAGE_SIZE, view.length)} из {view.length}</span>
+				<button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>← Назад</button>
+				<span>Страница {currentPage + 1} из {pageCount}</span>
+				<button type="button" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>Далее →</button>
+			</nav>}
 			<div className="base-foot">
 				<span>Позиций: {view.length}</span>
 				<span>{meta ? `данные на ${hhmm(meta.generatedAt)}${meta.cached ? ' · из кэша' : ''}` : ''}</span>
