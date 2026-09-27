@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { PlannerEnvelope } from './schema.js';
 import { migratePlannerChat } from './chat-migration.js';
+import { migratePlannerAlbum } from './album-migration.js';
 export type PlannerJob = { request_id: string; source_id: string; hash: string; receipt: string; payload: string; stage: string; state: string; lease: string; lead_id: string | null; comment_id: string | null; message_id: string | null; attempts: number };
 export class PlannerInbox {
     constructor(private db: DatabaseSync) {
@@ -10,6 +11,7 @@ export class PlannerInbox {
             attempts INTEGER NOT NULL DEFAULT 0,lead_id TEXT,comment_id TEXT,message_id TEXT,reason TEXT);
             CREATE INDEX IF NOT EXISTS planner_inbox_due ON planner_inbox_v1(state,next_at);`);
         migratePlannerChat(db);
+        migratePlannerAlbum(db);
     }
     accept(body: PlannerEnvelope, payload: string, hash: string) {
         this.db.exec('BEGIN IMMEDIATE');
@@ -40,6 +42,29 @@ export class PlannerInbox {
             this.db.prepare('INSERT INTO planner_chat_receipts_v1(request_id,view,message_id,file_id) VALUES(?,?,?,?)').run(job.request_id, view, messageId, fileId);
             this.db.exec('COMMIT');
             job.stage = stage; job.message_id ??= messageId;
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    }
+    uploadedImages(requestId: string) {
+        return this.db.prepare('SELECT view,file_id FROM planner_chat_uploads_v1 WHERE request_id=? ORDER BY CASE view WHEN \'top\' THEN 0 ELSE 1 END').all(requestId) as Array<{ view: 'top' | 'iso'; file_id: string }>;
+    }
+    checkpointUpload(job: PlannerJob, view: 'top' | 'iso', fileId: string) {
+        const stage = view === 'top' ? 'album_iso' : 'album_commit';
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            if (this.db.prepare('UPDATE planner_inbox_v1 SET stage=?,lease_until=? WHERE request_id=? AND lease=?').run(stage, Date.now() + 120000, job.request_id, job.lease).changes !== 1) throw Error('LEASE_LOST');
+            this.db.prepare('INSERT INTO planner_chat_uploads_v1(request_id,view,file_id) VALUES(?,?,?)').run(job.request_id, view, fileId);
+            this.db.exec('COMMIT'); job.stage = stage;
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    }
+    checkpointAlbum(job: PlannerJob, messageId: string) {
+        const images = this.uploadedImages(job.request_id);
+        if (images.length !== 2) throw Error('INCOMPLETE_ALBUM');
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            if (this.db.prepare("UPDATE planner_inbox_v1 SET stage='complete',message_id=?,lease_until=? WHERE request_id=? AND lease=?").run(messageId, Date.now() + 120000, job.request_id, job.lease).changes !== 1) throw Error('LEASE_LOST');
+            const receipt = this.db.prepare('INSERT INTO planner_chat_receipts_v1(request_id,view,message_id,file_id) VALUES(?,?,?,?)');
+            for (const image of images) receipt.run(job.request_id, image.view, messageId, image.file_id);
+            this.db.exec('COMMIT'); job.stage = 'complete'; job.message_id = messageId;
         } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
     finish(job: PlannerJob, state: 'done' | 'manual' | 'pending', reason: string | null = null) {

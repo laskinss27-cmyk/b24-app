@@ -38,6 +38,6 @@ export function plannerNotification(body: PlannerEnvelope, leadUrl: string) {
             partial ? 'Остальные цены и монтаж — уточнить. Это не полная смета.' : 'Монтаж не включён; стоимость и наличие подтвердить.');
     } else lines.push('', 'Стоимость оборудования и монтажа — уточнить.');
     if (contact.comment) lines.push('', 'Пожелания: ' + brief(contact.comment, 500));
-    lines.push('', `[URL=${leadUrl}]Открыть заявку и полный состав[/URL]`, 'Вид сверху ↓ · изометрия следующим сообщением.');
+    lines.push('', `[URL=${leadUrl}]Открыть заявку и полный состав[/URL]`, 'Приложены вид сверху и изометрия.');
     return lines.join('\n');
 }

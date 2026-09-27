@@ -9,7 +9,11 @@ import { CrmRateLimited } from './crm.js';
 import type { OrdersConfig } from './config.js';
 import { plannerSummary } from './planner/message.js';
 import { plannerNotification } from './planner/notification.js';
-function crmResult(method: string, id = 20) {
+const albumMethods = ['im.disk.folder.get', 'disk.folder.uploadfile', 'im.disk.folder.get', 'disk.folder.uploadfile', 'im.disk.file.commit'];
+function crmResult(method: string, id = 20, params: any = {}) {
+    if (method === 'im.disk.folder.get') return { ID: 900 };
+    if (method === 'disk.folder.uploadfile') return { ID: params.data.NAME.includes('isometry') ? 201 : 200 };
+    if (method === 'im.disk.file.commit') return { MESSAGE_ID: id, DISK_ID: ['200', '201'] };
     return method === 'im.v2.File.upload' ? { messageId: id, file: { id: id + 100 } } : id;
 }
 function setup() {
@@ -45,16 +49,18 @@ test('planner inbox is idempotent and creates one lead with three private attach
     assert.equal(s.store.accept(s.body, s.payload, s.hash).duplicate, true);
     assert.throws(() => s.store.accept(s.body, s.payload, 'different'), /CONFLICT/);
     const calls: Array<{ method: string; params: any }> = [];
-    await processPlanner(s.store, s.config, async (method, params) => { calls.push({ method, params }); return crmResult(method, calls.length); });
+    await processPlanner(s.store, s.config, async (method, params) => { calls.push({ method, params }); return crmResult(method, calls.length, params); });
     assert.equal(await processPlanner(s.store, s.config, async () => { throw Error('duplicate'); }), false);
-    assert.deepEqual(calls.map(c => c.method), ['crm.lead.add', 'crm.timeline.comment.add', 'im.v2.File.upload', 'im.v2.File.upload']);
+    assert.deepEqual(calls.map(c => c.method), ['crm.lead.add', 'crm.timeline.comment.add', ...albumMethods]);
     assert.equal(calls[0]!.params.fields.UF_CRM_UMNIYDOM_BRIDGE, 'umniydom-orders-v1');
     assert.equal(calls[1]!.params.fields.FILES.length, 3);
-    assert.equal(calls[2]!.params.dialogId, s.config.chatId);
-    assert.equal(calls[2]!.params.fields.content, s.body.images.top);
-    assert.equal(calls[3]!.params.fields.content, s.body.images.iso);
-    assert.match(calls[2]!.params.fields.message, /Прямоугольник: 12 × 9 м/);
-    assert.match(calls[3]!.params.fields.message, /Изометрия · PLAN-000001/);
+    assert.equal(calls[2]!.params.DIALOG_ID, s.config.chatId);
+    assert.equal(calls[3]!.params.fileContent[1], s.body.images.top);
+    assert.equal(calls[5]!.params.fileContent[1], s.body.images.iso);
+    assert.deepEqual(calls[6]!.params.UPLOAD_ID, ['200', '201']);
+    assert.match(calls[6]!.params.MESSAGE, /Прямоугольник: 12 × 9 м/);
+    assert.doesNotMatch(calls[6]!.params.MESSAGE, /следующим сообщением/);
+    assert.equal(s.db.prepare('SELECT count(DISTINCT message_id) AS n FROM planner_chat_receipts_v1').get()!.n, 1);
     assert.equal(s.db.prepare('SELECT count(*) AS n FROM planner_chat_receipts_v1').get()!.n, 2);
     assert.deepEqual(JSON.parse(Buffer.from(calls[1]!.params.fields.FILES[2][1], 'base64').toString()), s.body.project);
     assert.equal(s.store.get(s.body.requestId)!.state, 'done');
@@ -63,18 +69,18 @@ test('planner inbox is idempotent and creates one lead with three private attach
 test('second image rate limit resumes only that image and retains both delivery receipts', async t => {
     const s = setup(); t.after(() => s.db.close()); let limited = false; const sent: string[] = [];
     const call = async (method: string, params: Record<string, unknown>) => {
-        if (method !== 'im.v2.File.upload') return 10;
-        const fields = params.fields as { name: string };
+        if (method !== 'disk.folder.uploadfile') return crmResult(method, 10, params);
+        const fields = { name: (params.data as { NAME: string }).NAME };
         sent.push(fields.name);
         if (fields.name.includes('isometry') && !limited) { limited = true; throw new CrmRateLimited(); }
-        return crmResult(method, sent.length + 10);
+        return crmResult(method, sent.length + 10, params);
     };
     await processPlanner(s.store, s.config, call);
-    assert.equal(s.store.get(s.body.requestId)!.stage, 'notify_iso');
+    assert.equal(s.store.get(s.body.requestId)!.stage, 'album_iso');
     s.db.prepare('UPDATE planner_inbox_v1 SET next_at=0').run();
     await processPlanner(s.store, s.config, call);
     assert.deepEqual(sent, ['PLAN-000001-top.png', 'PLAN-000001-isometry.png', 'PLAN-000001-isometry.png']);
-    assert.equal(s.store.get(s.body.requestId)!.message_id, '11');
+    assert.equal(s.store.get(s.body.requestId)!.message_id, '10');
     assert.equal(s.store.get(s.body.requestId)!.state, 'done');
     assert.equal(s.db.prepare('SELECT count(*) AS n FROM planner_chat_receipts_v1').get()!.n, 2);
 });
@@ -82,10 +88,10 @@ test('second image rate limit resumes only that image and retains both delivery 
 for (const uncertain of ['top', 'isometry']) test(`unknown ${uncertain} upload outcome is never retried`, async t => {
     const s = setup(); t.after(() => s.db.close()); const sent: string[] = [];
     await processPlanner(s.store, s.config, async (method, params) => {
-        if (method !== 'im.v2.File.upload') return 10;
-        const fields = params.fields as { name: string }; sent.push(fields.name);
+        if (method !== 'disk.folder.uploadfile') return crmResult(method, 10, params);
+        const fields = { name: (params.data as { NAME: string }).NAME }; sent.push(fields.name);
         if (fields.name.includes(uncertain)) throw Error('Unknown network outcome');
-        return crmResult(method);
+        return crmResult(method, 20, params);
     });
     assert.equal(s.store.get(s.body.requestId)!.state, 'manual');
     assert.equal(await processPlanner(s.store, s.config, async () => { throw Error('Duplicate'); }), false);
@@ -93,7 +99,7 @@ for (const uncertain of ['top', 'isometry']) test(`unknown ${uncertain} upload o
 });
 
 test('expired chat sending leases and legacy uncertain notifications stay fenced', async t => {
-    for (const stage of ['notify_sending', 'notify_iso_sending']) {
+    for (const stage of ['notify_sending', 'notify_iso_sending', 'album_top_sending', 'album_iso_sending', 'album_commit_sending']) {
         const s = setup(); t.after(() => s.db.close());
         const job = s.store.claim()!; s.store.checkpoint(job, stage);
         s.db.prepare('UPDATE planner_inbox_v1 SET lease_until=0').run();
@@ -155,7 +161,7 @@ test('unknown attachment outcome is fenced for manual review and never duplicate
 });
 test('a known rejected rate limit resumes the attachment stage without a second lead', async t => {
     const s = setup(); t.after(() => s.db.close()); let limited = true; const methods: string[] = [];
-    const call = async (method: string) => { methods.push(method); if (limited && method.includes('comment')) { limited = false; throw new CrmRateLimited(); } return crmResult(method, 10); };
+    const call = async (method: string, params: Record<string, unknown>) => { methods.push(method); if (limited && method.includes('comment')) { limited = false; throw new CrmRateLimited(); } return crmResult(method, 10, params); };
     await processPlanner(s.store, s.config, call);
     s.db.prepare('UPDATE planner_inbox_v1 SET next_at=0').run();
     await processPlanner(s.store, s.config, call);
@@ -165,8 +171,8 @@ test('expired lead-send lease reconciles by origin before attaching; sandbox can
     const s = setup(); t.after(() => s.db.close()); const job = s.store.claim()!; s.store.checkpoint(job, 'lead_sending');
     s.db.prepare('UPDATE planner_inbox_v1 SET lease_until=0').run();
     const methods: string[] = [];
-    await processPlanner(s.store, s.config, async method => { methods.push(method); return method === 'crm.lead.list' ? [{ ID: '12' }] : crmResult(method); });
-    assert.deepEqual(methods, ['crm.lead.list', 'crm.timeline.comment.add', 'im.v2.File.upload', 'im.v2.File.upload']);
+    await processPlanner(s.store, s.config, async (method, params) => { methods.push(method); return method === 'crm.lead.list' ? [{ ID: '12' }] : crmResult(method, 20, params); });
+    assert.deepEqual(methods, ['crm.lead.list', 'crm.timeline.comment.add', ...albumMethods]);
     const other = setup(); t.after(() => other.db.close()); let called = false;
     await processPlanner(other.store, { ...other.config, mode: 'sandbox' }, async () => { called = true; return 1; });
     assert.equal(called, false);
@@ -178,7 +184,55 @@ test('rate limit while reconciling an uncertain lead never permits another lead 
     assert.equal(s.store.get(s.body.requestId)!.stage, 'lead_sending');
     s.db.prepare('UPDATE planner_inbox_v1 SET next_at=0').run();
     const calls: string[] = [];
-    await processPlanner(s.store, s.config, async method => { calls.push(method); return method === 'crm.lead.list' ? [{ ID: '12' }] : crmResult(method); });
-    assert.deepEqual(calls, ['crm.lead.list', 'crm.timeline.comment.add', 'im.v2.File.upload', 'im.v2.File.upload']);
+    await processPlanner(s.store, s.config, async (method, params) => { calls.push(method); return method === 'crm.lead.list' ? [{ ID: '12' }] : crmResult(method, 20, params); });
+    assert.deepEqual(calls, ['crm.lead.list', 'crm.timeline.comment.add', ...albumMethods]);
     assert.equal(s.store.get(s.body.requestId)!.state, 'done');
+});
+
+test('album commit rate limit retries only the one message, using persisted files after restart', async t => {
+    const s = setup(); t.after(() => s.db.close()); const methods: string[] = []; let limited = false;
+    const call = async (method: string, params: Record<string, unknown>) => {
+        methods.push(method);
+        if (method === 'im.disk.file.commit' && !limited) { limited = true; throw new CrmRateLimited(); }
+        return crmResult(method, 90, params);
+    };
+    await processPlanner(s.store, s.config, call);
+    assert.equal(s.store.get(s.body.requestId)!.stage, 'album_commit');
+    assert.equal(s.store.uploadedImages(s.body.requestId).length, 2);
+    s.db.prepare('UPDATE planner_inbox_v1 SET next_at=0').run();
+    await processPlanner(new PlannerInbox(s.db), s.config, call);
+    assert.equal(methods.filter(method => method === 'disk.folder.uploadfile').length, 2);
+    assert.equal(methods.filter(method => method === 'im.disk.file.commit').length, 2);
+    assert.equal(s.store.get(s.body.requestId)!.state, 'done');
+    const receipts = s.db.prepare('SELECT message_id FROM planner_chat_receipts_v1').all();
+    assert.deepEqual(receipts.map(row => row.message_id), ['90', '90']);
+});
+
+for (const outcome of ['timeout', 'partial']) test(`album commit ${outcome} never creates a second notification`, async t => {
+    const s = setup(); t.after(() => s.db.close()); let commits = 0;
+    await processPlanner(s.store, s.config, async (method, params) => {
+        if (method === 'im.disk.file.commit') {
+            commits++;
+            if (outcome === 'timeout') throw Error('Unknown write outcome');
+            return { MESSAGE_ID: 90, DISK_ID: ['200'] };
+        }
+        return crmResult(method, 20, params);
+    });
+    await processPlanner(s.store, s.config, async () => { throw Error('Duplicate'); });
+    assert.equal(commits, 1);
+    assert.equal(s.store.get(s.body.requestId)!.state, 'manual');
+    assert.equal(s.store.get(s.body.requestId)!.stage, 'album_commit_sending');
+});
+
+test('a stale worker cannot checkpoint uploaded files or the final album receipt', t => {
+    const s = setup(); t.after(() => s.db.close()); const job = s.store.claim()!;
+    s.store.checkpointUpload(job, 'top', '200'); s.store.checkpointUpload(job, 'iso', '201');
+    s.db.prepare('UPDATE planner_inbox_v1 SET lease=?').run('new-worker');
+    assert.throws(() => s.store.checkpointAlbum(job, '90'), /LEASE_LOST/);
+    assert.equal(s.db.prepare('SELECT count(*) AS n FROM planner_chat_receipts_v1').get()!.n, 0);
+    assert.equal(s.store.get(s.body.requestId)!.stage, 'album_commit');
+    const other = setup(); t.after(() => other.db.close()); const stale = other.store.claim()!;
+    other.db.prepare('UPDATE planner_inbox_v1 SET lease=?').run('new-worker');
+    assert.throws(() => other.store.checkpointUpload(stale, 'top', '200'), /LEASE_LOST/);
+    assert.equal(other.store.uploadedImages(stale.request_id).length, 0);
 });
