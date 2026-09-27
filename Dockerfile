@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_IMAGE=node:20-alpine
-FROM ${NODE_IMAGE} AS base
+FROM node:20-alpine AS base
 WORKDIR /app
 
 # ── Слой 1: зависимости.
@@ -14,7 +13,15 @@ RUN npm ci --ignore-scripts
 
 # ── Слой 2: код и сборка.
 COPY tsconfig.base.json ./
+COPY Dockerfile .dockerignore ./
 COPY packages ./packages
+COPY scripts/b24-release-integrity.mjs ./scripts/b24-release-integrity.mjs
+COPY .release/source.json ./.release/source.json
+ARG RELEASE_SHA
+ARG RELEASE_TREE
+# Missing provenance or a changed build context blocks the build before tests/build.
+RUN node scripts/b24-release-integrity.mjs check-input "$RELEASE_SHA" "$RELEASE_TREE"
+RUN npm -w @b24-app/backend test && npm -w @b24-app/frontend test
 # Backend imports runtime access-policy helpers from the shared workspace.
 # Bundle that workspace for plain Node.js and point only the container copy at it.
 RUN npm -w @b24-app/frontend run build \
@@ -22,7 +29,11 @@ RUN npm -w @b24-app/frontend run build \
  && test -s packages/backend/dist/catalog-mirror/reader.js \
  && test -s packages/backend/dist/catalog-mirror/live-stock.js \
  && npx esbuild packages/shared/src/index.ts --bundle --platform=node --format=esm --outfile=packages/shared/dist/index.js \
- && sed -i 's#\./src/index\.ts#./dist/index.js#g' packages/shared/package.json
+ && sed -i 's#\./src/index\.ts#./dist/index.js#g' packages/shared/package.json \
+ && node scripts/b24-release-integrity.mjs seal
+
+LABEL org.opencontainers.image.revision=$RELEASE_SHA \
+      com.b24.git-tree=$RELEASE_TREE
 
 # ── Рантайм-настройки
 ENV NODE_ENV=production

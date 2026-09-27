@@ -11,6 +11,9 @@
     "dev:frontend": "npm -w @b24-app/frontend run dev",
     "build": "npm -ws --if-present run build",
     "typecheck": "npm -ws --if-present run typecheck",
+    "test:release": "node --test scripts/b24-release.test.mjs",
+    "release:build": "node scripts/b24-release.mjs build",
+    "release:guard": "node scripts/b24-release.mjs guard",
     "lint": "npm -ws --if-present run lint",
     "gen:types": "tsx scripts/gen-types.ts"
   },

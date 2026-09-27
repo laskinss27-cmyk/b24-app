@@ -19,132 +19,20 @@
 
 Доступ выполняется по SSH-ключу. Пароли, API-ключи, OAuth-секреты и вебхуки в команды, логи и Git не копируются.
 
-## Проверка перед деплоем
+## Проверка и деплой backend
 
-В чистом состоянии исходников:
-
-```bash
-npm ci
-npm run typecheck
-npm -w @b24-app/backend test
-npm -w @b24-app/frontend test
-npm run build
-```
-
-Релиз собирается из зафиксированного коммита в чистой копии Git. Нельзя брать работающий Docker-образ за основу нового приложения и подкладывать в него отдельные исходники: после этого образ нельзя воспроизвести по Git, а следующая полная сборка может убрать уже работающие функции. Перед переключением контейнера сравнить список исходников текущего и нового образа через `scripts/b24-release-source-guard.sh b24-app:<COMMIT>`; отсутствующие файлы требуют отдельного разбора.
-
-## Деплой backend
-
-Ниже описано **обновление уже работающего** `b24-backend`. Процедура не зависит от пути к старому env-файлу: она снимает root-only копию фактического окружения, state-volume и публичный URL с текущего контейнера. Для первого запуска, когда текущего контейнера ещё нет, используется явно проверенный `<BACKEND_ENV>` из закрытой конфигурации.
-
-Перед запуском задать только фактический путь репозитория. Команда намеренно завершится до остановки backend, если переменная не задана, репозиторий содержит незакоммиченные отслеживаемые изменения, текущий контейнер не подключён к ERPNext или имя rollback уже занято.
+Обязательный процесс описан в [Релиз с подтверждённым Git SHA](release-provenance.md). Сборка берётся из чистого, уже отправленного коммита. Оба набора тестов запускаются внутри Docker build. Pre-deploy guard сверяет Git, метаданные и хеши файлов кандидата и текущего контейнера до остановки сервиса.
 
 ```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-: "${APP_REPO:?set APP_REPO from the private production configuration}"
-cd "$APP_REPO"
-
-git diff --quiet
-git diff --cached --quiet
-if git ls-files --others --exclude-standard -- \
-  packages package.json package-lock.json tsconfig.base.json Dockerfile .dockerignore \
-  | grep -q .; then
-  echo "untracked files would enter the Docker build context" >&2
-  exit 1
-fi
-git fetch origin
-git checkout main
-git merge --ff-only origin/main
-
-COMMIT=$(git rev-parse --short HEAD)
-ROLLBACK="b24-backend-prev-before-$COMMIT"
-
-docker container inspect b24-backend >/dev/null
-if docker container inspect "$ROLLBACK" >/dev/null 2>&1; then
-  echo "rollback container already exists: $ROLLBACK" >&2
-  exit 1
-fi
-docker inspect --format '{{json .NetworkSettings.Networks}}' b24-backend \
-  | grep -q '"erpnext_frappe_network"'
-
-STATE_DIR=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/state"}}{{.Source}}{{end}}{{end}}' b24-backend)
-PUBLIC_URL=$(docker exec b24-backend printenv PUBLIC_BASE_URL)
-test -n "$STATE_DIR"
-test -n "$PUBLIC_URL"
-
-umask 077
-ENV_SNAPSHOT=$(mktemp /tmp/b24-backend-env.XXXXXX)
-trap 'rm -f "$ENV_SNAPSHOT"' EXIT
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' b24-backend > "$ENV_SNAPSHOT"
-test -s "$ENV_SNAPSHOT"
-
-docker build -t "b24-app:$COMMIT" .
-bash scripts/b24-release-source-guard.sh "b24-app:$COMMIT"
-
-restore_previous() {
-  docker rm -f b24-backend >/dev/null 2>&1 || true
-  docker rename "$ROLLBACK" b24-backend
-  docker start b24-backend
-  curl --fail --retry 15 --retry-delay 1 --retry-all-errors http://127.0.0.1:3000/health
-  curl --fail --retry 5 --retry-delay 1 --retry-all-errors "${PUBLIC_URL%/}/health"
-}
-
-docker stop b24-backend
-if ! docker rename b24-backend "$ROLLBACK"; then
-  docker start b24-backend
-  exit 1
-fi
-
-if ! docker run -d \
-  --name b24-backend \
-  --network erpnext_frappe_network \
-  -p 127.0.0.1:3000:8080 \
-  -v "$STATE_DIR:/app/state" \
-  --env-file "$ENV_SNAPSHOT" \
-  --restart unless-stopped \
-  "b24-app:$COMMIT"; then
-  restore_previous
-  exit 1
-fi
-
-verify_release() {
-  curl --fail --retry 15 --retry-delay 1 --retry-all-errors http://127.0.0.1:3000/health || return 1
-  curl --fail --retry 5 --retry-delay 1 --retry-all-errors "${PUBLIC_URL%/}/health" || return 1
-  test "$(docker inspect --format '{{.Config.Image}}' b24-backend)" = "b24-app:$COMMIT" || return 1
-  docker inspect --format '{{json .NetworkSettings.Networks}}' b24-backend \
-    | grep -q '"erpnext_frappe_network"' || return 1
-  docker exec b24-backend node -e '
-    const base = String(process.env.ERPNEXT_URL || "").replace(/\/$/, "");
-    const token = String(process.env.ERPNEXT_TOKEN || "");
-    fetch(base + "/api/resource/Company?fields=%5B%22name%22%5D&limit_page_length=1", {
-      headers: { Authorization: token },
-    }).then((response) => {
-      if (!response.ok) throw new Error(`ERPNext HTTP ${response.status}`);
-      return response.json();
-    }).then((payload) => {
-      console.log(JSON.stringify({ ok: true, rows: Array.isArray(payload.data) ? payload.data.length : 0 }));
-    }).catch((error) => { console.error(error.message); process.exit(1); });
-  ' || return 1
-}
-
-if ! verify_release; then
-  restore_previous
-  exit 1
-fi
-
-rm -f "$ENV_SNAPSHOT"
-trap - EXIT
+npm run test:release
+node scripts/b24-release.mjs build
+SHA=$(git rev-parse HEAD)
+bash scripts/b24-deploy.sh "b24-app:git-$SHA" "$SHA"
 ```
 
-Предыдущий контейнер остаётся остановленным под именем из `$ROLLBACK`. Не удалять его до отдельного подтверждения стабильности релиза. Успешный `verify_release` уже подтверждает все обязательные условия: внутренний и публичный health, ожидаемый образ, членство в `erpnext_frappe_network` и авторизованный read-only запрос к ERPNext.
+Команды выполняются из реального Git checkout на сервере. Для подготовки архива на Windows и первого перехода со старого образа без SHA следуйте отдельным разделам документа. Не подменяйте guarded deploy ручным копированием файлов или командами stop/run.
 
-```bash
-docker ps --filter name=b24-backend
-docker inspect --format '{{.Config.Image}}' b24-backend
-docker inspect --format '{{json .NetworkSettings.Networks}}' b24-backend
-```
+Скрипт сохраняет rollback-контейнер, наследует фактические env и state, проверяет SHA во внутреннем и публичном `/health`, сеть `erpnext_frappe_network` и read-only доступ к ERPNext. При ошибке возвращает прежний контейнер. Очистка Docker выполняется установленной retention-службой после успешных проверок.
 
 ## Откат backend
 

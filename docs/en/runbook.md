@@ -21,130 +21,20 @@ The values below are sanitised placeholders, **not executable values or real pat
 
 Access is key-based SSH. Passwords, API keys, OAuth secrets, and webhooks must not be copied into commands, logs, or Git.
 
-## Pre-deployment checks
+## Guarded build and backend deployment
 
-Run from a clean source tree:
-
-```bash
-npm ci
-npm run typecheck
-npm -w @b24-app/backend test
-npm run build
-```
-
-Do not accidentally include uncommitted user files in either the commit or the image.
-
-## Backend deployment
-
-This procedure updates an **already running** `b24-backend`. It does not depend on the location of an old environment file: the effective environment, state volume, and public URL are captured from the current container. A first deployment with no current container must instead use an explicitly verified `<BACKEND_ENV>` from the private configuration.
-
-Set only the real repository path before running the block. The procedure intentionally exits before stopping the backend when that value is missing, tracked changes are present, the current container cannot reach the ERPNext network, or the rollback name is already occupied.
+Use the mandatory [release provenance procedure](../release-provenance.md). Build from a clean, pushed Git commit; both test suites run inside Docker build. The pre-deploy guard verifies the expected full SHA, Git source manifests and artifact hashes before stopping the running service.
 
 ```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-: "${APP_REPO:?set APP_REPO from the private production configuration}"
-cd "$APP_REPO"
-
-git diff --quiet
-git diff --cached --quiet
-if git ls-files --others --exclude-standard -- \
-  packages package.json package-lock.json tsconfig.base.json Dockerfile .dockerignore \
-  | grep -q .; then
-  echo "untracked files would enter the Docker build context" >&2
-  exit 1
-fi
-git fetch origin
-git checkout main
-git merge --ff-only origin/main
-
-COMMIT=$(git rev-parse --short HEAD)
-ROLLBACK="b24-backend-prev-before-$COMMIT"
-
-docker container inspect b24-backend >/dev/null
-if docker container inspect "$ROLLBACK" >/dev/null 2>&1; then
-  echo "rollback container already exists: $ROLLBACK" >&2
-  exit 1
-fi
-docker inspect --format '{{json .NetworkSettings.Networks}}' b24-backend \
-  | grep -q '"erpnext_frappe_network"'
-
-STATE_DIR=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/state"}}{{.Source}}{{end}}{{end}}' b24-backend)
-PUBLIC_URL=$(docker exec b24-backend printenv PUBLIC_BASE_URL)
-test -n "$STATE_DIR"
-test -n "$PUBLIC_URL"
-
-umask 077
-ENV_SNAPSHOT=$(mktemp /tmp/b24-backend-env.XXXXXX)
-trap 'rm -f "$ENV_SNAPSHOT"' EXIT
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' b24-backend > "$ENV_SNAPSHOT"
-test -s "$ENV_SNAPSHOT"
-
-docker build -t "b24-app:$COMMIT" .
-
-restore_previous() {
-  docker rm -f b24-backend >/dev/null 2>&1 || true
-  docker rename "$ROLLBACK" b24-backend
-  docker start b24-backend
-  curl --fail --retry 15 --retry-delay 1 --retry-all-errors http://127.0.0.1:3000/health
-  curl --fail --retry 5 --retry-delay 1 --retry-all-errors "${PUBLIC_URL%/}/health"
-}
-
-docker stop b24-backend
-if ! docker rename b24-backend "$ROLLBACK"; then
-  docker start b24-backend
-  exit 1
-fi
-
-if ! docker run -d \
-  --name b24-backend \
-  --network erpnext_frappe_network \
-  -p 127.0.0.1:3000:8080 \
-  -v "$STATE_DIR:/app/state" \
-  --env-file "$ENV_SNAPSHOT" \
-  --restart unless-stopped \
-  "b24-app:$COMMIT"; then
-  restore_previous
-  exit 1
-fi
-
-verify_release() {
-  curl --fail --retry 15 --retry-delay 1 --retry-all-errors http://127.0.0.1:3000/health || return 1
-  curl --fail --retry 5 --retry-delay 1 --retry-all-errors "${PUBLIC_URL%/}/health" || return 1
-  test "$(docker inspect --format '{{.Config.Image}}' b24-backend)" = "b24-app:$COMMIT" || return 1
-  docker inspect --format '{{json .NetworkSettings.Networks}}' b24-backend \
-    | grep -q '"erpnext_frappe_network"' || return 1
-  docker exec b24-backend node -e '
-    const base = String(process.env.ERPNEXT_URL || "").replace(/\/$/, "");
-    const token = String(process.env.ERPNEXT_TOKEN || "");
-    fetch(base + "/api/resource/Company?fields=%5B%22name%22%5D&limit_page_length=1", {
-      headers: { Authorization: token },
-    }).then((response) => {
-      if (!response.ok) throw new Error(`ERPNext HTTP ${response.status}`);
-      return response.json();
-    }).then((payload) => {
-      console.log(JSON.stringify({ ok: true, rows: Array.isArray(payload.data) ? payload.data.length : 0 }));
-    }).catch((error) => { console.error(error.message); process.exit(1); });
-  ' || return 1
-}
-
-if ! verify_release; then
-  restore_previous
-  exit 1
-fi
-
-rm -f "$ENV_SNAPSHOT"
-trap - EXIT
+npm run test:release
+node scripts/b24-release.mjs build
+SHA=$(git rev-parse HEAD)
+bash scripts/b24-deploy.sh "b24-app:git-$SHA" "$SHA"
 ```
 
-The previous container remains stopped under the name in `$ROLLBACK`. Do not remove it until release stability is confirmed separately. A successful `verify_release` already checks both health endpoints, the expected image, membership in `erpnext_frappe_network`, and an authenticated read-only request to ERPNext.
+Run from a real Git checkout on the server. See the linked procedure for Windows archive preparation and the first migration from an image without SHA metadata. Do not replace the guarded deployment with ad hoc stop/run commands or selected file copies.
 
-```bash
-docker ps --filter name=b24-backend
-docker inspect --format '{{.Config.Image}}' b24-backend
-docker inspect --format '{{json .NetworkSettings.Networks}}' b24-backend
-```
+The script preserves the rollback container and effective environment/state mount, verifies the expected SHA through internal and public health endpoints, checks erpnext_frappe_network membership, and makes a read-only authenticated ERPNext request. A failed verification restores the old container. The installed retention service runs after successful checks.
 
 ## Backend rollback
 
