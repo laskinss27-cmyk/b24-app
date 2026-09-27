@@ -32,14 +32,16 @@ test('shared matrix templates are created, updated and deleted atomically', asyn
 	}
 });
 
-test('shared matrix template rejects a stale overwrite', async () => {
+test('shared matrix template rejects a stale overwrite even within the same millisecond', async (t) => {
+	t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-27T00:00:00.000Z') });
 	const directory = await mkdtemp(join(tmpdir(), 'matrix-conflict-'));
 	const store = new AssortmentMatrixTemplateStore(join(directory, 'templates.json'));
 	try {
 		const created = await store.save({ id: '1', name: 'Автор' }, {
 			name: 'Шаблон', from: '2026-08-01', to: '2026-08-14', selectedStores: ['Склад'], salesScope: 'all', rows: [],
 		});
-		await store.save({ id: '2', name: 'Редактор' }, { ...created, name: 'Новая версия', expectedUpdatedAt: created.updatedAt });
+		const updated = await store.save({ id: '2', name: 'Редактор' }, { ...created, name: 'Новая версия', expectedUpdatedAt: created.updatedAt });
+		assert.ok(updated.updatedAt > created.updatedAt);
 		await assert.rejects(
 			store.save({ id: '3', name: 'Другой' }, { ...created, name: 'Устаревшая версия', expectedUpdatedAt: created.updatedAt }),
 			AssortmentMatrixTemplateConflictError,

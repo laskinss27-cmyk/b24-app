@@ -120,7 +120,9 @@ export class AssortmentMatrixTemplateStore {
 				if (input.expectedUpdatedAt && input.expectedUpdatedAt !== current.updatedAt) {
 					throw new AssortmentMatrixTemplateConflictError('шаблон уже изменён другим пользователем — открой его заново');
 				}
-				const updated = TemplateSchema.parse({ ...current, name, from, to, selectedStores, salesScope: input.salesScope, rows, updatedAt: now, updatedBy: normalizedActor });
+				// updatedAt is also the optimistic-lock version; every save must advance it.
+				const updatedAt = new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString();
+				const updated = TemplateSchema.parse({ ...current, name, from, to, selectedStores, salesScope: input.salesScope, rows, updatedAt, updatedBy: normalizedActor });
 				templates[index] = updated;
 				await this.write(templates);
 				return updated;
