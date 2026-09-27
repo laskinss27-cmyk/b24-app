@@ -1302,6 +1302,18 @@ html[data-theme="dark"] .tb-multi-option {
 html[data-theme="dark"] .tb-multi-option:hover, html[data-theme="dark"] .tb-multi-all:hover {
     background: #172233
 }
+html[data-theme="dark"] .tb-multi-option:focus-visible {
+    outline: 2px solid hsl(219 65% 53%)
+}
+html[data-theme="dark"] .tb-multi-check {
+    border: 1px solid #526178;
+    background: #202c3d;
+    color: #f8fafc
+}
+html[data-theme="dark"] .tb-multi-option[aria-checked="true"] .tb-multi-check {
+    border-color: hsl(210 65% 53%);
+    background: rgb(24 95 165)
+}
 html[data-theme="dark"] .tb-chk {
     color: #e5edf8
 }

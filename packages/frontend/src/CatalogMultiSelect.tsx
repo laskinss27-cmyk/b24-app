@@ -34,10 +34,14 @@ export function CatalogMultiSelect({ label, allLabel, options, value, onChange }
 				<input type="search" aria-label={`Поиск: ${label}`} placeholder="Найти…" value={query} onChange={(event) => setQuery(event.target.value)} />
 				<button type="button" className="tb-multi-all" onClick={() => onChange([])}>{allLabel}{value.length === 0 ? ' ✓' : ''}</button>
 				<div className="tb-multi-options">
-					{visible.map((option) => <label className="tb-multi-option" key={option.id}>
-						<input type="checkbox" checked={value.includes(option.id)} onChange={(event) => onChange(event.target.checked ? [...value, option.id] : value.filter((id) => id !== option.id))} />
-						<span>{option.label}</span>
-					</label>)}
+					{visible.map((option) => {
+						const checked = value.includes(option.id);
+						return <button type="button" role="checkbox" aria-checked={checked} className="tb-multi-option" key={option.id}
+							onClick={() => onChange(checked ? value.filter((id) => id !== option.id) : [...value, option.id])}>
+							<span className="tb-multi-check" aria-hidden="true">{checked ? '✓' : ''}</span>
+							<span>{option.label}</span>
+						</button>;
+					})}
 					{!visible.length && <span className="tb-multi-empty">Ничего не найдено</span>}
 				</div>
 			</div>
