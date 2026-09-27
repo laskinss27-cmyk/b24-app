@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { cleanHead, prepare, run, validateImageIdentity } from './b24-release.mjs';
 import { snapshot, checkInput, seal, verify, sourceHash } from './b24-release-integrity.mjs';
 
@@ -77,6 +78,14 @@ test('legacy comparison tolerates only text line endings while new images and bi
   assert.notEqual(sourceHash('a\r\nb'), sourceHash('a\nb'));
   assert.notEqual(sourceHash('a\r\nc', true), sourceHash('a\nb', true));
   assert.notEqual(sourceHash(Buffer.from([0, 13, 10]), true), sourceHash(Buffer.from([0, 10]), true));
+});
+
+test('retired one-off deploy entry points stop before accessing Git, SSH or production', () => {
+  for (const path of ['tools/deploy-consumables.mjs', 'tools/deploy-stock-conditions.mjs']) {
+    const result = spawnSync(process.execPath, [path], { encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Legacy deployment disabled/);
+  }
 });
 
 test('prepare blocks dirty, staged and unpushed changes and archives only committed bytes', (t) => {

@@ -84,6 +84,15 @@ export function guard(cwd, image, expectedSha, bootstrapSha) {
 
   const current = JSON.parse(run('docker', ['container', 'inspect', 'b24-backend']))[0];
   if (!current.State.Running || !current.NetworkSettings.Networks.erpnext_frappe_network) throw new Error('Current backend must be running on erpnext_frappe_network');
+  const ports = current.HostConfig.PortBindings;
+  if (current.Mounts.length !== 1 || current.Mounts[0].Destination !== '/app/state'
+    || current.Mounts[0].Type !== 'bind' || !current.Mounts[0].RW
+    || Object.keys(current.NetworkSettings.Networks).length !== 1
+    || Object.keys(ports).length !== 1 || ports['8080/tcp']?.length !== 1
+    || ports['8080/tcp'][0].HostIp !== '127.0.0.1' || ports['8080/tcp'][0].HostPort !== '3000'
+    || current.HostConfig.RestartPolicy.Name !== 'unless-stopped') {
+    throw new Error('Unexpected production mounts/ports/networks/restart policy: reconcile deployment configuration before switching');
+  }
   const currentSha = current.Config.Labels?.['org.opencontainers.image.revision'];
   const baseline = currentSha || bootstrapSha;
   if (!validSha(baseline)) throw new Error('Legacy image has no SHA: supply a verified full baseline SHA as the fourth argument for first migration');

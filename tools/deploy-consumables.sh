@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+echo 'Legacy deployment disabled. Use scripts/b24-deploy.sh and docs/release-provenance.md.' >&2
+exit 1
 ARCHIVE=${1:?archive}
 RELEASE=${2:?release}
 EXPECTED_ID=${3:?expected container}

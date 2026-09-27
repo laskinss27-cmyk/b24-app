@@ -3,7 +3,7 @@
 ## Production deployment
 
 - Use `node scripts/b24-release.mjs build` from a clean, pushed Git checkout and `bash scripts/b24-deploy.sh IMAGE FULL_SHA` for production updates. The deploy script must pass the pre-deploy guard before stopping the service; do not replace it with ad hoc stop/run commands. See `docs/release-provenance.md` for archive transfer and the one-time legacy migration.
-- The complete commit SHA must agree between Git, OCI image labels, baked-in `release.json`, and both `/health` responses. Use the guarded immutable image ID for the container, not a mutable tag. Never set the release SHA through the inherited runtime environment.
+- The complete commit SHA must agree between Git, OCI image labels, baked-in `release.json`, and both `/health` responses. Create a stopped candidate, verify its immutable image ID against the guard before stopping production, then start that exact container ID. Never set the release SHA through the inherited runtime environment.
 - A dirty/unpushed checkout, non-descendant release, failed test suite, image hash mismatch, or uncommitted production hotfix blocks deployment. Reconcile the changes in Git and rebuild; do not bypass the guard. Record intentional recovery/rollback separately.
 
 - Build application releases from a committed Git revision in a clean checkout. Never base a release image on the currently running application image or copy only selected source files into it: that hides missing Git files and can drop features at the next full rebuild.

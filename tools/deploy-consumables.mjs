@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+throw new Error('Legacy deployment disabled. Use scripts/b24-deploy.sh and docs/release-provenance.md.');
 const cwd='D:/Projects/b24-app/outputs/consumables/release-worktree';
 const key='C:/Users/LapTOP/.ssh/b24_company',host='root@201.51.12.57';
 const expectedId='536617120dd75783ce0729683120b99b85a1b08b764c6e6a7492fa5203a9e672';
