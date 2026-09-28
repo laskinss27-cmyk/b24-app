@@ -10,7 +10,7 @@ import { b24StoreTitle, erpContext } from './warehouse-context.js';
 import { parseCatalogContent, type CatalogProductContent } from '../catalog-content.js';
 import { splitCatalogProductNameStatus } from '../catalog-product-status.js';
 import { dealServiceAliasItemCode } from '../deal-service-product-ids.js';
-import { fillMissingPurchasePrices } from './purchase-prices.js';
+import { resolvePurchasePrices } from './purchase-prices.js';
 
 export const ITEM_GROUP = 'Каталог Б24';
 export const REALIZATION_SEGMENT_FIELD = 'b24_deal_segment';
@@ -149,22 +149,26 @@ export async function fetchErpStocksFor(erp: ErpClient, productIds: number[]): P
 	return out;
 }
 
-/** Catalog purchase price, last purchase, then historical stock valuation. */
+/** Latest posted purchase / newer catalog edit, then historical stock valuation. */
 export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
 	const out = new Map<number, number>();
+	const modified = new Map<number, string>();
 	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
 	for (let i = 0; i < ids.length; i += 200) {
 		const chunk = ids.slice(i, i + 200).map(String);
-		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate'], [
+		const prices = await erp.list('Item Price', ['item_code', 'price_list_rate', 'modified'], [
 			['item_code', 'in', chunk],
 			['price_list', '=', 'Standard Buying'],
 		], 0, 'modified desc, name desc');
 		for (const row of prices) {
 			const id = Number(row['item_code']);
-			if (!out.has(id)) out.set(id, Number(row['price_list_rate'] ?? 0));
+			if (!out.has(id)) {
+				out.set(id, Number(row['price_list_rate'] ?? 0));
+				modified.set(id, String(row['modified'] ?? ''));
+			}
 		}
 	}
-	await fillMissingPurchasePrices(erp, out, ids);
+	await resolvePurchasePrices(erp, out, modified, ids);
 	for (const id of ids) if (!out.has(id)) out.set(id, 0);
 	const realizationSegmentField = `Delivery Note Item-${REALIZATION_SEGMENT_FIELD}`;
 	if (!(await erp.get('Custom Field', realizationSegmentField))) {
@@ -288,21 +292,25 @@ export async function updateMarketplaceOldId(
 
 /** Справочные цены каталога ядра. Они не меняют складскую valuation_rate. */
 export async function fetchCoreCatalogPrices(erp: ErpClient): Promise<Map<number, CoreCatalogPrices>> {
-	const rows = await erp.list('Item Price', ['item_code', 'price_list', 'price_list_rate'], [
+	const rows = await erp.list('Item Price', ['item_code', 'price_list', 'price_list_rate', 'modified'], [
 		['price_list', 'in', ['Standard Selling', 'Standard Buying']],
 	], 0, 'modified desc, name desc');
 	const out = new Map<number, CoreCatalogPrices>();
+	const modified = new Map<number, string>();
 	for (const row of rows) {
 		const productId = Number(row['item_code']);
 		if (!(productId > 0)) continue;
 		const current = out.get(productId) ?? {};
 		const rate = Number(row['price_list_rate'] ?? 0);
 		if (row['price_list'] === 'Standard Selling' && current.retail === undefined) current.retail = rate;
-		if (row['price_list'] === 'Standard Buying' && current.purchase === undefined) current.purchase = rate;
+		if (row['price_list'] === 'Standard Buying' && current.purchase === undefined) {
+			current.purchase = rate;
+			modified.set(productId, String(row['modified'] ?? ''));
+		}
 		out.set(productId, current);
 	}
 	const purchasing = new Map([...out].filter(([, value]) => value.purchase !== undefined).map(([id, value]) => [id, value.purchase!]));
-	await fillMissingPurchasePrices(erp, purchasing);
+	await resolvePurchasePrices(erp, purchasing, modified);
 	for (const [id, purchase] of purchasing) out.set(id, { ...out.get(id), purchase });
 	return out;
 }

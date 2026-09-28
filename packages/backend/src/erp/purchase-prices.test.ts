@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fetchCoreCatalogPrices, fetchErpPurchasing, updateCoreCatalogPrices } from './stock-catalog.js';
-import { fillMissingPurchasePrices } from './purchase-prices.js';
+import { fillMissingPurchasePrices, resolvePurchasePrices } from './purchase-prices.js';
 import type { ErpClient } from './client.js';
 
 function fixture() {
@@ -10,6 +10,7 @@ function fixture() {
 		get: async () => ({}),
 		list: async (type: string, _fields: string[], filters: unknown[] = []) => {
 			calls.push({ type, filters });
+			if (type === 'Purchase Receipt') return [];
 			if (type === 'Item Price') return [
 				{ item_code: '27112', price_list: 'Standard Buying', price_list_rate: 0 },
 				{ item_code: '19842', price_list: 'Standard Buying', price_list_rate: 0.01 },
@@ -47,6 +48,62 @@ test('deal costs recover receipt and migrated valuation even after stock reaches
 	const ledger = calls.find((call) => call.type === 'Stock Ledger Entry')!;
 	assert.ok(ledger.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(['is_cancelled', '=', 0])));
 	assert.ok(ledger.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(['valuation_rate', '>', .01])));
+});
+
+test('new posted purchases replace nonzero catalog costs; later manual edits last until the next purchase', async () => {
+	let manualPrice = 3000;
+	let manualAt = '2026-09-20 10:00:00';
+	const receipt = (name: string, rate: number, date: string, extra = {}) => ({
+		name, item_code: '1', base_rate: rate, conversion_factor: 1, qty: 1, idx: 1,
+		docstatus: 1, is_return: 0, posting_date: date, posting_time: '10:00:00',
+		creation: `${date} 10:00:00`, modified: `${date} 10:01:00`, ...extra,
+	});
+	const receipts = [receipt('PR-1', 3500, '2026-09-21')];
+	const client = {
+		get: async () => ({}),
+		list: async (type: string, _fields: string[], filters: unknown[]) => {
+			if (type === 'Item Price') return [{ item_code: '1', price_list: 'Standard Buying', price_list_rate: manualPrice, modified: manualAt }];
+			if (type === 'Purchase Receipt') {
+				assert.deepEqual(filters, [['docstatus', '=', 1], ['is_return', '=', 0]]);
+				return receipts;
+			}
+			if (type === 'Item') return [{ name: '1', last_purchase_rate: 9999 }];
+			throw new Error(`Unexpected read ${type}`);
+		},
+	} as unknown as ErpClient;
+	const check = async (expected: number) => {
+		assert.equal((await fetchErpPurchasing(client, [1])).get(1), expected);
+		assert.equal((await fetchCoreCatalogPrices(client)).get(1)?.purchase, expected);
+	};
+	await check(3500);
+	manualAt = '2026-09-21 10:01:00';
+	receipts[0]!.modified = '2026-09-21 10:01:00.500000';
+	await check(3500);
+	manualAt = '2026-09-21 10:01:00.600000';
+	await check(3000);
+	manualPrice = 3400; manualAt = '2026-09-22 11:00:00';
+	await check(3400);
+	receipts.push(receipt('PR-2', 3700, '2026-09-23'));
+	await check(3700);
+	// A later-created backdated document must not replace the latest business-date purchase.
+	receipts.push(receipt('PR-BACKDATED', 1000, '2026-09-19', { modified: '2026-09-28 10:00:00' }));
+	await check(3700);
+	receipts.push(receipt('DRAFT', 9900, '2026-09-28', { docstatus: 0 }),
+		receipt('RETURN', 9800, '2026-09-28', { is_return: 1 }),
+		receipt('ZERO', 0, '2026-09-28'), receipt('TECHNICAL', .01, '2026-09-28'));
+	await check(3700);
+	receipts[1]!.docstatus = 2;
+	await check(3400);
+	manualAt = '2026-09-20 10:00:00';
+	await check(3500);
+	// Both readers return the price per stock unit in company currency, not package price.
+	receipts.push(receipt('PR-PACK', 36000, '2026-09-29', { conversion_factor: 10 }));
+	await check(3600);
+});
+
+test('empty product selection makes no receipt or fallback request', async () => {
+	await resolvePurchasePrices({ list: async () => { throw new Error('unexpected read'); } } as unknown as ErpClient,
+		new Map(), new Map(), []);
 });
 
 test('catalog and deal readers resolve the same costs without writing source documents', async () => {

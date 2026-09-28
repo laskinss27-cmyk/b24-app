@@ -43,10 +43,8 @@ export function registerStockDocumentCreationRoute(app: FastifyInstance): void {
 					lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, toStore, rate: l.purchase })),
 				});
 				for (const line of lines) {
-					const prices: { productId: number; retail?: number; purchase?: number } = { productId: line.productId };
-					if (line.retail > 0) prices.retail = line.retail;
-					if (line.purchase > 0) prices.purchase = line.purchase;
-					if (prices.retail !== undefined || prices.purchase !== undefined) await updateCoreCatalogPrices(erp, prices);
+					// Purchase cost becomes current only after this receipt is submitted.
+					if (line.retail > 0) await updateCoreCatalogPrices(erp, { productId: line.productId, retail: line.retail });
 				}
 				app.log.info({ name, lines: lines.length }, '[api/stock/create] receipt draft');
 				return { ok: true, kind, name };
