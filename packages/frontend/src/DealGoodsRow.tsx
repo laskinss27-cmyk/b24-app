@@ -1,6 +1,6 @@
 import type { FocusEvent, ReactNode } from 'react';
 import { rub } from './deal-display-formatters.js';
-import { dealProductFinalUnit, dealProductMarkupText, type DealProductRowEdit } from './deal-product-row-values.js';
+import { dealProductFinalUnit, dealProductMarkupText, dealProductPurchasingPrice, dealProductPurchaseWarning, type DealProductRowEdit } from './deal-product-row-values.js';
 import { DealProductStockSummary } from './DealProductStockDisplay.js';
 import type { DealProductAvailabilityStatus } from './deal-product-availability.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
@@ -61,6 +61,8 @@ export function DealGoodsRow({
 	onToggleStocks: () => void;
 }): JSX.Element {
 	const finalUnit = dealProductFinalUnit(edit);
+	const purchase = dealProductPurchasingPrice(row, finalUnit);
+	const purchaseWarning = dealProductPurchaseWarning(row, finalUnit);
 
 	return (
 		<tr className={`goods-row st-${status}${selected ? ' sel-row' : ''}`}>
@@ -88,8 +90,8 @@ export function DealGoodsRow({
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={edit.price} disabled={saving || !editable} onChange={(event) => onEdit({ price: event.target.value })} onBlur={onBlur} title="Цена без скидки, ₽" />
 				<div className="cell-final" title="Наценка от закупочной цены, рассчитанная по итоговой цене продажи после скидки">наценка {dealProductMarkupText(row, edit)}{saving ? ' …' : ''}</div>
-				{row.purchasingPrice != null
-					? <div className={`purchase-hint${finalUnit <= row.purchasingPrice ? ' danger' : ''}`}>закуп {rub(row.purchasingPrice)}{finalUnit <= row.purchasingPrice ? ' ⚠' : ''}</div>
+				{purchase != null
+					? <div className={`purchase-hint${purchaseWarning ? ' danger' : ''}`}>закуп {rub(purchase)}{purchaseWarning ? ' ⚠' : ''}</div>
 					: <div className="purchase-hint muted-hint">закуп —</div>}
 			</td>
 			<td className="num">

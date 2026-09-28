@@ -1,3 +1,4 @@
+import { isRetiredConsumablesProduct } from '@b24-app/shared';
 import type { CatalogProductContent } from '../catalog-content.js';
 import { coreStoreId } from '../erp/stock-catalog.js';
 import type { CatalogStore, CoreProductBaseRow } from '../routes/api-catalog-types.js';
@@ -35,7 +36,7 @@ export function buildSqlProductBase(plan: CatalogMirrorPlan): {
 		stocksByItem.set(stock.itemCode, current);
 	}
 
-	const rows = plan.products.map((product): CoreProductBaseRow => {
+	const rows = plan.products.filter((product) => !isRetiredConsumablesProduct(product.itemCode)).map((product): CoreProductBaseRow => {
 		const price = pricesByItem.get(product.itemCode);
 		const stockByStore = stocksByItem.get(product.itemCode) ?? {};
 		const sectionName = product.sectionName || undefined;

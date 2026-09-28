@@ -13,6 +13,9 @@
  * Тяжёлое (строки + закупки по сотням сделок) — серверным B24Client батчами, как «База».
  */
 import { B24Client, type BatchCall } from './client.js';
+import { dealLinePurchasingPrice, isPassThroughProduct } from '@b24-app/shared';
+import { ErpClient } from '../erp/client.js';
+import { readConsumablesReportRows } from './sales-report-consumables.js';
 
 /** TYPE строки сделки: 1 = товар, 7 = работа/услуга (как в crm.deal.productrows). */
 const WORK_TYPE = 7;
@@ -152,7 +155,7 @@ async function fetchPurchasing(client: B24Client, productIds: number[]): Promise
 	return map;
 }
 
-export async function buildSalesReport(client: B24Client, params: SalesReportParams): Promise<SalesReportData> {
+export async function buildSalesReport(client: B24Client, params: SalesReportParams, erp: ErpClient | null = ErpClient.fromEnv()): Promise<SalesReportData> {
 	const filter: Record<string, unknown> = {
 		STAGE_SEMANTIC_ID: 'S',
 		'>=CLOSEDATE': params.from,
@@ -165,12 +168,16 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 	const [categoryNames, sourceNames, coef] = await Promise.all([fetchCategoryNames(client), fetchSourceNames(client), fetchCoef(client)]);
 	const managerNames = await fetchManagerNames(client, deals.map((d) => Number(d['ASSIGNED_BY_ID'])));
 	const rowsByDeal = await fetchProductRows(client, deals.map((d) => Number(d['ID'])));
+	for (const [dealId, rows] of rowsByDeal) {
+		const coreRows = await readConsumablesReportRows(erp, dealId, rows);
+		if (coreRows) rowsByDeal.set(dealId, coreRows);
+	}
 
 	// все товарные productId (TYPE != 7) — для закупок одним проходом
 	const goodsIds: number[] = [];
 	for (const rows of rowsByDeal.values()) {
 		for (const r of rows) {
-			if (Number(r['TYPE']) !== WORK_TYPE) {
+			if (Number(r['TYPE']) !== WORK_TYPE && !('CORE_PURCHASING_PRICE' in r) && !isPassThroughProduct(Number(r['PRODUCT_ID']))) {
 				const pid = Number(r['PRODUCT_ID'] ?? 0);
 				if (pid > 0) goodsIds.push(pid);
 			}
@@ -183,6 +190,7 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 		const rows = rowsByDeal.get(dealId) ?? [];
 		let goodsSum = 0;
 		let worksSum = 0;
+		let worksProfit = 0;
 		let goodsProfit = 0;
 		let goodsNoPurchase = 0;
 		for (const r of rows) {
@@ -191,9 +199,12 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 			const line = price * qty;
 			if (Number(r['TYPE']) === WORK_TYPE) {
 				worksSum += line;
+				if (!isPassThroughProduct(Number(r['PRODUCT_ID']))) worksProfit += line * coef;
 			} else {
 				goodsSum += line;
-				const pp = purchasing.get(Number(r['PRODUCT_ID'] ?? 0));
+				const productId = Number(r['PRODUCT_ID'] ?? 0);
+				const catalogPurchase = 'CORE_PURCHASING_PRICE' in r ? numOrNull(r.CORE_PURCHASING_PRICE) : purchasing.get(productId);
+				const pp = dealLinePurchasingPrice(productId, price, catalogPurchase);
 				if (pp == null) goodsNoPurchase++;
 				else goodsProfit += (price - pp) * qty;
 			}
@@ -209,7 +220,7 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 			goodsSum,
 			worksSum,
 			goodsProfit,
-			worksProfit: worksSum * coef,
+			worksProfit,
 			goodsNoPurchase,
 		};
 	});

@@ -1,3 +1,4 @@
+import { isRetiredConsumablesProduct } from '@b24-app/shared';
 import { ErpClient } from './client.js';
 import { TECH_SUPPLIER, UOM } from './erp-setup.js';
 import {
@@ -150,7 +151,7 @@ export async function fetchErpStocksFor(erp: ErpClient, productIds: number[]): P
 }
 
 /** Latest posted purchase / newer catalog edit, then historical stock valuation. */
-export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+export async function fetchErpCatalogPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
 	const out = new Map<number, number>();
 	const modified = new Map<number, string>();
 	const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
@@ -170,6 +171,11 @@ export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): 
 	}
 	await resolvePurchasePrices(erp, out, modified, ids);
 	for (const id of ids) if (!out.has(id)) out.set(id, 0);
+	return out;
+}
+
+export async function fetchErpPurchasing(erp: ErpClient, productIds: number[]): Promise<Map<number, number>> {
+	const out = await fetchErpCatalogPurchasing(erp, productIds);
 	const realizationSegmentField = `Delivery Note Item-${REALIZATION_SEGMENT_FIELD}`;
 	if (!(await erp.get('Custom Field', realizationSegmentField))) {
 		await erp.create('Custom Field', {
@@ -239,6 +245,7 @@ export async function fetchCoreCatalogItems(erp: ErpClient): Promise<CoreCatalog
 	for (const row of rows) {
 		const productId = Number(row['name']);
 		if (!Number.isInteger(productId) || productId <= 0) continue;
+		if (isRetiredConsumablesProduct(productId)) continue;
 		const content = parseCatalogContent(row['b24_catalog_content']);
 		const normalizedIdentity = splitCatalogProductNameStatus(
 			row['item_name'],

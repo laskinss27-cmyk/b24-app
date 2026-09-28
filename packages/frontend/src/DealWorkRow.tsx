@@ -1,3 +1,4 @@
+import { isPassThroughProduct } from '@b24-app/shared';
 import type { FocusEvent } from 'react';
 import { rub } from './deal-display-formatters.js';
 import { dealProductFinalUnit, type DealProductRowEdit } from './deal-product-row-values.js';
@@ -74,6 +75,7 @@ export function DealWorkRow({
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={edit.price} disabled={saving || !editable} onChange={(event) => onEdit({ price: event.target.value })} onBlur={onBlur} title="Цена без скидки, ₽" />
 				<div className="cell-final">= {rub(finalUnit)}/ед{saving ? ' …' : ''}</div>
+				{isPassThroughProduct(row.productId) && <div className="purchase-hint">закуп {rub(finalUnit)} · прибыль 0 ₽</div>}
 			</td>
 			<td className="num">
 				<span className="cell-price"><input type="number" className="cell-inp cell-xs" min={0} max={100} step="any" value={edit.disc} disabled={saving || !editable} onChange={(event) => onEdit({ disc: event.target.value })} onBlur={onBlur} title="Скидка, %" /><span className="cell-pct">%</span></span>
