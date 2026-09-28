@@ -1,3 +1,4 @@
+import { readManualState, writeManualState, validateManualLine } from '../deal-manual-store.js';
 import { randomUUID } from 'node:crypto';
 import { ErpClient } from './client.js';
 import {
@@ -103,13 +104,27 @@ export async function upsertDealPlan(
 	// Обычный состав проведённой сделки остаётся зафиксированным. Новый этап — явная
 	// следующая партия той же сделки, поэтому он может расширить накопительный план.
 	if (!options.allowExpansionAfterSale) await assertPlanDoesNotExpandAfterSale(erp, dealId, existing, lines);
-	const durableLines = await withRealizedBaseline(erp, dealId, lines);
+	for (const line of lines) {
+		if (line.manual) validateManualLine(line);
+		else if (!Number.isSafeInteger(line.productId) || line.productId <= 0) throw new Error('bad productId');
+	}
+	const manualLines = lines.filter((line) => line.manual).map((line) => ({ ...line, lineKey: `manual:${-line.productId}` }));
+	const manualState = await readManualState(dealId);
+	const durableLines = await withRealizedBaseline(erp, dealId, lines.filter((line) => !line.manual));
+	const existingDoc = existing ? await erp.get<Record<string, unknown>>('Sales Order', existing) : null;
+	const saveManual = async (): Promise<void> => {
+		if (manualLines.length || manualState) await writeManualState(dealId, {
+			lines: manualLines,
+			...(!manualState?.variants && existingDoc?.[DEAL_VARIANTS_FIELD] ? { variants: String(existingDoc[DEAL_VARIANTS_FIELD]) } : {}),
+		});
+	};
 	if (!durableLines.length) {
+		await saveManual();
 		if (existing) await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(existing)}`);
-		return { name: null, lines: [] };
+		return { name: null, lines: manualLines };
 	}
 	for (const l of durableLines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}`, ...(l.isService !== undefined ? { isService: l.isService } : {}) });
-	const existingDoc = existing ? await erp.get<Record<string, unknown>>('Sales Order', existing) : null;
+
 	const existingItems = Array.isArray(existingDoc?.['items']) ? existingDoc.items as Array<Record<string, unknown>> : [];
 	const existingByProduct = new Map<number, Array<Record<string, unknown>>>();
 	for (const item of existingItems) {
@@ -135,19 +150,22 @@ export async function upsertDealPlan(
 	const savedLines: PlanLine[] = preparedLines.map(({ rowName: _rowName, ...line }) => line);
 	if (existing) {
 		const doc = await erp.update('Sales Order', existing, { items, delivery_date: deliveryDate });
-		return { name: String(doc['name'] ?? existing), lines: savedLines };
+		await saveManual();
+		return { name: String(doc['name'] ?? existing), lines: [...savedLines, ...manualLines] };
 	}
 	const doc = await erp.create('Sales Order', {
 		company: ctx.company, customer: TECH_CUSTOMER, delivery_date: deliveryDate,
 		[DEAL_FIELD]: String(dealId), items,
 	});
-	return { name: String(doc['name']), lines: savedLines };
+	await saveManual();
+	return { name: String(doc['name']), lines: [...savedLines, ...manualLines] };
 }
 
 /** Состав плана сделки (строки черновика Sales Order). delivered = сколько уже отгружено (ядро считает). */
 export async function listDealPlan(erp: ErpClient, dealId: number): Promise<PlanItem[]> {
+	const manual = ((await readManualState(dealId))?.lines ?? []).map((line): PlanItem => ({ ...line, itemName: line.itemName!, lineKey: `manual:${-line.productId}`, rate: Math.round(line.priceListRate * (1 - line.discountPercent / 100) * 100) / 100, delivered: 0, isService: false }));
 	const name = await findDealPlan(erp, dealId);
-	if (!name) return [];
+	if (!name) return manual;
 	const so = await erp.get<Record<string, unknown>>('Sales Order', name);
 	const items = (so?.['items'] as Array<Record<string, unknown>>) ?? [];
 	const ids = [...new Set(items.map((it) => String(it['item_code'] ?? '')).filter(Boolean))];
@@ -156,7 +174,7 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 		const rows = await erp.list('Item', ['name', 'is_stock_item'], [['name', 'in', ids.slice(i, i + 100)]]);
 		for (const row of rows) serviceById.set(String(row['name']), Number(row['is_stock_item'] ?? 1) === 0);
 	}
-	return items.flatMap((it) => {
+	return [...manual, ...items.flatMap((it) => {
 		const productId = Number(it['item_code']);
 		if (!Number.isInteger(productId) || productId <= 0) return [];
 		return [{
@@ -170,7 +188,7 @@ export async function listDealPlan(erp: ErpClient, dealId: number): Promise<Plan
 			isService: isDealServiceProductId(productId) || serviceById.get(String(it['item_code'] ?? '')) === true,
 			lineKey: String(it[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(it['name'] ?? '').trim(),
 		}];
-	});
+	})];
 }
 
 /** Заменить товар только в рабочем составе сделки.
@@ -203,6 +221,7 @@ export async function replaceDealPlanProduct(
 			lineKey: line.lineKey,
 		}
 		: {
+			...line,
 			productId: line.productId,
 			itemName: line.itemName,
 			qty: line.qty,
@@ -235,8 +254,9 @@ function parseDealQuoteVariants(raw: unknown): DealQuoteVariants {
 				const qty = Number(source.qty);
 				const priceListRate = Number(source.priceListRate);
 				const discountPercent = Number(source.discountPercent ?? 0);
-				if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(priceListRate) || priceListRate < 0) return [];
-				return [{ productId, itemName: String(source.itemName ?? `#${productId}`), qty, priceListRate, discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0, isService: Boolean(source.isService) }];
+				if (source.manual) validateManualLine(source as PlanLine);
+				if (!Number.isInteger(productId) || (!source.manual && productId <= 0) || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(priceListRate) || priceListRate < 0) return [];
+				return [{ ...(source.manual ? { manual: true, unit: source.unit!, lineKey: source.lineKey || `manual:${-productId}` } : {}), productId, itemName: String(source.itemName ?? `#${productId}`), qty, priceListRate, discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0, isService: Boolean(source.isService) }];
 			});
 			return [{ id, name, createdAt: String(row.createdAt ?? ''), createdById: String(row.createdById ?? ''), createdByName: String(row.createdByName ?? ''), items }];
 		});
@@ -249,6 +269,8 @@ function parseDealQuoteVariants(raw: unknown): DealQuoteVariants {
 }
 
 async function dealPlanDocument(erp: ErpClient, dealId: number): Promise<{ name: string; doc: Record<string, unknown> } | null> {
+	const manual = await readManualState(dealId);
+	if (manual) return { name: `manual:${dealId}`, doc: { [DEAL_VARIANTS_FIELD]: manual.variants } };
 	await ensurePlanField(erp);
 	const name = await findDealPlan(erp, dealId);
 	if (!name) return null;
@@ -257,7 +279,11 @@ async function dealPlanDocument(erp: ErpClient, dealId: number): Promise<{ name:
 }
 
 async function saveDealQuoteVariants(erp: ErpClient, planName: string, state: DealQuoteVariants): Promise<void> {
-	await erp.update('Sales Order', planName, { [DEAL_VARIANTS_FIELD]: JSON.stringify(state) });
+	if (planName.startsWith('manual:')) {
+		await writeManualState(Number(planName.slice(7)), { variants: JSON.stringify(state) });
+	} else {
+		await erp.update('Sales Order', planName, { [DEAL_VARIANTS_FIELD]: JSON.stringify(state) });
+	}
 }
 
 export async function listDealQuoteVariants(erp: ErpClient, dealId: number): Promise<DealQuoteVariants> {
@@ -281,13 +307,13 @@ export async function createDealQuoteVariant(erp: ErpClient, dealId: number, arg
 	if (state.variants.some((variant) => variant.name.toLocaleLowerCase('ru-RU') === cleanName.toLocaleLowerCase('ru-RU'))) throw new Error('вариант с таким названием уже есть');
 	let items: DealQuoteVariantItem[];
 	if (!state.enabled) {
-		items = (await listDealPlan(erp, dealId)).map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
+		items = (await listDealPlan(erp, dealId)).map((item) => ({ ...item, productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
 	} else if (!args.sourceVariantId) {
 		items = [];
 	} else if (args.sourceVariantId === state.selectedId) {
 		// Выбранный вариант живёт в рабочем плане и мог измениться после выбора:
 		// копируем актуальный состав, а не его старый снимок в JSON вариантов.
-		items = (await listDealPlan(erp, dealId)).map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
+		items = (await listDealPlan(erp, dealId)).map((item) => ({ ...item, productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: item.isService }));
 	} else {
 		const source = state.variants.find((variant) => variant.id === args.sourceVariantId);
 		if (!source) throw new Error('вариант для копирования не найден');
@@ -335,9 +361,11 @@ export async function updateDealQuoteVariantItems(erp: ErpClient, dealId: number
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
 	if (!state.variants.some((variant) => variant.id === variantId)) throw new Error('вариант не найден');
 	if (state.selectedId === variantId) throw new Error('основной вариант изменяется через рабочий состав и этапы');
-	for (const item of items) await ensureCoreItem(erp, { productId: item.productId, name: item.itemName, isService: Boolean(item.isService) });
+	for (const item of items) if (item.manual) validateManualLine(item); else await ensureCoreItem(erp, { productId: item.productId, name: item.itemName, isService: Boolean(item.isService) });
 	const next = { ...state, variants: state.variants.map((variant) => variant.id === variantId ? { ...variant, items: items.map((item) => ({ ...item })) } : variant) };
-	await saveDealQuoteVariants(erp, plan.name, next);
+	if (items.some((item) => item.manual) && !plan.name.startsWith('manual:')) {
+		await writeManualState(dealId, { variants: JSON.stringify(next) });
+	} else await saveDealQuoteVariants(erp, plan.name, next);
 	return next;
 }
 
@@ -351,6 +379,7 @@ export async function selectDealQuoteVariant(erp: ErpClient, dealId: number, var
 	if (!selected.items.length) throw new Error('нельзя выбрать пустой вариант');
 	const currentItems = state.selectedId
 		? (await listDealPlan(erp, dealId)).map((item): DealQuoteVariantItem => ({
+			...item,
 			productId: item.productId,
 			itemName: item.itemName,
 			qty: item.qty,
@@ -367,7 +396,7 @@ export async function selectDealQuoteVariant(erp: ErpClient, dealId: number, var
 			? state.variants.map((variant) => variant.id === state.selectedId ? { ...variant, items: currentItems } : variant)
 			: state.variants,
 	};
-	await saveDealQuoteVariants(erp, plan.name, next);
+	await saveDealQuoteVariants(erp, (await dealPlanDocument(erp, dealId))!.name, next);
 	return next;
 }
 
@@ -377,6 +406,7 @@ export async function cancelDealQuoteVariantSelection(erp: ErpClient, dealId: nu
 	const state = parseDealQuoteVariants(plan.doc[DEAL_VARIANTS_FIELD]);
 	if (!state.selectedId) return state;
 	const currentItems = (await listDealPlan(erp, dealId)).map((item): DealQuoteVariantItem => ({
+		...item,
 		productId: item.productId,
 		itemName: item.itemName,
 		qty: item.qty,
@@ -467,6 +497,7 @@ export async function reduceDealPlanForReturns(
 		return qty > 0.000001 ? [{ ...item, qty }] : [];
 	});
 	const saved = await upsertDealPlan(erp, dealId, nextPlan.map((item) => ({
+		...item,
 		productId: item.productId,
 		itemName: item.itemName,
 		qty: item.qty,

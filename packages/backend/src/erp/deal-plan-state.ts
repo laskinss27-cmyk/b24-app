@@ -41,8 +41,9 @@ export async function ensurePlanField(erp: ErpClient): Promise<void> {
 }
 
 // priceListRate = базовая цена (до скидки), discountPercent = скидка %. rate (итог) ERPNext считает сам.
-export interface PlanLine { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean; lineKey?: string }
-export interface PlanItem { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean; lineKey: string }
+export interface ManualLineFields { manual?: boolean; unit?: string }
+export interface PlanLine extends ManualLineFields { productId: number; itemName?: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean; lineKey?: string }
+export interface PlanItem extends ManualLineFields { productId: number; itemName: string; qty: number; rate: number; priceListRate: number; discountPercent: number; delivered: number; isService: boolean; lineKey: string }
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
 export interface DealStage { id: string; name?: string; at: string; byId: string; byName: string; items: DealStageItem[] }
 export interface DealQuoteVariantItem extends PlanLine { itemName: string }

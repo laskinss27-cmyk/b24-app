@@ -54,7 +54,7 @@ function ReceiptDocument({ kp }: { kp: KpData }): JSX.Element {
 					<tr key={`${row.isWork ? 'w' : 'g'}-${row.productId}-${index}`}>
 						<td>{index + 1}</td>
 						<td>{row.name}{row.article && <small>{row.article}</small>}</td>
-						<td className="num">{row.qty}</td>
+						<td className="num">{row.qty}{row.unit ? ` ${row.unit}` : ''}</td>
 						<td className="num">{money(row.price)}</td>
 						<td className="num">{money(row.sum)}</td>
 					</tr>
@@ -114,7 +114,7 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 				<td className="kp-index">{i + 1}</td>
 				<td className="kp-photo-cell">{photo ? <img src={photo} alt="" className="kp-photo" /> : <div className="kp-photo kp-photo-empty" />}</td>
 				<td>{r.name}{r.article && <div className="kp-article">{r.article}</div>}</td>
-				<td className="kp-num">{r.qty}</td>
+				<td className="kp-num">{r.qty}{r.unit ? ` ${r.unit}` : ''}</td>
 				<td className="kp-num">{money(r.price)}</td>
 				<td className="kp-num">{money(r.sum)}</td>
 			</tr>
@@ -125,7 +125,7 @@ export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: 
 			<td className="kp-index">{(kp?.goods.length ?? 0) + i + 1}</td>
 			<td className="kp-photo-cell" />
 			<td>{r.name}</td>
-			<td className="kp-num">{r.qty}</td>
+			<td className="kp-num">{r.qty}{r.unit ? ` ${r.unit}` : ''}</td>
 			<td className="kp-num">{money(r.price)}</td>
 			<td className="kp-num">{money(r.sum)}</td>
 		</tr>

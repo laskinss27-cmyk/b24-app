@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { DealManualProductForm } from './DealManualProductForm.js';
 import { addProductsToDeal, replaceDealPlanProduct } from './b24.js';
 import { ProductBase } from './ProductBase.js';
 
@@ -26,13 +28,16 @@ export function DealProductsPicker({
 	onReplaced: () => void;
 	onReload: () => Promise<void>;
 }): JSX.Element {
+	const [manual, setManual] = useState(false);
 	const isNewStage = adding?.kind === 'new-stage';
 	const isExistingStage = adding?.kind === 'stage';
 	const isVariant = adding?.kind === 'variant';
 
-	return (
-		<ProductBase
+	return <>
+		{manual && <DealManualProductForm dealId={dealId} {...(adding?.kind === 'variant' ? { variantId: adding.variantId } : {})} onCancel={() => setManual(false)} onAdded={async () => { onAdded(); await onReload(); }} />}
+		<div hidden={manual}><ProductBase
 			picker={{
+				...(!replacing && (adding?.kind === 'deal' || isVariant) ? { onAddManual: () => setManual(true) } : {}),
 				title: replacing
 					? `Заменить «${replacing.name}»`
 					: isVariant && adding?.kind === 'variant'
@@ -63,6 +68,6 @@ export function DealProductsPicker({
 					await onReload();
 				},
 			}}
-		/>
-	);
+		/></div>
+	</>;
 }

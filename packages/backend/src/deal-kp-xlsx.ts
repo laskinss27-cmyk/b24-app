@@ -102,7 +102,7 @@ function addItem(
 			wrapText: column === 3,
 		};
 	});
-	row.getCell(4).numFmt = Number.isInteger(item.qty) ? '0' : '0.###';
+	row.getCell(4).numFmt = (Number.isInteger(item.qty) ? '0' : '0.###') + (item.unit ? `" ${item.unit.replaceAll('\"', '')}"` : '');
 	row.getCell(5).numFmt = Number.isInteger(item.price) ? '#,##0" ₽"' : '#,##0.00" ₽"';
 	row.getCell(6).numFmt = Number.isInteger(item.sum) ? '#,##0" ₽"' : '#,##0.00" ₽"';
 	const image = item.photoPath ? images.get(item.photoPath) : undefined;

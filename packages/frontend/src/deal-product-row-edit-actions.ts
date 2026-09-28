@@ -38,7 +38,7 @@ export function createDealProductRowEditActions({
 	setNotice: (notice: DealNotice) => void;
 }) {
 	const editOf = (r: EnrichedRow): DealProductRowEdit =>
-		rowEdits[r.id] ?? { qty: String(r.quantity), price: String(dealProductBasePrice(r)), disc: String(dealProductDiscountPercent(r)) };
+		rowEdits[r.id] ?? { qty: String(r.quantity), price: String(dealProductBasePrice(r)), disc: String(dealProductDiscountPercent(r)), ...(r.manual ? { name: r.name, unit: r.measure } : {}) };
 	const setEdit = (r: EnrichedRow, patch: Partial<DealProductRowEdit>): void =>
 		setRowEdits((m) => ({ ...m, [r.id]: { ...editOf(r), ...patch } }));
 	const clearEdit = (id: string): void => setRowEdits((m) => { const n = { ...m }; delete n[id]; return n; });
@@ -47,24 +47,26 @@ export function createDealProductRowEditActions({
 		const e = editOf(r);
 		const q = Number(e.qty.replace(',', '.')), p = Number(e.price.replace(',', '.')), d = Number(e.disc.replace(',', '.'));
 		if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p) || p < 0 || !Number.isFinite(d) || d < 0 || d > 100) { clearEdit(r.id); return; }
-		if (q === r.quantity && Math.abs(p - dealProductBasePrice(r)) < 0.005 && Math.abs(d - dealProductDiscountPercent(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
+		if (r.manual && (!e.name?.trim() || !e.unit?.trim())) { setNotice({ kind: 'err', text: 'Укажите название и единицу измерения' }); return; }
+		const manualPatch = r.manual ? { itemName: e.name!.trim(), unit: e.unit!.trim() } : {};
+		if ((!r.manual || (e.name?.trim() === r.name && e.unit?.trim() === r.measure)) && q === r.quantity && Math.abs(p - dealProductBasePrice(r)) < 0.005 && Math.abs(d - dealProductDiscountPercent(r)) < 0.05) { clearEdit(r.id); return; } // без изменений
 		setSavingRow(r.id); setNotice(null);
 		try {
 			if (proposalEditable && activeVariantId && isVariantRow(r)) {
-				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)), activeVariantId);
+				await setDealPlan(dealId, data.plan.map((x) => (x.productId === r.productId ? { ...x, ...manualPatch, qty: q, priceListRate: p, discountPercent: d } : x)), activeVariantId);
 			} else if (r.segmentKind === 'stage' && r.stageId) {
 				await updateDealStageItem(dealId, r.stageId, r.productId, q, p, d);
 			} else if (r.segmentKind === 'base') {
 				const planLine = data.plan.find((item) => samePlanLine(r, item));
 				if (!planLine) throw new Error('Состав старой сделки ещё не перенесён в ядро. Обнови вкладку и повтори действие.');
 				await setDealPlan(dealId, data.plan.map((x) => (samePlanLine(r, x)
-					? { ...x, qty: x.qty - r.quantity + q, priceListRate: p, discountPercent: d }
+					? { ...x, ...manualPatch, qty: x.qty - r.quantity + q, priceListRate: p, discountPercent: d }
 					: x)));
 			} else if (isPlanRow(r)) {
-				if (data.stages.length) throw new Error('Для изменения цены выберите «Вид по этапам» и измените нужную строку.');
+				if (data.stages.length && !r.manual) throw new Error('Для изменения цены выберите «Вид по этапам» и измените нужную строку.');
 				// Товар плана: пишем НОВЫЙ состав в ядро (база p + скидка d% — скидка сохраняется, цену вернуть можно)
 				// + пересчёт служебной строки с общей суммой в Б24.
-				await setDealPlan(dealId, data.plan.map((x) => (samePlanLine(r, x) ? { ...x, qty: q, priceListRate: p, discountPercent: d } : x)));
+				await setDealPlan(dealId, data.plan.map((x) => (samePlanLine(r, x) ? { ...x, ...manualPatch, qty: q, priceListRate: p, discountPercent: d } : x)));
 			} else {
 				throw new Error('Историческую строку нельзя редактировать: текущий состав сделки хранится только в ядре.');
 			}

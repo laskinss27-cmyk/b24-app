@@ -1473,6 +1473,13 @@ html[data-theme="dark"] .cell-final {
 html[data-theme="dark"] .qtypair-l {
     color: #b9c6d7
 }
+html[data-theme="dark"] .deal-manual-form {
+    border: 1px solid #34445a;
+    background: #202c3d
+}
+html[data-theme="dark"] .deal-manual-form input {
+    border: 1px solid #34445a
+}
 html[data-theme="dark"] .base-tablewrap {
     background: #202c3d;
     border: 1px solid #34445a

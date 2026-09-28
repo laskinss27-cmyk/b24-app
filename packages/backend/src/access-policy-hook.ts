@@ -17,6 +17,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/deal/realize-core': ['realizations.create', 'realizations.post'],
 	'/api/deal/search-products': ['deals.view', 'catalog.search'],
 	'/api/deal/add-products': ['deals.add_products'],
+	'/api/deal/add-manual': ['deals.add_products'],
 	'/api/deal/remove-product': ['deals.remove_products'],
 	'/api/deal/update-product': ['deals.edit_quantity', 'deals.edit_prices', 'deals.apply_discount'],
 	'/api/deal/collapse-service': ['deals.edit_quantity'],

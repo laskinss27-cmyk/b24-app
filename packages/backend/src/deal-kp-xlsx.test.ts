@@ -28,3 +28,18 @@ test('builds a compact customer-facing proposal workbook', async () => {
 	const file = await buildDealKpXlsx(sample, images);
 	assert.ok(file.byteLength > 5_000);
 });
+
+
+test('manual quote unit keeps Excel quantity numeric and total formula intact', () => {
+	const book = createDealKpWorkbook({ ...sample, goods: [{ productId: -101, name: 'Кабель вручную', article: '', unit: 'м', qty: 2.5, price: 90, sum: 225, isWork: false }], works: [] });
+	const sheet = book.worksheets[0]!;
+	let found = false;
+	sheet.eachRow((row) => {
+		if (row.getCell(3).value !== 'Кабель вручную') return;
+		found = true;
+		assert.equal(row.getCell(4).value, 2.5);
+		assert.match(row.getCell(4).numFmt, /м/);
+		assert.equal((row.getCell(6).value as { result: number }).result, 225);
+	});
+	assert.equal(found, true);
+});

@@ -257,7 +257,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		profitability,
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
-	const selectableRows = [...visibleGoods, ...visibleWorks].filter((row) => remaining(row) > 0);
+	const selectableRows = [...visibleGoods, ...visibleWorks].filter((row) => !row.manual && remaining(row) > 0);
 	const allRowsSelected = selectableRows.length > 0 && selectableRows.every(isSel);
 	const someRowsSelected = selectableRows.some(isSel);
 	const selectionDisabled = hasPendingDrafts || busy || supplyBusy || selectableRows.length === 0;
@@ -339,8 +339,8 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
-	const supplyGoods = visibleGoods.filter((r) => isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
-	const reserveGoods = visibleGoods.filter((row) => isSel(row) && remaining(row) > 0 && amountAt(row, storeOf(row)) > 0 && Boolean(storeName(storeOf(row))));
+	const supplyGoods = visibleGoods.filter((r) => !r.manual && isSel(r) && remaining(r) > 0 && !activeSupplyOf(r));
+	const reserveGoods = visibleGoods.filter((row) => !row.manual && isSel(row) && remaining(row) > 0 && amountAt(row, storeOf(row)) > 0 && Boolean(storeName(storeOf(row))));
 	const reservationStatus = dealReservations.error && !showReservation ? `Резерв: ${dealReservations.error}` : dealReservations.current?.status === 'pending'
 		? `Резерв: заявка ожидает снабжение до ${new Date(dealReservations.current.requestedExpiresAt).toLocaleString('ru-RU')}`
 		: dealReservations.current?.status === 'approved' && dealReservations.current.reservationStatus

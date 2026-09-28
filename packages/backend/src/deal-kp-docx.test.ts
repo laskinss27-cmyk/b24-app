@@ -56,3 +56,13 @@ test('builds a readable Word package with escaped deal data', async () => {
 	assert.ok(relationships?.includes('media/product-1.png'));
 	assert.ok(await zip.file('docProps/core.xml')?.async('string'));
 });
+
+
+test('manual quote units survive normalization and Word export', async () => {
+	const data = { ...sample, goods: [{ productId: -101, name: 'Кабель вручную', article: '', unit: 'м', qty: 2.5, price: 90, sum: 225, isWork: false }], works: [] };
+	assert.equal(normalizeDealKpDocument(data).total, 225);
+	const archive = await JSZip.loadAsync(await buildDealKpDocx(data));
+	const xml = await archive.file('word/document.xml')!.async('string');
+	assert.match(xml, /2,5 м/);
+	assert.match(xml, /Кабель вручную/);
+});

@@ -11,6 +11,7 @@ export interface DealKpDocumentRow {
 	sum: number;
 	isWork: boolean;
 	photoPath?: string | undefined;
+	unit?: string;
 }
 
 export interface DealKpDocumentData {
@@ -64,6 +65,7 @@ function normalizeRow(value: unknown, isWork: boolean): DealKpDocumentRow | null
 		productId: Math.max(0, Math.trunc(finite(row.productId))),
 		name,
 		article: clean(row.article, 120),
+		...(clean(row.unit, 20) ? { unit: clean(row.unit, 20) } : {}),
 		qty,
 		price,
 		sum: finite(row.sum) || price * qty,
@@ -79,7 +81,7 @@ function normalizeRow(value: unknown, isWork: boolean): DealKpDocumentRow | null
 function mergeDocumentRows(rows: DealKpDocumentRow[]): DealKpDocumentRow[] {
 	const merged = new Map<string, DealKpDocumentRow>();
 	for (const row of rows) {
-		const key = [row.isWork ? 'work' : 'goods', row.name, row.article, row.price].join('\u0000');
+		const key = [row.isWork ? 'work' : 'goods', row.name, row.article, row.price, row.unit].join('\u0000');
 		const current = merged.get(key);
 		if (current) {
 			current.qty += row.qty;
@@ -234,7 +236,7 @@ function itemRow(row: DealKpDocumentRow, index: number, picture = ''): string {
 		cell(String(index), { width: columnWidths[0], align: 'center', color: '6B7280' }),
 		photoCell(columnWidths[1], picture),
 		nameCell(row, columnWidths[2]),
-		cell(quantity(row.qty), { width: columnWidths[3], align: 'center' }),
+		cell(`${quantity(row.qty)}${row.unit ? ` ${row.unit}` : ''}`, { width: columnWidths[3], align: 'center' }),
 		cell(`${money(row.price)} ₽`, { width: columnWidths[4], align: 'right' }),
 		cell(`${money(row.sum)} ₽`, { width: columnWidths[5], align: 'right', bold: true }),
 	].join('')}</w:tr>`;

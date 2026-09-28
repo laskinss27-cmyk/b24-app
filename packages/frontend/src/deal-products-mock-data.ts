@@ -5,10 +5,12 @@ export const DEAL_PRODUCTS_MOCK_DATA: TableData = {
 	coef: 0.5,
 	coreReals: [],
 	plan: [
+		{ productId: -101, manual: true, lineKey: "manual:101", itemName: "Оборудование под заказ", unit: "компл.", qty: 2, rate: 4500, priceListRate: 5000, discountPercent: 10, delivered: 0 },
 		{ productId: 101, itemName: 'IP-камера AHD 2 Мп', qty: 4, rate: 1000, priceListRate: 1000, discountPercent: 0, delivered: 0 },
 		{ productId: 102, itemName: 'Кабель UTP cat5e, бухта 305 м', qty: 1, rate: 100, priceListRate: 100, discountPercent: 0, delivered: 0 },
 	],
 	planRows: [
+		{ id: "plan-manual:101", productId: -101, planLineKey: "manual:101", manual: true, name: "Оборудование под заказ", type: 1, price: 4500, quantity: 2, discountSum: 500, measure: "компл.", purchasingPrice: null, stocks: [] },
 		{ id: 'plan-101', productId: 101, name: 'IP-камера AHD 2 Мп', type: 1, price: 1000, quantity: 4, discountSum: 0, measure: 'шт', purchasingPrice: 600, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 50 }, { storeId: 8, storeName: 'Максидом Дунайский 64', amount: 50 }] },
 		{ id: 'plan-102', productId: 102, name: 'Кабель UTP cat5e, бухта 305 м', type: 1, price: 100, quantity: 1, discountSum: 0, measure: 'шт', purchasingPrice: 80, stocks: [{ storeId: 4, storeName: 'Измайловский 18Д', amount: 30 }] },
 	],
@@ -37,7 +39,7 @@ export const DEAL_PRODUCTS_MOCK_DATA: TableData = {
 };
 
 export function dealProductsMockVariantData(selected = false, activity = false): TableData {
-	const first = { id: 'mock-min', name: 'Минимальный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: DEAL_PRODUCTS_MOCK_DATA.plan.map((item) => ({ productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: Boolean(item.isService) })) };
+	const first = { id: 'mock-min', name: 'Минимальный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: DEAL_PRODUCTS_MOCK_DATA.plan.map((item) => ({ ...item, productId: item.productId, itemName: item.itemName, qty: item.qty, priceListRate: item.priceListRate, discountPercent: item.discountPercent, isService: Boolean(item.isService) })) };
 	const second = { id: 'mock-max', name: 'Расширенный', createdAt: '', createdById: '1', createdByName: 'Сергей Ласкин', items: first.items.map((item) => ({ ...item, qty: item.qty * 2 })) };
 	const toRows = (variant: typeof first): EnrichedRow[] => variant.items.map((item) => {
 		const source = DEAL_PRODUCTS_MOCK_DATA.planRows.find((row) => row.productId === item.productId);

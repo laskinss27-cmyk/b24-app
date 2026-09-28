@@ -2,6 +2,8 @@ import { bx24Auth } from './bitrix-auth.js';
 
 /** Строка плана сделки из ядра (черновик Sales Order). delivered — сколько уже отгружено. */
 export interface DealPlanItem {
+	manual?: boolean;
+	unit?: string;
 	productId: number;
 	itemName: string;
 	qty: number;
@@ -18,7 +20,7 @@ export interface DealPlanItem {
 
 export interface DealStageItem { productId: number; itemName: string; qty: number; price: number; discountPercent?: number; isService: boolean }
 export interface DealStage { id: string; name?: string; at: string; byId: string; byName: string; items: DealStageItem[] }
-export interface DealQuoteVariantItem { productId: number; itemName: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
+export interface DealQuoteVariantItem { manual?: boolean; unit?: string; lineKey?: string; productId: number; itemName: string; qty: number; priceListRate: number; discountPercent: number; isService?: boolean }
 export interface DealQuoteVariant { id: string; name: string; createdAt: string; createdById: string; createdByName: string; items: DealQuoteVariantItem[] }
 export interface DealQuoteVariants { enabled: boolean; selectedId: string | null; variants: DealQuoteVariant[] }
 

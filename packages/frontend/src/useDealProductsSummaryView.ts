@@ -12,6 +12,6 @@ export function useDealProductsSummaryView({
 	const [summaryView, setSummaryView] = useState(false);
 	const segmentActionsBlocked = summaryView && hasStages;
 	const rowEditable = (row: EnrichedRow): boolean =>
-		tableEditable && !(segmentActionsBlocked && isPlanRow(row));
+		tableEditable && !(segmentActionsBlocked && isPlanRow(row) && !row.manual);
 	return { summaryView, setSummaryView, segmentActionsBlocked, rowEditable };
 }

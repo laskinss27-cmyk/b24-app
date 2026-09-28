@@ -122,7 +122,7 @@ export function createDealGoodsRowRenderer({
 						setExpandedStocks((current) => ({ ...current, [r.id]: !current[r.id] }));
 						requestB24FitWindow(160);
 					}}
-					statusCell={<DealGoodsStatusCell
+					statusCell={r.manual ? <td className="realize-cell"><span className="none">Только для КП</span></td> : <DealGoodsStatusCell
 						workingMode={workingMode}
 						alternativeView={alternativeView}
 						stores={data.stores}

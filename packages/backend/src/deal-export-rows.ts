@@ -1,7 +1,7 @@
 import type { DealExportRow } from './deal-export-xlsx.js';
 import type { DealStage, ErpRealization, PlanItem } from './erp/operations.js';
 
-export type ExportPlanLine = Pick<PlanItem, 'productId' | 'qty' | 'priceListRate' | 'discountPercent'> & { itemName?: string; isService?: boolean };
+export type ExportPlanLine = Pick<PlanItem, 'productId' | 'qty' | 'priceListRate' | 'discountPercent'> & { itemName?: string; isService?: boolean; unit?: string };
 
 export function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], realizations: ErpRealization[], isVariant = false): DealExportRow[] {
 	const stageQuantity = new Map<number, number>();
@@ -19,7 +19,7 @@ export function dealExportRows(plan: ExportPlanLine[], stages: DealStage[], real
 			productId: item.productId,
 			name: item.itemName || `#${item.productId}`,
 			quantity,
-			unit: item.isService ? 'усл.' : 'шт.',
+			unit: item.unit || (item.isService ? 'усл.' : 'шт.'),
 			priceListRate: item.priceListRate,
 			discountPercent: item.discountPercent,
 		});

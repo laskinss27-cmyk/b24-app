@@ -61,6 +61,7 @@ export interface ProductPickItem {
 	stocks?: Record<string, number>;
 }
 export interface ProductPicker {
+	onAddManual?: () => void;
 	onDone: (items: ProductPickItem[]) => Promise<void>;
 	onCancel: () => void;
 	title?: string | undefined;
@@ -457,6 +458,7 @@ export function ProductBase({
 					<h1>{pickMode ? (picker?.title ?? 'Добавить товар в сделку') : 'База товаров'}</h1>
 					{pickMode && (
 						<div className="picker-head-actions">
+							{picker?.onAddManual && <button type="button" className="btn-secondary" disabled={done} onClick={picker.onAddManual}>Добавить вручную</button>}
 							<span className="pick-count">Выбрано: <b>{cart.size}</b></span>
 							<button className="btn-secondary" onClick={() => picker?.onCancel()}>← Отмена</button>
 							<button className="btn-primary" disabled={done || cart.size === 0} onClick={() => void handleDone()}>{done ? 'Добавляю…' : `✓ Готово (${cart.size})`}</button>
@@ -535,6 +537,7 @@ export function ProductBase({
 
 			{pickMode && (
 					<div className="pick-bar">
+						{picker?.onAddManual && <button type="button" className="btn-secondary" disabled={done} onClick={picker.onAddManual}>Добавить вручную</button>}
 						<span className="pick-count">Выбрано: <b>{cart.size}</b>{cart.size > 0 ? ` товаров` : ''}</span>
 						{saleErr && <span className="cart-err">⛔ {saleErr}</span>}
 						<div className="tb-spacer" />

@@ -34,6 +34,7 @@ export async function ensureCoreItem(erp: ErpClient, args: {
 	section?: string;
 	description?: string;
 }): Promise<void> {
+	if (!Number.isSafeInteger(args.productId) || args.productId <= 0) throw new Error('Ручная строка доступна только для КП');
 	const code = String(args.productId);
 	const existing = await erp.get<Record<string, unknown>>('Item', code);
 	if (existing) {

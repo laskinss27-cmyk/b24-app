@@ -1,3 +1,4 @@
+import { newManualProductId, validateManualLine } from '../deal-manual-store.js';
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { B24ApiError, type B24Client } from '../b24/client.js';
@@ -21,6 +22,9 @@ interface AuthBody {
 }
 
 type DealPlanDraftLine = {
+	manual?: boolean;
+	unit?: string;
+	lineKey?: string;
 	productId: number;
 	itemName?: string;
 	qty: number;
@@ -41,6 +45,33 @@ export function registerDealProductManagementRoutes(
 	clientFrom: DealClientFrom,
 	syncDealTechnicalFields: SyncDealTechnicalFields,
 ): void {
+	app.post('/api/deal/add-manual', async (req, reply) => {
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; name?: unknown; unit?: unknown; quantity?: unknown; price?: unknown; discountPercent?: unknown; variantId?: unknown };
+		const client = clientFrom(b);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(b.dealId);
+		if (!Number.isSafeInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		try {
+			const erp = ErpClient.fromEnv();
+			if (!erp) throw new Error('ядро склада не подключено');
+			const productId = newManualProductId();
+			const line = { productId, manual: true, lineKey: `manual:${-productId}`, itemName: String(b.name ?? '').trim(), unit: String(b.unit ?? '').trim(), qty: Number(b.quantity), priceListRate: Number(b.price), discountPercent: Number(b.discountPercent ?? 0), isService: false };
+			validateManualLine(line);
+			const variantId = String(b.variantId ?? '').trim();
+			if (variantId) {
+				const variant = (await listDealQuoteVariants(erp, dealId)).variants.find((item) => item.id === variantId);
+				if (!variant) throw new Error('вариант КП не найден');
+				await updateDealQuoteVariantItems(erp, dealId, variantId, [...variant.items, line]);
+			} else {
+				await assertDealQuoteVariantSelected(erp, dealId);
+				await upsertDealPlan(erp, dealId, [...await listDealPlan(erp, dealId), line], new Date().toISOString().slice(0, 10));
+				await setDealB24Service(client, dealId, await calculateDealPlanTotal(erp, dealId));
+				await syncDealTechnicalFields(client, erp, dealId);
+			}
+			return { ok: true };
+		} catch (error) { return reply.code(200).send({ ok: false, error: errInfo(error) }); }
+	});
+
 	// Добавить НЕСКОЛЬКО товарных строк в сделку за раз (корзина из пикера «Готово»).
 	app.post('/api/deal/add-products', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; items?: unknown; stage?: unknown; stageId?: unknown; stageName?: unknown; variantId?: unknown };
@@ -91,6 +122,7 @@ export function registerDealProductManagementRoutes(
 				const addingToStage = Boolean(targetStageId) || b.stage === true;
 				const currentPlan = await listDealPlan(erp, dealId);
 				const initialLines = currentPlan.map((p) => ({
+					...p,
 					productId: p.productId,
 					itemName: p.itemName,
 					qty: p.qty,

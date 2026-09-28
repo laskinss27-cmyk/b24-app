@@ -53,6 +53,7 @@ async function syncRepairCoreComposition(
 	const currentPlan = await listDealPlan(erp, dealId);
 	const lines = mergeRepairServiceLine(
 		currentPlan.map((line) => ({
+			...line,
 			productId: line.productId,
 			itemName: line.itemName,
 			qty: line.qty,

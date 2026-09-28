@@ -36,7 +36,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 	const planIds = plan.map((p) => p.productId).filter((id) => id > 0);
 	const realizedIds = coreReals.flatMap((document) => document.items.map((item) => item.productId)).filter((id) => id > 0);
 	const variantIds = quoteVariants.variants.flatMap((variant) => variant.items.map((item) => item.productId));
-	const allIds = [...new Set([...planIds, ...realizedIds, ...variantIds])];
+	const allIds = [...new Set([...planIds, ...realizedIds, ...variantIds])].filter((id) => id > 0);
 	const enrich: Record<number, ProductEnrichment> = allIds.length
 		? await withTimeout(fetchStockPreferCore(allIds), 15000, 'остатки и закупочные цены из ядра')
 		: {};
@@ -54,12 +54,13 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 			...(p.lineKey ? { planLineKey: p.lineKey } : {}),
 			legacyBaseFallback: (planProductCounts.get(p.productId) ?? 0) === 1,
 			productId: p.productId,
+			manual: Boolean(p.manual),
 			name: p.itemName || `#${p.productId}`,
 			type: isService ? 7 : 1,
 			price: p.rate,                                                  // итог за ед. (после скидки)
 			quantity: p.qty,
 			discountSum: Math.round((p.priceListRate - p.rate) * 100) / 100, // скидка ₽/ед = база − итог (база восстановима)
-			measure: 'шт',
+			measure: p.unit || 'шт',
 			stocks: isService ? [] : mkStocks(p.productId),
 			purchasingPrice: isService ? null : (enrich[p.productId]?.purchasingPrice ?? null),
 		};
@@ -103,12 +104,13 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		return {
 			id: `variant-${variant.id}-${item.productId}-${index}`,
 			productId: item.productId,
+			manual: Boolean(item.manual),
 			name: item.itemName || `#${item.productId}`,
 			type: isService ? 7 : 1,
 			price: rate,
 			quantity: item.qty,
 			discountSum: Math.round((item.priceListRate - rate) * 100) / 100,
-			measure: 'шт',
+			measure: item.unit || 'шт',
 			stocks: isService ? [] : mkStocks(item.productId),
 			purchasingPrice: isService ? null : (enrich[item.productId]?.purchasingPrice ?? null),
 		} satisfies EnrichedRow;

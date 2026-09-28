@@ -2,6 +2,8 @@ import type { EnrichedRow } from './deal-products-table-types.js';
 
 export interface DealProductRowEdit {
 	qty: string;
+	name?: string;
+	unit?: string;
 	price: string;
 	disc: string;
 }

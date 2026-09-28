@@ -1,3 +1,4 @@
+import { validateManualLine } from '../deal-manual-store.js';
 import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
 import { fetchServiceProductIds, setDealB24Service } from '../deal-product-catalog.js';
@@ -40,15 +41,17 @@ export function registerDealPlanUpdateRoute(
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		const lines = (Array.isArray(b.items) ? b.items : [])
-			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown; isService?: unknown; lineKey?: unknown })
-			.map((it) => ({ productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent) || 0, isService: Boolean(it.isService), lineKey: String(it.lineKey ?? '').trim() }))
-			.filter((it) => Number.isInteger(it.productId) && it.productId > 0 && Number.isFinite(it.qty) && it.qty > 0 && Number.isFinite(it.priceListRate) && it.priceListRate >= 0 && it.discountPercent >= 0 && it.discountPercent <= 100);
+			.map((it) => it as { productId?: unknown; itemName?: unknown; qty?: unknown; priceListRate?: unknown; discountPercent?: unknown; isService?: unknown; lineKey?: unknown; manual?: unknown; unit?: unknown })
+			.map((it) => ({ ...(it.manual === true ? { manual: true, unit: String(it.unit ?? '').trim() } : {}), productId: Number(it.productId), itemName: String(it.itemName ?? ''), qty: Number(it.qty), priceListRate: Number(it.priceListRate), discountPercent: Number(it.discountPercent ?? 0), isService: Boolean(it.isService), lineKey: String(it.lineKey ?? '').trim() }))
+			.filter((it) => Number.isInteger(it.productId) && (it.manual ? it.productId < 0 : it.productId > 0) && Number.isFinite(it.qty) && it.qty > 0 && Number.isFinite(it.priceListRate) && it.priceListRate >= 0 && it.discountPercent >= 0 && it.discountPercent <= 100);
+		if (!Array.isArray(b.items) || lines.length !== b.items.length) return reply.code(400).send({ ok: false, error: 'Некорректные строки сделки' });
 		try {
-			const serviceIds = await fetchServiceProductIds(client, lines.map((l) => l.productId));
+			for (const line of lines) if (line.manual) validateManualLine(line);
+			const serviceIds = await fetchServiceProductIds(client, lines.filter((l) => !l.manual).map((l) => l.productId));
 			for (const line of lines) line.isService = line.isService || serviceIds.has(line.productId);
 			const variantId = String(b.variantId ?? '').trim();
 			if (variantId) {
-				const variantItems: DealQuoteVariantItem[] = lines.map((line) => ({ productId: line.productId, itemName: line.itemName || `#${line.productId}`, qty: line.qty, priceListRate: line.priceListRate, discountPercent: line.discountPercent, isService: line.isService }));
+				const variantItems: DealQuoteVariantItem[] = lines.map((line) => ({ ...line, productId: line.productId, itemName: line.itemName || `#${line.productId}`, qty: line.qty, priceListRate: line.priceListRate, discountPercent: line.discountPercent, isService: line.isService }));
 				await updateDealQuoteVariantItems(erp, dealId, variantId, variantItems);
 				const total = Math.round(variantItems.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 				return { ok: true, total, lines: variantItems.length };
@@ -61,6 +64,7 @@ export function registerDealPlanUpdateRoute(
 			const previousByIdentity = new Map(previousPlan.map((line) => [planIdentity(line), line.rate]));
 			const changedPrices: Array<{ productId: number; segmentId: string; rate: number; previousRate: number }> = [];
 			for (const line of lines) {
+				if (line.manual) continue;
 				const previousRate = previousByIdentity.get(planIdentity(line));
 				const nextRate = Math.round(line.priceListRate * (1 - line.discountPercent / 100) * 100) / 100;
 				if (previousRate !== undefined && Math.abs(nextRate - previousRate) >= 0.005) {
@@ -70,7 +74,7 @@ export function registerDealPlanUpdateRoute(
 			if (changedPrices.length) await syncDealRealizationPrices(erp, dealId, changedPrices);
 			let savedPlan: Awaited<ReturnType<typeof upsertDealPlan>>;
 			try {
-				savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.lineKey ? { lineKey: l.lineKey } : {}) })), today);
+				savedPlan = await upsertDealPlan(erp, dealId, lines.map((l) => ({ ...l, productId: l.productId, qty: l.qty, priceListRate: l.priceListRate, discountPercent: l.discountPercent, isService: l.isService, ...(l.itemName ? { itemName: l.itemName } : {}), ...(l.lineKey ? { lineKey: l.lineKey } : {}) })), today);
 			} catch (error) {
 				await upsertDealPlan(erp, dealId, previousPlan, today).catch(() => undefined);
 				if (changedPrices.length) {

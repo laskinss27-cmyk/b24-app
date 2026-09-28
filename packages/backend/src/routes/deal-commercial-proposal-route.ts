@@ -60,12 +60,13 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 			const variant = variantState?.variants.find((row) => row.id === variantId);
 			const variantItems = variant?.items ?? null;
 			if (erp && variantId && !variantItems) throw new Error('вариант КП не найден');
-			type KpRawRow = { productId: number; name: string; type: number; qty: number; price: number; stage?: string };
+			type KpRawRow = { productId: number; name: string; type: number; qty: number; price: number; stage?: string; unit?: string | undefined };
 			let raw: KpRawRow[] = [];
 			if (erp && variantItems) {
 				raw = variantItems.map((r) => ({
 					productId: r.productId,
 					name: r.itemName || `#${r.productId}`,
+					unit: r.productId < 0 ? r.unit : undefined,
 					type: r.isService ? 7 : 1,
 					qty: r.qty,
 					price: r.priceListRate * (1 - r.discountPercent / 100),
@@ -85,6 +86,7 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 					qty: r.quantity,
 					price: r.priceListRate * (1 - r.discountPercent / 100),
 					stage: r.stage,
+					unit: r.productId < 0 ? r.unit : undefined,
 				}));
 			}
 			// Этапы остаются только внутри карточки сделки. Для клиентского КП
@@ -92,13 +94,14 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 			const flattened = new Map<string, KpRawRow>();
 			for (const row of raw) {
 				if (!Number.isFinite(row.qty) || row.qty <= 0) continue;
-				const key = [row.productId, row.type, row.name, row.price].join('\u0000');
+				const key = [row.productId, row.type, row.name, row.price, row.unit].join('\u0000');
 				const current = flattened.get(key);
 				if (current) current.qty += row.qty;
 				else {
 					flattened.set(key, {
 						productId: row.productId,
 						name: row.name,
+						unit: row.unit,
 						type: row.type,
 						qty: row.qty,
 						price: row.price,
@@ -108,19 +111,20 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 			const printRows = [...flattened.values()];
 			const catalogInfo = await enrichCatalogProducts(
 				client,
-				printRows.filter((row) => row.type !== 7).map((row) => row.productId),
+				printRows.filter((row) => row.type !== 7 && row.productId > 0).map((row) => row.productId),
 			).catch((err) => {
 				app.log.warn({ dealId }, `[api/deal/kp] catalog images failed — ${errInfo(err)}`);
 				return new Map();
 			});
 			const rows = printRows
-				.map((r) => ({ productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price) }))
+				.map((r) => ({ unit: r.productId < 0 ? r.unit : undefined, productId: Number(r.productId), name: String(r.name ?? ''), type: Number(r.type), qty: Number(r.qty), price: Number(r.price) }))
 				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
 				.map((r) => {
 					const info = catalogInfo.get(r.productId);
 					return {
 						productId: r.productId,
 						name: r.name,
+						...(r.unit ? { unit: r.unit } : {}),
 						article: info?.article || info?.model || articleOf(r.name),
 						qty: r.qty,
 						price: r.price,

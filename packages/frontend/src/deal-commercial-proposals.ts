@@ -1,6 +1,7 @@
 import { bx24Auth } from './bitrix-auth.js';
 
 export interface KpRow {
+	unit?: string;
 	productId: number;
 	name: string;
 	article: string;

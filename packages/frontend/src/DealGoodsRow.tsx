@@ -72,7 +72,7 @@ export function DealGoodsRow({
 						onClick={onRemove}
 						title={row.segmentKind === 'stage' ? 'Удалить товар из этого этапа' : 'Удалить товар из сделки'}
 					>{removingThisRow ? '…' : '✕'}</button>}
-					{workingMode && <input
+					{workingMode && !row.manual && <input
 						type="checkbox"
 						className="row-check"
 						checked={selected}
@@ -83,7 +83,7 @@ export function DealGoodsRow({
 				</div>
 			</td>
 			<td>
-				<span className="goods-name-line">{hasParts ? <span className="part-name">↳ {row.name}</span> : row.name}{orderedTitle && <span className="goods-ordered-mark" title={orderedTitle}>заказано</span>}</span>
+				{row.manual ? <><input aria-label="Название ручного товара" title={row.name} className="cell-inp manual-name-input" maxLength={500} value={edit.name ?? row.name} disabled={saving || !editable} onChange={(event) => onEdit({ name: event.target.value })} onBlur={onBlur} /><span className="goods-ordered-mark">Вручную</span></> : <span className="goods-name-line">{hasParts ? <span className="part-name">↳ {row.name}</span> : row.name}{orderedTitle && <span className="goods-ordered-mark" title={orderedTitle}>заказано</span>}</span>}
 			</td>
 			<td className="num cell-edit">
 				<input type="number" className="cell-inp" min={0} step="any" value={edit.price} disabled={saving || !editable} onChange={(event) => onEdit({ price: event.target.value })} onBlur={onBlur} title="Цена без скидки, ₽" />
@@ -97,14 +97,15 @@ export function DealGoodsRow({
 			</td>
 			<td className="num">
 				<input type="number" className="cell-inp cell-xs" min={0} step="any" value={edit.qty} disabled={saving || !editable} onChange={(event) => onEdit({ qty: event.target.value })} onBlur={onBlur} title="Количество в сделке" />
+				{row.manual && <input aria-label="Единица измерения" className="cell-inp cell-xs" maxLength={20} value={edit.unit ?? row.measure} disabled={saving || !editable} onChange={(event) => onEdit({ unit: event.target.value })} onBlur={onBlur} />}
 			</td>
-			<td className="num">{workingMode ? <b className="realized-qty">{shipped}</b> : <span className="none">—</span>}</td>
+			<td className="num">{workingMode && !row.manual ? <b className="realized-qty">{shipped}</b> : <span className="none">—</span>}</td>
 			<td className="num">
-				{workingMode ? <input type="number" className="qty-input" min={0} max={left} step="any" value={batchQuantity} disabled={batchDisabled} onChange={(event) => onBatchQuantity(event.target.value)} title={`Сколько отгрузить сейчас (остаток ${left} ${row.measure})`} /> : <span className="none">—</span>}
+				{workingMode && !row.manual ? <input type="number" className="qty-input" min={0} max={left} step="any" value={batchQuantity} disabled={batchDisabled} onChange={(event) => onBatchQuantity(event.target.value)} title={`Сколько отгрузить сейчас (остаток ${left} ${row.measure})`} /> : <span className="none">—</span>}
 			</td>
 			<td className="num">{rub(finalUnit * (Number(edit.qty.replace(',', '.')) || 0))}</td>
 			<td className="row-store">
-				<DealProductStockSummary stocks={row.stocks} total={totalStock} expanded={stockExpanded} onToggle={onToggleStocks} />
+				{row.manual ? <span className="none">—</span> : <DealProductStockSummary stocks={row.stocks} total={totalStock} expanded={stockExpanded} onToggle={onToggleStocks} />}
 			</td>
 			{statusCell}
 		</tr>
