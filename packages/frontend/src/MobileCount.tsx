@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getContext, type B24Context } from './b24-context.js';
 import { listInventories, type InvPoint, type InvResult } from './b24.js';
 import { InventoryCount } from './InventoryReport.js';
+import { inventoryCountReadOnlyReason } from './inventory-draft.js';
 
 /**
  * Мобильный экран подсчёта точки (вход с телефона по QR → /m?inv&store, вне iframe Б24).
@@ -41,6 +42,11 @@ export function MobileCount(): JSX.Element {
 				const point = inv.points.find((p) => p.storeId === storeId);
 				if (!point) {
 					setPhase({ k: 'error', msg: 'Точка не найдена в этой инвентаризации.' });
+					return;
+				}
+				const readOnlyReason = inventoryCountReadOnlyReason(inv.status, point.status ?? 'idle');
+				if (readOnlyReason) {
+					setPhase({ k: 'error', msg: readOnlyReason });
 					return;
 				}
 				setPhase({ k: 'counting', point, sectionIds: inv.sectionIds });

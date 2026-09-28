@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { requireSupplyOrderNote } from '@b24-app/shared';
 import { type SupplyOrderRow } from './b24.js';
 
 export function SupplyOrderNoteEditor({ order, onSave }: { order: SupplyOrderRow; onSave: (order: SupplyOrderRow, note: string) => Promise<void> }): JSX.Element {
@@ -9,6 +10,8 @@ export function SupplyOrderNoteEditor({ order, onSave }: { order: SupplyOrderRow
 
 	async function save(): Promise<void> {
 		if (!changed || saving) return;
+		try { requireSupplyOrderNote(value); }
+		catch (reason) { setError((reason as Error).message); return; }
 		setSaving(true); setError('');
 		try {
 			await onSave(order, value);
@@ -21,8 +24,8 @@ export function SupplyOrderNoteEditor({ order, onSave }: { order: SupplyOrderRow
 
 	return (
 		<div className="supply-order-common-note supply-order-note-editor">
-			<label><b>Комментарий</b><textarea rows={2} maxLength={500} value={value} placeholder="Общий комментарий к заказу" onChange={(event) => setValue(event.target.value)} /></label>
-			<button type="button" disabled={!changed || saving} onClick={() => void save()}>{saving ? 'Сохраняю…' : 'Сохранить'}</button>
+			<label><b>Общий комментарий (обязательно)</b><textarea required rows={2} maxLength={500} value={value} placeholder="Общий комментарий к заказу" onChange={(event) => setValue(event.target.value)} /></label>
+			<button type="button" disabled={!changed || saving || !value.trim()} onClick={() => void save()}>{saving ? 'Сохраняю…' : 'Сохранить'}</button>
 			{error && <span className="error">{error}</span>}
 		</div>
 	);

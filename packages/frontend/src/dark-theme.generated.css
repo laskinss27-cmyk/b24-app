@@ -498,6 +498,9 @@ html[data-theme="dark"] .inventory-registry .deadline.closed {
         background: #202c3d
     }
 }
+html[data-theme="dark"] .inventory-export-error {
+    color: var(--red, hsl(4 76% 72%))
+}
 html[data-theme="dark"] .deal-addbar .hint {
     color: #aebdd0
 }
@@ -667,14 +670,6 @@ html[data-theme="dark"] .deal-supply-order-qty input:focus {
 }
 html[data-theme="dark"] .deal-supply-order-line-head small {
     color: #b9c6d7
-}
-html[data-theme="dark"] .deal-supply-order-line textarea {
-    border: 1px solid #34445a;
-    background: #202c3d;
-    color: #e5edf8
-}
-html[data-theme="dark"] .deal-supply-order-line textarea:focus {
-    border-color: hsl(212 65% 53%)
 }
 html[data-theme="dark"] .deal-supply-order-modal footer {
     border-top: 1px solid #34445a

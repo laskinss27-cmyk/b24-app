@@ -3,6 +3,7 @@ import { DEAL_FIELD } from './erp-setup.js';
 import { INV_FIELD } from './inventory-reconciliation.js';
 import { REALIZATION_SEGMENT_FIELD } from './stock-catalog.js';
 import { erpContext, erpWarehouse } from './warehouse-context.js';
+import { assertReceiptPrices } from './receipt-price-validation.js';
 
 export type EditableStockDocumentKind = 'issue' | 'receipt' | 'return';
 
@@ -177,6 +178,9 @@ export async function amendSubmittedStockDocument(erp: ErpClient, input: StockDo
 	const descriptor = editableStockDocumentDescriptor(input.doctype, original);
 	if (!descriptor.kind) throw new Error(descriptor.blockedReason);
 	validateInput(descriptor.kind, original, input);
+	if (input.doctype === 'Purchase Receipt') {
+		assertReceiptPrices(input.lines.map((line) => ({ rate: line.rate, itemCode: line.productId })));
+	}
 	const ctx = await erpContext(erp);
 	const toWarehouse = (title: string): string => title.includes(` - ${ctx.abbr}`) ? title : erpWarehouse(ctx, title);
 	const replacementFields = buildCopy(original, input.doctype, descriptor.kind, input, toWarehouse, input.name);

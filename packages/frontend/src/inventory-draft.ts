@@ -1,5 +1,11 @@
 export type InventoryDraftMode = 'count' | 'act';
 
+export function inventoryCountReadOnlyReason(rootStatus: string, pointStatus: string): string | null {
+	return rootStatus === 'closed' || pointStatus === 'submitted' || pointStatus === 'reconciled'
+		? 'Ревизия уже отправлена или закрыта. Для продолжения подсчёта попросите ответственного вернуть её в работу. Сохранённые количества не изменены.'
+		: null;
+}
+
 export interface InventoryLocalDraft {
 	version: 1;
 	inventoryId: string;

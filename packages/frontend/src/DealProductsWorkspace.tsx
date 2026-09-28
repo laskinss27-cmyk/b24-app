@@ -127,8 +127,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		setSupplyBusy,
 		showSupplyOrder,
 		setShowSupplyOrder,
-		supplyNotes,
-		setSupplyNotes,
 		supplyQty,
 		setSupplyQty,
 		supplyToStore,
@@ -354,7 +352,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		supplyBusy,
 		busy,
 		hasPendingDrafts,
-		supplyNotes,
 		supplyQty,
 		supplyToStore,
 		supplyDeadline,
@@ -363,7 +360,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		onReload,
 		setSupplyBusy,
 		setShowSupplyOrder,
-		setSupplyNotes,
 		setSupplyQty,
 		setSupplyToStore,
 		setSupplyDeadline,
@@ -530,14 +526,12 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				orderNote={supplyOrderNote}
 				formError={supplyFormError}
 				quantities={supplyQty}
-				notes={supplyNotes}
 				remaining={remaining}
 				onClose={() => setShowSupplyOrder(false)}
 				onStoreChange={(value) => { setSupplyToStore(value); setSupplyFormError(null); }}
 				onDeadlineChange={(value) => { setSupplyDeadline(value); setSupplyFormError(null); }}
 				onOrderNoteChange={setSupplyOrderNote}
 				onQuantityChange={(rowId, value) => { setSupplyQty((quantities) => ({ ...quantities, [rowId]: value })); setSupplyFormError(null); }}
-				onNoteChange={(rowId, value) => setSupplyNotes((notes) => ({ ...notes, [rowId]: value }))}
 				onSubmit={() => void doCreateSupply()}
 			/>
 

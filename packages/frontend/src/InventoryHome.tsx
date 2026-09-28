@@ -31,6 +31,7 @@ import {
 import { InventoryCount } from './InventoryReport.js';
 import { inventoryStoreVisible } from './inventory-settings.js';
 import { inventoryMoney } from './inventory-money.js';
+import { InventoryExportButton } from './InventoryExportButton.js';
 
 /**
  * Модуль инвентаризации (вход из левого меню). Своя сущность, без привязки к задаче.
@@ -528,6 +529,7 @@ export function InventoryHome(): JSX.Element {
 		<div className="inventory-detail-panel">
 			<div className="inventory-detail-head">
 				<div><strong>Точки инвентаризации</strong><span>{inv.sectionIds?.length ? `Разделов каталога: ${inv.sectionIds.length}` : 'Весь ассортимент выбранных складов'}</span></div>
+				<InventoryExportButton inventoryId={inv.id} />
 				{isInitiator && <button className="inventory-delete" type="button" onClick={() => void removeInventory(inv)}>Удалить инвентаризацию</button>}
 			</div>
 			{inv.points.some((point) => point.result) && <InventoryMoneySummary results={inv.points.flatMap((point) => point.result ? [point.result] : [])} label="Итоги по точкам" partial={inv.points.some((point) => !point.result)} />}
@@ -548,6 +550,7 @@ export function InventoryHome(): JSX.Element {
 									<button className="btn-mini ghost qr-btn" title="QR для подсчёта с телефона" onClick={() => setQrFor({ invId: inv.id, storeId: point.storeId, storeName: point.storeName })}>QR</button>
 								</div>
 							</div>
+							<InventoryExportButton inventoryId={inv.id} storeId={point.storeId} />
 							{expanded === key && point.result && <DiscDetail result={point.result} />}
 						</div>
 					);

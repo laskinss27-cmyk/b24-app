@@ -56,7 +56,7 @@ function captureResponses(responses: unknown[]): CapturedRequest[] {
 
 test('supply order listing rejects backend errors and request creation preserves its payload', async () => {
 	const requests = captureResponses([{ ok: false, error: 'supply unavailable' }, { ok: true }]);
-	const lines = [{ productId: 17, itemName: 'Товар', qty: 2, note: 'Срочно' }];
+	const lines = [{ productId: 17, itemName: 'Товар', qty: 2 }];
 
 	await assert.rejects(fetchSupplyOrders(), /supply unavailable/);
 	assert.equal(await createDealSupplyRequest(91, lines, {

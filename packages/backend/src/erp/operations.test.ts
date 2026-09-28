@@ -1545,7 +1545,7 @@ test('supply purchase drafts keep create, edit and stage payloads', async () => 
 		},
 		{
 			item_code: '202', qty: 1, [SUPPLY_PURCHASE_REQUEST_QTY_FIELD]: 1,
-			schedule_date: '2026-08-20', rate: 0.01,
+			schedule_date: '2026-08-20', rate: 0,
 		},
 	]);
 
@@ -1689,6 +1689,15 @@ test('supply purchase receipt keeps limits, ERP payload and submit rollback', as
 		/submit failed/,
 	);
 	assert.deepEqual(deleted, ['PR-2']);
+	for (const rate of [0, -1, NaN, Infinity]) {
+		order.items[0]!.rate = rate;
+		await assert.rejects(createSupplyPurchaseReceipt(client, {
+			dealId: 77, supplyRequest: 'MR-7', supplyRequestKey: 'MR-7::v1', purchaseOrder: 'PO-7',
+			toStore: 'Main', lines: [{ productId: 101, qty: 1, rate: 99 }],
+		}), /Заполните закупочную цену больше 0 ₽.*101/);
+	}
+	assert.equal(created.length, 2);
+	assert.deepEqual(submitted, ['PR-1', 'PR-2']);
 });
 
 test('supply line quantity change updates only the request', async () => {
@@ -2498,4 +2507,93 @@ test('transit shipping keeps rollback and unfinished-operation recovery', async 
 	}), { name: 'EXISTING-1' });
 	assert.equal(createCalled, false);
 	assert.deepEqual(submitted, ['EXISTING-1']);
+});
+
+test('price change leaves fully returned realization history untouched', async () => {
+	const erp = new FakeErp([
+		{
+			name: 'DN-RETURNED-1',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 0,
+			items: [item('DN-RETURNED-1-ROW', 18612, 1, 151140.25, { [REALIZATION_SEGMENT_FIELD]: 'base' })],
+		},
+		{
+			name: 'RET-RETURNED-1',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 1,
+			return_against: 'DN-RETURNED-1',
+			items: [item('RET-RETURNED-1-ROW', 18612, -1, 84110.5, {
+				dn_detail: 'DN-RETURNED-1-ROW',
+				[REALIZATION_SEGMENT_FIELD]: 'base',
+			})],
+		},
+		{
+			name: 'DN-RETURNED-2',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 0,
+			items: [item('DN-RETURNED-2-ROW', 18612, 1, 18081, { [REALIZATION_SEGMENT_FIELD]: 'base' })],
+		},
+		{
+			name: 'RET-RETURNED-2',
+			docstatus: 1,
+			company: 'Test',
+			customer: 'Customer',
+			posting_date: '2026-09-17',
+			b24_deal_id: '37184',
+			is_return: 1,
+			return_against: 'DN-RETURNED-2',
+			items: [item('RET-RETURNED-2-ROW', 18612, -1, 18081, {
+				dn_detail: 'DN-RETURNED-2-ROW',
+				[REALIZATION_SEGMENT_FIELD]: 'base',
+			})],
+		},
+	]);
+
+	const result = await syncDealRealizationPrices(erp.asClient(), 37184, [
+		{ productId: 18612, segmentId: 'base', rate: 99959 },
+	]);
+
+	assert.deepEqual(result, { draftsUpdated: 0, realizationsAmended: 0, returnsAmended: 0 });
+	assert.deepEqual(erp.active().map((document) => [
+		document.name,
+		document.docstatus,
+		Number(document.items[0]?.['rate']),
+	]), [
+		['DN-RETURNED-1', 1, 151140.25],
+		['RET-RETURNED-1', 1, 84110.5],
+		['DN-RETURNED-2', 1, 18081],
+		['RET-RETURNED-2', 1, 18081],
+	]);
+});
+
+test('price sync preserves returned history beside a new sale, including service aliases and draft returns', async () => {
+	const header = { company: 'Test', customer: 'Customer', posting_date: '2026-09-29', b24_deal_id: '42' };
+	const line = (name: string, qty: number, rate: number, extra = {}) => item(name, 18816, qty, rate, {
+		item_code: 'B24-SERVICE-18816', [REALIZATION_SEGMENT_FIELD]: 'base', ...extra,
+	});
+	const erp = new FakeErp([
+		{ ...header, name: 'OLD', docstatus: 1, items: [line('OLD-ROW', 1, 100)] },
+		{ ...header, name: 'RETURNED', docstatus: 1, is_return: 1, return_against: 'OLD', items: [line('RET-ROW', -1, 100, { dn_detail: 'OLD-ROW' })] },
+		{ ...header, name: 'DRAFT-RETURN', docstatus: 0, is_return: 1, return_against: 'OLD', items: [line('DRAFT-ROW', -1, 100, { dn_detail: 'OLD-ROW' })] },
+		{ ...header, name: 'NEW', docstatus: 1, items: [line('NEW-ROW', 2, 150)] },
+	]);
+	const history = structuredClone(erp.active().filter((doc) => doc.name !== 'NEW'));
+	assert.deepEqual(await syncDealRealizationPrices(erp.asClient(), 42, [{ productId: 18816, segmentId: 'base', rate: 200 }]),
+		{ draftsUpdated: 0, realizationsAmended: 1, returnsAmended: 0 });
+	assert.deepEqual(erp.active().filter((doc) => history.some((old) => old.name === doc.name)), history);
+	const sale = erp.active().find((doc) => doc['amended_from'] === 'NEW');
+	assert.equal(sale?.items[0]?.['rate'], 200);
+	assert.equal(sale?.items[0]?.['qty'], 2);
 });

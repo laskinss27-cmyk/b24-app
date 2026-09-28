@@ -11,6 +11,7 @@ import { canManageStock } from './api-stock-access.js';
 import { validateFreeStock } from './api-stock-availability.js';
 import { stockClientFrom, stockErrorInfo } from './api-stock-route-helpers.js';
 import type { StockAuthBody, StockIssueLine, StockReceiptLine } from './api-stock-types.js';
+import { assertReceiptPrices } from '../erp/receipt-price-validation.js';
 
 export function registerStockDocumentCreationRoute(app: FastifyInstance): void {
 	app.post('/api/stock/create', async (req, reply) => {
@@ -34,6 +35,7 @@ export function registerStockDocumentCreationRoute(app: FastifyInstance): void {
 					.map((l) => ({ productId: Number(l['productId']), qty: Number(l['qty']), purchase: Number(l['purchase'] ?? 0), retail: Number(l['retail'] ?? 0) }))
 					.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 				if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций с количеством > 0' });
+				assertReceiptPrices(lines.map((line) => ({ rate: line.purchase, itemCode: line.productId })));
 				const supplierIn = String(b['supplier'] ?? '').trim();
 				const supplier = supplierIn ? await ensureSupplier(erp, supplierIn) : undefined;
 				const note = String(b['note'] ?? '').trim();

@@ -469,3 +469,5 @@ h2.inv-h2 {
 	.inventory-detail-head { align-items: flex-start; }
 	.inventory-point-actions { justify-content: flex-start; }
 }
+.inventory-export { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.inventory-export-error { color: var(--red, #b42318); font-size: 12px; max-width: 360px; }

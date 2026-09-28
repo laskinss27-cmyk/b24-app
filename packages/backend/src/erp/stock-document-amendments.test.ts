@@ -71,6 +71,18 @@ test('inventory and service documents cannot be manually amended', () => {
 	assert.match(editableStockDocumentDescriptor('Stock Entry', { ...ISSUE, b24_condition_operation: 'condition:1' }).blockedReason, /Служебный/);
 });
 
+test('receipt correction rejects zero purchase before cancelling the original document', async () => {
+	const receipt = { name: 'PR-1', docstatus: 1, company: 'Test Company', supplier: 'Vendor', items: [
+		{ name: 'ROW-1', item_code: '17', qty: 1, warehouse: 'Main - TEST', rate: 800 },
+	] };
+	const { client, calls } = fakeErp(receipt);
+	await assert.rejects(amendSubmittedStockDocument(client, {
+		doctype: 'Purchase Receipt', name: 'PR-1', date: '2026-09-29',
+		lines: [{ rowId: 'ROW-1', productId: 17, qty: 1, store: 'Main', rate: 0 }],
+	}), /закупочную цену больше 0/);
+	assert.deepEqual(calls, []);
+});
+
 test('purchase receipt amendment keeps supplier linkage and changes warehouse, quantity, and rate', async () => {
 	const receipt = {
 		name: 'PR-1', docstatus: 1, company: 'Test Company', supplier: 'Vendor A', posting_date: '2026-09-20',

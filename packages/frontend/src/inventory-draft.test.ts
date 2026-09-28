@@ -54,3 +54,12 @@ test('only valid entered quantities and non-empty comments enter a server snapsh
 	assert.deepEqual(countsToDraft({ 1: '0', 2: '12.5', 3: '', 4: '-1', 5: 'text' }), { 1: 0, 2: 12.5 });
 	assert.deepEqual(commentsToDraft({ 1: '  найден  ', 2: '   ', 3: 'повреждён' }), { 1: 'найден', 3: 'повреждён' });
 });
+
+import { inventoryCountReadOnlyReason } from './inventory-draft.js';
+test('mobile count does not reopen an already submitted point; explicitly reopened work remains available', () => {
+	assert.equal(inventoryCountReadOnlyReason('active', 'in_progress'), null);
+	assert.equal(inventoryCountReadOnlyReason('active', 'idle'), null);
+	assert.match(inventoryCountReadOnlyReason('active', 'submitted')!, /вернуть её в работу/);
+	assert.match(inventoryCountReadOnlyReason('active', 'reconciled')!, /вернуть её в работу/);
+	assert.match(inventoryCountReadOnlyReason('closed', 'in_progress')!, /закрыта/);
+});
