@@ -1358,6 +1358,9 @@ html[data-theme="dark"] .purchase-hint.danger {
 html[data-theme="dark"] .purchase-hint.muted-hint {
     color: #aebdd0
 }
+html[data-theme="dark"] .assortment-matrix {
+    background: #202c3d
+}
 html[data-theme="dark"] .assortment-matrix-banner {
     border: 1px solid hsl(216 65% 37%);
     background: hsl(212 55% 22%);
@@ -1451,6 +1454,28 @@ html[data-theme="dark"] .assortment-matrix-actions button.danger {
 }
 html[data-theme="dark"] .assortment-matrix-empty {
     color: #b9c6d7
+}
+html[data-theme="dark"] .matrix-grid-tools {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .assortment-matrix .matrix-edge {
+    background: hsl(212 55% 22%);
+    color: hsl(213 70% 72%)
+}
+html[data-theme="dark"] .assortment-matrix .matrix-edge:hover {
+    background: hsl(214 55% 22%)
+}
+html[data-theme="dark"] .matrix-column-resizer::after {
+    border-right: 2px solid hsl(190 28% 53%)
+}
+html[data-theme="dark"] .assortment-matrix .matrix-column-resizer:hover {
+    background: hsl(189 55% 22%)
+}
+html[data-theme="dark"] .assortment-matrix :focus-visible {
+    outline: 2px solid hsl(210 65% 53%)
+}
+html[data-theme="dark"] .matrix-expanded::backdrop {
+    background: #202c3d
 }
 html[data-theme="dark"] .goods-ordered-mark {
     border: 1px solid #34445a;

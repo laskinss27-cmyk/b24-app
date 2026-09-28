@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MatrixTable, type MatrixColumn } from './MatrixTable.js';
 import {
 	deleteAssortmentMatrixTemplate,
 	fetchAssortmentMatrix,
@@ -81,6 +82,37 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 	const [activeTemplateId, setActiveTemplateId] = useState('');
 	const [templateName, setTemplateName] = useState('');
 	const [templateBusy, setTemplateBusy] = useState(false);
+	const [expanded, setExpanded] = useState(false);
+	const [settingsVisible, setSettingsVisible] = useState(true);
+	const workspace = useRef<HTMLDialogElement>(null);
+	const expandButton = useRef<HTMLButtonElement>(null);
+	const toggleExpanded = (next: boolean): void => {
+		const dialog = workspace.current;
+		if (!dialog) return;
+		dialog.close();
+		if (next) dialog.showModal(); else dialog.show();
+		setExpanded(next);
+		if (next) setSettingsVisible(false);
+		expandButton.current?.focus();
+	};
+	useEffect(() => {
+		if (!expanded) return;
+		const overflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => { document.body.style.overflow = overflow; };
+	}, [expanded]);
+	const columns: MatrixColumn[] = [
+		{ id: 'category', label: 'Категория', width: 180, min: 110 },
+		{ id: 'segment', label: 'Сегментация товара', width: 200, min: 110 },
+		{ id: 'product', label: 'ID или модель товара', width: 230, min: 140 },
+		...selectedStores.map((store) => ({ id: `store:${store}`, label: store, width: 110 })),
+		{ id: 'total', label: 'Общие остатки', width: 110 },
+		{ id: 'sales', label: 'Продажи за период', width: 110 },
+		{ id: 'recommended', label: 'Рекомендовано к заказу · запас на 60 дней', width: 160, min: 100 },
+		{ id: 'toOrder', label: 'К заказу', width: 100, min: 80 },
+		{ id: 'comment', label: 'Комментарий', width: 210, min: 120 },
+		{ id: 'actions', label: 'Действия', width: 110, min: 100 },
+	];
 
 	const syncDrafts = (rows: AssortmentMatrixRow[]): void => setDrafts(Object.fromEntries(rows.map((row) => [row.productId, {
 		category: row.category,
@@ -258,8 +290,9 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 		finally { setTemplateBusy(false); }
 	};
 
-	return <section className="assortment-matrix">
-		<div className="assortment-matrix-banner"><b>Матрица заказов</b><span>Рекомендация рассчитывается на явный запас <strong>60 дней</strong>.</span></div>
+	return <dialog open ref={workspace} className={`assortment-matrix${expanded ? ' matrix-expanded' : ''}`} aria-label="Матрица заказов" aria-modal={expanded || undefined} onCancel={(event) => { event.preventDefault(); toggleExpanded(false); }}>
+		<div className="assortment-matrix-banner"><b>Матрица заказов</b><span>Целевой запас — <strong>60 дней</strong>.</span><div className="matrix-window-actions"><button type="button" aria-expanded={settingsVisible} aria-controls="matrix-settings" onClick={() => setSettingsVisible((value) => !value)}>{settingsVisible ? 'Скрыть настройки' : 'Настройки и шаблоны'}</button><button ref={expandButton} type="button" onClick={() => toggleExpanded(!expanded)}>{expanded ? 'Свернуть · Esc' : 'Развернуть на весь экран'}</button></div></div>
+		<div id="matrix-settings" className="matrix-settings" hidden={!settingsVisible}>
 		<div className="assortment-matrix-templates">
 			<label>Общий шаблон<select value={activeTemplateId} disabled={templateBusy || loading} onChange={(event) => void openTemplate(event.target.value)}><option value="">Текущая матрица</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
 			<label>Название<input value={templateName} maxLength={80} placeholder="Например, Домофоны — основной заказ" onChange={(event) => setTemplateName(event.target.value)} /></label>
@@ -285,9 +318,10 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 			<small className="assortment-matrix-category-count">Категорий первого уровня: {categories.length}</small>
 		</div>
 
-		{error && <p className="error">⛔ {error}</p>}
-		<div className="assortment-matrix-toolbar"><input type="search" placeholder="Поиск по матрице" value={filter} onChange={(event) => setFilter(event.target.value)} /><span>{visibleRows.length} позиций · анализ {report?.periodDays ?? 0} дней · целевой запас {report?.targetDays ?? 60} дней</span></div>
-		<div className="assortment-matrix-table-wrap"><table><thead><tr><th>Категория</th><th>Сегментация товара</th><th>ID или модель товара</th>{selectedStores.map((store) => <th key={store}>{store}</th>)}<th>Общие остатки</th><th>Продажи за период</th><th>Рекомендовано к заказу<br /><small>запас на 60 дней</small></th><th>К заказу</th><th>Комментарий</th><th /></tr></thead><tbody>
+		</div>
+		{error && <p className="error" role="alert">⛔ {error}</p>}
+		<div className="assortment-matrix-toolbar"><input type="search" aria-label="Поиск по матрице" placeholder="Поиск по матрице" value={filter} onChange={(event) => setFilter(event.target.value)} /><span>{visibleRows.length} позиций · анализ {report?.periodDays ?? 0} дней · целевой запас {report?.targetDays ?? 60} дней</span></div>
+		<MatrixTable columns={columns}>
 			{visibleRows.map((row) => {
 				const draft = drafts[row.productId] ?? { category: row.category, segment: row.segment, toOrder: String(row.toOrderQty), comment: row.comment };
 				return <tr key={row.productId}>
@@ -303,7 +337,7 @@ export function AssortmentMatrix({ stores: initialStores, mock = false }: { stor
 					<td className="assortment-matrix-actions">{!activeTemplateId && <button type="button" disabled={saving !== null} onClick={() => void saveRow(row)}>{saving === row.productId ? '…' : 'Сохранить'}</button>}<button type="button" className="danger" disabled={saving !== null} onClick={() => void removeRow(row)}>Убрать</button></td>
 				</tr>;
 			})}
-			{!loading && visibleRows.length === 0 && <tr><td colSpan={10 + selectedStores.length} className="assortment-matrix-empty">Добавь первые товары в матрицу.</td></tr>}
-		</tbody></table></div>
-	</section>;
+			{!loading && visibleRows.length === 0 && <tr><td colSpan={columns.length} className="assortment-matrix-empty">{filter ? 'По запросу ничего не найдено.' : 'Добавь первые товары в матрицу.'}</td></tr>}
+		</MatrixTable>
+	</dialog>;
 }
