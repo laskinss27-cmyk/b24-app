@@ -1,4 +1,5 @@
 import { ErpClient } from './client.js';
+import { listWithBatchedInFilters } from './list-batched.js';
 import {
 	erpContext,
 	fetchCoreCatalogItems,
@@ -95,19 +96,6 @@ async function getDocumentsInBatches(erp: ErpClient, doctype: string, names: str
 	return out;
 }
 
-async function listOrderedReceiptHeaders(erp: ErpClient, orderNames: string[]): Promise<Array<Record<string, unknown>>> {
-	const out: Array<Record<string, unknown>> = [];
-	// ERP rejects HTTP request lines above 4094 bytes. A single IN filter already
-	// exceeds that limit with 149 standard purchase-order names; keep each query small.
-	for (let index = 0; index < orderNames.length; index += 50) {
-		out.push(...await erp.list('Purchase Receipt', ['name', SUPPLY_PURCHASE_ORDER_FIELD], [
-			[SUPPLY_PURCHASE_ORDER_FIELD, 'in', orderNames.slice(index, index + 50)],
-			['docstatus', '=', 1],
-		]));
-	}
-	return out;
-}
-
 /**
  * Количество товара, которое ещё ожидается по заявкам поставщикам со стадией «Заказано».
  * Черновые Purchase Order приложения не попадают в нативный Bin.ordered_qty, поэтому
@@ -124,7 +112,9 @@ export async function fetchOutstandingOrderedQuantities(
 	if (!orderedNames.length) return out;
 	const [orders, receiptHeaders] = await Promise.all([
 		getDocumentsInBatches(erp, 'Purchase Order', orderedNames),
-		listOrderedReceiptHeaders(erp, orderedNames),
+		listWithBatchedInFilters(erp, 'Purchase Receipt', ['name', SUPPLY_PURCHASE_ORDER_FIELD], [
+			[SUPPLY_PURCHASE_ORDER_FIELD, 'in', orderedNames], ['docstatus', '=', 1],
+		]),
 	]);
 	const receiptNames = receiptHeaders.map((row) => String(row['name'] ?? '')).filter(Boolean);
 	const receivedByOrderProduct = new Map<string, number>();
@@ -295,8 +285,8 @@ export async function buildTurnoverReport(
 
 	const stockEntryTypes = new Map<string, string>();
 	const names = [...stockEntryNames];
-	for (let i = 0; i < names.length; i += 200) {
-		const entries = await erp.list('Stock Entry', ['name', 'stock_entry_type'], [['name', 'in', names.slice(i, i + 200)]]);
+	if (names.length) {
+		const entries = await listWithBatchedInFilters(erp, 'Stock Entry', ['name', 'stock_entry_type'], [['name', 'in', names]]);
 		for (const entry of entries) stockEntryTypes.set(String(entry['name']), String(entry['stock_entry_type'] ?? ''));
 	}
 

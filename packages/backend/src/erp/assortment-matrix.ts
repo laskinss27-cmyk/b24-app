@@ -1,6 +1,7 @@
 import { ErpClient } from './client.js';
 import { erpContext, erpWarehouse, listActiveStoreTitles } from './operations.js';
 import { fetchOutstandingOrderedQuantities } from './turnover-report.js';
+import { listWithBatchedInFilters } from './list-batched.js';
 
 export const ASSORTMENT_MATRIX_TARGET_DAYS = 60;
 export const MATRIX_ENABLED_FIELD = 'b24_matrix_enabled';
@@ -203,10 +204,10 @@ export async function buildAssortmentMatrixReport(erp: ErpClient, input: {
 	const salesStores = input.salesScope === 'all' ? stores : selectedStores;
 	const salesWarehouses = salesStores.map((store) => erpWarehouse(ctx, store));
 	const [bins, ledger, ordered] = await Promise.all([
-		erp.list('Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty'], [
+		listWithBatchedInFilters(erp, 'Bin', ['item_code', 'warehouse', 'actual_qty', 'reserved_qty'], [
 			['item_code', 'in', itemCodes], ['warehouse', 'in', stockWarehouses],
 		]),
-		erp.list('Stock Ledger Entry', ['item_code', 'warehouse', 'actual_qty'], [
+		listWithBatchedInFilters(erp, 'Stock Ledger Entry', ['item_code', 'warehouse', 'actual_qty'], [
 			['item_code', 'in', itemCodes], ['warehouse', 'in', salesWarehouses],
 			['posting_date', '>=', input.from], ['posting_date', '<=', input.to],
 			['voucher_type', '=', 'Delivery Note'], ['is_cancelled', '=', 0],
