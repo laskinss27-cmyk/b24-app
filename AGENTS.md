@@ -1,5 +1,12 @@
 # Project operating rules
 
+## Feature continuity and documentation
+
+- Use `docs/feature-registry.md` as the versioned map of business rules, implementation paths, regression tests, and known gaps. Update the affected rule in the same commit as behavior changes. Keep retired rules with the reason, replacement, and migration decision; do not silently delete them.
+- Before a release, review changed/removed rules and tests against the registry and the currently deployed SHA. File presence and release provenance do not prove business behavior. Resolve the open regressions recorded in `docs/audits/2026-09-29-feature-audit.md` before treating a green test run as release readiness; diagnostics are not approved release exceptions.
+- Backend/frontend test commands must discover all `src/**/*.test.ts` and `src/**/*.test.tsx`; do not replace discovery with a hand-maintained subset. New or recovered regression tests belong in the normal suite. Review unexplained decreases in test coverage/counts.
+- Store specifications and recovery references in tracked docs. Ignored `outputs`, temporary worktrees, and deployment logs may supplement evidence but must not be the only description of a shipped feature. When architecture changes, record the old/new data source and compatibility implications.
+
 ## Production deployment
 
 - Use `node scripts/b24-release.mjs build` from a clean, pushed Git checkout and `bash scripts/b24-deploy.sh IMAGE FULL_SHA` for production updates. The deploy script must pass the pre-deploy guard before stopping the service; do not replace it with ad hoc stop/run commands. See `docs/release-provenance.md` for archive transfer and the one-time legacy migration.

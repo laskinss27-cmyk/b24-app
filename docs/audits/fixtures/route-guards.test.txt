@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import Fastify from 'fastify';
+import { B24Client } from '../b24/client.js';
+import { ErpClient } from '../erp/client.js';
+import { registerSupplyRequestRoutes } from './api-supply-request-routes.js';
+import { registerStockDocumentSubmitRoute } from './api-stock-document-submit-route.js';
+import { registerInventoryUpdateRoute } from './api-inventory-update-route.js';
+
+// Historic contract ebbcd2f: invalid common note must stop before ERP access.
+test('SUP-02: empty common note is rejected before ERP access', async t => {
+  let erpAccesses = 0;
+  t.mock.method(ErpClient, 'fromEnv', () => { erpAccesses++; return null; });
+  const app = Fastify();
+  app.decorate('config', { portalDomain: 'test.example' } as typeof app.config);
+  registerSupplyRequestRoutes(app, new Set());
+  t.after(() => app.close());
+  const response = await app.inject({ method: 'POST', url: '/api/supply/request', payload: {
+    domain: 'test.example', accessToken: 'test', dealId: 42,
+    lines: [{ productId: 1, qty: 1 }], toStore: 'Test store', deadline: '2099-01-01', note: '',
+  } });
+  assert.deepEqual({ status: response.statusCode, erpAccesses }, { status: 400, erpAccesses: 0 });
+});
+
+// Historic contract 61e4358: a Purchase Receipt with zero rate cannot be submitted.
+test('STOCK-02: zero-price purchase receipt is rejected before submit', async t => {
+  let submits = 0;
+  const erp = {
+    async get() { return { items: [{ item_code: '123', item_name: 'Test item', qty: 1, rate: 0 }] }; },
+    async submit() { submits++; },
+  } as unknown as ErpClient;
+  t.mock.method(ErpClient, 'fromEnv', () => erp);
+  t.mock.method(B24Client.prototype, 'call', async () => ({ ID: '1' }));
+  const app = Fastify();
+  app.decorate('config', { portalDomain: 'test.example' } as typeof app.config);
+  registerStockDocumentSubmitRoute(app);
+  t.after(() => app.close());
+  const response = await app.inject({ method: 'POST', url: '/api/stock/submit', payload: {
+    domain: 'test.example', accessToken: 'test', kind: 'receipt', name: 'PR-FAKE',
+  } });
+  assert.deepEqual({ ok: response.json().ok, submits }, { ok: false, submits: 0 });
+});
+
+// Historic contract 6e1bd92: never acknowledge unsaved facts as a successful save.
+test('INV-05: changed draft for a reconciled point is rejected, not acknowledged', async t => {
+  let writes = 0;
+  t.mock.method(ErpClient, 'fromEnv', () => { throw new Error('Unexpected ERP access'); });
+  t.mock.method(B24Client.prototype, 'call', async (method: string) => {
+    if (method === 'entity.add') return true;
+    if (method === 'entity.item.get') return [{ ID: '1', NAME: 'Test inventory', DETAIL_TEXT: JSON.stringify({
+      status: 'closed', points: [{ storeId: 7, status: 'reconciled', draft: { 123: 1 },
+        stockSnapshot: { version: 1, capturedAt: '2026-09-01T00:00:00Z', lines: [[123, 1]] } }],
+    }) }];
+    if (method === 'entity.item.update') { writes++; return true; }
+    throw new Error(`Unexpected Bitrix call: ${method}`);
+  });
+  const app = Fastify();
+  app.decorate('config', { portalDomain: 'test.example' } as typeof app.config);
+  registerInventoryUpdateRoute(app);
+  t.after(() => app.close());
+  const response = await app.inject({ method: 'POST', url: '/api/inventory/update', payload: {
+    domain: 'test.example', accessToken: 'test', inventoryId: '1', storeId: 7,
+    action: 'saveDraft', draft: { 123: 2 },
+  } });
+  assert.deepEqual({ ok: response.json().ok, writes }, { ok: false, writes: 0 });
+});

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { FastifyInstance } from 'fastify';
@@ -6,7 +8,7 @@ import type { B24Client, BatchResult } from '../b24/client.js';
 import { ReservationService } from './service.js';
 import { ReservationStore } from './store.js';
 
-test('reservation service groups request notifications and does not repeat them', async () => {
+test('reservation service groups request notifications and does not repeat them', async (t) => {
 	const messages: Array<Record<string, unknown>> = [];
 	let reserveEnd = '30.09.2099';
 	const client = {
@@ -35,7 +37,9 @@ test('reservation service groups request notifications and does not repeat them'
 		operationLog: { record: async (): Promise<void> => {} },
 		log: { warn: (): void => {}, error: (): void => {} },
 	} as unknown as FastifyInstance;
-	const filePath = join(process.cwd(), '.tmp', `reservation-service-${process.pid}-${Date.now()}.json`);
+	const temporaryDirectory = await mkdtemp(join(tmpdir(), 'b24-reservation-test-'));
+	t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
+	const filePath = join(temporaryDirectory, 'reservations.json');
 	const service = new ReservationService(app, new ReservationStore(filePath));
 
 	const first = await service.list(client, true);
