@@ -1,6 +1,7 @@
 import React, { useMemo, useState, type CSSProperties } from 'react';
 import { amendStockDocument, searchStockItems, type CoreDocDetail, type StockItem } from './b24.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
+import { ReceiptPurchasePrices } from './ReceiptPurchasePrices.js';
 
 const inp: CSSProperties = { padding: '7px 9px', border: '1px solid #cdd5e0', borderRadius: 6, fontSize: 13, color: 'var(--app-text)', boxSizing: 'border-box' };
 const btnGhost: CSSProperties = { ...inp, cursor: 'pointer', background: 'var(--app-surface)' };
@@ -25,6 +26,7 @@ export function StockDocumentEditForm({ detail, form, onCancel, onSaved }: {
 	const [searching, setSearching] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
+	const [editCatalogPrices, setEditCatalogPrices] = useState(false);
 	const stores = useMemo(() => [...new Set([...form.stores, ...lines.map((line) => line.store).filter(Boolean)])], [form.stores, lines]);
 	const canAdd = detail.allowAddLines;
 
@@ -66,7 +68,9 @@ export function StockDocumentEditForm({ detail, form, onCancel, onSaved }: {
 		finally { setBusy(false); }
 	};
 
+	if (editCatalogPrices) return <ReceiptPurchasePrices items={detail.items} onBack={() => setEditCatalogPrices(false)} onClose={onCancel} />;
 	return <div>
+		{detail.kind === 'receipt' && <div style={{ marginBottom: 12 }}><button type="button" className="btn-primary" disabled={busy} onClick={() => setEditCatalogPrices(true)}>Закупочные цены для сделок</button><p style={{ fontSize: 13 }}>Чтобы изменить закупочную цену в списке товаров сделки, откройте цены каталога. Форма ниже исправляет сам складской документ.</p></div>}
 		<div style={{ padding: '10px 12px', borderRadius: 8, background: '#fff7e6', color: '#7a4b00', fontSize: 13 }}>
 			Исходный проведённый документ будет отменён. Ядро создаст и проведёт исправленную версию, а обе версии останутся в журнале.
 		</div>

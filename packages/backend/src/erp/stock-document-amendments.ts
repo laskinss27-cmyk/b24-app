@@ -1,4 +1,4 @@
-import type { ErpClient } from './client.js';
+import { ErpApiError, type ErpClient } from './client.js';
 import { DEAL_FIELD } from './erp-setup.js';
 import { INV_FIELD } from './inventory-reconciliation.js';
 import { REALIZATION_SEGMENT_FIELD } from './stock-catalog.js';
@@ -182,7 +182,14 @@ export async function amendSubmittedStockDocument(erp: ErpClient, input: StockDo
 	const replacementFields = buildCopy(original, input.doctype, descriptor.kind, input, toWarehouse, input.name);
 	const restoreFields = buildCopy(original, input.doctype, descriptor.kind, null, toWarehouse, input.name);
 	let replacementName = '';
-	await erp.cancel(input.doctype, input.name);
+	try {
+		await erp.cancel(input.doctype, input.name);
+	} catch (error) {
+		if (descriptor.kind === 'receipt' && error instanceof ErpApiError && error.status === 417) {
+			throw new Error(`Ядро не разрешило отменить приход ${input.name}. Проверьте связанные перемещения и реализации. Для изменения цены в списке товаров сделки используйте «Закупочные цены для сделок»: отмена прихода для этого не нужна.`);
+		}
+		throw error;
+	}
 	try {
 		const replacement = await erp.create(input.doctype, replacementFields);
 		replacementName = String(replacement['name'] ?? '');

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ErpClient } from '../erp/client.js';
-import { updateCoreCatalogPrices, updateMarketplaceOldId } from '../erp/operations.js';
+import { fetchErpPurchasing, updateCoreCatalogPrices, updateMarketplaceOldId } from '../erp/operations.js';
+import { catalogAccessForUser, type CatalogAccessUser } from '../catalog-access.js';
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import type { AuthBody } from './api-catalog-types.js';
@@ -13,6 +14,40 @@ import {
 import { baseCache } from './api-catalog-cache.js';
 
 export function registerCatalogCommercialFieldRoutes(app: FastifyInstance): void {
+	app.post('/api/catalog/update-purchase-price', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
+		const client = catalogClientFrom(app, body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const actor = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
+		if (!appPermission(req, 'catalog.edit_purchase_prices', catalogAccessForUser(actor).canEditPrices)) {
+			return reply.code(403).send({ ok: false, error: 'редактирование закупочных цен доступно снабжению и Константину Ласкину' });
+		}
+		const productId = Number(body['productId']);
+		const purchase = Number(body['purchase']);
+		if (!Number.isSafeInteger(productId) || productId <= 0) return reply.code(400).send({ ok: false, error: 'неверный ID товара' });
+		if (body['purchase'] === null || body['purchase'] === '' || !Number.isFinite(purchase) || purchase <= 0.01) {
+			return reply.code(400).send({ ok: false, error: 'Укажите закупочную цену больше 0,01 ₽.' });
+		}
+		const erp = ErpClient.fromEnv();
+		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
+		try {
+			const previous = (await fetchErpPurchasing(erp, [productId])).get(productId) ?? 0;
+			await updateCoreCatalogPrices(erp, { productId, purchase });
+			baseCache.delete(normalizeDomain(body.domain ?? ''));
+			await app.operationLog.record({
+				area: 'catalog', operation: 'purchase_price', outcome: 'success',
+				summary: `Закупочная цена #${productId}: ${previous} → ${purchase} ₽`,
+				actor: { id: String(actor?.ID ?? ''), name: `${actor?.LAST_NAME ?? ''} ${actor?.NAME ?? ''}`.trim() },
+				details: { productId, previous, purchase },
+			});
+			app.log.info({ productId, purchase }, '[api/catalog/update-purchase-price] ok');
+			return { ok: true, productId, purchase };
+		} catch (error) {
+			app.log.error({ productId }, `[api/catalog/update-purchase-price] failed — ${errInfo(error)}`);
+			return reply.code(200).send({ ok: false, error: errInfo(error) });
+		}
+	});
+
 	app.post('/api/catalog/update-prices', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = catalogClientFrom(app, body);

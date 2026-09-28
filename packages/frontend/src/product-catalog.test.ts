@@ -88,6 +88,17 @@ function jsonResponse(body: unknown): Response {
 	});
 }
 
+test('receipt price editor sends only the catalog purchase price and preserves failures', async () => {
+	const { updateCatalogPurchasePrice } = await import('./product-catalog.js');
+	const requests = captureResponses([jsonResponse({ ok: true, purchase: 17902 }), jsonResponse({ ok: false, error: 'Нет права' })]);
+	assert.equal(await updateCatalogPurchasePrice(27112, 17902), 17902);
+	assert.equal(requests[0]?.url, '/api/catalog/update-purchase-price');
+	assert.equal(requests[0]?.body.purchase, 17902);
+	assert.equal('retail' in requests[0]!.body, false);
+	assert.equal('doctype' in requests[0]!.body, false);
+	await assert.rejects(updateCatalogPurchasePrice(27112, 17902), /Нет права/);
+});
+
 test('fetchProductBase preserves request flags and fills absent optional response fields', async () => {
 	const requests = captureResponses([jsonResponse({
 		ok: true,

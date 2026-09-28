@@ -25,3 +25,10 @@ test('return editor preserves existing lines and hides arbitrary item addition',
 	assert.doesNotMatch(html, /Найти товар для добавления/);
 	assert.match(html, /Новую позицию оформите отдельным возвратом из сделки/);
 });
+
+test('receipt editor separates catalog purchase prices from historical document correction', () => {
+	const html = renderToStaticMarkup(<StockDocumentEditForm detail={{ ...base, doctype: 'Purchase Receipt', kind: 'receipt' }} form={form} onCancel={() => undefined} onSaved={() => undefined} />);
+	assert.match(html, /Закупочные цены для сделок/);
+	assert.match(html, /Форма ниже исправляет сам складской документ/);
+	assert.match(html, /Исходный проведённый документ будет отменён/);
+});

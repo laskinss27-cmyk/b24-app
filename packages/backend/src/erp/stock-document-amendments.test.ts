@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { amendSubmittedStockDocument, editableStockDocumentDescriptor } from './stock-document-amendments.js';
-import type { ErpClient } from './client.js';
+import { ErpApiError, type ErpClient } from './client.js';
 
 function fakeErp(source: Record<string, unknown>, failReplacement = false): { client: ErpClient; calls: Array<{ action: string; name?: string; fields?: Record<string, unknown> }> } {
 	const calls: Array<{ action: string; name?: string; fields?: Record<string, unknown> }> = [];
@@ -28,6 +28,16 @@ const ISSUE = {
 	name: 'STE-1', docstatus: 1, company: 'Test Company', stock_entry_type: 'Material Issue', posting_date: '2026-09-20',
 	b24_reason: 'Бой', b24_note: 'До проверки', items: [{ name: 'ROW-1', item_code: '17', item_name: 'Relay', qty: 2, s_warehouse: 'Main - TEST' }],
 };
+
+test('blocked receipt cancellation leaves stock untouched and points to the catalog price editor', async () => {
+	const receipt = { ...ISSUE, name: 'PR-1', items: [{ name: 'ROW-1', item_code: '17', qty: 1, warehouse: 'Main - TEST', rate: 100 }] };
+	const { client, calls } = fakeErp(receipt);
+	client.cancel = async () => { throw new ErpApiError('PUT', '/Purchase Receipt/PR-1', 417, '<a>Required by transfer</a>'); };
+	await assert.rejects(amendSubmittedStockDocument(client, {
+		doctype: 'Purchase Receipt', name: 'PR-1', date: '2026-09-20', lines: [{ rowId: 'ROW-1', productId: 17, qty: 1, store: 'Main', rate: 80 }],
+	}), /Закупочные цены для сделок/);
+	assert.deepEqual(calls, []);
+});
 
 test('submitted issue amendment cancels, recreates, and submits an amended document', async () => {
 	const { client, calls } = fakeErp(ISSUE);

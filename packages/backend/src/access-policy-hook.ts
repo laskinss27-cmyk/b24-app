@@ -8,6 +8,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/catalog/export-comparison': ['catalog.export_comparison'],
 	'/api/catalog/export-marketplace-selection': ['catalog.view', 'catalog.search'],
 	'/api/catalog/update-prices': ['catalog.edit_retail_prices', 'catalog.edit_purchase_prices'],
+	'/api/catalog/update-purchase-price': ['catalog.edit_purchase_prices'],
 	'/api/catalog/update-marketplace-old-id': ['catalog.view'],
 	'/api/catalog/update-product': ['catalog.edit_card'],
 	'/api/catalog/create-product': ['catalog.create'],

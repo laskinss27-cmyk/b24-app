@@ -178,6 +178,17 @@ export async function updateCatalogPrices(productId: number, retail: number, pur
 	return { retail: Number(json.retail ?? retail), purchase: Number(json.purchase ?? purchase) };
 }
 
+/** Changes only the current catalog purchase price, never a submitted receipt. */
+export async function updateCatalogPurchasePrice(productId: number, purchase: number): Promise<number> {
+	const res = await fetch('/api/catalog/update-purchase-price', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), productId, purchase }),
+	});
+	const json = await res.json() as { ok?: boolean; error?: string; purchase?: number };
+	if (!json.ok) throw new Error(json.error ?? 'Не удалось сохранить закупочную цену');
+	return Number(json.purchase ?? purchase);
+}
+
 export async function updateMarketplaceOldId(productId: number, oldId: string): Promise<string> {
 	const res = await fetch('/api/catalog/update-marketplace-old-id', {
 		method: 'POST',
