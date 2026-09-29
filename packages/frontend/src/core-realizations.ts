@@ -26,15 +26,19 @@ export interface CoreRealization {
 }
 
 /** Что уже реализовано по сделке — из ЯДРА (черновики + проведённые). */
-export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRealization[]> {
+export async function fetchDealRealizationsData(dealId: number): Promise<{ realizations: CoreRealization[]; actualProfit: import('@b24-app/shared').DealActualProfit | null }> {
 	const res = await fetch('/api/deal/realize-core', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), action: 'list', dealId }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; realizations?: CoreRealization[] };
+	const json = (await res.json()) as { ok: boolean; error?: string; realizations?: CoreRealization[]; actualProfit?: import('@b24-app/shared').DealActualProfit | null };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось загрузить реализации сделки из ядра');
-	return json.realizations ?? [];
+	return { realizations: json.realizations ?? [], actualProfit: json.actualProfit ?? null };
+}
+
+export async function fetchDealRealizationsCore(dealId: number): Promise<CoreRealization[]> {
+	return (await fetchDealRealizationsData(dealId)).realizations;
 }
 
 export interface RealizeCoreGroup {

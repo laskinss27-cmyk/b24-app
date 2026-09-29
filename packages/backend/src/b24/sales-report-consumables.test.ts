@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { writeManualState } from '../deal-manual-store.js';
 import type { B24Client, BatchCall } from './client.js';
 import type { ErpClient } from '../erp/client.js';
-import { buildSalesReport } from './sales-report.js';
+// These regressions describe the retained preliminary/migration calculation.
+import { buildPlannedSalesReport as buildSalesReport } from './sales-report.js';
 import { readConsumablesReportRows } from './sales-report-consumables.js';
 import { buildCatalogMirrorPlan } from '../catalog-mirror/plan.js';
 import { buildSqlProductBase } from '../catalog-mirror/product-base.js';

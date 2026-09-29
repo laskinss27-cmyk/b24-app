@@ -65,7 +65,7 @@ const MOCK_DATASETS: ReportDataset[] = [
 			{ id: 'manager', label: 'Менеджер', type: 'text', role: 'dimension', defaultVisible: true },
 			{ id: 'goodsSum', label: 'Продажа товаров', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
 			{ id: 'worksSum', label: 'Продажа работ', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
-			{ id: 'totalProfit', label: 'Общая прибыль', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
+			{ id: 'totalProfit', label: 'Прибыль с оценкой услуг', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
 			{ id: '__count', label: 'Количество сделок', type: 'number', role: 'measure', aggregate: 'sum' },
 		],
 	},

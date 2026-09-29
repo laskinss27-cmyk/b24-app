@@ -29,9 +29,10 @@ const CSV_HEADERS = [
 	'ФИО менеджера',
 	'Сумма товаров',
 	'Сумма услуг',
-	'Прибыльность товаров',
-	'Прибыльность услуг',
-	'Позиций без закупки',
+	'Прибыль товаров по проводкам',
+	'Прибыль услуг — оценка',
+	'Строк без полной себестоимости',
+	'Основание расчёта',
 ];
 
 const MOCK_ROWS: SalesReportRow[] = [
@@ -53,7 +54,8 @@ function ruDate(s: string): string {
 	return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
 /** Число → строка с запятой-разделителем (ru Excel), 2 знака, без групп. */
-function ruNum(n: number): string {
+function ruNum(n: number | null): string {
+	if (n == null) return '';
 	return n.toFixed(2).replace('.', ',');
 }
 /** Экранирование поля CSV: оборачиваем в кавычки, если есть ; " или перевод строки. */
@@ -76,6 +78,7 @@ function buildCsv(rows: SalesReportRow[]): string {
 			ruNum(r.goodsProfit),
 			ruNum(r.worksProfit),
 			String(r.goodsNoPurchase),
+			r.profitStatus ?? '',
 		].map((c) => csvCell(String(c))).join(';'));
 	}
 	// BOM — чтобы Excel открыл кириллицу в UTF-8.
@@ -205,7 +208,7 @@ export function SalesReport({ onBack }: { onBack?: (() => void) | undefined }): 
 				</div>
 
 				{err && <p className="error">⛔ {err}</p>}
-				{loading && <p className="muted">Тяну сделки за период, строки и закупки — на больших периодах это несколько секунд.</p>}
+				{loading && <p className="muted">Загружаю сделки, проведённые реализации, возвраты и себестоимость — на больших периодах это несколько секунд.</p>}
 
 				{rows && (
 					rows.length === 0
@@ -220,16 +223,17 @@ export function SalesReport({ onBack }: { onBack?: (() => void) | undefined }): 
 function ReportPreview({ rows }: { rows: SalesReportRow[] }): JSX.Element {
 	const PREVIEW = 50;
 	const shown = rows.slice(0, PREVIEW);
-	const num = (n: number): string => n.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
+	const num = (n: number | null): string => n == null ? '—' : n.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
 	return (
 		<div className="report-preview">
+			<p className="muted">Суммы по проведённым реализациям за вычетом возвратов. Прибыль товаров — по складской себестоимости; услуг — оценка по коэффициенту. «—» означает, что прибыль не подтверждена.</p>
 			<p className="report-count">✅ Готово: <b>{rows.length}</b> сделок. CSV скачан. {rows.length > PREVIEW ? `Ниже — первые ${PREVIEW} для проверки.` : 'Полный список ниже.'}</p>
 			<div className="table-wrap">
 				<table className="products-table report-table">
 					<thead>
 						<tr>
 							<th>Воронка</th><th>Источник</th><th>Создана</th><th>Успех</th><th>Сделка</th><th>Менеджер</th>
-							<th className="num">Товары</th><th className="num">Услуги</th><th className="num">Приб. тов.</th><th className="num">Приб. усл.</th><th className="num">Без зак.</th>
+							<th className="num">Товары</th><th className="num">Услуги</th><th className="num">Приб. тов.</th><th className="num">Приб. усл. ≈</th><th className="num">Без себест.</th><th>Расчёт</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -245,7 +249,7 @@ function ReportPreview({ rows }: { rows: SalesReportRow[] }): JSX.Element {
 								<td className="num">{num(r.worksSum)}</td>
 								<td className="num">{num(r.goodsProfit)}</td>
 								<td className="num">{num(r.worksProfit)}</td>
-								<td className="num">{r.goodsNoPurchase || ''}</td>
+								<td className="num">{r.goodsNoPurchase || ''}</td><td>{r.profitStatus}</td>
 							</tr>
 						))}
 					</tbody>

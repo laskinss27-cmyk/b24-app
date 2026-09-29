@@ -43,9 +43,10 @@ export const REPORT_DATASETS: ReportDataset[] = [
 			{ id: 'worksSum', label: 'Продажа работ', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
 			{ id: 'totalSum', label: 'Общая продажа', type: 'number', role: 'measure', aggregate: 'sum' },
 			{ id: 'goodsProfit', label: 'Прибыль товаров', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
-			{ id: 'worksProfit', label: 'Прибыль работ', type: 'number', role: 'measure', aggregate: 'sum' },
-			{ id: 'totalProfit', label: 'Общая прибыль', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
-			{ id: 'goodsNoPurchase', label: 'Позиций без закупки', type: 'number', role: 'measure', aggregate: 'sum' },
+			{ id: 'worksProfit', label: 'Прибыль работ — оценка', type: 'number', role: 'measure', aggregate: 'sum' },
+			{ id: 'totalProfit', label: 'Прибыль с оценкой услуг', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
+			{ id: 'profitStatus', label: 'Основание прибыли', type: 'text', role: 'dimension' },
+			{ id: 'goodsNoPurchase', label: 'Строк без себестоимости', type: 'number', role: 'measure', aggregate: 'sum' },
 			{ id: '__count', label: 'Количество сделок', type: 'number', role: 'measure', aggregate: 'sum' },
 		],
 	},
@@ -182,12 +183,12 @@ export function buildReportResult(definitionInput: unknown, sourceRows: ReportRo
 	if (!definition.groupBy.length) {
 		rows = sourceRows.map((source) => Object.fromEntries(outputIds.map((id) => [id, source[id] ?? null])));
 	} else {
-		const groups = new Map<string, { row: ReportRow; counts: Record<string, number> }>();
+		const groups = new Map<string, { row: ReportRow; counts: Record<string, number>; incompleteProfit: Set<string> }>();
 		for (const source of sourceRows) {
 			const key = JSON.stringify(definition.groupBy.map((id) => source[id] ?? null));
 			let group = groups.get(key);
 			if (!group) {
-				group = { row: {}, counts: {} };
+				group = { row: {}, counts: {}, incompleteProfit: new Set() };
 				for (const id of definition.groupBy) group.row[id] = source[id] ?? null;
 				for (const id of definition.columns) if (fields.get(id)?.role === 'measure') group.row[id] = 0;
 				groups.set(key, group);
@@ -196,6 +197,7 @@ export function buildReportResult(definitionInput: unknown, sourceRows: ReportRo
 				const field = fields.get(id);
 				if (field?.role !== 'measure') continue;
 				const rawValue = source[id];
+				if (definition.datasetId === 'sales_deals' && ['goodsProfit', 'totalProfit'].includes(id) && rawValue == null) group.incompleteProfit.add(id);
 				if (rawValue == null || rawValue === '') continue;
 				const value = Number(rawValue);
 				if (!Number.isFinite(value)) continue;
@@ -206,6 +208,7 @@ export function buildReportResult(definitionInput: unknown, sourceRows: ReportRo
 		rows = [...groups.values()].map((group) => {
 			for (const id of definition.columns) {
 				const field = fields.get(id);
+				if (group.incompleteProfit.has(id)) { group.row[id] = null; continue; }
 				if (field?.aggregate === 'average') {
 					const count = group.counts[id] ?? 0;
 					group.row[id] = count ? round(Number(group.row[id] ?? 0) / count) : null;

@@ -1,21 +1,15 @@
 /**
- * Отчёт по продажам за период по каждому менеджеру — сборка на БЭКЕНДЕ.
- *
- * Одна строка = одна ВЫИГРАННАЯ сделка (STAGE_SEMANTIC_ID='S') за период (по CLOSEDATE).
- * Колонки: воронка, дата создания, дата перевода в успех, название, ФИО менеджера,
- * сумма товаров, сумма услуг, прибыль товаров, прибыль услуг, позиций без закупки.
- *
- * Прибыль товаров = Σ(цена−закупка)×кол-во ТОЛЬКО по позициям с известной закупкой
- * (catalog.product.purchasingPrice); позиции без закупки считаем в отдельный счётчик
- * (решение Сергея 2026-06-05 — честнее, чем занулять закупку). Прибыль услуг = сумма
- * услуг × коэффициент (app.option profit_coef, дефолт 0.5 — как во вкладке сделки).
- *
- * Тяжёлое (строки + закупки по сотням сделок) — серверным B24Client батчами, как «База».
+ * Sales report: successfully closed deals selected by CLOSEDATE. Revenue and goods
+ * profit come from posted ERP deliveries net of returns; stock cost is the signed
+ * ledger value. Service profit is explicitly estimated using profit_coef.
+ * buildPlannedSalesReport retains the old calculation for migration/regression
+ * reference; production report routes call buildSalesReport only.
  */
 import { B24Client, type BatchCall } from './client.js';
 import { dealLinePurchasingPrice, isPassThroughProduct } from '@b24-app/shared';
 import { ErpClient } from '../erp/client.js';
 import { readConsumablesReportRows } from './sales-report-consumables.js';
+import { readDealsActualProfit } from '../erp/deal-profit.js';
 
 /** TYPE строки сделки: 1 = товар, 7 = работа/услуга (как в crm.deal.productrows). */
 const WORK_TYPE = 7;
@@ -41,7 +35,8 @@ export interface SalesReportRow {
 	manager: string;
 	goodsSum: number;
 	worksSum: number;
-	goodsProfit: number;
+	goodsProfit: number | null;
+	profitStatus?: string;
 	worksProfit: number;
 	/** Сколько товарных позиций сделки без заполненной закупки (прибыль по ним не учтена). */
 	goodsNoPurchase: number;
@@ -62,11 +57,12 @@ async function pageDeals(client: B24Client, filter: Record<string, unknown>, sel
 	const out: Array<Record<string, unknown>> = [];
 	let start = 0;
 	for (let i = 0; i < 400; i++) {
-		const page = await client.call<Array<Record<string, unknown>>>('crm.deal.list', { filter, select, order: { CLOSEDATE: 'ASC' }, start });
+		const page = await client.call<Array<Record<string, unknown>>>('crm.deal.list', { filter, select, order: { CLOSEDATE: 'ASC', ID: 'ASC' }, start });
 		if (!page || !page.length) break;
 		out.push(...page);
 		if (page.length < 50) break;
 		start += 50;
+		if (i === 399) throw new Error('Слишком много сделок: сузьте период отчёта; неполный результат не выдан');
 	}
 	return out;
 }
@@ -155,7 +151,8 @@ async function fetchPurchasing(client: B24Client, productIds: number[]): Promise
 	return map;
 }
 
-export async function buildSalesReport(client: B24Client, params: SalesReportParams, erp: ErpClient | null = ErpClient.fromEnv()): Promise<SalesReportData> {
+/** Retained solely as an explicit preliminary calculation and migration reference. */
+export async function buildPlannedSalesReport(client: B24Client, params: SalesReportParams, erp: ErpClient | null = ErpClient.fromEnv()): Promise<SalesReportData> {
 	const filter: Record<string, unknown> = {
 		STAGE_SEMANTIC_ID: 'S',
 		'>=CLOSEDATE': params.from,
@@ -226,4 +223,35 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 	});
 
 	return { rows: out, coef, generatedAt: new Date().toISOString() };
+}
+
+/** Actual posted sales; current catalog prices and native collapsed rows are never used. */
+export async function buildSalesReport(client: B24Client, params: SalesReportParams, erp: ErpClient | null = ErpClient.fromEnv()): Promise<SalesReportData> {
+	if (!erp) throw new Error('Фактическая прибыль недоступна: ядро склада не подключено');
+	const filter: Record<string, unknown> = {
+		STAGE_SEMANTIC_ID: 'S',
+		'>=CLOSEDATE': `${params.from}T00:00:00+03:00`,
+		'<=CLOSEDATE': `${params.to}T23:59:59+03:00`,
+	};
+	if (params.categoryIds?.length) filter.CATEGORY_ID = params.categoryIds;
+	const deals = await pageDeals(client, filter, ['ID', 'TITLE', 'CATEGORY_ID', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'CLOSEDATE', 'SOURCE_ID']);
+	const [categories, sources, coef, managers, profits] = await Promise.all([
+		fetchCategoryNames(client), fetchSourceNames(client), fetchCoef(client),
+		fetchManagerNames(client, deals.map(d => Number(d.ASSIGNED_BY_ID))),
+		readDealsActualProfit(erp, deals.map(d => Number(d.ID))),
+	]);
+	return { coef, generatedAt: new Date().toISOString(), rows: deals.map(d => {
+		const dealId = Number(d.ID);
+		const profit = profits.get(dealId)!;
+		return {
+			dealId, category: categories.get(Number(d.CATEGORY_ID)) ?? `Воронка ${d.CATEGORY_ID}`,
+			source: sources.get(String(d.SOURCE_ID ?? '')) ?? String(d.SOURCE_ID ?? ''),
+			dateCreate: String(d.DATE_CREATE ?? ''), dateClosed: String(d.CLOSEDATE ?? ''),
+			title: String(d.TITLE ?? `Сделка #${dealId}`), manager: managers.get(Number(d.ASSIGNED_BY_ID)) ?? String(d.ASSIGNED_BY_ID ?? ''),
+			goodsSum: profit.goodsRevenue, worksSum: profit.worksRevenue,
+			goodsProfit: profit.goodsProfit, worksProfit: Math.round(profit.worksProfitBase * coef * 100) / 100,
+			goodsNoPurchase: profit.missingCostLines,
+			profitStatus: !profit.documentCount ? 'Нет проведённых реализаций' : profit.missingCostLines ? `Неполные данные: ${profit.missingCostLines} строк` : 'По проведённым реализациям и возвратам',
+		};
+	}) };
 }

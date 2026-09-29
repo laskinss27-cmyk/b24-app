@@ -1,4 +1,5 @@
 export * from './domain.js';
+export * from './deal-profit.js';
 export * from './consumables.js';
 export * from './product-aliases.js';
 export * from './access-control.js';

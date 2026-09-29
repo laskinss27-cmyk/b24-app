@@ -84,6 +84,14 @@ body.deal-placement-body #root.deal-placement-root {
 	font-size: 15px;
 	white-space: nowrap;
 }
+
+.deal-head-stats small {
+	display: block;
+	margin-top: 4px;
+	color: #64748b;
+	font-size: 11px;
+	line-height: 1.4;
+}
 .deal-head-stats .deal-profit-value.positive { color: #15803d; }
 .deal-head-stats .deal-profit-value.negative { color: #b91c1c; }
 .beta-banner,

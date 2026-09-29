@@ -36,7 +36,8 @@ export interface SalesReportRow {
 	manager: string;
 	goodsSum: number;
 	worksSum: number;
-	goodsProfit: number;
+	goodsProfit: number | null;
+	profitStatus?: string;
 	worksProfit: number;
 	goodsNoPurchase: number;
 }

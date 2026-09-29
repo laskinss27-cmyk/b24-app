@@ -2180,6 +2180,9 @@ html[data-theme="dark"] .deal-head-stats > div {
 html[data-theme="dark"] .deal-head-stats span {
     color: #b9c6d7
 }
+html[data-theme="dark"] .deal-head-stats small {
+    color: #b9c6d7
+}
 html[data-theme="dark"] .deal-head-stats .deal-profit-value.positive {
     color: hsl(142 72% 72%)
 }

@@ -16,6 +16,15 @@ const definition: ReportDefinition = {
 	sort: [{ field: 'soldQty', direction: 'desc' }],
 };
 
+test('unknown deal profit makes grouped profit unknown instead of silently summing a subset', () => {
+	const result = buildReportResult({ datasetId: 'sales_deals', columns: ['manager', 'goodsProfit', 'totalProfit'], groupBy: ['manager'], filters: { from: '2026-09-01', to: '2026-09-30' }, sort: [] }, [
+		{ manager: 'A', goodsProfit: 100, totalProfit: 200 },
+		{ manager: 'A', goodsProfit: null, totalProfit: null },
+	]);
+	assert.equal(result.rows[0]?.goodsProfit, null);
+	assert.equal(result.rows[0]?.totalProfit, null);
+});
+
 test('report result groups rows and applies field aggregations', () => {
 	const result = buildReportResult(definition, [
 		{ section: 'Домофония', soldQty: 5, daysOfStock: 10, __count: 1 },

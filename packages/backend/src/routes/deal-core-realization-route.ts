@@ -6,6 +6,7 @@ import { ensureTransfersEntity, TRANSFERS_ENTITY } from '../b24/placement.js';
 import { fetchServiceProductIds } from '../deal-product-catalog.js';
 import { dealProductIdFromCoreItemCode } from '../deal-service-product-ids.js';
 import { ErpClient } from '../erp/client.js';
+import { readDealsActualProfit } from '../erp/deal-profit.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import {
 	assertDealQuoteVariantSelected,
@@ -67,7 +68,13 @@ export function registerDealCoreRealizationRoute(
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 				const realizations = await listDealRealizations(erp, dealId);
-				return { ok: true, realizations };
+				try {
+					const profits = await readDealsActualProfit(erp, [dealId]);
+					return { ok: true, realizations, actualProfit: profits.get(dealId) };
+				} catch (error) {
+					req.log.warn({ err: error, dealId }, 'Actual profit unavailable');
+					return { ok: true, realizations, actualProfit: null, profitError: 'Не удалось загрузить фактическую себестоимость' };
+				}
 			}
 			if (action === 'draft') {
 				const dealId = Number(b.dealId);

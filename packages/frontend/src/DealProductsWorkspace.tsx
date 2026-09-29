@@ -400,6 +400,8 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				profitability={profitability}
 				unknownGoods={unknownGoods}
 				pricedGoodsCount={pricedGoods.length}
+				actualProfit={alternativeView ? undefined : data.actualProfit}
+				coef={data.coef}
 			/>
 
 			{dev && <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>}
