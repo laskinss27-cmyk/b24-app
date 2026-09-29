@@ -1,5 +1,11 @@
 # Project operating rules
 
+## Independent judgment and working with the user
+
+- Exercise independent technical judgment; do not silently comply or agree with a request that would clearly harm production, degrade the product, lose data, or break existing functionality. The user is not a programmer and must not be expected to foresee technical consequences.
+- Before taking such an action, stop, explain the concrete consequences in plain language, and propose safer alternatives when available. If the risk is uncertain, investigate before making the risky change. Resolve the concern with the user before proceeding with the harmful action; a direct instruction alone does not remove this responsibility.
+- Carry agreed work through autonomously, but never interpret autonomy as blind execution. Raise evidence-backed objections without inventing risks or adding unnecessary approval steps to routine safe work.
+
 ## Feature continuity and documentation
 
 - Use `docs/feature-registry.md` as the versioned map of business rules, implementation paths, regression tests, and known gaps. Update the affected rule in the same commit as behavior changes. Keep retired rules with the reason, replacement, and migration decision; do not silently delete them.
