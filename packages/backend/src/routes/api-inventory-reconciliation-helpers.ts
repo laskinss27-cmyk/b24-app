@@ -5,7 +5,7 @@ import { fetchErpItemNames, fetchErpStoreStock } from '../erp/operations.js';
 import { frozenInventoryDifferences } from '../inventory-stock-snapshot.js';
 
 export async function loadInventoryPoint(client: B24Client, inventoryId: string, storeId: number) {
-	const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
+	const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY, FILTER: { ID: inventoryId } });
 	const item = (items ?? []).find((it) => String(it['ID']) === String(inventoryId));
 	if (!item) throw new Error('инвентаризация не найдена');
 	const data = item['DETAIL_TEXT'] ? (JSON.parse(String(item['DETAIL_TEXT'])) as Record<string, unknown>) : {};

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { ensureInventoryEntity, INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import {
@@ -32,7 +33,7 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 
 		const ent = await ensureInventoryEntity(client);
 		try {
-			const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
+			const items = await listAllEntityItems(client, INVENTORY_ENTITY);
 			const inventories = (items ?? []).map((it) => {
 				let parsed: Record<string, unknown> = {};
 				try {

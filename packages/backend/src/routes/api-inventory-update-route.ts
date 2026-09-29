@@ -34,7 +34,7 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 		await ensureInventoryEntity(client);
 		return withInventoryUpdateLock(b.inventoryId, async () => {
 			try {
-				const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY });
+				const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: INVENTORY_ENTITY, FILTER: { ID: b.inventoryId } });
 				const item = (items ?? []).find((it) => String(it['ID']) === String(b.inventoryId));
 				if (!item) return reply.code(200).send({ ok: false, error: 'инвентаризация не найдена' });
 

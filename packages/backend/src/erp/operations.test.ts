@@ -2123,9 +2123,9 @@ test('stock movement list keeps document filters, summaries and submission state
 		name: 'STE-1', doctype: 'Stock Entry', date: '2026-08-03', submitted: false, summary: 'списание · бой', dealId: '7',
 	}]);
 
-	const deliveryCall = calls.find((call) => call.doctype === 'Delivery Note' && call.limit === 1000);
+	const deliveryCall = calls.find((call) => call.doctype === 'Delivery Note');
 	assert.ok(deliveryCall);
-	assert.equal(deliveryCall.order, 'posting_date desc');
+	assert.equal(deliveryCall.order, 'posting_date desc, name desc');
 	assert.deepEqual(deliveryCall.filters, [
 		['docstatus', '!=', 2],
 		['is_return', '=', 0],
@@ -2133,7 +2133,7 @@ test('stock movement list keeps document filters, summaries and submission state
 		['posting_date', '<=', '2026-08-06'],
 		['Delivery Note Item', 'item_code', '=', '101'],
 	]);
-	assert.ok(calls.filter((call) => call.doctype !== 'Delivery Note').every((call) => call.limit === 50));
+	assert.ok(calls.every((call) => call.limit === 0));
 });
 
 test('stock document detail keeps header fields and warehouse-name conversion', async () => {

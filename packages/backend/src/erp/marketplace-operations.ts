@@ -489,7 +489,7 @@ export async function listMarketplaceOperations(
 			MARKETPLACE_TITLE_FIELD,
 			...(doctype === 'Delivery Note' ? ['grand_total'] : []),
 		];
-		const heads = await erp.list(doctype, fields, filters, opts.limit ?? 200, 'posting_date desc, creation desc');
+		const heads = await erp.list(doctype, fields, filters, opts.limit ?? 0, 'posting_date desc, creation desc');
 		for (const head of heads) {
 			const name = String(head['name'] ?? '');
 			if (!name) continue;
@@ -547,7 +547,6 @@ export async function listMarketplaceOperations(
 			});
 		}
 	}
-	return rows
-		.sort((left, right) => `${right.date}:${right.name}`.localeCompare(`${left.date}:${left.name}`))
-		.slice(0, opts.limit ?? 200);
+	rows.sort((left, right) => `${right.date}:${right.name}`.localeCompare(`${left.date}:${left.name}`));
+	return opts.limit && opts.limit > 0 ? rows.slice(0, opts.limit) : rows;
 }

@@ -41,8 +41,8 @@ export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase
 
 /**
  * Документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация).
- * Период (from/to по posting_date, YYYY-MM-DD) фильтруется в ядре; без периода — последние 50.
- * Сортировка posting_date desc (свежие сверху).
+ * Период и товар фильтруются в ядре. Возвращаем все заголовки: поиск и страницы
+ * по 50 строк применяются в интерфейсе после фильтрации, без потери старых документов.
  */
 export async function listCoreMovements(
 	erp: ErpClient,
@@ -54,8 +54,8 @@ export async function listCoreMovements(
 	if (opts.to) dateFilters.push(['posting_date', '<=', opts.to]);
 	// Фильтр по товару = по дочерней таблице документа (frappe: [child_doctype, field, op, val]).
 	const child = (childDt: string): unknown[] => opts.productId ? [[childDt, 'item_code', '=', String(opts.productId)]] : [];
-	const limit = (opts.from || opts.to || opts.productId) ? 1000 : 50;
-	const ORDER = 'posting_date desc';
+	const limit = 0;
+	const ORDER = 'posting_date desc, name desc';
 	if (kind === 'delivery' || kind === 'return') {
 		// Реализации и возвраты — один doctype (Delivery Note), разводим по is_return: 0=продажа, 1=возврат.
 		await ensureNoteField(erp, 'Delivery Note'); // причина возврата лежит в b24_note
@@ -84,7 +84,7 @@ export async function listCoreMovements(
 				name: String(row['name']), doctype: 'Stock Entry' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
 				summary: String(row[NOTE_FIELD] ?? '') || 'оприходование', dealId: String(row[DEAL_FIELD] ?? ''),
 			})),
-		].sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name)).slice(0, limit);
+		].sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name));
 	}
 	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
 	await ensureNoteField(erp, 'Stock Entry');

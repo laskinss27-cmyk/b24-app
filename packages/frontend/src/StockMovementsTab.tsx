@@ -5,6 +5,8 @@ import { StockDocumentDetailModal } from './StockDocumentDetailModal.js';
 import { IssueForm, ReceiptForm } from './StockDocumentForms.js';
 import { StockListFilterBar, mkPeriod } from './StockListFilterBar.js';
 import { StockProductFilter } from './StockProductFilter.js';
+import { StockMovementPagination } from './StockMovementPagination.js';
+import { stockMovementPage } from './stock-movement-view.js';
 import type { StockForm, StockMovementKind } from './StockWorkspaceTypes.js';
 
 const KIND_DOCTYPE: Record<StockMovementKind, string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note', return: 'Delivery Note' };
@@ -23,6 +25,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [search, setSearch] = useState('');
+	const [page, setPage] = useState(1);
 	const [status, setStatus] = useState('all');
 	const [from, setFrom] = useState('');
 	const [to, setTo] = useState('');
@@ -38,7 +41,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 	const showActions = canPost || canEditSubmitted || canCancelRealization;
 
 	useEffect(() => {
-		let alive = true; setList(null); setErr(null); setLoading(true);
+		let alive = true; setList(null); setErr(null); setLoading(true); setPage(1);
 		fetchMovements(kind, { ...period, ...(prod ? { productId: prod.productId } : {}) })
 			.then((m) => { if (alive) setList(m); })
 			.catch((e) => { if (alive) setErr(errText(e)); })
@@ -67,14 +70,8 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 		finally { setBusyDoc(null); }
 	};
 
-	const shown = (list ?? []).filter((m) => {
-		if (status === 'submitted' && !m.submitted) return false;
-		if (status === 'draft' && m.submitted) return false;
-		const q = search.trim().toLowerCase();
-		if (!q) return true;
-		const hay = `${m.name} ${m.dealId} ${m.ownerName ?? ''} ${m.summary} ${m.date}`.toLowerCase();
-		return q.split(/\s+/).every((w) => hay.includes(w));
-	});
+	const view = stockMovementPage(list ?? [], search, status, page);
+	const shown = view.rows;
 
 	const createLabel = kind === 'receipt' ? '➕ Приход' : '➕ Создать списание';
 
@@ -89,9 +86,10 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 				<span style={{ fontSize: 13, color: 'var(--app-muted)' }}>Товар:</span>
 				<StockProductFilter value={prod} onChange={setProd} />
 			</div>
-			<StockListFilterBar search={search} onSearch={setSearch} status={status} onStatus={setStatus} statusOptions={MOVE_STATUS_OPTS}
+			<StockListFilterBar search={search} onSearch={(value) => { setSearch(value); setPage(1); }} status={status} onStatus={(value) => { setStatus(value); setPage(1); }} statusOptions={MOVE_STATUS_OPTS}
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
-				onReset={reset} loading={loading} shown={shown.length} total={(list ?? []).length} />
+				onReset={reset} loading={loading} shown={view.total} total={(list ?? []).length} />
+			{!err && list && view.total > 0 && <StockMovementPagination {...view} onPage={setPage} />}
 			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Сделка / ответственный</th><th style={TH}>Инфо</th><th style={TH}>Статус</th>{showActions && <th style={TH}></th>}</tr></thead>
@@ -109,6 +107,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 					</tbody>
 				</table>
 			)}
+			{!err && list && view.pages > 1 && <StockMovementPagination {...view} onPage={setPage} />}
 			{openDoc && <StockDocumentDetailModal doctype={openDoc.doctype} name={openDoc.name} form={form} editInitially={Boolean(openDoc.edit)} {...(kind === 'issue' || kind === 'receipt' ? { printKind: kind } : {})} onChanged={(nextName) => { setOpenDoc({ name: nextName, doctype: openDoc.doctype }); setBump((b) => b + 1); }} onClose={() => setOpenDoc(null)} />}
 			{showForm && form && kind === 'receipt' && <ReceiptForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}
 			{showForm && form && kind === 'issue' && <IssueForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); setBump((b) => b + 1); }} />}

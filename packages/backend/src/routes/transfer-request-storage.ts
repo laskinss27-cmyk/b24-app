@@ -1,4 +1,5 @@
 import type { B24Client } from '../b24/client.js';
+import { listAllEntityItems } from '../b24/entity-items.js';
 import { TRANSFER_REQUESTS_ENTITY } from '../b24/placement.js';
 import {
 	parseTransferRequestItem,
@@ -13,7 +14,7 @@ export async function loadTransferRequest(client: B24Client, id: number): Promis
 }
 
 export async function loadTransferRequests(client: B24Client): Promise<StoredTransferRequest[]> {
-	const items = await client.call<Array<Record<string, unknown>>>('entity.item.get', { ENTITY: TRANSFER_REQUESTS_ENTITY, SORT: { ID: 'DESC' } });
+	const items = await listAllEntityItems(client, TRANSFER_REQUESTS_ENTITY);
 	return (items ?? []).map(parseTransferRequestItem).filter((item): item is StoredTransferRequest => item != null);
 }
 
