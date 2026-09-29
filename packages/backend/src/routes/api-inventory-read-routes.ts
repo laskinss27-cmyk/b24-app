@@ -15,6 +15,7 @@ import { loadInventoryPoint } from './api-inventory-reconciliation-helpers.js';
 import { inventoryClientFrom, inventoryErrorInfo } from './api-inventory-route-helpers.js';
 import { inventoryStatusForPoints } from './api-inventory-status.js';
 import type { InventoryAuthBody } from './api-inventory-types.js';
+import { freezeInventoryResultPrices } from './inventory-price-snapshot.js';
 
 async function resolveCurrentStoreTitle(erp: ErpClient, storeId: number, storeName: unknown): Promise<string> {
 	const storeTitles = await listActiveStoreTitles(erp);
@@ -33,7 +34,12 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 
 		const ent = await ensureInventoryEntity(client);
 		try {
-			const items = await listAllEntityItems(client, INVENTORY_ENTITY);
+			const listedItems = await listAllEntityItems(client, INVENTORY_ENTITY);
+			const erp = ErpClient.fromEnv();
+			const items: Array<Record<string, unknown>> = [];
+			for (const item of listedItems) {
+				items.push(erp ? await freezeInventoryResultPrices(client, erp, item) : item);
+			}
 			const inventories = (items ?? []).map((it) => {
 				let parsed: Record<string, unknown> = {};
 				try {
@@ -53,25 +59,6 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 					sectionIds: Array.isArray(parsed['sectionIds']) ? parsed['sectionIds'] : [],
 				};
 			});
-			const resultLines = inventories.flatMap((inventory) => inventory.points.flatMap((point) => {
-				const result = point['result'];
-				return result && typeof result === 'object' && Array.isArray((result as Record<string, unknown>)['lines'])
-					? (result as { lines: Array<Record<string, unknown>> }).lines
-					: [];
-			}));
-			const priceIds = resultLines.map((line) => Number(line['productId'])).filter((id) => Number.isInteger(id) && id > 0);
-			const erp = ErpClient.fromEnv();
-			if (erp && priceIds.length) {
-				try {
-					const prices = await fetchInventoryPurchasePrices(erp, priceIds);
-					for (const line of resultLines) {
-						const productId = Number(line['productId']);
-						if (!Number.isFinite(Number(line['purchase']))) line['purchase'] = prices.get(productId) ?? 0;
-					}
-				} catch (error) {
-					app.log.warn({}, `[api/inventory/list] purchase prices unavailable — ${inventoryErrorInfo(error)}`);
-				}
-			}
 			inventories.sort((a, b) => Number(b.id) - Number(a.id));
 			app.log.info({ entity: ent.status, count: inventories.length }, '[api/inventory/list] ok');
 			return { ok: true, entity: ent.status, inventories };

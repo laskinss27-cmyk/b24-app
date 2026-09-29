@@ -13,6 +13,12 @@
 - Backend/frontend test commands must discover all `src/**/*.test.ts` and `src/**/*.test.tsx`; do not replace discovery with a hand-maintained subset. New or recovered regression tests belong in the normal suite. Review unexplained decreases in test coverage/counts.
 - Store specifications and recovery references in tracked docs. Ignored `outputs`, temporary worktrees, and deployment logs may supplement evidence but must not be the only description of a shipped feature. When architecture changes, record the old/new data source and compatibility implications.
 
+## Inventory business decisions (2026-09-29)
+
+- Value inventory discrepancies at purchase cost, not retail. Keep prices already saved in a result. For older result lines without a saved price, persist the purchase price on their first valuation and reuse it thereafter; never silently revalue history from the current catalog. Do not present an unsaved price as fixed or invent a missing price as zero.
+- Staff manually account for sales/movements during counting before submitting the result. The user deliberately retired the requirement to restore historical automatic draft-freshness checks, full stock preflight, and the separate confirmed-recount workflow (INV-06). Do not reintroduce them as a release blocker or new feature without a new request.
+- This decision does not remove existing quantity snapshots, save acknowledgements, stale-save protection, duplicate/partial-submit handling, access checks, or ERP posting validation. Preserve these protections.
+
 ## Production deployment
 
 - Use `node scripts/b24-release.mjs build` from a clean, pushed Git checkout and `bash scripts/b24-deploy.sh IMAGE FULL_SHA` for production updates. The deploy script must pass the pre-deploy guard before stopping the service; do not replace it with ad hoc stop/run commands. See `docs/release-provenance.md` for archive transfer and the one-time legacy migration.
