@@ -1,6 +1,5 @@
 import type { StoreInfo, SupplyCard, TransferDoc } from './b24.js';
 import {stockChoiceLabel} from '@b24-app/shared';
-import { stageLabel } from './deal-display-formatters.js';
 import type { DealProductAvailabilityStatus } from './deal-product-availability.js';
 
 export function DealGoodsStatusCell({
@@ -53,18 +52,16 @@ export function DealGoodsStatusCell({
 					<span className={`st-badge ${activeTransfer.status === 'in_transit' ? 'transit' : 'requested'}`} title={`${activeTransfer.fromStore} → ${activeTransfer.toStore}`}>
 						{activeTransferLabel}
 					</span>
-				) : status === 'ready' ? <span className="st-badge ready">✓ хватит</span> : receivedTransfer ? (
+				) : status === 'ready' ? <span className="st-badge ready">✓ хватит</span> : (
+					<span className={`st-badge ${status === 'order' ? 'order' : 'requested'}`}>{activeSupply ? 'заказано' : status === 'order' ? 'нужен заказ' : 'нужно привезти'}</span>
+				)}
+				{!activeTransfer && status !== 'ready' && receivedTransfer && (
 					<button
-						className="st-badge ready"
+						className="st-badge requested"
 						disabled={refreshing || busy}
 						onClick={onRefresh}
-						title="Перемещение получено — обновить остаток из ядра, чтобы реализовать"
-					>{refreshing ? '…' : '✓ принято — обновить'}</button>
-				) : null}
-				{!activeTransfer && !receivedTransfer && status === 'order' && (
-					activeSupply
-						? <span className="st-badge order" title={`${activeSupply.title} · ${stageLabel(activeSupply.stageId)}`}>заказано</span>
-						: <span className="st-badge order" title="Нет нигде — отметь строку галочкой и нажми «Заказать»">нужен заказ</span>
+						title="Ранее товар привозили — проверить текущий остаток"
+					>{refreshing ? '…' : 'Обновить остаток'}</button>
 				)}
 			</>}
 		</td>

@@ -47,6 +47,7 @@ export interface DealShipment {
 
 export interface SupplyCard {
 	id: number;
+	closed?: boolean;
 	title: string;
 	stageId: string;
 	source?: 'b24' | 'core';
@@ -71,6 +72,7 @@ export interface DealShippedInfo {
 	sourceStoreId: number | null;
 	/** Заявки снабжения сделки (смарт-процесс «Снабжение»). */
 	supply: SupplyCard[];
+	supplyError?: string | null;
 	/** Строки сделки серверным клиентом (BX24 на фронте флапает). null — бэкенд не отдал, фолбэк на BX24. */
 	rows: DealProductRow[] | null;
 }
@@ -84,7 +86,7 @@ export async function fetchDealShipped(dealId: number): Promise<DealShippedInfo>
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string } & Partial<DealShippedInfo>;
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить отгрузки сделки');
-	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, reserves: json.reserves ?? {}, shipments: json.shipments ?? [], payment: json.payment ?? null, sourceStoreId: json.sourceStoreId ?? null, supply: json.supply ?? [], rows: json.rows ?? null };
+	return { orderId: json.orderId ?? null, shipped: json.shipped ?? {}, reserves: json.reserves ?? {}, shipments: json.shipments ?? [], payment: json.payment ?? null, sourceStoreId: json.sourceStoreId ?? null, supply: json.supply ?? [], ...(json.supplyError ? { supplyError: json.supplyError } : {}), rows: json.rows ?? null };
 }
 
 /** Повторитель для флапающих BX24-вызовов: каждая попытка со своим таймаутом. */

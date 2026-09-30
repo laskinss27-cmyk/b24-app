@@ -1,20 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { listAllEntityItems } from '../b24/entity-items.js';
-import { TRANSFERS_ENTITY, ensureTransfersEntity } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
 import { readableDocumentTitle } from '../erp/document-titles.js';
 import { listSupplyRequests, type SupplyRequest } from '../erp/operations.js';
-import { calculateRequestProgress, coverageBeyondBaseline, directReceiptFulfillment } from '../supply/progress.js';
-import {
-	addCovered,
-	listPurchaseChildren,
-	parseTransferProgress,
-	purchaseRequestLines,
-	STANDALONE_SUPPLY_REQUEST,
-	transferBelongsToRequest,
-} from './api-supply-request-progress.js';
+import { calculateRequestProgress } from '../supply/progress.js';
+import { loadSupplyOrderProgress } from './api-supply-order-progress.js';
+import { STANDALONE_SUPPLY_REQUEST } from './api-supply-request-progress.js';
 import { errInfo, supplyClientFrom } from './api-supply-route-helpers.js';
-import type { AuthBody, TransferProgress } from './api-supply-types.js';
+import type { AuthBody } from './api-supply-types.js';
 
 const MR_DONE = new Set(['Transferred', 'Issued', 'Received', 'Stopped']);
 
@@ -38,65 +30,8 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 				}).catch(() => [] as Array<Record<string, unknown>>);
 				for (const d of deals ?? []) titleMap.set(Number(d['ID']), String(d['TITLE'] ?? ''));
 			}
-			const planned = new Map<string, Map<number, number>>();
-			const fulfilled = new Map<string, Map<number, number>>();
-			const cancelled = new Map<string, Map<number, number>>();
-			const purchaseCovered = new Map<string, Map<number, number>>();
-			const purchaseTransferCoverage = new Map<string, Map<number, number>>();
-			const transfersByRequest = new Map<string, TransferProgress[]>();
-			const standaloneTransfers: TransferProgress[] = [];
-			const reservations = new Map<string, number>();
-			try {
-				await ensureTransfersEntity(client);
-				const transferItems = await listAllEntityItems(client, TRANSFERS_ENTITY);
-				for (const t of (transferItems ?? []).map(parseTransferProgress).filter((x): x is TransferProgress => x != null)) {
-					if (t.status === 'draft' || t.status === 'collected' || t.status === 'requested') {
-						for (const line of t.lines) {
-							const key = `${line.productId}:${t.fromStore}`;
-							reservations.set(key, (reservations.get(key) ?? 0) + line.qty);
-						}
-					}
-					const request = reqs.find((candidate) => transferBelongsToRequest(t, candidate));
-					if (!request) {
-						if (!t.supplyRequest && !t.dealId) standaloneTransfers.push(t);
-						continue;
-					}
-					transfersByRequest.set(request.requestKey, [...(transfersByRequest.get(request.requestKey) ?? []), t]);
-					if (t.correctionOf) continue;
-					// Перемещение, созданное из закупки, — следующий этап тех же единиц,
-					// а не дополнительное обеспечение заявки.
-					if (t.status !== 'canceled') {
-						addCovered(t.purchaseOrder ? purchaseTransferCoverage : planned, request.requestKey, t.lines);
-					}
-					const lines = t.status === 'shortage' ? t.receivedLines : (t.status === 'received' || t.status === 'posted') ? t.lines : [];
-					addCovered(fulfilled, request.requestKey, lines);
-				}
-			} catch (error) {
-				// Нельзя считать недоступный реестр пустым: иначе обработанные позиции
-				// ложно возвращаются в «нераспределённые».
-				throw new Error(`Не удалось загрузить реестр перемещений: ${errInfo(error)}`);
-			}
-			const purchasesByRequest = await listPurchaseChildren(erp, [...reqs, standaloneRequest]);
-			for (const [requestKey, purchases] of purchasesByRequest.entries()) {
-				for (const purchase of purchases) {
-					const requestLines = purchaseRequestLines(purchase.lines);
-					addCovered(purchaseCovered, requestKey, requestLines);
-					addCovered(purchase.supplyStage === 'cancelled' ? cancelled : planned, requestKey, requestLines);
-				}
-			}
-			for (const [requestKey, transferCoverage] of purchaseTransferCoverage.entries()) {
-				addCovered(planned, requestKey, coverageBeyondBaseline(transferCoverage, purchaseCovered.get(requestKey) ?? new Map()));
-			}
-			// Если поставщик привёз товар сразу на склад назначения заявки, физического
-			// перемещения не будет и оно не нужно. Проведённый приход сам завершает эту
-			// часть заявки; приход на любой другой склад по-прежнему ждёт перемещение.
-			for (const request of reqs) {
-				const directLines = directReceiptFulfillment(
-					request.toStore,
-					purchasesByRequest.get(request.requestKey) ?? [],
-				);
-				addCovered(fulfilled, request.requestKey, directLines);
-			}
+			const { planned, fulfilled, cancelled, transfersByRequest, standaloneTransfers, reservations, purchasesByRequest } =
+				await loadSupplyOrderProgress(erp, client, [...reqs, standaloneRequest]);
 			const enriched = reqs.map((o) => {
 				const byProduct = planned.get(o.requestKey) ?? new Map<number, number>();
 				const fulfilledByProduct = fulfilled.get(o.requestKey) ?? new Map<number, number>();

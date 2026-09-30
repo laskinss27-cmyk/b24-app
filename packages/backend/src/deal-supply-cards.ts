@@ -1,6 +1,8 @@
 import type { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
 import { listSupplyRequestsForDeal } from './erp/operations.js';
+import { calculateRequestProgress } from './supply/progress.js';
+import { loadSupplyOrderProgress } from './routes/api-supply-order-progress.js';
 
 // ── Снабжение (смарт-процесс «Снабжение», разведка 2026-06-11) ────────────────────────────────
 // Карточки «Поставка № N_<сделка>_<название>», parentId2 = сделка, перечень — текстовое поле.
@@ -36,6 +38,7 @@ export async function resolveSupplyStore(client: B24Client, storeName: string): 
 
 export interface SupplyCard {
 	id: number;
+	closed?: boolean;
 	title: string;
 	stageId: string;
 	source?: 'b24' | 'core';
@@ -57,20 +60,28 @@ export async function listSupplyCards(client: B24Client, dealId: number): Promis
 	return (res?.items ?? []).map((i) => ({ id: Number(i['id']), title: String(i['title'] ?? ''), stageId: String(i['stageId'] ?? '') }));
 }
 
-export async function listCoreSupplyCards(dealId: number): Promise<SupplyCard[]> {
-	const erp = ErpClient.fromEnv();
-	if (!erp) return [];
+export async function listCoreSupplyCards(dealId: number, client: B24Client, erp = ErpClient.fromEnv()): Promise<SupplyCard[]> {
+	if (!erp) throw new Error('ядро склада не подключено');
 	const requests = await listSupplyRequestsForDeal(erp, dealId);
-	return requests.map((r) => ({
-		id: 0,
-		title: `${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`,
-		stageId: `CORE:${r.status || 'Draft'}`,
-		source: 'core',
-		productIds: r.productIds,
-		date: r.date,
-		deadline: r.deadline,
-		toStore: r.toStore,
-		note: r.note,
-		items: r.items,
-	}));
+	if (!requests.length) return [];
+	const progress = await loadSupplyOrderProgress(erp, client, requests);
+	return requests.map((r) => {
+		const closed = ['Transferred', 'Issued', 'Received', 'Stopped'].includes(r.status) || calculateRequestProgress(
+			r.items, progress.planned.get(r.requestKey) ?? new Map(),
+			progress.fulfilled.get(r.requestKey) ?? new Map(), progress.cancelled.get(r.requestKey) ?? new Map(),
+		).closed;
+		return {
+			id: 0,
+			closed,
+			title: `${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`,
+			stageId: `CORE:${closed && r.status !== 'Stopped' ? 'Completed' : r.status || 'Draft'}`,
+			source: 'core',
+			productIds: r.productIds,
+			date: r.date,
+			deadline: r.deadline,
+			toStore: r.toStore,
+			note: r.note,
+			items: r.items,
+		};
+	});
 }

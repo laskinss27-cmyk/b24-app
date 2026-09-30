@@ -25,12 +25,14 @@ export function parseTransferProgress(it: Record<string, unknown>): TransferProg
 	return parseTransferItem(it);
 }
 
-function belongsToRequest(request: SupplyRequest, requestKey: string): boolean {
+type SupplyRequestIdentity = Pick<SupplyRequest, 'name' | 'requestKey'>;
+
+function belongsToRequest(request: SupplyRequestIdentity, requestKey: string): boolean {
 	if (request.name === STANDALONE_SUPPLY_REQUEST) return !requestKey;
 	return Boolean(requestKey) && requestKey === request.requestKey;
 }
 
-export function transferBelongsToRequest(transfer: TransferProgress, request: SupplyRequest): boolean {
+export function transferBelongsToRequest(transfer: TransferProgress, request: SupplyRequestIdentity): boolean {
 	return transfer.supplyRequest === request.name
 		&& belongsToRequest(request, transfer.supplyRequestKey);
 }
@@ -57,7 +59,7 @@ async function listChildHeaders(
 	return headers;
 }
 
-export async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequest[]): Promise<Map<string, PurchaseChild[]>> {
+export async function listPurchaseChildren(erp: ErpClient, requests: SupplyRequestIdentity[]): Promise<Map<string, PurchaseChild[]>> {
 	const out = new Map<string, PurchaseChild[]>();
 	if (!requests.length) return out;
 	const requestNames = requests.map((request) => request.name);

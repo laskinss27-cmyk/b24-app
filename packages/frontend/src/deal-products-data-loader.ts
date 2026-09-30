@@ -24,7 +24,7 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		withTimeout(fetchStores(), 15000, 'склады ядра'),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
-		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, sourceStoreId: null, supply: [], rows: null })),
+		withTimeout(fetchDealShipped(dealId), 20000, 'deal/shipped').catch((): DealShippedInfo => ({ orderId: null, shipped: {}, reserves: {}, shipments: [], payment: null, sourceStoreId: null, supply: [], supplyError: 'Не удалось проверить заявки снабжения. Обновите сделку перед заказом.', rows: null })),
 		withTimeout(fetchDealRealizationsData(dealId), 20000, 'реализации сделки из ядра'),
 		withTimeout(fetchDealPlan(dealId), 15000, 'состав сделки из ядра'),
 		withTimeout(fetchDealStages(dealId), 15000, 'этапы сделки из ядра'),
@@ -117,5 +117,5 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 			purchasingPrice: dealLinePurchasingPrice(item.productId, rate, isService ? null : enrich[item.productId]?.purchasingPrice),
 		} satisfies EnrichedRow;
 	})]));
-	return { rows, planRows, coef, coreReals, actualProfit, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
+	return { rows, planRows, coef, coreReals, actualProfit, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, supplyError: shippedInfo.supplyError ?? null, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
 }

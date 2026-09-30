@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { assertDealSupplyOrderAllowed } from '../deal-supply-repeat-order.js';
 import { requireSupplyOrderNote } from '@b24-app/shared';
 import { normalizeDomain } from '../security.js';
 import { ErpClient } from '../erp/client.js';
@@ -49,18 +50,24 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			.map((l) => ({ productId: Number(l.productId), itemName: String(l.itemName ?? ''), qty: Number(l.qty) }))
 			.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && Number.isFinite(l.qty) && l.qty > 0);
 		if (!lines.length) return reply.code(400).send({ ok: false, error: 'нет позиций для заявки' });
+		const lockKey = `deal:${dealId}`;
+		if (supplyCreationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'Заказ по этой сделке уже создаётся. Обновите сделку.' });
+		supplyCreationLocks.add(lockKey);
 		try {
 			await assertDealQuoteVariantSelected(erp, dealId);
 			const toStore = String(b.toStore ?? '').trim();
 			const scheduleDate = String(b.deadline ?? '').trim();
 			if (!toStore) return reply.code(400).send({ ok: false, error: 'не указан конечный склад' });
 			if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate) || Number.isNaN(new Date(`${scheduleDate}T00:00:00`).getTime())) return reply.code(400).send({ ok: false, error: 'не указана крайняя дата поставки' });
+			await assertDealSupplyOrderAllowed(erp, client, dealId, toStore, lines);
 			const { name } = await createSupplyRequest(erp, { dealId, scheduleDate, toStore, note, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, ...(l.itemName ? { itemName: l.itemName } : {}) })) });
 			app.log.info({ dealId, lines: lines.length, name, toStore, scheduleDate }, '[api/supply/request] created');
 			return { ok: true, name };
 		} catch (err) {
 			app.log.error({ dealId }, `[api/supply/request] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			supplyCreationLocks.delete(lockKey);
 		}
 	});
 

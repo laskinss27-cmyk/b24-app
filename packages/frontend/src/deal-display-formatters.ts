@@ -9,7 +9,7 @@ export const stageLabel = (stageId: string): string => {
 		if (status.includes('draft')) return 'черновик';
 		if (status.includes('pending')) return 'новая';
 		if (status.includes('ordered')) return 'заказано';
-		if (status.includes('transferred') || status.includes('received') || status.includes('issued')) return 'выполнена';
+		if (status.includes('transferred') || status.includes('received') || status.includes('issued') || status.includes('completed')) return 'выполнена';
 		if (status.includes('stopped') || status.includes('cancel')) return 'отменена';
 		return stageId.slice(5) || 'в ядре';
 	}

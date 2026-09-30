@@ -35,10 +35,14 @@ export function registerDealSupplyRoutes(app: FastifyInstance, clientFrom: DealC
 		const dealId = Number(b.dealId);
 		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
 		try {
+			let supplyError: string | null = null;
 			const [info, b24Supply, coreSupply] = await Promise.all([
 				loadDealOrderInfo(client, dealId),
 				listSupplyCards(client, dealId).catch(() => [] as SupplyCard[]),
-				listCoreSupplyCards(dealId).catch(() => [] as SupplyCard[]),
+				listCoreSupplyCards(dealId, client).catch((error) => {
+					supplyError = `Не удалось проверить заявки снабжения: ${errInfo(error)}`;
+					return [] as SupplyCard[];
+				}),
 			]);
 			const supply = [...coreSupply, ...b24Supply];
 			return {
@@ -50,6 +54,7 @@ export function registerDealSupplyRoutes(app: FastifyInstance, clientFrom: DealC
 				payment: info.payment,
 				sourceStoreId: info.sourceStoreId,
 				supply,
+				supplyError,
 				rows: [],
 			};
 		} catch (err) {
@@ -80,7 +85,7 @@ export function registerDealSupplyRoutes(app: FastifyInstance, clientFrom: DealC
 		try {
 			const [existing, coreExisting] = await Promise.all([
 				listSupplyCards(client, dealId),
-				listCoreSupplyCards(dealId).catch(() => [] as SupplyCard[]),
+				listCoreSupplyCards(dealId, client),
 			]);
 			const open = existing.find((c) => !/SUCCESS|FAIL/i.test(c.stageId)) ?? existing[0];
 			if (open) {

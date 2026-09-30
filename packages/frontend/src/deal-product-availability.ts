@@ -50,6 +50,23 @@ export function dealProductTransferLabel(transfer: TransferDoc): string {
 export function dealProductActiveSupply(row: EnrichedRow, supply: SupplyCard[]): SupplyCard | null {
 	return supply.find((card) =>
 		card.source === 'core'
-		&& !/stopped|closed|completed|success|fail/i.test(card.stageId)
+		&& !(card.closed ?? /stopped|closed|completed|success|fail|transferred|received|issued/i.test(card.stageId))
 		&& (card.productIds ?? []).includes(row.productId)) ?? null;
+}
+
+/** Reuse the ordinary order action; historic deliveries do not cover today's stock shortage. */
+export function dealSupplyOrderQuantities(
+	rows: EnrichedRow[], supply: SupplyCard[], remaining: (row: EnrichedRow) => number,
+	storeOf: (row: EnrichedRow) => number,
+): Map<string, number> {
+	const stockLeft = new Map<string, number>();
+	return new Map(rows.map((row) => {
+		const qty = remaining(row);
+		if (!supply.some((card) => card.source === 'core' && card.productIds?.includes(row.productId))) return [row.id, qty];
+		const storeId = storeOf(row);
+		const key = `${row.productId}:${storeId}`;
+		const available = stockLeft.get(key) ?? Math.max(dealProductStockAmount(row, storeId), 0);
+		stockLeft.set(key, Math.max(available - qty, 0));
+		return [row.id, Math.max(qty - available, 0)];
+	}));
 }

@@ -39,6 +39,7 @@ export interface TableData {
 	sourceStoreId: number | null;
 	/** Заявки снабжения сделки. */
 	supply: SupplyCard[];
+	supplyError?: string | null;
 	/** Сохранённые версии договоров, сформированные нашим конструктором. */
 	contracts: StoredDealContractDocument[];
 	/** Активные склады каталога. */

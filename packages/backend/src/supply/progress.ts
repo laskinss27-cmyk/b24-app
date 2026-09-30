@@ -39,12 +39,18 @@ export function calculateRequestProgress<T extends { productId: number; qty: num
 	fulfilled: ReadonlyMap<number, number>,
 	cancelled: ReadonlyMap<number, number>,
 ): SupplyRequestProgress<T> {
-	const uncovered = (item: T, covered: ReadonlyMap<number, number>): T => ({
-		...item,
-		qty: Math.max(item.qty - (covered.get(item.productId) ?? 0) - (cancelled.get(item.productId) ?? 0), 0),
-	});
-	const remaining = items.map((item) => uncovered(item, planned)).filter((item) => item.qty > 0);
-	const unfulfilled = items.map((item) => uncovered(item, fulfilled)).filter((item) => item.qty > 0);
+	const uncovered = (covered: ReadonlyMap<number, number>): T[] => {
+		const available = new Map(covered), cancelledLeft = new Map(cancelled);
+		return items.map((item) => {
+			const cancelledQty = Math.min(item.qty, Math.max(cancelledLeft.get(item.productId) ?? 0, 0));
+			cancelledLeft.set(item.productId, (cancelledLeft.get(item.productId) ?? 0) - cancelledQty);
+			const coveredQty = Math.min(item.qty - cancelledQty, Math.max(available.get(item.productId) ?? 0, 0));
+			available.set(item.productId, (available.get(item.productId) ?? 0) - coveredQty);
+			return { ...item, qty: Math.max(item.qty - cancelledQty - coveredQty, 0) };
+		}).filter((item) => item.qty > 0);
+	};
+	const remaining = uncovered(planned);
+	const unfulfilled = uncovered(fulfilled);
 	return { remaining, unfulfilled, closed: items.length > 0 && unfulfilled.length === 0 };
 }
 

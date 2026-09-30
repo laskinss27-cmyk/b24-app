@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { calculateRequestProgress, coverageBeyondBaseline, directReceiptFulfillment } from './progress.js';
 
+test('delivery and cancellation quantities cover duplicate product rows only once', () => {
+	const items = [{ productId: 101, qty: 2, row: 'first' }, { productId: 101, qty: 2, row: 'second' }];
+	const partial = calculateRequestProgress(items, new Map([[101, 4]]), new Map([[101, 2]]), new Map());
+	assert.equal(partial.closed, false);
+	assert.deepEqual(partial.remaining, []);
+	assert.deepEqual(partial.unfulfilled, [{ productId: 101, qty: 2, row: 'second' }]);
+	assert.equal(calculateRequestProgress(items, new Map(), new Map([[101, 3]]), new Map()).closed, false);
+	assert.equal(calculateRequestProgress(items, new Map(), new Map([[101, 3]]), new Map([[101, 1]])).closed, true);
+});
+
 test('purchase transfer covers lines missing from its changed or cancelled purchase', () => {
 	assert.deepEqual(
 		coverageBeyondBaseline(
