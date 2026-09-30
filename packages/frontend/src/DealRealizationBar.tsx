@@ -79,7 +79,7 @@ export function DealRealizationBar({
 					{workItems.length > 0 && <span className="plan-group">Услуги · в едином документе, без склада: {workItems.map((item) => `${item.name.slice(0, 22)} ×${item.quantity}`).join(' · ')}</span>}
 				</div>
 			) : (
-				<span className="hint">Отметь строки галочками: доступное можно реализовать, отсутствующее — заказать через снабжение.</span>
+				<span className="hint">Отметь строки галочками для реализации или заказа через снабжение.</span>
 			)}
 			<div className="realize-actions">
 				<div className="deal-action-total"><span>Общая сумма</span><b>{rub(total)}</b></div>

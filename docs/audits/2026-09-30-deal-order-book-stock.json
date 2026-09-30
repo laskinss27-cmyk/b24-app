@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-30",
+  "feature": "SUP-04",
+  "baseProductionSha": "88de177ab9379c3ff433a076d62412d91b8a4b95",
+  "trigger": "Deal 36874 repeat order was rejected because KN-4710 #11020 had one unit in Bin and one unit remaining in the plan. No new Material Request was created by that attempt.",
+  "decision": "User explicitly requires ordering even when book stock is sufficient: an item can be missing in reality, broken or unsuitable as a display sample. Retain the existing order action and protection from unfinished requests. No additional button or automatic reserve.",
+  "retiredRule": {
+    "sourceRelease": "88de177",
+    "oldUi": "Repeat order action hidden when calculated shortage was zero; default quantity subtracted book stock.",
+    "oldServer": "Repeated quantity could not exceed remaining deal quantity minus book stock.",
+    "replacement": "No stock-based availability or quantity cap. Staff choose a positive order quantity; form defaults to remaining unshipped deal quantity.",
+    "migration": "None; existing orders, stock, receipts and transfers remain unchanged. No automatic retry of the rejected order."
+  },
+  "architecture": {
+    "oldEligibilitySources": ["Material Request plus B24 transfer/ERP purchase progress", "Sales Order and Delivery Note remaining quantities", "ERP Bin destination stock"],
+    "newServerEligibilitySources": ["Material Request plus B24 transfer/ERP purchase progress"],
+    "ui": "Remaining plan quantity still determines selectable unshipped rows and the editable default quantity. Stock remains visible in the table but does not gate ordering.",
+    "compatibility": "No API payload/schema change. Destination, deadline, positive quantity and common comment remain required. Existing automatic completion calculation, fail-closed reads, duplicate locks, reservations and shipment safeguards remain."
+  },
+  "verification": {
+    "backend": { "passed": 383, "failed": 0 },
+    "frontend": { "passed": 179, "failed": 0 },
+    "releaseTooling": { "passed": 6, "failed": 0 },
+    "typecheck": "passed",
+    "localBuild": "passed; subsequent changes only clarify selection hint/title",
+    "browser": "Real DealProductsWorkspace and production styles with mocked data: sufficient stock shows Заказать next to ✓ хватит, default quantity three is editable to four; active request and unreadable progress hide ordering. No live business order submitted.",
+    "backendRegression": "Completed request allows a new request with quantity four despite book stock three and plan quantity two. Original request stays unchanged; concurrent click and next unfinished request block another order; unreadable progress refuses creation.",
+    "frontendRegression": "Order candidates available at stock zero, partial, exact and surplus; active request/transfer, manual rows and fully shipped rows remain excluded. Duplicate product plan rows remain selectable.",
+    "productionWrites": "None during implementation; no replacement order created for deal 36874."
+  },
+  "release": "Prepared implementation; production remains on 88de177 until release approval."
+}

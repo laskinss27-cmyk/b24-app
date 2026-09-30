@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React, { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { dealProductActiveSupply, dealSupplyOrderQuantities } from './deal-product-availability.js';
+import { dealProductActiveSupply, dealSupplyOrderCandidates } from './deal-product-availability.js';
 import type { EnrichedRow } from './deal-products-table-types.js';
 import type { SupplyCard } from './deal-fulfillment.js';
 import { DealGoodsStatusCell } from './DealGoodsStatusCell.js';
@@ -21,13 +21,18 @@ test('completed requests release ordering; any remaining active request still bl
 	}
 });
 
-test('repeat order defaults to today shortage and stock is counted only once across duplicate plan rows', () => {
+test('order candidates remain available despite sufficient book stock, but not during active supply or transfer', () => {
 	const qty = (r: EnrichedRow) => r.quantity;
-	assert.equal(dealSupplyOrderQuantities([row], [complete], qty, () => 1).get('a'), 2);
-	assert.equal(dealSupplyOrderQuantities([{ ...row, stocks: [{ storeId: 1, storeName: 'Точка', amount: 3 }] }], [complete], qty, () => 1).get('a'), 0);
-	assert.equal(dealSupplyOrderQuantities([row], [], qty, () => 1).get('a'), 3);
-	const split = dealSupplyOrderQuantities([row, { ...row, id: 'b' }], [complete], qty, () => 1);
-	assert.deepEqual([...split.values()], [2, 3]);
+	for (const amount of [0, 1, 3, 10]) {
+		const stockedRow = { ...row, stocks: [{ storeId: 1, storeName: 'Точка', amount }] };
+		assert.deepEqual(dealSupplyOrderCandidates([stockedRow], [complete], qty, []), [stockedRow]);
+	}
+	assert.deepEqual(dealSupplyOrderCandidates([row], [], qty, []), [row]);
+	assert.deepEqual(dealSupplyOrderCandidates([row], [complete, { ...complete, closed: false }], qty, []), []);
+	assert.deepEqual(dealSupplyOrderCandidates([row], [complete], () => 0, []), []);
+	assert.deepEqual(dealSupplyOrderCandidates([{ ...row, manual: true }], [complete], qty, []), []);
+	assert.deepEqual(dealSupplyOrderCandidates([row], [complete], qty, [{ id: 1, status: 'in_transit', lines: [{ productId: 101, qty: 3 }] } as never]), []);
+	assert.deepEqual(dealSupplyOrderCandidates([row, { ...row, id: 'b' }], [complete], qty, []).map((r) => r.id), ['a', 'b']);
 });
 
 test('a historical received transfer cannot display current shortage as ready', () => {

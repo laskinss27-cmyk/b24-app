@@ -59,7 +59,7 @@ export function registerSupplyRequestRoutes(app: FastifyInstance, supplyCreation
 			const scheduleDate = String(b.deadline ?? '').trim();
 			if (!toStore) return reply.code(400).send({ ok: false, error: 'не указан конечный склад' });
 			if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate) || Number.isNaN(new Date(`${scheduleDate}T00:00:00`).getTime())) return reply.code(400).send({ ok: false, error: 'не указана крайняя дата поставки' });
-			await assertDealSupplyOrderAllowed(erp, client, dealId, toStore, lines);
+			await assertDealSupplyOrderAllowed(erp, client, dealId, lines);
 			const { name } = await createSupplyRequest(erp, { dealId, scheduleDate, toStore, note, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, ...(l.itemName ? { itemName: l.itemName } : {}) })) });
 			app.log.info({ dealId, lines: lines.length, name, toStore, scheduleDate }, '[api/supply/request] created');
 			return { ok: true, name };

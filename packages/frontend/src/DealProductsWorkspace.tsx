@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { dealSupplyOrderQuantities } from './deal-product-availability.js';
+import { dealSupplyOrderCandidates } from './deal-product-availability.js';
 import type { DealPrintKind } from './Kp.js';
 import { rub } from './deal-display-formatters.js';
 import { DealPaymentStatus, DealProductsSummaryHeader } from './DealProductsSummary.js';
@@ -338,9 +338,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 	// Заказ в снабжение: отмеченные чекбоксами товары превращаются в документ Material Request,
 	// который затем появляется в дисплее снабжения. Те же чекбоксы используются и другими действиями.
-	const supplyQuantities = dealSupplyOrderQuantities(visibleGoods, data.supply, remaining, storeOf);
-	const supplyNeeded = (row: typeof visibleGoods[number]): number => supplyQuantities.get(row.id) ?? 0;
-	const supplyGoods = data.supplyError ? [] : visibleGoods.filter((r) => !r.manual && isSel(r) && supplyNeeded(r) > 0 && !activeSupplyOf(r) && !activeTransferOf(r));
+	const supplyGoods = data.supplyError ? [] : dealSupplyOrderCandidates(visibleGoods.filter(isSel), data.supply, remaining, dealTransfers);
 	const reserveGoods = visibleGoods.filter((row) => !row.manual && isSel(row) && remaining(row) > 0 && amountAt(row, storeOf(row)) > 0 && Boolean(storeName(storeOf(row))));
 	const reservationStatus = dealReservations.error && !showReservation ? `Резерв: ${dealReservations.error}` : dealReservations.current?.status === 'pending'
 		? `Резерв: заявка ожидает снабжение до ${new Date(dealReservations.current.requestedExpiresAt).toLocaleString('ru-RU')}`
@@ -359,7 +357,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		supplyToStore,
 		supplyDeadline,
 		supplyOrderNote,
-		remaining: supplyNeeded,
+		remaining,
 		onReload,
 		setSupplyBusy,
 		setShowSupplyOrder,

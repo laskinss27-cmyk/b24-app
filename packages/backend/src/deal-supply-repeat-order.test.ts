@@ -11,14 +11,12 @@ import { registerSupplyRequestRoutes } from './routes/api-supply-request-routes.
 const line = { productId: 101, qty: 2 };
 const closed: SupplyCard = { id: 0, title: 'MR-1', stageId: 'CORE:Completed', source: 'core', productIds: [101], closed: true };
 
-test('repeat order requires all matching requests to finish and only orders the current shortage', () => {
-	const remaining = new Map([[101, 3]]), stock = new Map([[101, 1]]);
-	validateDealRepeatOrder([closed], [line], remaining, stock);
-	assert.throws(() => validateDealRepeatOrder([closed, { ...closed, closed: false }], [line], remaining, stock), /ещё не выполнена/);
-	assert.throws(() => validateDealRepeatOrder([closed], [{ ...line, qty: 3 }], remaining, stock), /не хватает 2/);
-	assert.throws(() => validateDealRepeatOrder([closed], [line], remaining, new Map([[101, 3]])), /не хватает 0/);
-	assert.throws(() => validateDealRepeatOrder([closed], [line, line], remaining, stock), /превышает нехватку/);
-	validateDealRepeatOrder([{ ...closed, productIds: [202], closed: false }], [line], remaining, stock);
+test('repeat order requires matching requests to finish but does not cap staff quantities by book stock', () => {
+	validateDealRepeatOrder([closed], [line]);
+	assert.throws(() => validateDealRepeatOrder([closed, { ...closed, closed: false }], [line]), /ещё не выполнена/);
+	validateDealRepeatOrder([closed], [{ ...line, qty: 30 }]);
+	validateDealRepeatOrder([closed], [line, line]);
+	validateDealRepeatOrder([{ ...closed, productIds: [202], closed: false }], [line]);
 });
 
 class SupplyErp {
@@ -90,8 +88,9 @@ test('deal cards use the same delivery coverage as supply: received, partial, co
 	await assert.rejects(listCoreSupplyCards(32100991, b24([], true), erp.asClient()), /реестр перемещений/);
 });
 
-test('server creates a fresh request after delivery, blocks next duplicate and simultaneous submission', async (t) => {
+test('server orders despite sufficient book stock, preserves history and blocks duplicate/simultaneous submission', async (t) => {
 	const erp = new SupplyErp();
+	erp.stock = 3; // Plan needs two; stock is sufficient, but staff require replacement equipment.
 	t.mock.method(ErpClient, 'fromEnv', () => erp.asClient());
 	t.mock.method(B24Client.prototype, 'call', async () => ({}));
 	t.mock.method(B24Client.prototype, 'callWithMeta', async () => ({ result: [transfer('received')] }));
@@ -99,7 +98,7 @@ test('server creates a fresh request after delivery, blocks next duplicate and s
 	app.decorate('config', { portalDomain: 'portal.example' } as Config);
 	registerSupplyRequestRoutes(app, new Set());
 	const payload = { domain: 'portal.example', accessToken: 'test', dealId: 32100991, note: 'Товар ушёл, требуется снова',
-		toStore: 'Точка', deadline: '2099-10-01', lines: [line] };
+		toStore: 'Точка', deadline: '2099-10-01', lines: [{ ...line, qty: 4 }] };
 	try {
 		const original = JSON.stringify(erp.requests[0]);
 		let release!: () => void;
@@ -113,6 +112,7 @@ test('server creates a fresh request after delivery, blocks next duplicate and s
 		release();
 		assert.equal((await first).json().ok, true);
 		assert.equal(erp.requests.length, 2);
+		assert.deepEqual(erp.requests[1]?.items, [{ item_code: '101', qty: 4, schedule_date: '2099-10-01', warehouse: 'Точка - TEST' }]);
 		assert.equal(JSON.stringify(erp.requests[0]), original);
 		const duplicate = await app.inject({ method: 'POST', url: '/api/supply/request', payload });
 		assert.equal(duplicate.json().ok, false);

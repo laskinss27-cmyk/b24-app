@@ -54,19 +54,11 @@ export function dealProductActiveSupply(row: EnrichedRow, supply: SupplyCard[]):
 		&& (card.productIds ?? []).includes(row.productId)) ?? null;
 }
 
-/** Reuse the ordinary order action; historic deliveries do not cover today's stock shortage. */
-export function dealSupplyOrderQuantities(
+/** Book stock does not prove that an item is usable for the customer. */
+export function dealSupplyOrderCandidates(
 	rows: EnrichedRow[], supply: SupplyCard[], remaining: (row: EnrichedRow) => number,
-	storeOf: (row: EnrichedRow) => number,
-): Map<string, number> {
-	const stockLeft = new Map<string, number>();
-	return new Map(rows.map((row) => {
-		const qty = remaining(row);
-		if (!supply.some((card) => card.source === 'core' && card.productIds?.includes(row.productId))) return [row.id, qty];
-		const storeId = storeOf(row);
-		const key = `${row.productId}:${storeId}`;
-		const available = stockLeft.get(key) ?? Math.max(dealProductStockAmount(row, storeId), 0);
-		stockLeft.set(key, Math.max(available - qty, 0));
-		return [row.id, Math.max(qty - available, 0)];
-	}));
+	transfers: TransferDoc[],
+): EnrichedRow[] {
+	return rows.filter((row) => !row.manual && remaining(row) > 0
+		&& !dealProductActiveSupply(row, supply) && !dealProductActiveTransfer(row, transfers));
 }

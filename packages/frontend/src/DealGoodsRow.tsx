@@ -80,7 +80,7 @@ export function DealGoodsRow({
 						checked={selected}
 						disabled={selectionDisabled}
 						onChange={onToggleSelected}
-						title={status === 'ready' ? 'Отметить: реализовать (если хватает) или отправить в снабжение' : 'Отметить, чтобы отправить в снабжение (на складе не хватает)'}
+						title="Отметить для реализации или заказа в снабжение"
 					/>}
 				</div>
 			</td>
