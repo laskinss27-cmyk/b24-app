@@ -593,6 +593,8 @@ export async function updateDealStageItem(
 	await erp.update('Sales Order', name, {
 		delivery_date: deliveryDate,
 		items: items.map((row) => ({
+			...(row['name'] ? { name: String(row['name']) } : {}),
+			[DEAL_PLAN_LINE_KEY_FIELD]: String(row[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(row['name'] ?? '').trim(),
 			item_code: String(row['item_code'] ?? ''),
 			qty: Number(row['qty'] ?? 0),
 			price_list_rate: Number(row['price_list_rate'] ?? row['rate'] ?? 0),
@@ -626,6 +628,7 @@ export async function removeDealStageItem(
 		const qty = Number(row['qty'] ?? 0) - (rowProductId === productId ? stageItem.qty : 0);
 		if (!Number.isInteger(rowProductId) || rowProductId <= 0 || qty <= 0.000001) return [];
 		return [{
+			lineKey: String(row[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(row['name'] ?? '').trim(),
 			productId: rowProductId,
 			itemName: String(row['item_name'] ?? ''),
 			qty,
@@ -640,15 +643,24 @@ export async function removeDealStageItem(
 	}
 
 	const deliveryDate = String(plan?.['delivery_date'] ?? new Date().toISOString().slice(0, 10));
+	const previousItems = (plan?.['items'] as Array<Record<string, unknown>>) ?? [];
+	const previousByKey = new Map(previousItems.map((row) => [
+		String(row[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(row['name'] ?? '').trim(), row,
+	]));
 	await erp.update('Sales Order', name, {
 		delivery_date: deliveryDate,
-		items: durableLines.map((row) => ({
-			item_code: String(row.productId),
-			qty: row.qty,
-			price_list_rate: row.priceListRate,
-			discount_percentage: row.discountPercent,
-			delivery_date: deliveryDate,
-		})),
+		items: durableLines.map((row) => {
+			const previous = row.lineKey ? previousByKey.get(row.lineKey) : previousItems.find((item) => Number(item['item_code']) === row.productId);
+			return {
+				...(previous?.['name'] ? { name: String(previous['name']) } : {}),
+				[DEAL_PLAN_LINE_KEY_FIELD]: row.lineKey || String(previous?.[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(previous?.['name'] ?? '').trim() || randomUUID(),
+				item_code: String(row.productId),
+				qty: row.qty,
+				price_list_rate: row.priceListRate,
+				discount_percentage: row.discountPercent,
+				delivery_date: deliveryDate,
+			};
+		}),
 		[DEAL_STAGES_FIELD]: JSON.stringify(stages),
 	});
 	return listDealPlan(erp, dealId);

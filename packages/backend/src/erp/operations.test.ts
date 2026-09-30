@@ -802,13 +802,46 @@ test('deal stage lifecycle keeps stage JSON and aggregated plan quantity in sync
 
 	const afterUpdate = await updateDealStageItem(erp.asClient(), 91, 'stage-1', 101, 2, 140, 5);
 	assert.equal(afterUpdate[0]?.qty, 3);
+	assert.equal(afterUpdate[0]?.lineKey, 'line-101');
+	assert.equal(((await erp.get('Sales Order', 'SO-STAGES'))?.items as Array<Record<string, unknown>>)[0]?.name, 'SO-STAGE-ROW');
 	assert.deepEqual((await listDealStages(erp.asClient(), 91))[0]?.items, [
 		{ productId: 101, itemName: 'Product 101', qty: 2, price: 140, discountPercent: 5, isService: false },
 	]);
 
 	const afterRemove = await removeDealStageItem(erp.asClient(), 91, 'stage-1', 101);
 	assert.equal(afterRemove[0]?.qty, 1);
+	assert.equal(afterRemove[0]?.lineKey, 'line-101');
+	assert.equal(((await erp.get('Sales Order', 'SO-STAGES'))?.items as Array<Record<string, unknown>>)[0]?.name, 'SO-STAGE-ROW');
 	assert.deepEqual((await listDealStages(erp.asClient(), 91))[0]?.items, []);
+});
+
+test('editing and removing another stage keeps already sold duplicate plan rows and legacy identities', async () => {
+	const erp = new FakeErp([{
+		name: 'DN-SOLD', docstatus: 1, b24_deal_id: '93',
+		items: [item('DN-A', 202, 1, 100, { [REALIZATION_SEGMENT_FIELD]: 'line:key-a' }),
+			item('DN-B', 202, 1, 200, { [REALIZATION_SEGMENT_FIELD]: 'line:key-b' })],
+	}], {
+		name: 'SO-IDENTITY', docstatus: 0, b24_deal_id: '93', delivery_date: '2026-08-10',
+		b24_deal_stages: JSON.stringify([{ id: 'stage-1', at: '2026-08-02', byId: '1', byName: 'Manager',
+			items: [{ productId: 101, itemName: 'Product 101', qty: 1, price: 150, isService: false }] }]),
+		items: [item('SO-101', 101, 2, 100, { b24_line_key: 'key-stage' }),
+			item('SO-202-A', 202, 1, 100, { b24_line_key: 'key-a' }),
+			item('SO-202-B', 202, 1, 200, { b24_line_key: 'key-b' }), item('SO-LEGACY', 203, 1, 80)],
+	});
+	const beforeSales = await listDealRealizations(erp.asClient(), 93);
+	for (const update of [
+		() => updateDealStageItem(erp.asClient(), 93, 'stage-1', 101, 1, 180, 0),
+		() => removeDealStageItem(erp.asClient(), 93, 'stage-1', 101),
+	]) {
+		const plan = await update();
+		assert.deepEqual(plan.filter((line) => line.productId === 202).map((line) => [line.lineKey, line.qty, line.priceListRate]),
+			[['key-a', 1, 100], ['key-b', 1, 200]]);
+		assert.equal(plan.find((line) => line.productId === 203)?.lineKey, 'SO-LEGACY');
+		const saved = await erp.get('Sales Order', 'SO-IDENTITY');
+		assert.deepEqual((saved?.items as Array<Record<string, unknown>>).map((line) => [line.name, line.b24_line_key]),
+			[['SO-101', 'key-stage'], ['SO-202-A', 'key-a'], ['SO-202-B', 'key-b'], ['SO-LEGACY', 'SO-LEGACY']]);
+		assert.deepEqual(await listDealRealizations(erp.asClient(), 93), beforeSales);
+	}
 });
 
 test('returned stage quantity reduces both the stage and the accumulated plan', async () => {
