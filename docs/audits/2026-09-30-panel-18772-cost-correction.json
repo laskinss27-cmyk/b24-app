@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "date": "2026-09-30",
+  "kind": "data-correction-without-application-release",
+  "productionSha": "5271263a98f776fa600522def3ea488dfd2ce831",
+  "authorization": {
+    "request": "Set historical cost to 3700 for deal 38458 and subsequent sales/remaining units of the same cost layer",
+    "clarification": "User explicitly confirmed panel 18772, not monitor 10686"
+  },
+  "itemCode": "18772",
+  "oldUnitCost": 6673,
+  "newUnitCost": 3700,
+  "scope": {
+    "from": "2026-09-11 06:03:10",
+    "warehouses": [
+      "Железноводская, секция 34 - УД",
+      "Максидом ул. Фаворского 12 - УД"
+    ],
+    "qtyAtCorrection": [
+      1,
+      1
+    ],
+    "targetSale": "MAT-DN-2026-00834",
+    "dealId": 38458,
+    "remainingCorrectedQty": 1,
+    "remainingWarehouse": "Максидом ул. Фаворского 12 - УД",
+    "laterOtherCostLayers": "Not part of this confirmed correction"
+  },
+  "method": {
+    "doctype": "Stock Reconciliation",
+    "name": "MAT-RECO-2026-00180",
+    "docstatus": 1,
+    "purpose": "Stock Reconciliation",
+    "expenseAccount": "Stock Adjustment - УД",
+    "costCenter": "Main - УД",
+    "valuationDifference": -5946,
+    "quantityDifference": 0,
+    "auditNote": "Standard Comment attached to correction document",
+    "repostingFunction": "erpnext.stock.doctype.repost_item_valuation.repost_item_valuation.execute_reposting_entry",
+    "reposts": [
+      {
+        "name": "emi3b9r69t",
+        "status": "Completed"
+      },
+      {
+        "name": "emiiksf7b3",
+        "status": "Completed"
+      }
+    ]
+  },
+  "verification": {
+    "saleBusinessHashUnchanged": true,
+    "allItemWarehouseQuantitiesUnchanged": true,
+    "totalItemQty": 11,
+    "previousSalesCostsUnchanged": true,
+    "otherWarehouseValuesUnchanged": true,
+    "correctionLedgerRows": 2,
+    "eachCorrectionActualQty": 0,
+    "eachCorrectionValueDifference": -2973,
+    "saleRevenue": 27415,
+    "oldSaleCost": 16906,
+    "newSaleCost": 13933,
+    "oldSaleProfit": 10509,
+    "newSaleProfit": 13482,
+    "profitIncrease": 2973,
+    "remainingUnitCost": 3700,
+    "glBalanced": true,
+    "saleGlDebitAndCredit": 13933,
+    "correctionGlDebitAndCredit": 5946,
+    "standardSalesReportDealProfit": 13482,
+    "reportNote": "At post-check the September report had 159 successful deals; the earlier 157-deal snapshot was not silently replaced or attributed wholly to this correction."
+  },
+  "recovery": {
+    "protectedServerDirectory": "/root/b24-data-audits/panel-18772-deal-38458",
+    "files": [
+      "before.json",
+      "draft.json",
+      "submitted.json",
+      "after.json",
+      "repost-favorskogo.log",
+      "repost-zheleznovodskaya.log"
+    ],
+    "rollbackProcedure": "If an authorized reversal is required, cancel only MAT-RECO-2026-00180 through ERPNext, then complete only its generated stock/accounting reposts and compare to before.json. Do not restore journal fields or Bin directly; do not bypass period/access validation."
+  }
+}
