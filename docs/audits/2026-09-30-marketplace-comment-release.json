@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-30",
+  "feature": "MARKET-03",
+  "gitSha": "be9f64745f584654556cec15919f08ca85c2e0e1",
+  "gitTree": "032c7e0eded3af633457014dc8b4041d9cd6e0d7",
+  "imageId": "sha256:45ca5263cd2ce5f62856f8fa43d080fbf0aacdb5e68f71a0419e432b2243622d",
+  "previousGitSha": "5271263a98f776fa600522def3ea488dfd2ce831",
+  "rollbackContainer": "b24-backend-prev-before-be9f64745f58-20260930T090037Z",
+  "authorization": "User explicitly approved this release after the prepared version was presented.",
+  "validation": {
+    "backendTests": { "passed": 379, "failed": 0 },
+    "frontendTests": { "passed": 176, "failed": 0 },
+    "releaseToolingTests": { "passed": 6, "failed": 0 },
+    "typecheck": "passed",
+    "localBuild": "passed",
+    "releaseBuild": "clean pushed Git checkout, b24-release.mjs build, full suites inside image",
+    "guard": "passed; source guard and current release ancestry preserved",
+    "internalHealth": "passed; expected full SHA",
+    "publicHealth": "passed; expected full SHA",
+    "erpReadFromBackend": "passed",
+    "dockerNetwork": "erpnext_frappe_network confirmed by docker inspect",
+    "runningImage": "matches immutable guarded candidate image ID",
+    "releaseIntegrity": "passed after deployment",
+    "commentField": "Delivery Note.b24_marketplace_comment, Text; initialized by ensureMarketplaceFields and successfully selected through ERP REST",
+    "browser": "Local real components with mocked data: optional multiline input and comment displayed when opening document after journal reload",
+    "financialTestDocuments": "No production sale or stock posting created for verification"
+  },
+  "compatibility": {
+    "schema": "Additive Text custom field. Older documents remain unchanged; previous backend ignores the new field.",
+    "history": "No historical comments backfilled, no quantities or prices changed."
+  },
+  "retention": {
+    "initialRun": "Failed: hourly timer coincided with container switch and observed backend between stop and start.",
+    "retry": "2026-09-30 09:02 UTC: Result=success, ExecMainStatus=0; cleanup deferred by normal one-hour deployment safety window."
+  },
+  "serverEvidence": {
+    "build": "/root/b24-release-audits/marketplace-comment-build.log",
+    "guard": "/root/b24-release-audits/marketplace-comment-guard.json",
+    "deploy": "/root/b24-release-audits/marketplace-comment-deploy.log"
+  }
+}
