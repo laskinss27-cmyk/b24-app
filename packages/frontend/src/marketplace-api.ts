@@ -16,6 +16,7 @@ export interface MarketplaceOperationItem {
 
 export interface MarketplaceOperationRow {
 	name: string;
+	comment?: string;
 	title: string;
 	operation: MarketplaceOperationKind;
 	marketplace: string;
@@ -84,6 +85,7 @@ export async function createMarketplaceSale(input: {
 	marketplace: string;
 	storeTitle: string;
 	postingDate: string;
+	comment?: string;
 	lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>;
 }): Promise<{ name: string; title: string }> {
 	const res = await fetch('/api/marketplaces/sale', {

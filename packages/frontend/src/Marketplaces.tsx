@@ -94,6 +94,7 @@ function MarketplaceSaleModal({
 	const [marketplace, setMarketplace] = useState(form.marketplaces[0] ?? '');
 	const [storeTitle, setStoreTitle] = useState(form.stores.includes('Маркетплейс') ? 'Маркетплейс' : (form.stores[0] ?? ''));
 	const [postingDate, setPostingDate] = useState(localDate);
+	const [comment, setComment] = useState('');
 	const [lines, setLines] = useState<SaleLine[]>([]);
 	const [picking, setPicking] = useState(false);
 	const [busy, setBusy] = useState(false);
@@ -141,12 +142,14 @@ function MarketplaceSaleModal({
 					marketplace,
 					storeTitle,
 					postingDate,
+					comment: comment.trim(),
 					lines: lines.map(({ productId, itemName, qty, rate }) => ({ productId, itemName, qty, rate })),
 				});
 			onDone({
 				name: result.name,
 				title: result.title,
 				operation: 'sale',
+				comment: comment.trim(),
 				marketplace,
 				date: postingDate,
 				storeTitle,
@@ -212,6 +215,9 @@ function MarketplaceSaleModal({
 					</table>
 				</div>
 				<div className="marketplace-sale-total"><span>Итого</span><b>{money(total)}</b></div>
+				<label className="marketplace-sale-comment">Комментарий (необязательно)
+					<textarea rows={3} value={comment} onChange={(event) => setComment(event.target.value)} disabled={busy} />
+				</label>
 				{error && <div className="marketplace-error">{error}</div>}
 				<footer>
 					<button type="button" onClick={onClose}>Отмена</button>
@@ -555,6 +561,7 @@ function MarketplaceDocumentModal({
 					<div><span>Склад</span><b>{row.storeTitle || '—'}</b></div>
 					<div><span>Статус</span><b>{row.submitted ? 'Проведено' : 'Черновик'}</b></div>
 				</div>
+				{row.comment && <div className="marketplace-document-comment"><span>Комментарий</span><p>{row.comment}</p></div>}
 				<div className="marketplace-lines marketplace-document-lines">
 					<table>
 						<thead><tr><th>Движение</th><th>Товар</th><th>Склад</th><th>Количество</th><th>Цена</th><th>Сумма</th></tr></thead>

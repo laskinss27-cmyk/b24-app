@@ -58,6 +58,7 @@ test('marketplace sale preserves request and response fields', async () => {
 		marketplace: 'Ozon',
 		storeTitle: 'Marketplace',
 		postingDate: '2026-08-06',
+		comment: 'Заказ №123\nДоставка завтра',
 		lines: [{ productId: 42, itemName: 'Bundle', qty: 2, rate: 1500 }],
 	};
 	const requests = captureResponses([{ ok: true, name: 'DN-1', title: 'Sale 1' }]);

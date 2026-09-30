@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ErpClient } from './client.js';
+import { MARKETPLACE_COMMENT_FIELD } from './marketplace-fields.js';
 import {
 	MARKETPLACE_NAME_FIELD,
 	MARKETPLACE_OLD_ID_FIELD,
@@ -1020,6 +1021,7 @@ test('marketplace field setup keeps document, bundle and legacy ID payloads', as
 			MARKETPLACE_OPERATION_FIELD,
 			MARKETPLACE_NAME_FIELD,
 			MARKETPLACE_TITLE_FIELD,
+			MARKETPLACE_COMMENT_FIELD,
 			MARKETPLACE_BUNDLE_SOURCE_FIELD,
 			MARKETPLACE_BUNDLE_UNITS_FIELD,
 			MARKETPLACE_OLD_ID_FIELD,
@@ -1049,6 +1051,10 @@ test('marketplace field setup keeps document, bundle and legacy ID payloads', as
 		{
 			dt: 'Stock Entry', fieldname: MARKETPLACE_TITLE_FIELD, label: 'Marketplace title', fieldtype: 'Data',
 			insert_after: 'stock_entry_type', in_standard_filter: 1, in_list_view: 1,
+		},
+		{
+			dt: 'Delivery Note', fieldname: MARKETPLACE_COMMENT_FIELD, label: 'Комментарий реализации маркетплейса',
+			fieldtype: 'Text', insert_after: MARKETPLACE_TITLE_FIELD,
 		},
 		{
 			dt: 'Item', fieldname: MARKETPLACE_BUNDLE_SOURCE_FIELD, label: 'Bundle source product', fieldtype: 'Data',
@@ -1084,6 +1090,7 @@ test('marketplace realization gets a human title, warehouse marker and is submit
 	assert.equal(created[MARKETPLACE_NAME_FIELD], 'Озон');
 	assert.equal(created[MARKETPLACE_TITLE_FIELD], '23.07.26_Озон');
 	assert.equal(created['b24_deal_id'], undefined);
+	assert.equal(created[MARKETPLACE_COMMENT_FIELD], undefined);
 	assert.equal(created.items[0]?.['warehouse'], 'Маркетплейс - TEST');
 	assert.equal(created.items[0]?.['qty'], 2);
 	assert.equal(created.items[0]?.['rate'], 1500);
@@ -1094,6 +1101,7 @@ test('marketplace realization gets a human title, warehouse marker and is submit
 	assert.equal(journal[0]?.operation, 'sale');
 	assert.equal(journal[0]?.storeTitle, 'Маркетплейс');
 	assert.equal(journal[0]?.quantity, 2);
+	assert.equal(journal[0]?.comment, undefined);
 	assert.deepEqual(journal[0]?.items, [{
 		productId: 101,
 		itemName: '#101',
@@ -1103,6 +1111,20 @@ test('marketplace realization gets a human title, warehouse marker and is submit
 		direction: 'out',
 		storeTitle: 'Маркетплейс',
 	}]);
+});
+
+test('marketplace sale persists an optional multiline comment through posting and journal reload', async () => {
+	for (const comment of ['  Заказ №123\nДоставка завтра  ', 'Комментарий длиннее 140 символов: ' + 'Подробности заказа. '.repeat(15), '', '   ']) {
+		const erp = new FakeErp([]);
+		await createMarketplaceSale(erp.asClient(), {
+			marketplace: 'Озон', storeTitle: 'Маркетплейс', postingDate: '2026-07-23', comment,
+			lines: [{ productId: 101, itemName: 'Product 101', qty: 2, rate: 1500 }],
+		});
+		assert.equal(erp.active()[0]?.docstatus, 1);
+		assert.equal(erp.active()[0]?.[MARKETPLACE_COMMENT_FIELD], comment.trim() || undefined);
+		const journal = await listMarketplaceOperations(erp.asClient());
+		assert.equal(journal[0]?.comment, comment.trim() || undefined);
+	}
 });
 
 test('marketplace bundle repacks source units into finished bundle units on the same warehouse', async () => {

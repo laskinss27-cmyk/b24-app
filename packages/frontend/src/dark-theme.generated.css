@@ -3443,7 +3443,7 @@ html[data-theme="dark"] .marketplace-journal > header {
 html[data-theme="dark"] .marketplace-journal p {
     color: #b9c6d7
 }
-html[data-theme="dark"] .marketplace-journal button, html[data-theme="dark"] .marketplace-filters input, html[data-theme="dark"] .marketplace-filters select, html[data-theme="dark"] .marketplace-sale-fields input, html[data-theme="dark"] .marketplace-sale-fields select, html[data-theme="dark"] .marketplace-line-toolbar button, html[data-theme="dark"] .marketplace-modal footer button, html[data-theme="dark"] .marketplace-back {
+html[data-theme="dark"] .marketplace-journal button, html[data-theme="dark"] .marketplace-filters input, html[data-theme="dark"] .marketplace-filters select, html[data-theme="dark"] .marketplace-sale-fields input, html[data-theme="dark"] .marketplace-sale-fields select, html[data-theme="dark"] .marketplace-sale-comment textarea, html[data-theme="dark"] .marketplace-line-toolbar button, html[data-theme="dark"] .marketplace-modal footer button, html[data-theme="dark"] .marketplace-back {
     border: 1px solid #34445a;
     background: #202c3d;
     color: #e5edf8
@@ -3453,6 +3453,15 @@ html[data-theme="dark"] .marketplace-filters {
 }
 html[data-theme="dark"] .marketplace-filters label, html[data-theme="dark"] .marketplace-sale-fields label {
     color: #b9c6d7
+}
+html[data-theme="dark"] .marketplace-sale-comment {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .marketplace-document-comment {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .marketplace-document-comment p {
+    color: #e5edf8
 }
 html[data-theme="dark"] .marketplace-filters > span {
     color: #b9c6d7

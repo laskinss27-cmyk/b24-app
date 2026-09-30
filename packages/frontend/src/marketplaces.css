@@ -91,6 +91,7 @@
 .marketplace-filters select,
 .marketplace-sale-fields input,
 .marketplace-sale-fields select,
+.marketplace-sale-comment textarea,
 .marketplace-line-toolbar button,
 .marketplace-modal footer button,
 .marketplace-back {
@@ -118,6 +119,33 @@
 	gap: 4px;
 	color: #687386;
 	font-size: 11px;
+}
+
+.marketplace-sale-comment {
+	display: grid;
+	gap: 6px;
+	margin: 16px 20px;
+	color: #687386;
+	font-size: 12px;
+}
+
+.marketplace-sale-comment textarea {
+	resize: vertical;
+	min-height: 70px;
+	cursor: text;
+}
+
+.marketplace-document-comment {
+	margin: 16px 20px;
+	color: #687386;
+	font-size: 12px;
+}
+
+.marketplace-document-comment p {
+	margin: 6px 0 0;
+	color: #1a2231;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .marketplace-filters > span {

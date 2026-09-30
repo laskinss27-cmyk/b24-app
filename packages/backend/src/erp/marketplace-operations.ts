@@ -4,6 +4,7 @@ import { fetchErpStoreStock } from './inventory-reconciliation.js';
 import {
 	MARKETPLACE_BUNDLE_SOURCE_FIELD,
 	MARKETPLACE_BUNDLE_UNITS_FIELD,
+	MARKETPLACE_COMMENT_FIELD,
 	MARKETPLACE_NAME_FIELD,
 	MARKETPLACE_OPERATION_FIELD,
 	MARKETPLACE_TITLE_FIELD,
@@ -28,6 +29,7 @@ export interface MarketplaceOperationItem {
 
 export interface MarketplaceOperation {
 	name: string;
+	comment?: string;
 	title: string;
 	operation: MarketplaceOperationKind;
 	marketplace: string;
@@ -83,6 +85,7 @@ export async function createMarketplaceSale(
 		marketplace: string;
 		storeTitle: string;
 		postingDate: string;
+		comment?: string;
 		lines: Array<{ productId: number; itemName: string; qty: number; rate: number }>;
 	},
 ): Promise<{ name: string; title: string }> {
@@ -111,6 +114,7 @@ export async function createMarketplaceSale(
 		[MARKETPLACE_OPERATION_FIELD]: 'sale',
 		[MARKETPLACE_NAME_FIELD]: marketplace,
 		[MARKETPLACE_TITLE_FIELD]: title,
+		...(args.comment?.trim() ? { [MARKETPLACE_COMMENT_FIELD]: args.comment.trim() } : {}),
 		items: args.lines.map((line) => ({
 			item_code: String(line.productId),
 			qty: line.qty,
@@ -534,6 +538,8 @@ export async function listMarketplaceOperations(
 			});
 			rows.push({
 				name,
+				...(operation === 'sale' && String(doc[MARKETPLACE_COMMENT_FIELD] ?? '').trim()
+					? { comment: String(doc[MARKETPLACE_COMMENT_FIELD]).trim() } : {}),
 				title: String(doc[MARKETPLACE_TITLE_FIELD] ?? head[MARKETPLACE_TITLE_FIELD] ?? '') || `${date}_${marketplace}`,
 				operation,
 				marketplace,

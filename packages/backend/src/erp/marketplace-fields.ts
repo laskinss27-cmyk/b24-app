@@ -3,6 +3,7 @@ import { ErpClient } from './client.js';
 export const MARKETPLACE_OPERATION_FIELD = 'b24_marketplace_operation';
 export const MARKETPLACE_NAME_FIELD = 'b24_marketplace';
 export const MARKETPLACE_TITLE_FIELD = 'b24_marketplace_title';
+export const MARKETPLACE_COMMENT_FIELD = 'b24_marketplace_comment';
 export const MARKETPLACE_BUNDLE_SOURCE_FIELD = 'b24_bundle_source_product';
 export const MARKETPLACE_BUNDLE_UNITS_FIELD = 'b24_bundle_units';
 export const MARKETPLACE_OLD_ID_FIELD = 'b24_marketplace_old_id';
@@ -33,6 +34,13 @@ export async function ensureMarketplaceFields(erp: ErpClient): Promise<void> {
 				});
 			}
 		}
+	}
+	const commentFieldName = `Delivery Note-${MARKETPLACE_COMMENT_FIELD}`;
+	if (!(await erp.get('Custom Field', commentFieldName))) {
+		await erp.create('Custom Field', {
+			dt: 'Delivery Note', fieldname: MARKETPLACE_COMMENT_FIELD, label: 'Комментарий реализации маркетплейса',
+			fieldtype: 'Text', insert_after: MARKETPLACE_TITLE_FIELD,
+		});
 	}
 	for (const field of [
 		{ fieldname: MARKETPLACE_BUNDLE_SOURCE_FIELD, label: 'Bundle source product', fieldtype: 'Data' },

@@ -205,6 +205,10 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 			if (!DATE_RE.test(postingDate)) {
 				return reply.code(400).send({ ok: false, error: 'неверная дата реализации' });
 			}
+			if (body['comment'] != null && typeof body['comment'] !== 'string') {
+				return reply.code(400).send({ ok: false, error: 'комментарий должен быть текстом' });
+			}
+			const comment = typeof body['comment'] === 'string' ? body['comment'].trim() : '';
 			const lines = (Array.isArray(body['lines']) ? body['lines'] as Array<Record<string, unknown>> : [])
 				.map((line) => ({
 					productId: Number(line['productId']),
@@ -227,6 +231,7 @@ export function registerApiMarketplacesRoute(app: FastifyInstance): void {
 				marketplace,
 				storeTitle: resolvedStore,
 				postingDate,
+				comment,
 				lines,
 			});
 			app.log.info({ name: result.name, title: result.title, marketplace, storeTitle: resolvedStore }, '[api/marketplaces/sale] submitted');
