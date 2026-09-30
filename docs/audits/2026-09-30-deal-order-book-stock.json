@@ -2,7 +2,7 @@
   "date": "2026-09-30",
   "feature": "SUP-04",
   "baseProductionSha": "88de177ab9379c3ff433a076d62412d91b8a4b95",
-  "trigger": "Deal 36874 repeat order was rejected because KN-4710 #11020 had one unit in Bin and one unit remaining in the plan. No new Material Request was created by that attempt.",
+  "trigger": "A repeat order was rejected because book stock matched the remaining plan quantity. No new Material Request was created by the rejected attempt.",
   "decision": "User explicitly requires ordering even when book stock is sufficient: an item can be missing in reality, broken or unsuitable as a display sample. Retain the existing order action and protection from unfinished requests. No additional button or automatic reserve.",
   "retiredRule": {
     "sourceRelease": "88de177",
@@ -28,5 +28,28 @@
     "frontendRegression": "Order candidates available at stock zero, partial, exact and surplus; active request/transfer, manual rows and fully shipped rows remain excluded. Duplicate product plan rows remain selectable.",
     "productionWrites": "None during implementation; no replacement order created for deal 36874."
   },
-  "release": "Prepared implementation; production remains on 88de177 until release approval."
+  "release": {
+    "status": "deployed",
+    "authorization": "User explicitly approved prepared version 6e20f39: выкладывай; then requested a read-only monitor investigation for deal 36874.",
+    "deployedAtUtc": "2026-09-30T12:03:29Z",
+    "gitSha": "6e20f39dd83f83090356859143dd5f614079526d",
+    "gitTree": "90506f521ece9eb719bbccafb7e81a87c0a4f429",
+    "imageId": "sha256:44f558b716021d199c75d3e56f31f2cc5beb61f210bb4a7b24e2a5cddaf1ecf2",
+    "containerId": "afe9d407d6f14236973b09356c229be7e5fff1950100c3c3685a5659c36b525b",
+    "previousGitSha": "88de177ab9379c3ff433a076d62412d91b8a4b95",
+    "rollbackContainer": "b24-backend-prev-before-6e20f39dd83f-20260930T120329Z",
+    "build": "Clean pushed Git checkout; b24-release.mjs build, full backend/frontend suites inside the image.",
+    "guard": "passed; source guard, ancestry and stopped candidate image pin verified before switch",
+    "internalHealth": "passed; expected full SHA and tree",
+    "publicHealth": "passed; expected full SHA and tree",
+    "erpReadFromBackend": "passed; authenticated read-only Company request",
+    "network": "erpnext_frappe_network confirmed by docker inspect",
+    "integrity": "passed; running OCI revision, baked metadata and guarded immutable image agree",
+    "retention": "Result=success, ExecMainStatus=0; deferred by normal one-hour deployment safety window.",
+    "serverEvidence": {
+      "build": "/root/b24-release-audits/order-book-stock-build.log",
+      "guard": "/root/b24-release-audits/order-book-stock-guard.json",
+      "deploy": "/root/b24-release-audits/order-book-stock-deploy.log"
+    }
+  }
 }
