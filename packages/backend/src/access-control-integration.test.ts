@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import { emptyAccessControlDraft, type AccessSubjectRule } from '@b24-app/shared';
+import { ACCESS_PERMISSIONS, WAREHOUSE_PERMISSION_IDS, emptyAccessControlDraft, type AccessSubjectRule } from '@b24-app/shared';
 import { B24ApiError, B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
 import { appPermission, invalidateAccessPolicyCache } from './access-policy.js';
@@ -178,4 +178,38 @@ test('native portal administration does not override an explicit ERP warehouse r
 	const response = await f.call('/api/stock/create-product', { name: 'Проверка доступа' });
 	assert.equal(response.statusCode, 403);
 	assert.deepEqual(response.json().deniedPermissions, ['stock.create_product']);
+});
+
+test('saving employee and department warehouse roles never changes decisions outside the warehouse or writes native rights', async (t) => {
+	const f = await fixture(t);
+	const unrelated = ACCESS_PERMISSIONS.filter((permission) => !WAREHOUSE_PERMISSION_IDS.includes(permission.id) && !permission.id.startsWith('admin.'));
+	for (const target of ['employees', 'departments'] as const) {
+		for (const profile of ['manager', 'supply', 'leadership', ...(target === 'employees' ? ['administrator'] : [])] as AccessSubjectRule['profileId'][]) {
+			f.setActor('1858'); const draft = await f.load();
+			delete draft.employees['3000']; delete draft.departments['10'];
+			// Even an old client sending hidden overrides must not activate other ERP sections.
+			draft[target][target === 'employees' ? '3000' : '10'] = rule(profile, { 'catalog.create': 'deny', 'deals.view': 'deny' });
+			assert.equal((await f.call('/api/access-control/save', { draft })).statusCode, 200);
+			f.setActor('3000'); const me = (await f.call('/api/access-control/me')).json();
+			for (const permission of unrelated) assert.equal(me.decisions[permission.id], 'inherit', `${target}/${profile}/${permission.id}`);
+		}
+	}
+	// The fixture rejects every Bitrix method except user.current, including any
+	// native role, entity ACL, scope or app-option mutation during these real saves.
+});
+
+test('warehouse restrictions do not run authorization checks on unrelated catalog and deal routes', async (t) => {
+	const f = await fixture(t);
+	const routes = ['/api/catalog/browse', '/api/catalog/update-prices', '/api/deal/plan', '/api/deal/update-product'];
+	for (const route of routes) f.app.post(route, async (req) => ({ ok: true, hasWarehousePolicy: Boolean(req.appAccess) }));
+	const draft = await f.load(); draft.departments['10'] = rule('manager');
+	assert.equal((await f.call('/api/access-control/save', { draft })).statusCode, 200);
+	f.setActor('3000'); f.fail();
+	for (const route of routes) {
+		const response = await f.call(route);
+		assert.equal(response.statusCode, 200, route);
+		assert.deepEqual(response.json(), { ok: true, hasWarehousePolicy: false });
+	}
+	// Conversely, the warehouse check remains enforced rather than becoming a bypass.
+	assert.equal((await f.call('/api/stock/submit')).statusCode, 503);
 });
