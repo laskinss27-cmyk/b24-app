@@ -83,7 +83,7 @@ export function CatalogProductTable({
 									{marketplaceMode && <td className="marketplace-old-id-col">{d.marketplaceOldId || <span className="muted">—</span>}</td>}
 									<td className="ph-col">
 										{photo
-											? <img className="ph" src={photo} loading="lazy" alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+											? <img key={photo} className="ph" src={photo} loading="lazy" alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
 											: <div className="no-ph">▦</div>}
 									</td>
 									<td className="nm">

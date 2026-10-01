@@ -174,7 +174,7 @@ export function CatalogProductCard({
 				<div className="catalog-product-card-body">
 					<aside className="catalog-product-visual">
 						{displayedPhoto
-							? <img src={displayedPhoto} alt={row.name} onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+							? <img key={displayedPhoto} src={displayedPhoto} alt={row.name} onError={(event) => { event.currentTarget.style.display = 'none'; }} />
 							: <div className="catalog-product-no-photo">Фото пока нет</div>}
 						{editing && <div className="catalog-product-photo-editor">
 							<label className="btn-secondary">
