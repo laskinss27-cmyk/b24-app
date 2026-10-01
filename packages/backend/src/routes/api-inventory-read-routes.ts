@@ -115,11 +115,16 @@ export function registerInventoryReadRoutes(app: FastifyInstance): void {
 
 	app.get('/api/inventory/erp-image', async (req, reply) => {
 		const p = String((req.query as Record<string, unknown> | undefined)?.['p'] ?? '');
-		if (!/^\/files\/[\w.\-]+$/.test(p)) return reply.code(400).send('bad path');
+		const fileName = p.startsWith('/files/') ? p.slice('/files/'.length) : '';
+		// ERPNext retains Unicode and spaces in uploaded names. Permit one file segment,
+		// then encode it ourselves so URL syntax can never change the requested path.
+		if (!fileName || fileName === '.' || fileName === '..' || /[/\\?#\u0000-\u001f\u007f]/u.test(fileName)) {
+			return reply.code(400).send('bad path');
+		}
 		const base = process.env['ERPNEXT_URL'];
 		if (!base) return reply.code(404).send('core off');
 		try {
-			const r = await fetch(`${base.replace(/\/$/, '')}${p}`, { signal: AbortSignal.timeout(8000) });
+			const r = await fetch(`${base.replace(/\/$/, '')}/files/${encodeURIComponent(fileName)}`, { signal: AbortSignal.timeout(8000) });
 			if (!r.ok) return reply.code(r.status).send('not found');
 			const buf = Buffer.from(await r.arrayBuffer());
 			reply.header('Content-Type', r.headers.get('content-type') ?? 'image/jpeg');
