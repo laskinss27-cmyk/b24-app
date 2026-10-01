@@ -7,11 +7,10 @@ export function DealProductsSummaryHeader({
 	goodsTotal,
 	worksTotal,
 	total,
-	profitability,
+	plannedGoodsProfit,
 	unknownGoods,
 	pricedGoodsCount,
 	actualProfit,
-	coef = 0.5,
 }: {
 	dealId: number | null;
 	rowCount: number;
@@ -19,11 +18,10 @@ export function DealProductsSummaryHeader({
 	goodsTotal: number;
 	worksTotal: number;
 	total: number;
-	profitability: number;
+	plannedGoodsProfit: number;
 	unknownGoods: number;
 	pricedGoodsCount: number;
 	actualProfit?: import('@b24-app/shared').DealActualProfit | null | undefined;
-	coef?: number;
 }): JSX.Element {
 	return (
 		<header className="deal-head">
@@ -35,18 +33,19 @@ export function DealProductsSummaryHeader({
 				<div><span>Сумма товаров</span><b>{rub(goodsTotal)}</b></div>
 				<div><span>Сумма работ</span><b>{rub(worksTotal)}</b></div>
 				<div><span>Общая сумма</span><b>{rub(total)}</b></div>
-				<div title={unknownGoods ? `Прибыль товаров рассчитана без ${unknownGoods} из ${pricedGoodsCount}: не заполнена закупочная цена.` : 'Прибыль товаров плюс прибыль работ.'}>
-					<span>Плановая прибыль · оценка</span>
-					<b className={`deal-profit-value${profitability > 0 ? ' positive' : profitability < 0 ? ' negative' : ''}`}>{unknownGoods ? '≈ ' : ''}{rub(profitability)}</b>
+				<div className="deal-profit-card">
+					<span>Прибыль товаров</span>
+					<dl className="deal-profit-comparison">
+						{actualProfit !== undefined && <>
+							<dt title="Проведённые реализации минус возвраты. Себестоимость — из складских проводок.">Факт</dt>
+							<dd><b className={`deal-profit-value${(actualProfit?.goodsProfit ?? 0) > 0 ? ' positive' : (actualProfit?.goodsProfit ?? 0) < 0 ? ' negative' : ''}`}>{actualProfit?.goodsProfit == null ? '—' : rub(actualProfit.goodsProfit)}</b></dd>
+						</>}
+						<dt title="Сумма товаров по составу сделки минус их закупочная стоимость. Услуги не включены.">План · оценка</dt>
+						<dd><b className={`deal-profit-value${plannedGoodsProfit > 0 ? ' positive' : plannedGoodsProfit < 0 ? ' negative' : ''}`}>{unknownGoods > 0 && unknownGoods === pricedGoodsCount ? '—' : `${unknownGoods ? '≈ ' : ''}${rub(plannedGoodsProfit)}`}</b></dd>
+					</dl>
+					{actualProfit !== undefined && <small>{!actualProfit ? 'Себестоимость недоступна' : !actualProfit.documentCount ? 'Нет проведённых реализаций' : actualProfit.missingCostLines ? `Нет полных данных: ${actualProfit.missingCostLines} строк` : 'Реализации минус возвраты'}</small>}
+					{unknownGoods > 0 && <small>План без {unknownGoods} из {pricedGoodsCount} строк: нет закупочной цены</small>}
 				</div>
-				{actualProfit !== undefined && <div title="По проведённым реализациям за вычетом возвратов. Себестоимость — из складских проводок; новые закупочные цены её не подменяют.">
-					<span>Прибыль товаров · факт</span>
-					<b>{actualProfit?.goodsProfit == null ? '—' : rub(actualProfit.goodsProfit)}</b>
-					<small>{!actualProfit ? 'Себестоимость недоступна' : !actualProfit.documentCount ? 'Нет проведённых реализаций' : actualProfit.missingCostLines ? `Нет полных данных: ${actualProfit.missingCostLines} строк` : 'Реализации минус возвраты'}</small>
-				</div>}
-				{actualProfit && actualProfit.worksRevenue !== 0 && <div title="Прибыль проведённых услуг по действующему коэффициенту; фактические затраты на услуги не учитываются.">
-					<span>Прибыль услуг · оценка</span><b>≈ {rub(actualProfit.worksProfitBase * coef)}</b>
-				</div>}
 			</div>
 		</header>
 	);

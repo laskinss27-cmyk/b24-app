@@ -253,7 +253,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		sumGoods,
 		sumWorks,
 		total,
-		profitability,
+		plannedGoodsProfit,
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
 	const selectableRows = [...visibleGoods, ...visibleWorks].filter((row) => !row.manual && remaining(row) > 0);
@@ -399,11 +399,10 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				goodsTotal={sumGoods}
 				worksTotal={sumWorks}
 				total={total}
-				profitability={profitability}
+				plannedGoodsProfit={plannedGoodsProfit}
 				unknownGoods={unknownGoods}
 				pricedGoodsCount={pricedGoods.length}
 				actualProfit={alternativeView ? undefined : data.actualProfit}
-				coef={data.coef}
 			/>
 
 			{dev && <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>}

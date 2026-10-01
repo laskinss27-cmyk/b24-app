@@ -2189,6 +2189,9 @@ html[data-theme="dark"] .deal-head-stats .deal-profit-value.positive {
 html[data-theme="dark"] .deal-head-stats .deal-profit-value.negative {
     color: hsl(0 74% 72%)
 }
+html[data-theme="dark"] .deal-head-stats .deal-profit-comparison dt {
+    color: #b9c6d7
+}
 html[data-theme="dark"] .beta-banner {
     background: hsl(33 55% 22%);
     border-color: hsl(32 65% 37%);

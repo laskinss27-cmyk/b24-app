@@ -94,6 +94,26 @@ body.deal-placement-body #root.deal-placement-root {
 }
 .deal-head-stats .deal-profit-value.positive { color: #15803d; }
 .deal-head-stats .deal-profit-value.negative { color: #b91c1c; }
+.deal-head-stats .deal-profit-card { min-width: 230px; }
+.deal-head-stats .deal-profit-comparison {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: baseline;
+	gap: 5px 16px;
+	margin: 0;
+}
+.deal-head-stats .deal-profit-comparison dt {
+	font-size: 12px;
+	font-weight: 500;
+	color: #4b5563;
+}
+.deal-head-stats .deal-profit-comparison dd {
+	margin: 0;
+	text-align: right;
+	font-family: inherit;
+	font-variant-numeric: tabular-nums;
+}
+.deal-head-stats .deal-profit-comparison b { white-space: normal; overflow-wrap: anywhere; }
 .beta-banner,
 .dev-banner,
 .deal-pay {
@@ -792,4 +812,9 @@ body.deal-placement-body #root.deal-placement-root {
 		max-width: none;
 		text-align: left;
 	}
+}
+
+@media (max-width: 620px) {
+	.deal-head-stats > div:nth-child(3),
+	.deal-head-stats .deal-profit-card { grid-column: 1 / -1; min-width: 0; }
 }

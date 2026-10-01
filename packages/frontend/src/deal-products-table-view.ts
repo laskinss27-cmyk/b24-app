@@ -82,6 +82,7 @@ export function buildDealProductsTableView(data: TableData, workingMode: boolean
 		sumWorks,
 		total,
 		profitability,
+		plannedGoodsProfit: profitGoods,
 		unknownGoods,
 	};
 }
