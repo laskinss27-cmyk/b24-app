@@ -74,6 +74,7 @@ export function extractInstallAuth(body: PlacementBody, query: PlacementQuery): 
 }
 
 export interface PlacementContext {
+	supportTicketId?: number | null;
 	dealId: number | null;
 	taskId: number | null;
 	requestId?: number | null;
@@ -128,6 +129,7 @@ function parseReturnDecisionFromOptions(raw: string | undefined): 'approve' | 'r
 }
 
 export function parsePlacementOptions(raw: string | undefined): {
+	supportTicketId: number | null;
 	dealId: number | null;
 	requestId: number | null;
 	transferId: number | null;
@@ -138,6 +140,7 @@ export function parsePlacementOptions(raw: string | undefined): {
 	returnDecision: 'approve' | 'reject' | null;
 } {
 	return {
+		supportTicketId: parseSupportTicketId(raw),
 		dealId: parseIdFromOptions(raw, ['ID']),
 		requestId: parseIdFromOptions(raw, ['request', 'REQUEST']),
 		transferId: parseIdFromOptions(raw, ['transfer', 'TRANSFER']),
@@ -147,6 +150,17 @@ export function parsePlacementOptions(raw: string | undefined): {
 		returnRequestId: parseIdFromOptions(raw, ['returnRequest', 'RETURN_REQUEST']),
 		returnDecision: parseReturnDecisionFromOptions(raw),
 	};
+}
+
+function parseSupportTicketId(raw: string | undefined): number | null {
+	if (!raw) return null;
+	try {
+		const value = (JSON.parse(raw) as Record<string, unknown>)['supportTicket'];
+		if (typeof value !== 'number' && typeof value !== 'string') return null;
+		if (!/^\d+$/.test(String(value))) return null;
+		const id = Number(value);
+		return Number.isSafeInteger(id) && id > 0 ? id : null;
+	} catch { return null; }
 }
 
 /** Контекст для placement сделки (CRM_DEAL_DETAIL_TAB): dealId из {ID}. */

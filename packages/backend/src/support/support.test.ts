@@ -13,7 +13,8 @@ import { mobileSessionCookie } from '../mobile-auth-session.js';
 import { SupportStore } from './store.js';
 import { supportCreateSchema, SupportError } from './validation.js';
 import { registerSupportRoutes } from './routes.js';
-import { deliverSupport, rememberSupportAuth, SupportTransportError } from './notifications.js';
+import { deliverSupport, rememberSupportAuth, supportTicketUrl, SupportTransportError } from './notifications.js';
+import { registerPlacementRepairsRoute } from '../routes/placement-repairs.js';
 
 const manager = { id: '2000', name: 'Менеджер' };
 const owner = { id: APP_OWNER_USER_ID, name: 'Сергей' };
@@ -21,6 +22,41 @@ const screenshot = { name: '../скриншот.png', mime: 'image/png' as const
 const input = () => supportCreateSchema.parse({ requestId: randomUUID(), description: 'В сделке пропала связь реализации', expected: 'Должна быть реализация', reference: 'Сделка 38388', attachments: [screenshot] });
 const config = { portalDomain: 'portal.example', appClientSecret: 'test-secret', autozadachiWebhook: 'https://portal.example/rest/1858/test/', nodeEnv: 'test' } as Config;
 const conflict = (fn: () => unknown): void => assert.throws(fn, (e: unknown) => e instanceof SupportError && e.status === 409);
+
+test('support notification links use the application code instead of obsolete section placement IDs', async () => {
+	const linkedConfig = { ...config, appClientId: 'local.test.code', appSectionUrl: 'https://portal.example/devops/placement/502/' };
+	const store = new SupportStore(':memory:');
+	try {
+		const ticket = store.create(manager, { ...input(), attachments: [] });
+		store.claim(ticket.id, 1); let message = '';
+		await deliverSupport(store, linkedConfig, async (_auth, _method, params) => { message = String(params['MESSAGE']); return 123; });
+		const url = new URL(supportTicketUrl(linkedConfig, ticket.id));
+		assert.equal(url.pathname, '/marketplace/view/local.test.code/');
+		assert.equal(url.searchParams.get('params[supportTicket]'), String(ticket.id));
+		assert.ok(message.includes(url.toString())); assert.ok(!message.includes('/placement/502/'));
+		assert.equal(supportTicketUrl({ portalDomain: config.portalDomain }, ticket.id), '');
+	} finally { store.close(); }
+});
+
+test('registered URI handler opens support context, preserves other deep links and rejects a foreign portal', async () => {
+	const app = Fastify(); app.decorate('config', config);
+	app.decorate('readFrontendIndex', async () => '<html><head></head><body></body></html>');
+	registerPlacementRepairsRoute(app);
+	const open = (options: Record<string, unknown>, domain = config.portalDomain) => app.inject({ method: 'POST', url: '/placement/repairs', payload: { DOMAIN: domain, PLACEMENT: 'REST_APP_URI', PLACEMENT_OPTIONS: JSON.stringify(options) } });
+	const context = (html: string) => JSON.parse(html.match(/window\.__B24_CONTEXT__ = (.*);/)![1]!);
+	try {
+		const linked = await open({ supportTicket: '42' }); assert.equal(linked.statusCode, 200);
+		assert.equal(context(linked.body).supportTicketId, 42); assert.equal(context(linked.body).view, 'inventory');
+		assert.ok(linked.body.includes('//api.bitrix24.com/api/v1/'));
+		assert.equal(context((await open({ repairId: '3' })).body).repairId, 3);
+		assert.equal(context((await open({ request: '7' })).body).view, 'supply');
+		for (const id of ['42x', '1.5', '-1', '0', '9007199254740992', '<script>']) {
+			const invalid = context((await open({ supportTicket: id })).body);
+			assert.equal(invalid.supportTicketId, undefined); assert.equal(invalid.view, 'repairs');
+		}
+		assert.equal((await open({ supportTicket: '42' }, 'evil.example')).statusCode, 403);
+	} finally { await app.close(); }
+});
 
 test('support survives reopening, deduplicates submission and stores screenshots without public links', () => {
 	const dir = mkdtempSync(join(tmpdir(), 'support-')); const path = join(dir, 'queue.sqlite'); let store = new SupportStore(path);

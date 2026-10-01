@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { PlacementBodySchema, PlacementQuerySchema, buildRepairsContext, buildSupplyContext, parsePlacementOptions } from '../handlers/placement-context.js';
+import { PlacementBodySchema, PlacementQuerySchema, buildInventoryContext, buildRepairsContext, buildSupplyContext, parsePlacementOptions } from '../handlers/placement-context.js';
 import { verifyBitrixRequest } from '../security.js';
 
 /**
@@ -27,7 +27,9 @@ export function registerPlacementRepairsRoute(app: FastifyInstance): void {
 		const options = parsePlacementOptions(parsed.data.PLACEMENT_OPTIONS);
 		const isSupplyLink = Boolean(options.requestId || options.transferId || options.dealSupplyId);
 		const baseContext = isSupplyLink ? buildSupplyContext(parsed.data) : buildRepairsContext(parsed.data);
-		const ctx = isSupplyLink
+		const ctx = options.supportTicketId
+			? { ...buildInventoryContext(parsed.data), supportTicketId: options.supportTicketId }
+			: isSupplyLink
 			? baseContext
 			: { ...baseContext, repairId: query.success ? (query.data.repairId ?? baseContext.repairId) : baseContext.repairId };
 		app.log.info({ view: ctx.view, requestId: ctx.requestId, transferId: ctx.transferId, dealSupplyId: ctx.dealSupplyId, linkTarget: ctx.linkTarget }, '[placement/repairs] opened');

@@ -4,6 +4,8 @@
  */
 
 export interface B24Context {
+	/** Обращение из личного уведомления: доступ по-прежнему проверяет support API. */
+	supportTicketId?: number | null;
 	dealId: number | null;
 	/** id задачи — устаревший путь (task placement не принимается новой карточкой). */
 	taskId?: number | null;

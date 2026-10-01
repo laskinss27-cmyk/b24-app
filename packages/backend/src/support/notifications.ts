@@ -48,7 +48,7 @@ export async function deliverSupport(store: SupportStore, config: Config, call: 
 		}
 		const dialogId = job.role === 'manager' ? APP_OWNER_USER_ID : job.authorId;
 		const ticket = store.get(job.ticketId);
-		const link = config.appSectionUrl;
+		const link = supportTicketUrl(config, job.ticketId);
 		const text = `${job.text}\n\nСтатус: ${ticket.status === 'new' ? 'зарегистрировано' : ticket.status === 'in_progress' ? 'в работе' : ticket.status === 'needs_details' ? 'нужны подробности' : ticket.status === 'needs_owner' ? 'нужно решение Сергея' : 'решено'}\n`
 			+ `Ответы и уточнения: кнопка «Сообщить о проблеме» → «Мои обращения» в ERP.${link ? `\n${link}` : ''}`;
 		try {
@@ -92,4 +92,13 @@ export async function deliverSupport(store: SupportStore, config: Config, call: 
 			store.finishDelivery(job, retry ? 'pending' : 'attention', '', code);
 		}
 	}
+}
+
+/** REST_APP_URI uses the application code, never an ephemeral placement ID. */
+export function supportTicketUrl(config: Pick<Config, 'portalDomain' | 'appClientId'>, ticketId: number): string {
+	const code = config.appClientId?.trim();
+	if (!code || !Number.isSafeInteger(ticketId) || ticketId <= 0) return '';
+	const url = new URL(`https://${config.portalDomain}/marketplace/view/${encodeURIComponent(code)}/`);
+	url.searchParams.set('params[supportTicket]', String(ticketId));
+	return url.toString();
 }

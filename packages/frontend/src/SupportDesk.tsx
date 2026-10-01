@@ -28,7 +28,8 @@ function Screenshot({ attachment, api }: { attachment: SupportAttachment; api: S
 export function SupportDesk({ ctx, api = supportApi }: { ctx: B24Context; api?: SupportApi }): JSX.Element {
 	const initial = supportContext(ctx);
 	const dialog = useRef<HTMLDialogElement>(null); const trigger = useRef<HTMLButtonElement>(null);
-	const [open, setOpen] = useState(false); const [tab, setTab] = useState<'create' | 'list'>('create');
+	const linkedTicket = Number.isSafeInteger(ctx.supportTicketId) && Number(ctx.supportTicketId) > 0 ? ctx.supportTicketId : null;
+	const [open, setOpen] = useState(Boolean(linkedTicket)); const [tab, setTab] = useState<'create' | 'list'>(linkedTicket ? 'list' : 'create');
 	const [reference, setReference] = useState(initial.reference); const [description, setDescription] = useState(''); const [expected, setExpected] = useState('');
 	const [files, setFiles] = useState<SupportUpload[]>([]); const [busy, setBusy] = useState(false); const [reading, setReading] = useState(false);
 	const [error, setError] = useState(''); const [notice, setNotice] = useState('');
@@ -70,6 +71,17 @@ export function SupportDesk({ ctx, api = supportApi }: { ctx: B24Context; api?: 
 		catch (e) { setError(e instanceof Error ? e.message : 'Не удалось обновить обращение'); }
 		finally { setLoading(false); }
 	};
+	useEffect(() => {
+		if (!linkedTicket) return;
+		let active = true; setLoading(true);
+		// Both reads retain normal authorization and establish the owner's reply controls.
+		void Promise.all([api<ListResult>('list'), api<TicketResult>('get', { ticketId: linkedTicket })]).then(([list, result]) => {
+			if (!active) return;
+			setOwner(list.owner); setTickets(list.tickets); setNext(list.next); setSelected(result.ticket);
+		}).catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : 'Не удалось открыть обращение'); })
+			.finally(() => { if (active) setLoading(false); });
+		return () => { active = false; };
+	}, [linkedTicket, api]);
 	const attachments = async (incoming: File[], followup: boolean): Promise<void> => {
 		if (reading || busy || uncertain) return;
 		setReading(true); setError('');
@@ -116,7 +128,7 @@ export function SupportDesk({ ctx, api = supportApi }: { ctx: B24Context; api?: 
 	return <>
 		<button type="button" ref={trigger} className="support-trigger" onClick={() => setOpen(true)}>Сообщить о проблеме</button>
 		<dialog ref={dialog} className="support-dialog" aria-labelledby="support-title" onCancel={(e) => { e.preventDefault(); close(); }}
-			onClose={() => { setOpen(false); trigger.current?.focus(); }} onPaste={(e) => {
+			onClose={() => { if (dialog.current?.open) return; setOpen(false); trigger.current?.focus(); }} onPaste={(e) => {
 				if (tab === 'list' && (!selected || owner && selected.author.id !== ctx.me?.id)) return;
 				const images = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
 				if (images.length) { e.preventDefault(); void attachments(images, tab === 'list'); }

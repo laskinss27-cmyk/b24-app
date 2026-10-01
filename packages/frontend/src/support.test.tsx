@@ -14,6 +14,15 @@ test('support form uses current deal and includes clear labels without making a 
 	assert.match(html, /Мои обращения/); assert.ok(!html.includes('В работе'));
 });
 
+test('support deep link starts in ticket history rather than the new-request form', () => {
+	const ctx = { dealId: null, domain: 'portal.example', memberId: null, supportTicketId: 42 };
+	const linked = renderToStaticMarkup(<SupportDesk ctx={ctx} />);
+	assert.ok(!linked.includes('Что делали и что пошло не так'));
+	assert.match(linked, /Мои обращения/);
+	const invalid = renderToStaticMarkup(<SupportDesk ctx={{ ...ctx, supportTicketId: -1 }} />);
+	assert.match(invalid, /Что делали и что пошло не так/);
+});
+
 test('screenshots reject unsupported files, oversize images and excess attachments before FileReader', async () => {
 	await assert.rejects(readSupportScreenshots([{ name: 'x.svg', type: 'image/svg+xml', size: 20 } as File], 0), /PNG/);
 	await assert.rejects(readSupportScreenshots([{ name: 'x.png', type: 'image/png', size: 3 * 1024 * 1024 } as File], 0), /2 МБ/);
