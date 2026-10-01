@@ -29,6 +29,8 @@
 | REAL-02 | Изменение цены этапа исправляет связанные документы этого этапа, не меняя итоговое складское количество. | B/erp/deal-realizations.ts | B/erp/operations.test.ts: stage price change, legacy realization rows; **Тесты**, полностью возвращённая история защищена REAL-03 |
 | REAL-03 | Полностью возвращённая реализация и её возвраты не переписываются при изменении текущей цены сделки. | B/erp/deal-realizations.ts: outstandingPriceChanges | **Тесты, восстановлено**: B/erp/operations.test.ts: fully returned, price sync preserves returned history; отдельная новая продажа, service aliases и черновики возвратов; исторический фикс `7fd5e18` |
 
+| REAL-04 | Создание и проведение реализации проверяют остаток плана: старый `base` учитывается у единственной соответствующей строки с `lineKey`, неоднозначные/утраченные активные связи блокируются. Дополнительный общий лимит товара сохраняется между этапами. Черновики продаж занимают количество, только проведённые возвраты освобождают его. Перед каждым проведением данные перечитываются; изменения реализаций одной сделки сериализованы в единственном процессе backend. | B/routes/deal-realization-quantity.ts; B/routes/deal-core-realization-route.ts | B/routes/deal-realization-quantity.test.ts; B/routes/deal-realization-safety.test.ts; **Тесты**; [контракт и ограничения](deal-realization-quantity-safety.md) |
+
 ## Каталог, резервы, снабжение и склад
 
 | ID | Обязательное поведение | Реализация | Проверка / статус |

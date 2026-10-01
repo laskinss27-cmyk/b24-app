@@ -48,6 +48,17 @@ export function registerDealCoreRealizationRoute(
 	// action='draft': по каждому складу-группе создаём черновик Delivery Note (b24_deal_id, реальный склад);
 	// action='submit': проводим переданные черновики (docstatus 1) → остаток ядра реально списывается.
 	// Один документ на склад (группировка на фронте). «День X» (синк перестаёт затирать) — отдельно.
+	// One running backend owns this route. Serialize its document mutations per deal
+	// so simultaneous clicks cannot both validate the same remaining quantity.
+	const pending = new Map<number, Promise<void>>();
+	async function acquire(dealId: number): Promise<() => void> {
+		const previous = pending.get(dealId) ?? Promise.resolve();
+		let unlock!: () => void;
+		const current = new Promise<void>((resolve) => { unlock = resolve; });
+		pending.set(dealId, current);
+		await previous;
+		return () => { if (pending.get(dealId) === current) pending.delete(dealId); unlock(); };
+	}
 	app.post('/api/deal/realize-core', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; action?: unknown; groups?: unknown; names?: unknown; note?: unknown; lines?: unknown };
 		const client = clientFrom(b);
@@ -60,6 +71,8 @@ export function registerDealCoreRealizationRoute(
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		const logDealId = Number(b.dealId);
 		const loggedDocuments: string[] = [];
+		const release = ['draft', 'submit', 'cancel', 'delete-draft'].includes(action) && Number.isInteger(logDealId) && logDealId > 0
+			? await acquire(logDealId) : () => {};
 		try {
 			const reservationService = app.reservationRuntime?.canWrite ? new ReservationService(app.reservationRuntime) : null;
 			if (action === 'list') {
@@ -88,8 +101,8 @@ export function registerDealCoreRealizationRoute(
 				// Тип строки определяем на сервере, а не доверяем флагу клиента: товар нельзя
 				// выдать за услугу, чтобы обойти склад и проверку остатка.
 				const [dealPlan, dealStages, catalogServiceIds] = await Promise.all([
-					listDealPlan(erp, dealId).catch(() => []),
-					listDealStages(erp, dealId).catch(() => []),
+					listDealPlan(erp, dealId),
+					listDealStages(erp, dealId),
 					fetchServiceProductIds(client, requestedProductIds),
 				]);
 				const serviceIds = new Set([
@@ -121,7 +134,7 @@ export function registerDealCoreRealizationRoute(
 				assertDealRealizationQuantityAvailable(
 					dealPlan,
 					dealStages,
-					await listDealRealizations(erp, dealId),
+					(await listDealRealizations(erp, dealId)).filter((doc) => !doc.isReturn || doc.submitted),
 					parsedGroups.flatMap((group) => group.lines),
 				);
 				for (const group of parsedGroups) for (const line of group.lines) {
@@ -227,10 +240,10 @@ export function registerDealCoreRealizationRoute(
 			if (action === 'submit') {
 				const dealId = Number(b.dealId);
 				if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
-				const names = (Array.isArray(b.names) ? b.names : []).map(String).filter((n) => n && n !== 'undefined');
+				const names = [...new Set((Array.isArray(b.names) ? b.names : []).map(String).filter((n) => n && n !== 'undefined'))];
 				if (!names.length) return reply.code(400).send({ ok: false, error: 'нет документов для проведения' });
 				const dealDocuments = await listDealRealizations(erp, dealId);
-				const allowedDrafts = new Set(dealDocuments.filter((document) => !document.submitted).map((document) => document.name));
+				const allowedDrafts = new Set(dealDocuments.filter((document) => !document.submitted && !document.isReturn).map((document) => document.name));
 				if (names.some((name) => !allowedDrafts.has(name))) throw new Error('один из черновиков не принадлежит этой сделке или уже проведён');
 				const submitted: string[] = [];
 				const reservationWarnings: string[] = [];
@@ -238,6 +251,17 @@ export function registerDealCoreRealizationRoute(
 					? await client.call<{ ID?: string | number; NAME?: string; LAST_NAME?: string }>('user.current', {})
 					: null;
 				for (const name of names) {
+					// Re-read immediately before each posting, including after partial success.
+					const [plan, stages, current] = await Promise.all([
+						listDealPlan(erp, dealId), listDealStages(erp, dealId), listDealRealizations(erp, dealId),
+					]);
+					const draft = current.find((doc) => doc.name === name);
+					if (!draft || draft.submitted || draft.isReturn) throw new Error(`черновик ${name} изменился; обнови сделку`);
+					if (draft.items.some((line) => !plan.some((item) => item.productId === line.productId && !item.isService))) {
+						throw new Error('в черновике есть услуга или отсутствующий в плане товар; пересоздай реализацию');
+					}
+					assertDealRealizationQuantityAvailable(plan, stages,
+						current.filter((doc) => doc.name !== name && (!doc.isReturn || doc.submitted)), draft.items);
 					await submitRealization(erp, name);
 					submitted.push(name);
 					loggedDocuments.push(name);
@@ -269,6 +293,8 @@ export function registerDealCoreRealizationRoute(
 				await recordRealizationEvent(app, req, { operation: action === 'delete-draft' ? 'delete_draft' : action, dealId: logDealId, documents: loggedDocuments, error });
 			}
 			return reply.code(200).send({ ok: false, error });
+		} finally {
+			release();
 		}
 	});
 }
