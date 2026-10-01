@@ -10,6 +10,7 @@ import { StockLedger } from './StockLedger.js';
 import { Supply } from './Supply.js';
 import { ReportBuilder } from './ReportBuilder.js';
 import { ReturnApproval } from './ReturnApproval.js';
+import { SupportDesk } from './SupportDesk.js';
 import { initializeLowVisionMode, LowVisionMode } from './LowVisionMode.js';
 import { initializeDarkTheme } from './DarkThemeMode.js';
 import './global.css';
@@ -52,6 +53,7 @@ import './admin-console.css';
 import './print.css';
 import './dark-theme.generated.css';
 import './dark-theme.css';
+import './support.css';
 
 const root = document.getElementById('root');
 if (!root) {
@@ -72,6 +74,7 @@ initializeDarkTheme();
 createRoot(root).render(
 	<StrictMode>
 		<div className="appearance-toolbar no-print">
+			<SupportDesk ctx={ctx} />
 			<LowVisionMode initialEnabled={lowVisionEnabled} />
 		</div>
 		{ctx.view === 'returnApproval' ? <ReturnApproval /> : opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'reportBuilder' ? <ReportBuilder /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}

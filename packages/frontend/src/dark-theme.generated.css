@@ -4094,6 +4094,79 @@ html[data-theme="dark"] .admin-structure-all-links span.wrong_deal, html[data-th
 html[data-theme="dark"] .admin-structure-all-links span.missing {
     color: hsl(4 76% 72%)
 }
+html[data-theme="dark"] .support-dialog::backdrop {
+    background: color-mix(in srgb, rgb(16 32 57) 53%, transparent)
+}
+html[data-theme="dark"] .support-dialog button:hover:not(:disabled), html[data-theme="dark"] .support-trigger:hover {
+    border-color: #526178
+}
+html[data-theme="dark"] .support-dialog :is(button, input, textarea, select, a):focus-visible, html[data-theme="dark"] .support-trigger:focus-visible {
+    outline: 3px solid hsl(211 60% 53%)
+}
+html[data-theme="dark"] .support-content :is(input:not([type=file]), textarea, select) {
+    border: 1px solid #34445a
+}
+html[data-theme="dark"] .support-content :is(input, textarea)::placeholder {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .support-previews img {
+    background: #172233
+}
+html[data-theme="dark"] .support-dialog .support-primary {
+    background: rgb(33 103 168);
+    color: #f8fafc;
+    border-color: hsl(209 65% 53%)
+}
+html[data-theme="dark"] .support-error {
+    color: hsl(356 59% 72%);
+    background: hsl(0 55% 22%);
+    border-color: hsl(358 39% 53%)
+}
+html[data-theme="dark"] .support-success {
+    color: hsl(149 55% 72%);
+    background: hsl(142 44% 22%);
+    border-color: hsl(145 27% 53%)
+}
+html[data-theme="dark"] .support-delivery, html[data-theme="dark"] .support-retry {
+    color: hsl(36 66% 72%);
+    background: hsl(39 55% 22%);
+    border-color: hsl(38 49% 53%)
+}
+html[data-theme="dark"] .support-status {
+    color: #b9c6d7;
+    background: #172233
+}
+html[data-theme="dark"] .support-status-in_progress {
+    background: hsl(217 55% 22%);
+    color: hsl(212 65% 72%)
+}
+html[data-theme="dark"] .support-status-needs_details, html[data-theme="dark"] .support-status-needs_owner {
+    background: hsl(39 55% 22%);
+    color: hsl(36 84% 72%)
+}
+html[data-theme="dark"] .support-status-resolved {
+    background: hsl(143 37% 22%);
+    color: hsl(150 55% 72%)
+}
+html[data-theme="dark"][data-theme=dark] .support-error {
+    background: rgb(62 32 41);
+    color: hsl(352 90% 78%);
+    border-color: hsl(352 29% 53%)
+}
+html[data-theme="dark"][data-theme=dark] .support-success {
+    background: rgb(24 58 44);
+    color: hsl(144 55% 78%);
+    border-color: hsl(151 31% 53%)
+}
+html[data-theme="dark"][data-theme=dark] :is(.support-delivery, .support-retry) {
+    background: rgb(61 48 28);
+    color: hsl(39 84% 78%);
+    border-color: hsl(39 34% 53%)
+}
+html[data-theme="dark"][data-theme=dark] .support-status {
+    background: rgb(38 59 82);
+    color: hsl(213 79% 78%)
+}
 html[data-theme="dark"] .rb-app {
     background: #172233
 }

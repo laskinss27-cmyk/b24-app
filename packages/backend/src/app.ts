@@ -44,6 +44,7 @@ import { registerApiAdminDealFulfillmentRoute } from './routes/api-admin-deal-fu
 import { registerApiAdminControlRoute } from './routes/api-admin-control.js';
 import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
 import { loadOrdersConfig } from './integrations/umniydom/config.js';
+import { registerSupportRoutes } from './support/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -149,6 +150,7 @@ export async function buildApp({ config, reservations }: AppOptions): Promise<Fa
 	registerApiContractsRoute(app);
 	registerApiAccessControlRoute(app);
 	registerApiReportBuilderRoute(app);
+	registerSupportRoutes(app);
 	registerPlacementReportBuilderRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
