@@ -18,7 +18,6 @@ export function DealRealizationBar({
 	readyRowCount,
 	realizationDocumentCount,
 	storeGroups,
-	workItems,
 	total,
 	dev,
 	busy,
@@ -42,7 +41,6 @@ export function DealRealizationBar({
 	readyRowCount: number;
 	realizationDocumentCount: number;
 	storeGroups: RealizationStoreGroup[];
-	workItems: RealizationItem[];
 	total: number;
 	dev: boolean;
 	busy: boolean;
@@ -76,7 +74,6 @@ export function DealRealizationBar({
 					{storeGroups.map((group) => (
 						<span key={group.id} className="plan-group">{group.storeName}: {group.items.map((item) => `${item.name.slice(0, 22)} ×${item.quantity}`).join(' · ')}</span>
 					))}
-					{workItems.length > 0 && <span className="plan-group">Услуги · в едином документе, без склада: {workItems.map((item) => `${item.name.slice(0, 22)} ×${item.quantity}`).join(' · ')}</span>}
 				</div>
 			) : (
 				<span className="hint">Отметь строки галочками для реализации или заказа через снабжение.</span>

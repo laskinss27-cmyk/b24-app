@@ -122,3 +122,17 @@ test('deal document diagnostics explains an unsubmitted realization without chan
 	assert.equal(result.documents[1]?.docstatus, 0);
 	assert.ok(result.issues.some((issue) => issue.code === 'realization_drafts' && issue.details.includes('MAT-DN-2026-00451')));
 });
+
+test('service with a legacy warehouse does not appear as missing goods in diagnostics', async () => {
+	const serviceErp = fakeErp({
+		'Sales Order': [{ name: 'SO-SERVICE', b24_deal_id: '32686', docstatus: 0, items: [
+			{ name: 'row', item_code: '9916', item_name: 'Проектирование', qty: 1, rate: 154000, warehouse: 'Stores - УД' },
+		] }],
+		Item: [{ name: '9916', is_stock_item: 0 }],
+	});
+	const client = { async call() { return { ID: '32686', UF_CRM_ALL_REALIZED: 'ДА' }; } } as unknown as B24Client;
+	const result = await diagnoseAdminDealDocuments(client, serviceErp, 32686);
+	assert.equal(result.calculatedFulfillment, 'ДА');
+	assert.deepEqual(result.shortages, []);
+	assert.ok(!result.issues.some((issue) => ['not_fully_realized', 'fulfillment_mismatch'].includes(issue.code)));
+});

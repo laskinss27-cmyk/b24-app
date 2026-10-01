@@ -247,7 +247,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		basePlanRows,
 		stageSections,
 		visibleGoods,
-		visibleWorks,
 		pricedGoods,
 		sumRealWorks,
 		sumGoods,
@@ -256,7 +255,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		plannedGoodsProfit,
 		unknownGoods,
 	} = buildDealProductsTableView(data, workingMode, summaryView);
-	const selectableRows = [...visibleGoods, ...visibleWorks].filter((row) => !row.manual && remaining(row) > 0);
+	const selectableRows = visibleGoods.filter((row) => !row.manual && remaining(row) > 0);
 	const allRowsSelected = selectableRows.length > 0 && selectableRows.every(isSel);
 	const someRowsSelected = selectableRows.some(isSel);
 	const selectionDisabled = hasPendingDrafts || busy || supplyBusy || selectableRows.length === 0;
@@ -266,11 +265,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 
 	const { realizationDocuments, returnDocuments, dealDocumentCount } = buildDealDocumentsView(data, dealTransfers.length);
 	const renderWorkRow = createDealWorkRowRenderer({
-		remaining,
 		editOf,
-		shippedForRow,
-		realizedForRow,
-		isSelected: isSel,
 		isEditable: rowEditable,
 		workingMode,
 		alternativeView,
@@ -278,13 +273,9 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		removing,
 		busy,
 		hasPendingDrafts,
-		supplyBusy,
-		batchQty,
 		onRemove: doRemove,
-		onToggleSelected: toggleSel,
 		onEdit: setEdit,
 		onRowBlur,
-		setBatchQty,
 	});
 
 	// Товарная строка расщепляется: каждая партия — застывшая запись (кол-во, склад, документ),
@@ -323,12 +314,9 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		setExpandedStocks,
 		setRowStore,
 	});
-	// Готовые товары группируем по складу. Услуги добавляем в первый товарный Delivery Note:
-	// склад им не нужен и складской остаток они не изменяют. Если товаров нет, создаём
-	// отдельный документ только с услугами.
-	const { blockedSelectedGoods, readyRows, readyWorks, realizeGroups, realizeDocumentCount } = buildDealRealizationSelection({
+	// Реализация нужна только товарам; услуги учитываются при успешном закрытии сделки.
+	const { blockedSelectedGoods, readyRows, realizeGroups, realizeDocumentCount } = buildDealRealizationSelection({
 		visibleGoods,
-		visibleWorks,
 		selected,
 		segmentActionsBlocked,
 		remaining,
@@ -376,7 +364,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 		realizeDocumentCount,
 		blockedSelectedGoods,
 		realizeGroups,
-		readyWorks,
 		pendingDraftNames,
 		storeOf,
 		storeName,
@@ -416,7 +403,6 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				readyRowCount={readyRows.length}
 				realizationDocumentCount={realizeDocumentCount}
 				storeGroups={[...realizeGroups.entries()].map(([storeId, rows]) => ({ id: storeId, storeName: storeName(storeId), items: rows.map((row) => ({ name: row.name, quantity: qtyOf(row) })) }))}
-				workItems={readyWorks.map((row) => ({ name: row.name, quantity: qtyOf(row) }))}
 				total={total}
 				dev={dev}
 				busy={busy}

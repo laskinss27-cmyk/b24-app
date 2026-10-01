@@ -21,7 +21,7 @@ test('manual row exposes editable name and unit but no stock selection or shipme
 });
 
 test('manual rows are excluded even if stale selection and stock data mark them ready', () => {
-	const result = buildDealRealizationSelection({ visibleGoods: [row], visibleWorks: [], selected: { [row.id]: true }, segmentActionsBlocked: false, remaining: () => 2.5, rowStatus: () => 'ready', storeOf: () => 1 });
+	const result = buildDealRealizationSelection({ visibleGoods: [row], selected: { [row.id]: true }, segmentActionsBlocked: false, remaining: () => 2.5, rowStatus: () => 'ready', storeOf: () => 1 });
 	assert.equal(result.realizeDocumentCount, 0);
 	assert.deepEqual(result.readyRows, []);
 });

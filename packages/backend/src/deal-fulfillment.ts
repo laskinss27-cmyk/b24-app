@@ -1,6 +1,37 @@
 import { B24Client } from './b24/client.js';
 import { ErpClient } from './erp/client.js';
 import { listDealPlan, listDealRealizations, type ErpRealization, type PlanItem } from './erp/operations.js';
+import { dealProductIdFromCoreItemCode } from './deal-service-product-ids.js';
+
+/** Refresh only the old service blocker when an existing open deal is viewed.
+ * Reads raw documents so opening a plan cannot assign/amend historical segments. */
+export async function refreshServiceFulfillmentOnPlanLoad(client: B24Client, erp: ErpClient, dealId: number, plan: PlanItem[]): Promise<boolean> {
+	if (!plan.some((item) => item.isService)) return false;
+	const deal = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
+	if (deal.CLOSED !== 'N' || String(deal[DEAL_FULFILLMENT_FIELD] ?? '').trim().toUpperCase() !== 'НЕТ') return false;
+	const realized: ErpRealization[] = [];
+	if (plan.some((item) => !item.isService)) {
+		const heads = await erp.list('Delivery Note', ['name'], [['b24_deal_id', '=', String(dealId)], ['docstatus', '=', 1]], 0);
+		for (const head of heads) {
+			const doc = await erp.get<Record<string, unknown>>('Delivery Note', String(head.name));
+			if (!doc || Number(doc.docstatus) !== 1 || String(doc.b24_deal_id) !== String(dealId) || !Array.isArray(doc.items)) throw new Error('Не удалось подтвердить реализации сделки');
+			realized.push({ name: String(doc.name), dealId: String(dealId), postingDate: String(doc.posting_date ?? ''), submitted: true, isReturn: Number(doc.is_return) === 1, returnAgainst: String(doc.return_against ?? ''), grandTotal: Number(doc.grand_total ?? 0), items: (doc.items as Record<string, unknown>[]).flatMap((item) => {
+				const productId = dealProductIdFromCoreItemCode(item.item_code);
+				const qty = Number(item.qty);
+				if (!Number.isFinite(qty)) throw new Error('Не подтверждено количество реализации');
+				return productId === null ? [] : [{ productId, qty, itemName: String(item.item_name ?? ''), rate: Number(item.rate ?? 0), storeTitle: '', rowName: String(item.name ?? ''), sourceRow: '', segmentId: '' }];
+			}) });
+		}
+	}
+	if (calculateDealFulfillment(plan, realized) !== 'ДА') return false;
+	// Recheck the CRM state immediately before writing; never reopen/close a deal here.
+	const current = await client.call<Record<string, unknown>>('crm.deal.get', { id: dealId });
+	if (current.CLOSED !== 'N' || current[DEAL_FULFILLMENT_FIELD] !== deal[DEAL_FULFILLMENT_FIELD]) return false;
+	const fingerprint = (items: PlanItem[]): string => JSON.stringify(items.map((item) => [item.productId, item.qty, item.lineKey]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+	if (fingerprint(await listDealPlan(erp, dealId)) !== fingerprint(plan)) return false;
+	await client.call('crm.deal.update', { id: dealId, fields: { [DEAL_FULFILLMENT_FIELD]: 'ДА' } });
+	return true;
+}
 
 export const DEAL_FULFILLMENT_FIELD = 'UF_CRM_ALL_REALIZED';
 export const DEAL_FULFILLMENT_FIELD_XML_ID = 'B24_APP_ALL_DEAL_ITEMS_REALIZED';
@@ -8,8 +39,10 @@ const DEAL_FULFILLMENT_FIELD_NAME = 'ALL_REALIZED';
 
 export type DealFulfillmentValue = 'ДА' | 'НЕТ';
 
-/** Товары и работы считаются одинаково: каждая текущая строка плана должна быть проведена полностью. */
+/** Услуги не требуют складской реализации; признак проверяет только товары. */
 export function calculateDealFulfillment(plan: PlanItem[], realizations: ErpRealization[]): DealFulfillmentValue {
+	if (plan.length > 0 && plan.every((item) => item.isService)) return 'ДА';
+	const goods = plan.filter((item) => !item.isService);
 	const submitted = realizations.filter((document) => document.submitted);
 	const realizedByProduct = new Map<number, number>();
 	for (const document of submitted) {
@@ -17,14 +50,15 @@ export function calculateDealFulfillment(plan: PlanItem[], realizations: ErpReal
 			realizedByProduct.set(item.productId, (realizedByProduct.get(item.productId) ?? 0) + item.qty);
 		}
 	}
-	const allCurrentLinesRealized = plan.every((item) =>
-		(realizedByProduct.get(item.productId) ?? 0) + 0.000001 >= item.qty,
-	);
+	const requiredByProduct = new Map<number, number>();
+	for (const item of goods) requiredByProduct.set(item.productId, (requiredByProduct.get(item.productId) ?? 0) + item.qty);
+	const allCurrentLinesRealized = [...requiredByProduct].every(([id, qty]) =>
+		(realizedByProduct.get(id) ?? 0) + 0.000001 >= qty);
 	// Старые версии уменьшали план при возврате. Поэтому пустой план считается выполненным
 	// только пока после всех возвратов осталось положительное реализованное количество.
 	// Полный возврат всегда переводит признак в «НЕТ».
 	const hasPositiveNetRealization = [...realizedByProduct.values()].some((qty) => qty > 0.000001);
-	return allCurrentLinesRealized && (plan.length > 0 || hasPositiveNetRealization) ? 'ДА' : 'НЕТ';
+	return allCurrentLinesRealized && (goods.length > 0 || hasPositiveNetRealization) ? 'ДА' : 'НЕТ';
 }
 
 /** Записывает поле только при реальном изменении, чтобы не запускать робота повторно без причины. */

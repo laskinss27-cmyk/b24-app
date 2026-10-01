@@ -10,7 +10,6 @@ export function createDealRealizationActions({
 	realizeDocumentCount,
 	blockedSelectedGoods,
 	realizeGroups,
-	readyWorks,
 	pendingDraftNames,
 	storeOf,
 	storeName,
@@ -28,7 +27,6 @@ export function createDealRealizationActions({
 	realizeDocumentCount: number;
 	blockedSelectedGoods: EnrichedRow[];
 	realizeGroups: Map<number, EnrichedRow[]>;
-	readyWorks: EnrichedRow[];
 	pendingDraftNames: string[];
 	storeOf: (row: EnrichedRow) => number;
 	storeName: (storeId: number) => string;
@@ -41,8 +39,7 @@ export function createDealRealizationActions({
 	setBatchQty: (quantities: Record<string, string>) => void;
 }) {
 	// «Реализация» — 1-й клик: создаём черновики Delivery Note в ядре
-	// (по одному на склад для товаров; услуги входят в первый товарный документ,
-	// а без товаров создаётся отдельный документ услуг без склада);
+	// (по одному на склад, только товары);
 	// 2-й клик «Провести» — submit черновиков (остаток ядра реально списывается).
 	const doDraft = async (): Promise<void> => {
 		if (dealId == null || busy || supplyBusy || !realizeDocumentCount) return;
@@ -63,23 +60,12 @@ export function createDealRealizationActions({
 				segmentId: r.segmentKind === 'stage' && r.stageId ? `stage:${r.stageId}` : r.planLineKey ? `line:${r.planLineKey}` : 'base',
 			})),
 		}));
-		if (readyWorks.length) {
-			const serviceLines = readyWorks.map((row) => ({
-				productId: row.productId,
-				qty: qtyOf(row),
-				rate: row.price,
-				segmentId: row.segmentKind === 'stage' && row.stageId ? `stage:${row.stageId}` : row.planLineKey ? `line:${row.planLineKey}` : 'base',
-				isService: true,
-			}));
-			if (groups[0]) groups[0].lines.push(...serviceLines);
-			else groups.push({ storeTitle: '', lines: serviceLines });
-		}
 		setBusy(true);
 		setNotice(null);
 		try {
 			const drafts = await realizeCoreDraft(dealId, groups);
 			setDraftNames(drafts.map((draft) => draft.name));
-			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length}. Услуги включены в товарный документ без склада на строке. Проверь партии и нажми «Провести».` });
+			setNotice({ kind: 'ok', text: `✅ Черновиков в ядре: ${drafts.length}. Проверь товары и нажми «Провести».` });
 			await onReload(); // черновики появятся строками-партиями (остаток уменьшится)
 		} catch (error) {
 			setNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });

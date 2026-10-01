@@ -115,6 +115,9 @@ export function registerDealCoreRealizationRoute(
 						.filter((l) => Number.isInteger(l.productId) && l.productId > 0 && l.qty > 0);
 					return { storeTitle, lines };
 				}).filter((group) => group.lines.length);
+				if (parsedGroups.some((group) => group.lines.some((line) => line.isService))) {
+					throw new Error('услуги не требуют реализации — они учитываются при успешном закрытии сделки; обнови вкладку «Товары 2.0»');
+				}
 				assertDealRealizationQuantityAvailable(
 					dealPlan,
 					dealStages,

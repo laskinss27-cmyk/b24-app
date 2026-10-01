@@ -1,7 +1,8 @@
 /**
  * Sales report: successfully closed deals selected by CLOSEDATE. Revenue and goods
  * profit come from posted ERP deliveries net of returns; stock cost is the signed
- * ledger value. Service profit is explicitly estimated using profit_coef.
+ * ledger value. Services use the successfully closed working composition; old
+ * deliveries are a fallback only without a plan. Profit uses profit_coef.
  * buildPlannedSalesReport retains the old calculation for migration/regression
  * reference; production report routes call buildSalesReport only.
  */
@@ -10,6 +11,7 @@ import { dealLinePurchasingPrice, isPassThroughProduct } from '@b24-app/shared';
 import { ErpClient } from '../erp/client.js';
 import { readConsumablesReportRows } from './sales-report-consumables.js';
 import { readDealsActualProfit } from '../erp/deal-profit.js';
+import { readClosedDealServices } from '../erp/closed-deal-services.js';
 
 /** TYPE строки сделки: 1 = товар, 7 = работа/услуга (как в crm.deal.productrows). */
 const WORK_TYPE = 7;
@@ -225,7 +227,7 @@ export async function buildPlannedSalesReport(client: B24Client, params: SalesRe
 	return { rows: out, coef, generatedAt: new Date().toISOString() };
 }
 
-/** Actual posted sales; current catalog prices and native collapsed rows are never used. */
+/** Posted goods/FIFO and services from the working composition of successfully closed deals. */
 export async function buildSalesReport(client: B24Client, params: SalesReportParams, erp: ErpClient | null = ErpClient.fromEnv()): Promise<SalesReportData> {
 	if (!erp) throw new Error('Фактическая прибыль недоступна: ядро склада не подключено');
 	const filter: Record<string, unknown> = {
@@ -235,23 +237,27 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 	};
 	if (params.categoryIds?.length) filter.CATEGORY_ID = params.categoryIds;
 	const deals = await pageDeals(client, filter, ['ID', 'TITLE', 'CATEGORY_ID', 'ASSIGNED_BY_ID', 'DATE_CREATE', 'CLOSEDATE', 'SOURCE_ID']);
-	const [categories, sources, coef, managers, profits] = await Promise.all([
+	const [categories, sources, coef, managers, profits, services] = await Promise.all([
 		fetchCategoryNames(client), fetchSourceNames(client), fetchCoef(client),
 		fetchManagerNames(client, deals.map(d => Number(d.ASSIGNED_BY_ID))),
 		readDealsActualProfit(erp, deals.map(d => Number(d.ID))),
+		readClosedDealServices(erp, deals.map(d => Number(d.ID))),
 	]);
 	return { coef, generatedAt: new Date().toISOString(), rows: deals.map(d => {
 		const dealId = Number(d.ID);
 		const profit = profits.get(dealId)!;
+		const closedServices = services.get(dealId);
+		const serviceOnly = closedServices?.goodsQty === 0 && closedServices.serviceQty > 0 && profit.goodsRevenue === 0 && profit.missingCostLines === 0;
+		const goodsStatus = serviceOnly ? 'Без товаров' : !profit.documentCount ? 'Нет проведённых реализаций' : profit.missingCostLines ? `Неполные данные: ${profit.missingCostLines} строк` : 'По проведённым реализациям и возвратам';
 		return {
 			dealId, category: categories.get(Number(d.CATEGORY_ID)) ?? `Воронка ${d.CATEGORY_ID}`,
 			source: sources.get(String(d.SOURCE_ID ?? '')) ?? String(d.SOURCE_ID ?? ''),
 			dateCreate: String(d.DATE_CREATE ?? ''), dateClosed: String(d.CLOSEDATE ?? ''),
 			title: String(d.TITLE ?? `Сделка #${dealId}`), manager: managers.get(Number(d.ASSIGNED_BY_ID)) ?? String(d.ASSIGNED_BY_ID ?? ''),
-			goodsSum: profit.goodsRevenue, worksSum: profit.worksRevenue,
-			goodsProfit: profit.goodsProfit, worksProfit: Math.round(profit.worksProfitBase * coef * 100) / 100,
+			goodsSum: profit.goodsRevenue, worksSum: closedServices?.revenue ?? profit.worksRevenue,
+			goodsProfit: profit.goodsProfit ?? (serviceOnly ? 0 : null), worksProfit: Math.round((closedServices?.profitBase ?? profit.worksProfitBase) * coef * 100) / 100,
 			goodsNoPurchase: profit.missingCostLines,
-			profitStatus: !profit.documentCount ? 'Нет проведённых реализаций' : profit.missingCostLines ? `Неполные данные: ${profit.missingCostLines} строк` : 'По проведённым реализациям и возвратам',
+			profitStatus: closedServices ? `${goodsStatus}; услуги по составу закрытой сделки` : goodsStatus,
 		};
 	}) };
 }

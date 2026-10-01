@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
 import { fetchServiceProductIds } from '../deal-product-catalog.js';
 import { syncDealServiceSum } from '../deal-service-sum.js';
+import { refreshServiceFulfillmentOnPlanLoad } from '../deal-fulfillment.js';
 import { ErpClient } from '../erp/client.js';
 import { listDealPlan } from '../erp/operations.js';
 
@@ -31,6 +32,12 @@ export function registerDealPlanRoute(app: FastifyInstance, clientFrom: DealClie
 			const items = await listDealPlan(erp, dealId);
 			const serviceIds = await fetchServiceProductIds(client, items.map((item) => item.productId));
 			for (const item of items) item.isService = item.isService || serviceIds.has(item.productId);
+			try {
+				const changed = await refreshServiceFulfillmentOnPlanLoad(client, erp, dealId, items);
+				if (changed) app.log.info({ dealId }, '[deal-fulfillment] service blocker refreshed on plan load');
+			} catch (error) {
+				app.log.error({ dealId }, `[deal-fulfillment] plan-load synchronization failed — ${errInfo(error)}`);
+			}
 			// Поле могло остаться пустым, если состав был создан до появления синхронизации
 			// или менялся не через наше окно. Открытие вкладки — безопасная точка сверки:
 			// syncDealServiceSum не пишет сделку повторно, когда сумма уже актуальна.

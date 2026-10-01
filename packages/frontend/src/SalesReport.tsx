@@ -226,7 +226,7 @@ function ReportPreview({ rows }: { rows: SalesReportRow[] }): JSX.Element {
 	const num = (n: number | null): string => n == null ? '—' : n.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
 	return (
 		<div className="report-preview">
-			<p className="muted">Суммы по проведённым реализациям за вычетом возвратов. Прибыль товаров — по складской себестоимости; услуг — оценка по коэффициенту. «—» означает, что прибыль не подтверждена.</p>
+			<p className="muted">Товары — по проведённым реализациям за вычетом возвратов, прибыль — по складской себестоимости. Услуги — по составу успешно закрытой сделки, их прибыль — оценка по коэффициенту. Для старых сделок без состава используются сохранённые реализации. «—» означает, что прибыль не подтверждена.</p>
 			<p className="report-count">✅ Готово: <b>{rows.length}</b> сделок. CSV скачан. {rows.length > PREVIEW ? `Ниже — первые ${PREVIEW} для проверки.` : 'Полный список ниже.'}</p>
 			<div className="table-wrap">
 				<table className="products-table report-table">

@@ -4,6 +4,8 @@ import type { ErpClient } from '../erp/client.js';
 import type { ErpRealization } from '../erp/deal-realizations.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import type { PlanItem } from '../erp/deal-plan-state.js';
+import { isDealServiceProductId } from '../deal-service-product-ids.js';
+import { listWithBatchedInFilters } from '../erp/list-batched.js';
 import type { DiagnosticIssue } from './repair-diagnostics-model.js';
 import { readDealApplicationDocuments, type AdminDealApplicationDocuments } from './deal-application-documents.js';
 import { inspectDealDocumentStructure, type DealDocumentStructureReport } from './deal-document-structure.js';
@@ -228,7 +230,7 @@ async function readDocuments(erp: ErpClient, dealId: number): Promise<AdminDealD
 	return groups.flat().sort((left, right) => `${left.postingDate}|${left.creation}`.localeCompare(`${right.postingDate}|${right.creation}`));
 }
 
-function planItems(document: AdminDealDocument | undefined): PlanItem[] {
+function planItems(document: AdminDealDocument | undefined, serviceIds: Set<number>): PlanItem[] {
 	return document?.items.flatMap((item) => item.productId === null ? [] : [{
 		productId: item.productId,
 		itemName: item.itemName,
@@ -237,7 +239,7 @@ function planItems(document: AdminDealDocument | undefined): PlanItem[] {
 		priceListRate: item.rate,
 		discountPercent: 0,
 		delivered: item.deliveredQty ?? 0,
-		isService: !item.warehouse,
+		isService: serviceIds.has(item.productId) || isDealServiceProductId(item.productId),
 		lineKey: item.rowName,
 	}]) ?? [];
 }
@@ -271,7 +273,12 @@ function fulfillmentShortages(plan: PlanItem[], documents: ErpRealization[]): Ad
 	for (const document of documents.filter((item) => item.submitted)) {
 		for (const item of document.items) realized.set(item.productId, (realized.get(item.productId) ?? 0) + item.qty);
 	}
-	return plan.flatMap((item) => {
+	const required = new Map<number, PlanItem>();
+	for (const item of plan.filter((line) => !line.isService)) {
+		const previous = required.get(item.productId);
+		required.set(item.productId, { ...item, qty: (previous?.qty ?? 0) + item.qty });
+	}
+	return [...required.values()].flatMap((item) => {
 		const shipped = realized.get(item.productId) ?? 0;
 		return shipped + 0.000001 >= item.qty ? [] : [{ productId: item.productId, itemName: item.itemName, required: item.qty, realized: shipped }];
 	});
@@ -296,7 +303,9 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 	}
 	const activePlans = documents.filter((document) => document.type === 'Sales Order' && document.docstatus === 0);
 	const activePlan = activePlans.at(-1);
-	const currentPlan = planItems(activePlan);
+	const codes = [...new Set(activePlan?.items.map((item) => item.itemCode) ?? [])];
+	const types = codes.length ? await listWithBatchedInFilters(erp, 'Item', ['name', 'is_stock_item'], [['name', 'in', codes]]) : [];
+	const currentPlan = planItems(activePlan, new Set(types.filter((item) => Number(item.is_stock_item) === 0).map((item) => Number(item.name))));
 	const dealRealizations = realizations(documents, dealId);
 	const calculatedFulfillment = calculateDealFulfillment(currentPlan, dealRealizations);
 	const shortages = fulfillmentShortages(currentPlan, dealRealizations);
@@ -307,7 +316,7 @@ export async function diagnoseAdminDealDocuments(client: B24Client, erp: ErpClie
 	if (activePlans.length > 1) issues.push({ code: 'multiple_plans', severity: 'warning', title: 'Несколько действующих планов', details: `Найдено черновиков Sales Order: ${activePlans.length}. Приложение использует самый новый.` });
 	const drafts = documents.filter((document) => document.type === 'Delivery Note' && document.docstatus === 0);
 	if (drafts.length) issues.push({ code: 'realization_drafts', severity: 'warning', title: 'Есть непроведённые реализации', details: drafts.map((document) => document.name).join(', ') });
-	if (shortages.length) issues.push({ code: 'not_fully_realized', severity: 'warning', title: 'Не все позиции проведены', details: shortages.map((item) => `${item.itemName || `#${item.productId}`}: ${item.realized} из ${item.required}`).join('; ') });
+	if (shortages.length) issues.push({ code: 'not_fully_realized', severity: 'warning', title: 'Не все товары проведены', details: shortages.map((item) => `${item.itemName || `#${item.productId}`}: ${item.realized} из ${item.required}`).join('; ') });
 	if (fulfillmentField && fulfillmentField !== calculatedFulfillment) issues.push({ code: 'fulfillment_mismatch', severity: 'error', title: 'Техническое поле сделки не совпадает с ядром', details: `В Битрикс24: «${fulfillmentField}», по документам ядра: «${calculatedFulfillment}».` });
 	for (const error of applicationDocuments.errors) issues.push({
 		code: `application_documents_${error.source}`,

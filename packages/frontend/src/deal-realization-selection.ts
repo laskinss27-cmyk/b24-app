@@ -4,7 +4,6 @@ import type { EnrichedRow } from './deal-products-table-types.js';
 
 export function buildDealRealizationSelection({
 	visibleGoods,
-	visibleWorks,
 	selected,
 	segmentActionsBlocked,
 	remaining,
@@ -12,7 +11,6 @@ export function buildDealRealizationSelection({
 	storeOf,
 }: {
 	visibleGoods: EnrichedRow[];
-	visibleWorks: EnrichedRow[];
 	selected: Record<string, boolean>;
 	segmentActionsBlocked: boolean;
 	remaining: (row: EnrichedRow) => number;
@@ -20,20 +18,19 @@ export function buildDealRealizationSelection({
 	storeOf: (row: EnrichedRow) => number;
 }) {
 	const canRealize = (row: EnrichedRow): boolean =>
-		!row.manual && !segmentActionsBlocked && remaining(row) > 0 && (isWorkRow(row.type) || rowStatus(row) === 'ready');
+		!row.manual && !isWorkRow(row.type) && !segmentActionsBlocked && remaining(row) > 0 && rowStatus(row) === 'ready';
 	// В реализацию идут ТОЛЬКО отмеченные галочкой строки (дефолт — ничего не отмечено).
-	const selectedRows = [...visibleGoods, ...visibleWorks].filter((row) => !row.manual && (selected[row.id] ?? false) && remaining(row) > 0);
+	const selectedRows = visibleGoods.filter((row) => !row.manual && !isWorkRow(row.type) && (selected[row.id] ?? false) && remaining(row) > 0);
 	const blockedSelectedGoods = selectedRows.filter((row) => !isWorkRow(row.type) && !canRealize(row));
 	const readyRows = selectedRows.filter(canRealize);
 	const readyGoods = readyRows.filter((row) => !isWorkRow(row.type));
-	const readyWorks = readyRows.filter((row) => isWorkRow(row.type));
 	const realizeGroups = new Map<number, EnrichedRow[]>();
 	for (const row of readyGoods) {
 		const storeId = storeOf(row);
 		if (!realizeGroups.has(storeId)) realizeGroups.set(storeId, []);
 		realizeGroups.get(storeId)!.push(row);
 	}
-	const realizeDocumentCount = realizeGroups.size || (readyWorks.length ? 1 : 0);
+	const realizeDocumentCount = realizeGroups.size;
 
-	return { blockedSelectedGoods, readyRows, readyWorks, realizeGroups, realizeDocumentCount };
+	return { blockedSelectedGoods, readyRows, realizeGroups, realizeDocumentCount };
 }

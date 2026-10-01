@@ -43,7 +43,6 @@ const barProps: ComponentProps<typeof DealRealizationBar> = {
 	readyRowCount: 0,
 	realizationDocumentCount: 0,
 	storeGroups: [],
-	workItems: [],
 	total: 0,
 	dev: false,
 	busy: false,

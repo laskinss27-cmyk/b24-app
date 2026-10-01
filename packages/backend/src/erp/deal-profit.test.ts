@@ -63,6 +63,7 @@ test('no posted documents has no confirmed profit; unknown commercial codes are 
 function erpFixture(): ErpClient {
 	return {
 		async list(type: string) {
+			if (type === 'Sales Order') return [];
 			if (type === 'Delivery Note') return [{ name: 'DN1' }];
 			if (type === 'Stock Ledger Entry') return [entry];
 			if (type === 'Item') return [item];
