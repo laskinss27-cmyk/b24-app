@@ -1,3 +1,28 @@
+.stock-store-filter {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 12px;
+	font-size: 13px;
+}
+.stock-store-filter select {
+	box-sizing: border-box;
+	max-width: 100%;
+	min-height: 36px;
+	padding: 6px 8px;
+	border: 1px solid var(--app-line);
+	border-radius: 6px;
+	background: var(--app-surface);
+	color: var(--app-text);
+	font: inherit;
+}
+.stock-store-filter select:focus-visible {
+	outline: 2px solid var(--app-link);
+	outline-offset: 2px;
+}
+.stock-store-filter span { color: var(--app-muted); }
+
 /* Печатная форма отчёта оборачиваемости — появляется только на время печати. */
 .turnover-print {
 	display: none;

@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { cancelTransferRequest, listTransferRequests, type TransferRequestDoc } from './b24.js';
 import { ConvertTransferRequestForm, SupplyTtRequestForm, TransferRequestForm } from './StockTransferRequestForms.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
+import { stockRouteMatchesStore } from './stock-store-filter.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
@@ -17,11 +18,12 @@ const TRANSFER_REQUEST_STATUS: Record<TransferRequestDoc['status'], string> = {
 	canceled: 'Отменён',
 };
 
-export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }: {
+export function TransferRequestsTab({ form, mode, onChanged, initialRequestId, store = '' }: {
 	form: StockForm | null;
 	mode: 'manager' | 'supply';
 	onChanged?: () => void;
 	initialRequestId?: number;
+	store?: string;
 }): JSX.Element {
 	const [requests, setRequests] = useState<TransferRequestDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
@@ -61,7 +63,7 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 		const target = requests.find((request) => request.id === initialRequestId);
 		if (target) setOpenRequest(target);
 	}, [initialRequestHandled, initialRequestId, requests]);
-	const shown = (requests ?? []).filter((request) => status === 'all' || request.status === status);
+	const shown = (requests ?? []).filter((request) => stockRouteMatchesStore(request, store) && (status === 'all' || request.status === status));
 	return (
 		<section>
 			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
@@ -71,14 +73,14 @@ export function TransferRequestsTab({ form, mode, onChanged, initialRequestId }:
 					<button className="btn-primary" disabled={!form?.stores.length} onClick={() => setShowForm(true)}>Заказ на перемещение</button>
 				</div>}
 			</div>
-			<div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+			<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
 				<select style={inp} value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
 					<option value="all">Все статусы</option><option value="pending">Ожидает снабжение</option><option value="converted">Перемещение создано</option><option value="canceled">Отменён</option>
 				</select>
 				<span style={{ marginLeft: 'auto', color: 'var(--app-muted)', fontSize: 12 }}>{shown.length} из {(requests ?? []).length}</span>
 			</div>
 			{err && <p className="error">⛔ {err}</p>}
-			{requests === null ? <p>Загрузка…</p> : shown.length === 0 ? <p className="empty">{status === 'pending' ? 'Необработанных заказов нет.' : 'Заказов нет.'}</p> : (
+			{requests === null ? <p>Загрузка…</p> : shown.length === 0 ? <p className="empty">{store ? 'Ничего не найдено по фильтру.' : status === 'pending' ? 'Необработанных заказов нет.' : 'Заказов нет.'}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата / автор</th><th style={TH}>Маршрут</th><th style={TH}>Состав</th><th style={TH}>Статус</th><th style={TH}></th></tr></thead>
 					<tbody>{shown.map((request) => {

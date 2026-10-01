@@ -76,6 +76,15 @@ test('reservation registry reads rows and can force a fresh scan', async () => {
 	});
 });
 
+test('movement journal passes store together with period and product without losing other filters', async () => {
+	const requests = captureResponses([{ ok: true, movements: [] }]);
+	await fetchMovements('receipt', { from: '2026-09-01', to: '2026-09-30', productId: 17, store: 'Дунайский' });
+	assert.deepEqual(requests[0]?.body, {
+		domain: 'mobile.example', accessToken: 'history-token', kind: 'receipt',
+		from: '2026-09-01', to: '2026-09-30', productId: 17, store: 'Дунайский',
+	});
+});
+
 test('reservation registry searches across deal, product and store and sorts urgent statuses first', () => {
 	const base = {
 		dealTitle: 'Монтаж офиса', managerName: 'Иван Иванов', rowId: '7', reserveId: '10', productId: 17,

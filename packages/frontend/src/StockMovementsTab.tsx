@@ -20,7 +20,7 @@ const MOVE_STATUS_OPTS = [
 	{ value: 'draft', label: 'Черновик' },
 ];
 
-export function StockMovementsTab({ kind, form, showCreate = true }: { kind: StockMovementKind; form: StockForm | null; showCreate?: boolean }): JSX.Element {
+export function StockMovementsTab({ kind, form, showCreate = true, store = '', onStoreReset }: { kind: StockMovementKind; form: StockForm | null; showCreate?: boolean; store?: string; onStoreReset?: () => void }): JSX.Element {
 	const [list, setList] = useState<CoreMovement[] | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -42,16 +42,16 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 
 	useEffect(() => {
 		let alive = true; setList(null); setErr(null); setLoading(true); setPage(1);
-		fetchMovements(kind, { ...period, ...(prod ? { productId: prod.productId } : {}) })
+		fetchMovements(kind, { ...period, ...(prod ? { productId: prod.productId } : {}), ...(store ? { store } : {}) })
 			.then((m) => { if (alive) setList(m); })
 			.catch((e) => { if (alive) setErr(errText(e)); })
 			.finally(() => { if (alive) setLoading(false); });
 		return () => { alive = false; };
-	}, [kind, period, bump, prod]);
+	}, [kind, period, bump, prod, store]);
 
 	// Сброс фильтров при смене вкладки.
 	useEffect(() => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); setProd(null); }, [kind]);
-	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); };
+	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); setProd(null); onStoreReset?.(); };
 
 	const submit = async (m: CoreMovement): Promise<void> => {
 		if (kind === 'delivery' || kind === 'return') return;
@@ -90,7 +90,7 @@ export function StockMovementsTab({ kind, form, showCreate = true }: { kind: Sto
 				from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => setPeriod(mkPeriod(from, to))}
 				onReset={reset} loading={loading} shown={view.total} total={(list ?? []).length} />
 			{!err && list && view.total > 0 && <StockMovementPagination {...view} onPage={setPage} />}
-			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
+			{err ? <p className="error">⛔ {err}</p> : !list ? <p>Загрузка…</p> : !shown.length ? <p className="empty">{store || list.length ? 'Ничего не найдено по фильтру.' : 'Документов нет.'}</p> : (
 				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 					<thead><tr><th style={TH}>Документ</th><th style={TH}>Дата</th><th style={TH}>Сделка / ответственный</th><th style={TH}>Инфо</th><th style={TH}>Статус</th>{showActions && <th style={TH}></th>}</tr></thead>
 					<tbody>

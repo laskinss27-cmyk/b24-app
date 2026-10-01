@@ -1,7 +1,7 @@
 import { ErpClient } from './client.js';
 import { DEAL_FIELD } from './erp-setup.js';
 import { INV_FIELD } from './inventory-reconciliation.js';
-import { b24StoreTitle, erpContext } from './warehouse-context.js';
+import { b24StoreTitle, erpContext, erpWarehouse } from './warehouse-context.js';
 import { editableStockDocumentDescriptor, type EditableStockDocumentKind } from './stock-document-amendments.js';
 import { dealProductIdFromCoreItemCode } from '../deal-service-product-ids.js';
 
@@ -41,19 +41,25 @@ export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase
 
 /**
  * Документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация).
- * Период и товар фильтруются в ядре. Возвращаем все заголовки: поиск и страницы
+ * Период, товар и склад строк фильтруются в ядре. Возвращаем все заголовки: поиск и страницы
  * по 50 строк применяются в интерфейсе после фильтрации, без потери старых документов.
  */
 export async function listCoreMovements(
 	erp: ErpClient,
 	kind: 'issue' | 'receipt' | 'delivery' | 'return',
-	opts: { from?: string; to?: string; productId?: number } = {},
+	opts: { from?: string; to?: string; productId?: number; store?: string } = {},
 ): Promise<CoreMovement[]> {
 	const dateFilters: unknown[] = [];
 	if (opts.from) dateFilters.push(['posting_date', '>=', opts.from]);
 	if (opts.to) dateFilters.push(['posting_date', '<=', opts.to]);
 	// Фильтр по товару = по дочерней таблице документа (frappe: [child_doctype, field, op, val]).
-	const child = (childDt: string): unknown[] => opts.productId ? [[childDt, 'item_code', '=', String(opts.productId)]] : [];
+	const warehouse = opts.store?.trim() ? erpWarehouse(await erpContext(erp), opts.store) : '';
+	const child = (childDt: string, warehouseField = 'warehouse'): unknown[] => [
+		...(opts.productId ? [[childDt, 'item_code', '=', String(opts.productId)]] : []),
+		...(warehouse ? [[childDt, warehouseField, '=', warehouse]] : []),
+	];
+	// Child joins can match several rows of one document; show each header only once.
+	const unique = (rows: CoreMovement[]): CoreMovement[] => [...new Map(rows.map((row) => [`${row.doctype}:${row.name}`, row])).values()];
 	const limit = 0;
 	const ORDER = 'posting_date desc, name desc';
 	if (kind === 'delivery' || kind === 'return') {
@@ -61,11 +67,11 @@ export async function listCoreMovements(
 		await ensureNoteField(erp, 'Delivery Note'); // причина возврата лежит в b24_note
 		const isRet = kind === 'return' ? 1 : 0;
 		const rows = await erp.list('Delivery Note', ['name', 'posting_date', 'grand_total', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ['is_return', '=', isRet], ...dateFilters, ...child('Delivery Note Item')], limit, ORDER);
-		return rows.map((r) => {
+		return unique(rows.map((r) => {
 			const base = `${Number(r['grand_total'] ?? 0).toLocaleString('ru-RU')} ₽`;
 			const note = String(r[NOTE_FIELD] ?? '');
 			return { name: String(r['name']), doctype: 'Delivery Note' as const, date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: kind === 'return' && note ? `${base} · ${note}` : base, dealId: String(r[DEAL_FIELD] ?? '') };
-		});
+		}));
 	}
 	const withNote = (base: string, note: string): string => note ? (base ? `${base} · ${note}` : note) : base;
 	if (kind === 'receipt') {
@@ -73,9 +79,9 @@ export async function listCoreMovements(
 		await ensureNoteField(erp, 'Stock Entry');
 		const [purchaseReceipts, materialReceipts] = await Promise.all([
 			erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER),
-			erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Receipt'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail')], limit, ORDER),
+			erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Receipt'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail', 't_warehouse')], limit, ORDER),
 		]);
-		return [
+		return unique([
 			...purchaseReceipts.map((row) => ({
 				name: String(row['name']), doctype: 'Purchase Receipt' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
 				summary: withNote(String(row['supplier'] ?? ''), String(row[NOTE_FIELD] ?? '')), dealId: String(row[DEAL_FIELD] ?? ''),
@@ -84,12 +90,12 @@ export async function listCoreMovements(
 				name: String(row['name']), doctype: 'Stock Entry' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
 				summary: String(row[NOTE_FIELD] ?? '') || 'оприходование', dealId: String(row[DEAL_FIELD] ?? ''),
 			})),
-		].sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name));
+		]).sort((left, right) => right.date.localeCompare(left.date) || right.name.localeCompare(left.name));
 	}
 	await ensureWriteoffField(erp); // поле причины может ещё не существовать — select упал бы
 	await ensureNoteField(erp, 'Stock Entry');
-	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail')], limit, ORDER);
-	return rows.map((r) => ({ name: String(r['name']), doctype: 'Stock Entry' as const, date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') }));
+	const rows = await erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, WRITEOFF_REASON_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Issue'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail', 's_warehouse')], limit, ORDER);
+	return unique(rows.map((r) => ({ name: String(r['name']), doctype: 'Stock Entry' as const, date: String(r['posting_date'] ?? ''), submitted: Number(r['docstatus']) === 1, summary: withNote(String(r[WRITEOFF_REASON_FIELD] ?? '') || 'списание', String(r[NOTE_FIELD] ?? '')), dealId: String(r[DEAL_FIELD] ?? '') })));
 }
 
 // ── Детали документа + история движений по товару (для окна «Складской учёт») ──

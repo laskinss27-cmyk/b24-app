@@ -14,6 +14,7 @@ import { StockTransferQuantityModal } from './StockTransferQuantityModal.js';
 import { transferStatusText } from './StockTransferStatus.js';
 import { transferNumberLabel, transferNumberSearchValues } from './transfer-number.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
+import { stockRouteMatchesStore } from './stock-store-filter.js';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
@@ -57,7 +58,7 @@ const TRANSFER_STATUS_OPTS = [
 	{ value: 'posted', label: 'Принято / завершено' },
 ];
 
-export function StockTransfersTab({ form, showCreate = true, supplyMode = false, initialTransferId }: { form: StockForm | null; showCreate?: boolean; supplyMode?: boolean; initialTransferId?: number }): JSX.Element {
+export function StockTransfersTab({ form, showCreate = true, supplyMode = false, initialTransferId, store = '', onStoreReset }: { form: StockForm | null; showCreate?: boolean; supplyMode?: boolean; initialTransferId?: number; store?: string; onStoreReset?: () => void }): JSX.Element {
 	const [list, setList] = useState<TransferDoc[] | null>(null);
 	const [isSupply, setIsSupply] = useState(false);
 	const [busy, setBusy] = useState<number | null>(null);
@@ -157,9 +158,10 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 		} catch (error) { setErr(errText(error)); }
 		finally { setBusy(null); }
 	};
-	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); };
+	const reset = (): void => { setSearch(''); setStatus('all'); setFrom(''); setTo(''); setPeriod({}); setProd(null); onStoreReset?.(); };
 
 	const shown = (list ?? []).filter((t) => {
+		if (!stockRouteMatchesStore(t, store)) return false;
 		if (status !== 'all' && t.status !== status) return false;
 		if (prod && !t.lines.some((l) => l.productId === prod.productId)) return false;
 		const q = search.trim().toLowerCase();

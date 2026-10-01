@@ -103,3 +103,29 @@ test('movement endpoint includes document 317 with its owner for global search',
 	assert.equal(response.json().movements[316].name, 'MAT-DN-2026-00763');
 	assert.equal(response.json().movements[316].ownerName, 'Иван Иванов');
 });
+
+test('movement endpoint forwards the selected store and rejects malformed store filters', async (t) => {
+	let reads = 0;
+	t.mock.method(ErpClient, 'fromEnv', () => ({
+		get: async () => ({ name: 'existing field' }),
+		list: async (doctype: string, _fields: string[], filters: unknown[] = []) => {
+			if (doctype === 'Company') return [{ name: 'Company', abbr: 'CO' }];
+			reads++;
+			assert.deepEqual(filters.find((filter) => Array.isArray(filter) && filter[1] === 'warehouse'), ['Delivery Note Item', 'warehouse', '=', 'Дунайский - CO']);
+			return [];
+		},
+	}));
+	const app = Fastify();
+	app.decorate('config', { portalDomain: 'test.example' } as typeof app.config);
+	registerStockMovementRoutes(app);
+	t.after(() => app.close());
+	const payload = { domain: 'test.example', accessToken: 'test', kind: 'delivery', store: ' Дунайский ' };
+	const result = await app.inject({ method: 'POST', url: '/api/stock/movements', payload });
+	assert.equal(result.json().ok, true, result.body);
+	assert.equal(reads, 1);
+	for (const store of [123, {}, 'x'.repeat(201)]) {
+		const invalid = await app.inject({ method: 'POST', url: '/api/stock/movements', payload: { ...payload, store } });
+		assert.equal(invalid.statusCode, 400);
+	}
+	assert.equal(reads, 1);
+});

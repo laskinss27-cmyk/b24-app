@@ -10,14 +10,16 @@ import { stockDocumentHistory } from './api-stock-document-amend-route.js';
 
 export function registerStockMovementRoutes(app: FastifyInstance): void {
 	app.post('/api/stock/movements', async (req, reply) => {
-		const body = (req.body ?? {}) as StockAuthBody & { kind?: unknown; from?: unknown; to?: unknown };
+		const body = (req.body ?? {}) as StockAuthBody & { kind?: unknown; from?: unknown; to?: unknown; store?: unknown };
 		const client = stockClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const kind = body.kind === 'receipt' ? 'receipt' : body.kind === 'delivery' ? 'delivery' : body.kind === 'return' ? 'return' : 'issue';
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 		const isDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
-		const period: { from?: string; to?: string; productId?: number } = {};
+		const period: { from?: string; to?: string; productId?: number; store?: string } = {};
+		if (body.store !== undefined && (typeof body.store !== 'string' || body.store.length > 200)) return reply.code(400).send({ ok: false, error: 'Некорректный склад' });
+		if (typeof body.store === 'string' && body.store.trim()) period.store = body.store.trim();
 		if (isDate(body.from)) period.from = body.from;
 		if (isDate(body.to)) period.to = body.to;
 		const productId = Number((body as { productId?: unknown }).productId);

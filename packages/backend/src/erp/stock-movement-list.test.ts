@@ -46,3 +46,28 @@ test('marketplace journal includes older operations beyond its former 200-docume
 	assert.equal((await listMarketplaceOperations(client, { from: '2026-09-01' })).length, 410);
 	assert.equal((await listMarketplaceOperations(client, { limit: 50 })).length, 50);
 });
+
+for (const kind of ['delivery', 'return', 'issue', 'receipt'] as const) {
+	test(`${kind}: store filters item warehouses before pagination and deduplicates multi-line documents`, async () => {
+		const calls: Array<{ doctype: string; filters: unknown[] }> = [];
+		const client = {
+			get: async () => ({ name: 'existing custom field' }),
+			list: async (doctype: string, _fields: string[], filters: unknown[] = [], limit: number) => {
+				if (doctype === 'Company') return [{ name: 'Company', abbr: 'CO' }];
+				assert.equal(limit, 0, 'store selection must not restore the old 50/1000 limits');
+				calls.push({ doctype, filters });
+				const rows = Array.from({ length: 105 }, (_, i) => ({ name: `${doctype}-${i}`, posting_date: '2026-09-01', docstatus: 1 }));
+				return [...rows, rows[104], rows[104]];
+			},
+		} as unknown as ErpClient;
+		const result = await listCoreMovements(client, kind, { store: 'Дунайский', productId: 123, from: '2026-09-01', to: '2026-09-30' });
+		assert.equal(result.length, kind === 'receipt' ? 210 : 105);
+		for (const call of calls) {
+			const child = call.doctype === 'Stock Entry' ? 'Stock Entry Detail' : `${call.doctype} Item`;
+			const field = call.doctype === 'Stock Entry' ? kind === 'issue' ? 's_warehouse' : 't_warehouse' : 'warehouse';
+			assert.ok(call.filters.some((filter) => JSON.stringify(filter) === JSON.stringify([child, field, '=', 'Дунайский - CO'])));
+			assert.ok(call.filters.some((filter) => JSON.stringify(filter) === JSON.stringify([child, 'item_code', '=', '123'])));
+			assert.ok(call.filters.some((filter) => JSON.stringify(filter) === JSON.stringify(['docstatus', '!=', 2])));
+		}
+	});
+}

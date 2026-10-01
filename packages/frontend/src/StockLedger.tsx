@@ -47,6 +47,7 @@ export function StockLedger(): JSX.Element {
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
 	const [tab, setTab] = useState<Tab>(requestId > 0 ? 'requests' : 'transfers');
 	const [form, setForm] = useState<StockForm | null>(null);
+	const [store, setStore] = useState('');
 
 	// Все сотрудники видят весь складской учёт. Опасные действия отдельно защищены правами API.
 	useEffect(() => {
@@ -71,6 +72,7 @@ export function StockLedger(): JSX.Element {
 	if (phase.k === 'init') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Загрузка…</div>;
 	if (phase.k === 'denied') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Не удалось определить права доступа. Обновите страницу.</div>;
 	const tabs = TABS;
+	const documentTab = tab !== 'inventory' && tab !== 'ledger';
 	return (
 		<div className="stock-ledger-shell" style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: 'var(--app-text)' }}>
 			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
@@ -79,11 +81,19 @@ export function StockLedger(): JSX.Element {
 					<button key={t.key} style={tabStyle(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
 				))}
 			</div>
+			{documentTab && <div className="stock-store-filter">
+				<label htmlFor="stock-document-store">Склад</label>
+				<select id="stock-document-store" value={store} disabled={!form?.stores.length} onChange={(event) => setStore(event.target.value)}>
+					<option value="">Все склады</option>
+					{form?.stores.map((title) => <option key={title} value={title}>{title}</option>)}
+				</select>
+				{(tab === 'transfers' || tab === 'requests') && <span>Входящие и исходящие документы</span>}
+			</div>}
 			{tab === 'inventory' ? <InventoryHome />
-				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
-				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
+				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" store={store} {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
+				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} store={store} onStoreReset={() => setStore('')} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
 				: tab === 'ledger' ? <StockItemHistoryTab />
-				: <StockMovementsTab kind={tab} form={form} showCreate={false} />}
+				: <StockMovementsTab kind={tab} form={form} showCreate={false} store={store} onStoreReset={() => setStore('')} />}
 		</div>
 	);
 }
