@@ -142,6 +142,8 @@ export function InventoryHome(): JSX.Element {
 	const [phase, setPhase] = useState<Phase>({ k: 'init' });
 	const [me, setMe] = useState<SimpleUser>({ id: '', name: '' });
 	const [isInitiator, setIsInitiator] = useState(false);
+	const [canCreateInventory, setCanCreateInventory] = useState(true);
+	const [canDeleteInventory, setCanDeleteInventory] = useState(false);
 	const [inventories, setInventories] = useState<Inventory[]>([]);
 	const [stores, setStores] = useState<StoreInfo[]>([]);
 	const [users, setUsers] = useState<SimpleUser[]>([]);
@@ -177,6 +179,7 @@ export function InventoryHome(): JSX.Element {
 		if (ctx.__mock) {
 			setMe({ id: '1858', name: 'Сергей Ласкин (dev)' });
 			setIsInitiator(true);
+			setCanDeleteInventory(true);
 			setStores(MOCK_STORES);
 			setUsers(MOCK_USERS);
 			setSections(MOCK_SECTIONS);
@@ -241,10 +244,11 @@ export function InventoryHome(): JSX.Element {
 				const manageDecision = appAccess?.decisions['inventory.manage'] ?? 'inherit';
 				// Внутрь рабочего места «Снаб» уже допускает его собственная внешняя проверка.
 				// Поэтому любой сотрудник снабжения может полноценно работать с инвентаризацией.
-				const init = ctx.view === 'supply'
-					? true
-					: manageDecision === 'allow' ? true : manageDecision === 'deny' ? false : legacyInitiator;
+				const init = manageDecision === 'allow' ? true : manageDecision === 'deny' ? false : ctx.view === 'supply' || legacyInitiator;
 				setIsInitiator(init);
+				setCanCreateInventory(appAccess?.decisions['inventory.create'] !== 'deny');
+				const deleteDecision = appAccess?.decisions['inventory.delete'] ?? 'inherit';
+				setCanDeleteInventory(deleteDecision === 'allow' || (deleteDecision === 'inherit' && init));
 
 				const sts = await withTimeout(fetchStores(), 15000, 'core stores');
 				// Создавать инвентаризацию может любой сотрудник, который открыл раздел.
@@ -530,7 +534,7 @@ export function InventoryHome(): JSX.Element {
 			<div className="inventory-detail-head">
 				<div><strong>Точки инвентаризации</strong><span>{inv.sectionIds?.length ? `Разделов каталога: ${inv.sectionIds.length}` : 'Весь ассортимент выбранных складов'}</span></div>
 				<InventoryExportButton inventoryId={inv.id} />
-				{isInitiator && <button className="inventory-delete" type="button" onClick={() => void removeInventory(inv)}>Удалить инвентаризацию</button>}
+				{canDeleteInventory && <button className="inventory-delete" type="button" onClick={() => void removeInventory(inv)}>Удалить инвентаризацию</button>}
 			</div>
 			{inv.points.some((point) => point.result) && <InventoryMoneySummary results={inv.points.flatMap((point) => point.result ? [point.result] : [])} label="Итоги по точкам" partial={inv.points.some((point) => !point.result)} />}
 			<div className="inventory-point-list">
@@ -568,7 +572,7 @@ export function InventoryHome(): JSX.Element {
 					<h1>Инвентаризации</h1>
 					<p className="subtitle">Контроль подсчётов, сверки и расхождений по торговым точкам · {me.name}{ctx.__mock ? ' · dev-мок' : ''}</p>
 				</div>
-				{!creating && <button className="btn-primary inventory-create-button" onClick={() => setCreating(true)}>+ Создать инвентаризацию</button>}
+				{canCreateInventory && !creating && <button className="btn-primary inventory-create-button" onClick={() => setCreating(true)}>+ Создать инвентаризацию</button>}
 			</header>
 
 			<section className="inventory-kpis" aria-label="Сводка по инвентаризациям">

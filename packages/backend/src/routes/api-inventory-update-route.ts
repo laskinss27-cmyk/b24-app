@@ -27,6 +27,10 @@ export function registerInventoryUpdateRoute(app: FastifyInstance): void {
 		};
 		const client = inventoryClientFrom(app, b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		if (req.appAccess) {
+			b.userId = req.appAccess.user.id;
+			b.userName = req.appAccess.user.name;
+		}
 		if (!b.inventoryId || b.storeId == null || !b.action) {
 			return reply.code(400).send({ ok: false, error: 'inventoryId/storeId/action required' });
 		}

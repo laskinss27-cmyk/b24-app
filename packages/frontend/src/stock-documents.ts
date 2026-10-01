@@ -1,16 +1,18 @@
 import { bx24Auth } from './bitrix-auth.js';
+import type { StockForm } from './StockWorkspaceTypes.js';
 
 export interface StockItem { productId: number; name: string; article: string; brand: string; stocks?: Record<string, number>; total?: number }
 
 /** Справочники для форм и ролевое право на складские документы. */
-export async function fetchStockFormData(): Promise<{ stores: string[]; suppliers: string[]; canCreate: boolean; canEditSubmitted: boolean; isSupply: boolean }> {
+export async function fetchStockFormData(): Promise<StockForm & { canEditSubmitted: boolean; isSupply: boolean }> {
 	const res = await fetch('/api/stock/form-data', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth() }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; stores?: string[]; suppliers?: string[]; canCreate?: boolean; canEditSubmitted?: boolean; isSupply?: boolean };
+	const json = (await res.json()) as Partial<StockForm> & { ok: boolean; error?: string; isSupply?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось получить справочники');
-	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate), canEditSubmitted: Boolean(json.canEditSubmitted), isSupply: Boolean(json.isSupply) };
+	const permissions = Object.fromEntries(['canCreateReceipt', 'canCreateIssue', 'canPost', 'canCancelRealization'].filter((key) => key in json).map((key) => [key, Boolean(json[key as keyof StockForm])]));
+	return { stores: json.stores ?? [], suppliers: json.suppliers ?? [], canCreate: Boolean(json.canCreate), canEditSubmitted: Boolean(json.canEditSubmitted), isSupply: Boolean(json.isSupply), ...permissions };
 }
 
 export interface StockDocumentAmendInput {

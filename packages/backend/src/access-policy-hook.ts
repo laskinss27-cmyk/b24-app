@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { AccessPermissionId } from '@b24-app/shared';
+import { WAREHOUSE_PERMISSION_IDS, type AccessPermissionId } from '@b24-app/shared';
 import { ACCESS_POLICY_ENFORCEMENT_ENABLED, hasAppPermissions, type AccessAuthBody } from './access-policy.js';
 
 const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>> = {
@@ -138,8 +138,17 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/inventory/delete': ['inventory.delete'],
 };
 
-function permissionsFor(route: string, body: Record<string, unknown>): readonly AccessPermissionId[] {
-	if (route === '/api/deal/realize-core' && body['action'] === 'cancel') return ['realizations.cancel'];
+export function permissionsFor(route: string, body: Record<string, unknown>): readonly AccessPermissionId[] {
+	if (route === '/api/stock/movements' && (body['kind'] === 'delivery' || body['kind'] === 'return')) return ['stock.view_movements', 'realizations.view'];
+	if (route === '/api/stock/doc' && body['doctype'] === 'Delivery Note') return ['stock.view', 'realizations.view'];
+	if (route === '/api/inventory/update') return body['action'] === 'makeAct' || body['action'] === 'reopen' ? ['inventory.manage'] : ['inventory.count'];
+	if (route === '/api/deal/realize-core') {
+		const actions: Record<string, readonly AccessPermissionId[]> = {
+			list: ['realizations.view'], draft: ['realizations.create'], submit: ['realizations.post'],
+			'delete-draft': ['realizations.delete'], cancel: ['realizations.cancel'], return: ['realizations.return'],
+		};
+		return actions[String(body['action'])] ?? ['realizations.view'];
+	}
 	if(route==='/api/stock/conditions')return body['action']==='change'?['transfers.create','transfers.post']:['catalog.view'];
 	if (route === '/api/stock/create') {
 		return body['kind'] === 'receipt' ? ['stock.create_receipt'] : ['stock.create_issue'];
@@ -157,7 +166,7 @@ export function registerAccessPolicyHook(app: FastifyInstance): void {
 		const route = String(req.routeOptions.url ?? '');
 		if (!route.startsWith('/api/') || route.startsWith('/api/access-control/')) return;
 		const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
-		const permissionIds = permissionsFor(route, body);
+		const permissionIds = permissionsFor(route, body).filter((id) => WAREHOUSE_PERMISSION_IDS.includes(id));
 		if (!permissionIds.length) return;
 		const domain = typeof body['domain'] === 'string' ? body['domain'] : '';
 		const accessToken = typeof body['accessToken'] === 'string' ? body['accessToken'] : '';
@@ -179,9 +188,9 @@ export function registerAccessPolicyHook(app: FastifyInstance): void {
 				deniedPermissions: result.denied,
 			});
 		} catch (error) {
-			// Битрикс иногда кратковременно не отвечает. Новая модель не должна положить
-			// рабочее приложение: старые проверки маршрута продолжат действовать.
-			app.log.error({ route, error: String(error) }, '[access-policy] check failed; legacy access preserved');
+			// Ошибка чтения не должна превращать явный запрет в прежний доступ.
+			app.log.error({ route, error: String(error) }, '[access-policy] check failed');
+			return reply.code(503).send({ ok: false, error: 'Не удалось проверить права. Повторите действие после восстановления связи с Битрикс24.' });
 		}
 	});
 }

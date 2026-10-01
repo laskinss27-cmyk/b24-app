@@ -3631,165 +3631,94 @@ html[data-theme="dark"] .marketplace-picker {
     background: #172233
 }
 html[data-theme="dark"] .access-control {
-    background: #172233;
-    color: #e5edf8
+    color: var(--app-text,#e5edf8)
 }
-html[data-theme="dark"] .access-header p {
-    color: #b9c6d7
+html[data-theme="dark"] .access-control button {
+    border: 1px solid var(--app-line,#34445a)
 }
-html[data-theme="dark"] .access-draft-badge {
-    border: 1px solid hsl(41 65% 53%);
-    background: hsl(42 55% 22%);
-    color: hsl(39 90% 72%)
+html[data-theme="dark"] .access-control :is(button,input,select,textarea,summary):focus-visible {
+    outline: 3px solid var(--app-link,hsl(214 65% 53%))
 }
-html[data-theme="dark"] .access-draft-badge.active {
-    border-color: hsl(140 43% 53%);
-    background: hsl(140 50% 22%);
-    color: hsl(142 65% 72%)
+html[data-theme="dark"] .access-control :is(input,select,textarea) {
+    border: 1px solid var(--app-line,#34445a)
 }
-html[data-theme="dark"] .access-safety {
-    border: 1px solid hsl(210 65% 37%);
-    background: hsl(210 55% 22%);
-    color: #e5edf8
+html[data-theme="dark"] .access-header p, html[data-theme="dark"] .access-subject-head p {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-control .access-eyebrow {
+    color: var(--app-link,hsl(214 68% 72%))
+}
+html[data-theme="dark"] .access-users {
+    border: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-subject-tabs {
+    background: var(--app-bg,#172233)
+}
+html[data-theme="dark"] .access-subject-tabs button[aria-pressed=true] {
+    border-color: var(--app-link,hsl(214 65% 53%));
+    color: var(--app-link,hsl(214 68% 72%))
+}
+html[data-theme="dark"] .access-user-list button[aria-pressed=true] {
+    background: var(--app-bg,hsl(215 55% 22%));
+    border-left-color: var(--app-link,hsl(214 65% 53%))
+}
+html[data-theme="dark"] .access-user-list span, html[data-theme="dark"] .access-user-list small {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-editor {
+    border: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-hint {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-fixed {
+    border-left: 3px solid var(--app-link,hsl(214 65% 53%));
+    background: var(--app-bg,#172233)
+}
+html[data-theme="dark"] .access-summary {
+    border-top: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-summary>div {
+    border-bottom: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-summary strong {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-advanced details {
+    border-top: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-permission {
+    border-top: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-permission small {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-note {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-save-bar {
+    border: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .access-save-bar small {
+    color: var(--app-muted,#b9c6d7)
+}
+html[data-theme="dark"] .access-save-bar .btn-primary {
+    background: var(--app-link,rgb(36 103 190))
+}
+html[data-theme="dark"] .access-message {
+    border: 1px solid var(--app-line,#34445a)
 }
 html[data-theme="dark"] .access-message.error {
-    border: 1px solid hsl(0 65% 37%);
-    background: hsl(356 55% 22%);
-    color: hsl(352 80% 72%)
+    border-left: 4px solid hsl(4 65% 53%)
 }
 html[data-theme="dark"] .access-message.ok {
-    border: 1px solid hsl(141 55% 37%);
-    background: hsl(141 55% 22%);
-    color: hsl(142 65% 72%)
+    border-left: 4px solid hsl(151 55% 53%)
 }
-html[data-theme="dark"] .access-users, html[data-theme="dark"] .access-editor {
-    border: 1px solid #34445a;
-    background: #202c3d
+html[data-theme="dark"] .access-empty {
+    color: var(--app-muted,#b9c6d7)
 }
-html[data-theme="dark"] .access-users-title span {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-users > input {
-    border: 1px solid #34445a
-}
-html[data-theme="dark"] .access-subject-heading {
-    background: #202c3d;
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-subject-empty {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-user-list > button:hover {
-    background: #172233
-}
-html[data-theme="dark"] .access-user-list > button.active {
-    background: hsl(214 55% 22%);
-    color: hsl(210 71% 72%)
-}
-html[data-theme="dark"] .access-avatar {
-    background: hsl(211 55% 22%);
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-avatar.department {
-    background: hsl(256 55% 22%);
-    color: hsl(256 55% 72%)
-}
-html[data-theme="dark"] .access-user-text small {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-configured {
-    color: hsl(210 63% 72%)
-}
-html[data-theme="dark"] .access-employee-head {
-    border-bottom: 1px solid #34445a
-}
-html[data-theme="dark"] .access-employee-head p {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-reset {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-reset:hover {
-    color: hsl(4 76% 72%)
-}
-html[data-theme="dark"] .access-profile {
-    background: #172233
-}
-html[data-theme="dark"] .access-profile label span, html[data-theme="dark"] .access-note > span {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-profile select, html[data-theme="dark"] .access-note textarea {
-    border: 1px solid #34445a;
-    background: #202c3d
-}
-html[data-theme="dark"] .access-profile p {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-groups button {
-    border: 1px solid #34445a;
-    background: #202c3d;
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-groups button span {
-    background: #172233;
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-groups button.active {
-    border-color: hsl(210 63% 53%);
-    background: hsl(214 55% 22%);
-    color: hsl(210 75% 72%)
-}
-html[data-theme="dark"] .access-groups button.active span {
-    background: hsl(212 55% 22%);
-    color: hsl(210 75% 72%)
-}
-html[data-theme="dark"] .access-permission-tools input {
-    border: 1px solid #34445a
-}
-html[data-theme="dark"] .access-permission-tools span {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-permissions {
-    border: 1px solid #34445a
-}
-html[data-theme="dark"] .access-permissions-empty {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-permission-row {
-    border-bottom: 1px solid #34445a
-}
-html[data-theme="dark"] .access-permission-row small {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-risk {
-    background: hsl(21 55% 22%);
-    color: hsl(21 80% 72%)
-}
-html[data-theme="dark"] .access-decision {
-    border: 1px solid #34445a
-}
-html[data-theme="dark"] .access-decision button {
-    border-right: 1px solid #34445a;
-    background: #202c3d;
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-decision button.inherit.active {
-    background: #172233;
-    color: #e5edf8
-}
-html[data-theme="dark"] .access-decision button.allow.active {
-    background: hsl(139 53% 22%);
-    color: hsl(143 64% 72%)
-}
-html[data-theme="dark"] .access-decision button.deny.active {
-    background: hsl(356 55% 22%);
-    color: hsl(4 76% 72%)
-}
-html[data-theme="dark"] .access-footer {
-    color: #b9c6d7
-}
-html[data-theme="dark"] .access-loading, html[data-theme="dark"] .access-empty, html[data-theme="dark"] .access-denied {
-    color: #b9c6d7
+html[data-theme="dark"] .access-audit {
+    color: var(--app-muted,#b9c6d7)
 }
 html[data-theme="dark"] .operation-log {
     background: #172233;

@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import type { AccessDecision, AccessPermissionId } from '@b24-app/shared';
 import { getContext } from './b24-context.js';
 import {
 	cancelTransfer, collectTransfer, deleteTransfer, fetchCurrentAppAccess, fetchCurrentUserId, fetchStockFormData,
@@ -78,7 +79,9 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 	const [receiveT, setReceiveT] = useState<TransferDoc | null>(null);
 	const [destinationStores, setDestinationStores] = useState<string[]>([]);
 	const [canDelete, setCanDelete] = useState(false);
-	const canManage = supplyMode && isSupply;
+	const [decisions, setDecisions] = useState<Partial<Record<AccessPermissionId, AccessDecision>>>({});
+	const permit = (id: AccessPermissionId, fallback: boolean): boolean => decisions[id] === 'allow' ? true : decisions[id] === 'deny' ? false : fallback;
+	const canManage = permit('transfers.manage_requests', supplyMode && isSupply);
 
 	const load = async (): Promise<void> => {
 		setLoading(true); setErr(null);
@@ -98,12 +101,12 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 		void fetchStockFormData().then((data) => setDestinationStores(data.stores)).catch(() => setDestinationStores([]));
 	}, [canManage]);
 	useEffect(() => {
-		if (!supplyMode) { setCanDelete(false); return; }
 		if (getContext().__mock) { setCanDelete(true); return; }
 		void Promise.all([fetchCurrentUserId(), fetchCurrentAppAccess().catch(() => null)])
 			.then(([id, access]) => {
+				setDecisions(access?.decisions ?? {});
 				const decision = access?.decisions['transfers.delete'] ?? 'inherit';
-				setCanDelete(decision === 'allow' || (decision === 'inherit' && id === '1858'));
+				setCanDelete(supplyMode && id === '1858' && decision !== 'deny');
 			})
 			.catch(() => setCanDelete(false));
 	}, [supplyMode]);
@@ -172,7 +175,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 
 	return (
 		<>
-			{showCreate && form?.canCreate && (
+			{permit('transfers.create', showCreate && Boolean(form?.canCreate)) && (
 				<div style={{ marginBottom: 10 }}>
 					<button className="btn-primary" onClick={() => setShowForm(true)}>➕ Создать перемещение</button>
 				</div>
@@ -196,21 +199,21 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{transferStatusText(t)}</td>
 								<td style={TD}>
-									{canManage && ['draft', 'collected', 'requested'].includes(t.status) && <button disabled={busy != null} onClick={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void act(t, 'cancel'); }}>Отменить</button>}
-									{(t.status === 'draft' || t.status === 'requested') && <button className="btn-primary" disabled={busy != null} onClick={() => setCollectT(t)}>{busy === t.id ? '…' : 'Собрано'}</button>}
-									{t.status === 'collected' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.collectedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'Отправлено'}</button>}
-									{t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
-									{canManage && t.status === 'accepted' && (transferPlanMatchesAccepted(t)
+									{permit('transfers.cancel', canManage) && ['draft', 'collected', 'requested'].includes(t.status) && <button disabled={busy != null} onClick={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void act(t, 'cancel'); }}>Отменить</button>}
+									{permit('transfers.collect', true) && (t.status === 'draft' || t.status === 'requested') && <button className="btn-primary" disabled={busy != null} onClick={() => setCollectT(t)}>{busy === t.id ? '…' : 'Собрано'}</button>}
+									{permit('transfers.ship', true) && t.status === 'collected' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.collectedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'Отправлено'}</button>}
+									{permit('transfers.receive', true) && t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
+									{permit('transfers.post', canManage) && t.status === 'accepted' && (transferPlanMatchesAccepted(t)
 										? <button className="btn-primary" disabled={busy != null} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>
 										: <button className="btn-primary" disabled={busy != null} onClick={() => setOpenT(t)}>Скорректировать</button>)}
-									{canManage && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
+									{permit('transfers.resolve_shortage', canManage) && t.status === 'shortage' && <button className="btn-primary" disabled={busy != null} onClick={() => void resolveShortage(t)}>{busy === t.id ? '…' : 'Скорректировать'}</button>}
 								</td>
 							</tr>
 						))}
 					</tbody>
 				</table>
 			)}
-			{openT && <StockTransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} canDelete={canDelete && !openT.correctionOf} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
+			{openT && <StockTransferDetailModal t={openT} stores={destinationStores.includes(openT.toStore) ? destinationStores : [openT.toStore, ...destinationStores]} editable={canManage} editDestination={permit('transfers.edit_destination', canManage)} editQuantity={permit('transfers.edit_quantity', canManage)} canDelete={canDelete && !openT.correctionOf} busy={busy === openT.id} onDestinationChange={(toStore) => changeDestination(openT, toStore)} onLinesChange={(lines) => changeLines(openT, lines)} onDelete={() => void remove(openT)} onClose={() => setOpenT(null)} />}
 			{collectT && <StockTransferQuantityModal mode="collect" t={collectT} busy={busy === collectT.id} onClose={() => setCollectT(null)} onConfirm={(lines) => void saveActual(collectT, 'collect', lines)} />}
 			{receiveT && <StockTransferQuantityModal mode="receive" t={receiveT} busy={busy === receiveT.id} onClose={() => setReceiveT(null)} onConfirm={(lines) => void saveActual(receiveT, 'receive', lines)} />}
 			{showForm && form && <TransferForm form={form} onClose={() => setShowForm(false)} onDone={() => { setShowForm(false); void load(); }} />}

@@ -5,4 +5,8 @@ export interface StockForm {
 	suppliers: string[];
 	canCreate: boolean;
 	canEditSubmitted?: boolean;
+	canCreateReceipt?: boolean;
+	canCreateIssue?: boolean;
+	canPost?: boolean;
+	canCancelRealization?: boolean;
 }

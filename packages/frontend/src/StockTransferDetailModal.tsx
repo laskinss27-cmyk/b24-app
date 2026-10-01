@@ -14,10 +14,12 @@ const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(
 const modalCard: CSSProperties = { background: 'var(--app-surface)', borderRadius: 12, padding: 20, maxWidth: 700, width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,.25)' };
 
 /** Раскрытие перемещения (наш entity-документ: позиции + история статусов). */
-export function StockTransferDetailModal({ t, stores, editable, canDelete, busy, onDestinationChange, onLinesChange, onDelete, onClose }: {
+export function StockTransferDetailModal({ t, stores, editable, editDestination, editQuantity, canDelete, busy, onDestinationChange, onLinesChange, onDelete, onClose }: {
 	t: TransferDoc;
 	stores: string[];
 	editable: boolean;
+	editDestination?: boolean;
+	editQuantity?: boolean;
 	canDelete: boolean;
 	busy: boolean;
 	onDestinationChange: (toStore: string) => Promise<TransferDoc>;
@@ -34,8 +36,8 @@ export function StockTransferDetailModal({ t, stores, editable, canDelete, busy,
 	const [lineQty, setLineQty] = useState<Record<number, number | ''>>(() => Object.fromEntries(t.lines.map((line) => [line.productId, line.qty])));
 	useEffect(() => setToStore(t.toStore), [t.toStore]);
 	useEffect(() => setLineQty(Object.fromEntries(t.lines.map((line) => [line.productId, line.qty]))), [t.lines]);
-	const canEditDestination = editable && ['draft', 'collected', 'requested'].includes(t.status);
-	const canEditLines = editable && ['draft', 'collected', 'accepted', 'requested'].includes(t.status);
+	const canEditDestination = (editDestination ?? editable) && ['draft', 'collected', 'requested'].includes(t.status);
+	const canEditLines = (editQuantity ?? editable) && ['draft', 'collected', 'accepted', 'requested'].includes(t.status);
 	const linesDirty = t.lines.some((line) => Math.abs(Number(lineQty[line.productId] || 0) - line.qty) > 0.000001);
 	const collected = new Map(t.collectedLines.map((line) => [line.productId, line.qty]));
 	const accepted = new Map(t.acceptedLines.map((line) => [line.productId, line.qty]));

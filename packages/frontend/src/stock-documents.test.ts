@@ -30,6 +30,13 @@ test('stock form data preserves empty and boolean fallbacks', async () => {
 	});
 });
 
+test('stock form keeps creation, posting and realization cancellation as independent permissions', async () => {
+	captureResponses([{ ok: true, canCreate: true, canCreateReceipt: true, canCreateIssue: false, canPost: false, canCancelRealization: true, canEditSubmitted: false }]);
+	const form = await fetchStockFormData();
+	assert.equal(form.canCreateReceipt, true); assert.equal(form.canCreateIssue, false);
+	assert.equal(form.canPost, false); assert.equal(form.canCancelRealization, true); assert.equal(form.canEditSubmitted, false);
+});
+
 test('stock product creation succeeds and search rejects backend errors', async () => {
 	const requests = captureResponses([
 		{ ok: true, productId: 17 },

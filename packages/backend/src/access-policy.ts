@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
 	ACCESS_PERMISSIONS,
+	ACCESS_ROLE_OWNER_IDS,
+	WAREHOUSE_PERMISSION_IDS,
+	canGrantAdministrator,
 	effectiveAccessDecision,
 	emptyAccessControlDraft,
 	hasDirectMarketplaceAccess,
@@ -11,21 +14,19 @@ import {
 } from '@b24-app/shared';
 import { B24Client } from './b24/client.js';
 import { normalizeDomain } from './security.js';
+import { readAccessPolicy } from './access-policy-store.js';
 
-export const ACCESS_POLICY_OPTION = 'ud_access_control_draft_v1';
-export const ACCESS_MANAGER_IDS = new Set(['1', '986', '1858']);
-/**
- * Emergency fail-open switch. The saved policy is intentionally preserved, but it
- * must not affect application access until the editor and rules are reviewed.
- */
-export const ACCESS_POLICY_ENFORCEMENT_ENABLED = false;
-export const ACCESS_POLICY_EDITOR_ENABLED = false;
+// Не читаем отключённую политику ud_access_control_draft_v1: старые назначения
+// остаются архивом и не могут включиться при выпуске нового редактора.
+export const ACCESS_MANAGER_IDS = new Set<string>(ACCESS_ROLE_OWNER_IDS);
+export const ACCESS_POLICY_ENFORCEMENT_ENABLED = true;
+export const ACCESS_POLICY_EDITOR_ENABLED = true;
 
 const PROFILE_IDS = new Set<AccessProfileId>(['legacy', 'manager', 'supply', 'administrator', 'leadership']);
 const PERMISSION_IDS = new Set<string>(ACCESS_PERMISSIONS.map((item) => item.id));
 const SAFE_ID = /^\d{1,12}$/;
 const POLICY_CACHE_MS = 15_000;
-const USER_CACHE_MS = 5 * 60_000;
+const USER_CACHE_MS = 30_000;
 
 export interface AccessAuthBody {
 	domain?: string;
@@ -112,12 +113,12 @@ export function parseStoredAccessPolicy(value: unknown): AccessControlDraft {
 	}
 }
 
-export async function loadAccessPolicy(client: B24Client, domain: string, force = false): Promise<AccessControlDraft> {
+export async function loadAccessPolicy(_client: B24Client, domain: string, force = false): Promise<AccessControlDraft> {
 	const key = normalizeDomain(domain);
 	const cached = policyCache.get(key);
 	if (!force && cached && cached.expiresAt > Date.now()) return cached.policy;
-	const options = await client.call<Record<string, unknown>>('app.option.get', {});
-	const policy = parseStoredAccessPolicy(options?.[ACCESS_POLICY_OPTION]);
+	const policy = parseStoredAccessPolicy(await readAccessPolicy(domain));
+	for (const id of ACCESS_ROLE_OWNER_IDS) policy.employees[id] = { profileId: 'administrator', overrides: {} };
 	policyCache.set(key, { expiresAt: Date.now() + POLICY_CACHE_MS, policy });
 	return policy;
 }
@@ -180,12 +181,13 @@ export async function resolveCurrentAccess(
 		permission.id,
 		directMarketplaceAccess && permission.id.startsWith('marketplaces.')
 			? 'allow'
+			: !WAREHOUSE_PERMISSION_IDS.includes(permission.id) && !permission.id.startsWith('admin.') ? 'inherit'
+			: canGrantAdministrator(user.id) ? 'allow'
 			: ACCESS_POLICY_ENFORCEMENT_ENABLED && policy.policyMode === 'active'
 			? effectiveAccessDecision(policy.employees[user.id], departmentRules, permission.id)
 			: 'inherit',
 	])) as Record<AccessPermissionId, 'inherit' | 'allow' | 'deny'>;
 	const canManageAccess = ACCESS_MANAGER_IDS.has(user.id)
-		|| user.isPortalAdmin
 		|| decisions['admin.manage_access'] === 'allow';
 	return { user, policy, decisions, canManageAccess };
 }

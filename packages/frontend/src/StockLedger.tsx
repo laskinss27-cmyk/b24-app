@@ -7,6 +7,8 @@ import { TransferRequestsTab } from './StockTransferRequestsTab.js';
 import { StockTransfersTab } from './StockTransfersTab.js';
 import type { StockForm, StockMovementKind } from './StockWorkspaceTypes.js';
 import { fetchStockFormData, withTimeout } from './b24.js';
+import { AccessControl } from './AccessControl.js';
+import { fetchCurrentAppAccess, type CurrentAppAccess } from './access-control-api.js';
 
 /**
  * Окно «Складской учёт» (левое меню, view='stock'). Вкладки:
@@ -48,10 +50,13 @@ export function StockLedger(): JSX.Element {
 	const [tab, setTab] = useState<Tab>(requestId > 0 ? 'requests' : 'transfers');
 	const [form, setForm] = useState<StockForm | null>(null);
 	const [store, setStore] = useState('');
+	const [access, setAccess] = useState<CurrentAppAccess | null>(null);
+	const [editingAccess, setEditingAccess] = useState(false);
 
 	// Все сотрудники видят весь складской учёт. Опасные действия отдельно защищены правами API.
 	useEffect(() => {
 		if (ctx.__mock) {
+			setAccess({ user: { id: '1858', name: 'Сергей', departments: [1], isPortalAdmin: true }, policyMode: 'draft', decisions: {}, canManageAccess: true });
 			setForm({ stores: ['Максидом Дунайский 64', 'Измайловский 111', 'Офис'], suppliers: ['Тантос', 'СТ Групп', 'Сити Видео', 'ЭТМ'], canCreate: true, canEditSubmitted: true });
 			setPhase({ k: 'ready' });
 			return;
@@ -59,6 +64,7 @@ export function StockLedger(): JSX.Element {
 		const bx = window.BX24;
 		if (!bx) { setPhase({ k: 'ready' }); return; }
 		bx.init(() => {
+			void withTimeout(fetchCurrentAppAccess(), 15000, 'access-control.me').then(setAccess).catch(() => setAccess(null));
 			void (async () => {
 				const access = await withTimeout(fetchStockFormData(), 15000, 'stock.form-data');
 				setForm(access);
@@ -69,13 +75,15 @@ export function StockLedger(): JSX.Element {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ctx]);
 
-	if (phase.k === 'init') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Загрузка…</div>;
-	if (phase.k === 'denied') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Не удалось определить права доступа. Обновите страницу.</div>;
+	if (editingAccess && access?.canManageAccess) return <AccessControl currentUserId={access.user?.id ?? ''} mock={Boolean(ctx.__mock)} canManageAccess={access.canManageAccess} onClose={() => { setEditingAccess(false); if (!ctx.__mock) window.location.reload(); }} />;
+	const accessButton = access?.canManageAccess ? <button className="btn-secondary" onClick={() => setEditingAccess(true)}>Права сотрудников</button> : null;
+	if (phase.k === 'init') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Загрузка… {accessButton}</div>;
+	if (phase.k === 'denied') return <div style={{ padding: 24, color: 'var(--app-muted)' }}>Не удалось определить права доступа. Обновите страницу. {accessButton}</div>;
 	const tabs = TABS;
 	const documentTab = tab !== 'inventory' && tab !== 'ledger';
 	return (
 		<div className="stock-ledger-shell" style={{ maxWidth: tab === 'inventory' ? 1040 : 980, margin: '0 auto', padding: 16, color: 'var(--app-text)' }}>
-			<h1 style={{ fontSize: 20, margin: '0 0 12px' }}>🏬 Складской учёт</h1>
+			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}><h1 style={{ fontSize: 20, margin: 0 }}>🏬 Складской учёт</h1>{accessButton}</div>
 			<div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--app-line)', marginBottom: 14, flexWrap: 'wrap' }}>
 				{tabs.map((t) => (
 					<button key={t.key} style={tabStyle(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
@@ -90,10 +98,10 @@ export function StockLedger(): JSX.Element {
 				{(tab === 'transfers' || tab === 'requests') && <span>Входящие и исходящие документы</span>}
 			</div>}
 			{tab === 'inventory' ? <InventoryHome />
-				: tab === 'requests' ? <TransferRequestsTab form={form} mode="manager" store={store} {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
+				: tab === 'requests' ? <TransferRequestsTab form={form} mode={access?.decisions['transfers.manage_requests'] === 'allow' ? 'supply' : 'manager'} store={store} {...(requestId > 0 ? { initialRequestId: requestId } : {})} />
 				: tab === 'transfers' ? <StockTransfersTab form={form} showCreate={false} store={store} onStoreReset={() => setStore('')} {...(transferId > 0 ? { initialTransferId: transferId } : {})} />
 				: tab === 'ledger' ? <StockItemHistoryTab />
-				: <StockMovementsTab kind={tab} form={form} showCreate={false} store={store} onStoreReset={() => setStore('')} />}
+				: <StockMovementsTab kind={tab} form={form} showCreate={access?.decisions[tab === 'receipt' ? 'stock.create_receipt' : 'stock.create_issue'] === 'allow'} store={store} onStoreReset={() => setStore('')} />}
 		</div>
 	);
 }

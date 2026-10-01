@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import type { AccessControlDraft, AccessSubjectRule } from '@b24-app/shared';
+import { canGrantAdministrator, type AccessControlDraft } from '@b24-app/shared';
+import { accessPolicyEditError, changedSubjects, withAccessPolicySave } from '../access-policy-edit.js';
+import { normalizeDomain } from '../security.js';
+import { writeAccessPolicy } from '../access-policy-store.js';
 import { B24ApiError, B24Client } from '../b24/client.js';
 import {
 	ACCESS_MANAGER_IDS,
 	ACCESS_POLICY_EDITOR_ENABLED,
 	ACCESS_POLICY_ENFORCEMENT_ENABLED,
-	ACCESS_POLICY_OPTION,
 	accessClientFrom,
 	cacheAccessPolicy,
 	loadAccessPolicy,
@@ -35,9 +37,8 @@ async function requireManager(
 		ADMIN?: boolean | string;
 	}>('user.current', {}).catch(() => null);
 	const id = String(user?.ID ?? '');
-	const portalAdmin = user?.ADMIN === true || String(user?.ADMIN ?? '').toUpperCase() === 'Y';
-	if (!ACCESS_MANAGER_IDS.has(id) && !portalAdmin) {
-		const access = await resolveCurrentAccess(app, body);
+	if (!ACCESS_MANAGER_IDS.has(id)) {
+		const access = await resolveCurrentAccess(app, body, true);
 		if (!access?.canManageAccess) return null;
 	}
 	return {
@@ -46,12 +47,19 @@ async function requireManager(
 	};
 }
 
-function changedSubjects(
-	before: Record<string, AccessSubjectRule>,
-	after: Record<string, AccessSubjectRule>,
-): string[] {
-	const ids = new Set([...Object.keys(before), ...Object.keys(after)]);
-	return [...ids].filter((id) => JSON.stringify(before[id] ?? null) !== JSON.stringify(after[id] ?? null));
+async function allSubjects(client: B24Client, method: string, params: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+	const rows: Array<Record<string, unknown>> = [];
+	let start = 0;
+	const seen = new Set<number>();
+	while (!seen.has(start)) {
+		seen.add(start);
+		const page = await client.callWithMeta<Array<Record<string, unknown>>>(method, { ...params, start });
+		rows.push(...(Array.isArray(page.result) ? page.result : []));
+		if (page.next === undefined || page.next === null) return rows;
+		start = Number(page.next);
+		if (!Number.isInteger(start) || start < 0) throw new Error('Некорректная страница справочника');
+	}
+	throw new Error('Справочник вернул повторную страницу');
 }
 
 export function registerApiAccessControlRoute(app: FastifyInstance): void {
@@ -77,6 +85,7 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 				policyMode: access.policy.policyMode,
 				decisions: access.decisions,
 				canManageAccess: access.canManageAccess,
+				canGrantAdministrator: canGrantAdministrator(access.user.id),
 			};
 		} catch (error) {
 			app.log.error({}, `[api/access-control/me] ${errInfo(error)}`);
@@ -102,7 +111,7 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 				} : null,
 				policyMode: 'draft',
 				decisions: {},
-				canManageAccess: ACCESS_MANAGER_IDS.has(id) || isPortalAdmin,
+				canManageAccess: ACCESS_MANAGER_IDS.has(id),
 			};
 		}
 	});
@@ -133,7 +142,7 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 			return reply.code(403).send({ ok: false, error: 'окно доступно только руководству и администраторам' });
 		}
 		try {
-			const rawUsers = await client.call<Array<Record<string, unknown>>>('user.get', {
+			const rawUsers = await allSubjects(client, 'user.get', {
 				FILTER: { ACTIVE: true },
 				SORT: 'LAST_NAME',
 				ORDER: 'ASC',
@@ -154,7 +163,7 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 			const usedDepartmentIds = [...new Set(users.flatMap((user) => user.departments))].sort((a, b) => a - b);
 			const names = new Map<number, string>([[10, 'Снабжение']]);
 			try {
-				const rawDepartments = await client.call<Array<Record<string, unknown>>>('department.get', {});
+				const rawDepartments = await allSubjects(client, 'department.get', {});
 				for (const department of Array.isArray(rawDepartments) ? rawDepartments : []) {
 					const id = Number(department['ID'] ?? 0);
 					const name = String(department['NAME'] ?? '').trim();
@@ -165,7 +174,7 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 				// Отдел всё равно доступен по ID из user.get и остаётся настраиваемым.
 				app.log.warn({}, `[api/access-control/users] department names unavailable: ${errInfo(error)}`);
 			}
-			const departments = usedDepartmentIds
+			const departments = [...new Set([...usedDepartmentIds, ...names.keys()])]
 				.map((id) => ({
 					id,
 					name: names.get(id) ?? `Отдел #${id}`,
@@ -189,9 +198,10 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AccessAuthBody & { draft?: unknown };
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'нет авторизации' });
-		const manager = await requireManager(app, body, client);
-		if (!manager) return reply.code(403).send({ ok: false, error: 'сохранять права может только руководство или администратор' });
+		return withAccessPolicySave(normalizeDomain(String(body.domain)), async () => {
 		try {
+			const manager = await requireManager(app, body, client);
+			if (!manager) return reply.code(403).send({ ok: false, error: 'сохранять права может только администратор приложения' });
 			const current = await loadAccessPolicy(client, String(body.domain ?? ''), true);
 			const incoming = body.draft && typeof body.draft === 'object'
 				? body.draft as Partial<AccessControlDraft>
@@ -205,6 +215,8 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 			}
 			const employees = sanitizeAccessRules(incoming.employees);
 			const departments = sanitizeAccessRules(incoming.departments);
+			const editError = accessPolicyEditError(manager.id, current, employees, departments);
+			if (editError) return reply.code(403).send({ ok: false, error: editError });
 			const changedUserIds = changedSubjects(current.employees, employees);
 			const changedDepartmentIds = changedSubjects(current.departments, departments);
 			const now = new Date().toISOString();
@@ -229,7 +241,7 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 			if (serialized.length > 55_000) {
 				return reply.code(413).send({ ok: false, error: 'настройки слишком большие; сократите примечания или число исключений' });
 			}
-			await client.call('app.option.set', { options: { [ACCESS_POLICY_OPTION]: serialized } });
+			await writeAccessPolicy(String(body.domain ?? ''), next);
 			cacheAccessPolicy(String(body.domain ?? ''), next);
 			app.log.info({ managerId: manager.id, changedUserIds, changedDepartmentIds }, '[api/access-control/save] active policy saved');
 			return { ok: true, draft: next };
@@ -237,5 +249,6 @@ export function registerApiAccessControlRoute(app: FastifyInstance): void {
 			app.log.error({}, `[api/access-control/save] ${errInfo(error)}`);
 			return reply.code(502).send({ ok: false, error: 'не удалось сохранить права' });
 		}
+		});
 	});
 }

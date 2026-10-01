@@ -13,6 +13,11 @@ export type AccessDecision = 'inherit' | 'allow' | 'deny';
  */
 export const DIRECT_MARKETPLACE_USER_IDS = ['760', '3608'] as const;
 export const APP_OWNER_USER_ID = '1858';
+/** Назначать администраторов могут только Сергей и Владимир Дранишников. */
+export const ACCESS_ROLE_OWNER_IDS = [APP_OWNER_USER_ID, '1'] as const;
+export function canGrantAdministrator(userId: unknown): boolean {
+	return (ACCESS_ROLE_OWNER_IDS as readonly string[]).includes(String(userId ?? ''));
+}
 export const OPERATION_LOG_VIEWER_USER_ID = APP_OWNER_USER_ID;
 /** ID действующего отдела «Снабжение» в Bitrix24. */
 export const SUPPLY_DEPARTMENT_ID = 10;
@@ -74,8 +79,8 @@ export const ACCESS_PERMISSIONS = [
 	{ id: 'stock.cancel_documents', group: 'Склад', label: 'Отменять складские документы', dangerous: true },
 	{ id: 'stock.create_product', group: 'Склад', label: 'Создавать товар из складского документа', dangerous: true },
 
-	{ id: 'transfers.view_own', group: 'Перемещения', label: 'Просматривать свои заявки' },
-	{ id: 'transfers.view_all', group: 'Перемещения', label: 'Просматривать все заявки и перемещения' },
+	{ id: 'transfers.view_own', group: 'Перемещения', label: 'Открывать заявки и журнал перемещений' },
+	{ id: 'transfers.view_all', group: 'Перемещения', label: 'Видеть заявки всех сотрудников' },
 	{ id: 'transfers.create_request', group: 'Перемещения', label: 'Создавать заявку на перемещение' },
 	{ id: 'transfers.cancel_own_request', group: 'Перемещения', label: 'Отменять свою заявку' },
 	{ id: 'transfers.manage_requests', group: 'Перемещения', label: 'Обрабатывать заявки сотрудников', dangerous: true },
@@ -141,6 +146,18 @@ export const ACCESS_PERMISSIONS = [
 ] as const satisfies readonly AccessPermissionDefinition[];
 
 export type AccessPermissionId = (typeof ACCESS_PERMISSIONS)[number]['id'];
+/** Проверенный контур нового редактора. Исторический общий каталог выше сохранён
+ * для совместимости; неподключённые настройки не выдаём за работающие. */
+export const WAREHOUSE_PERMISSION_IDS: readonly AccessPermissionId[] = [
+	'stock.view', 'stock.view_movements', 'stock.create_receipt', 'stock.create_issue',
+	'stock.edit_submitted', 'stock.post_documents', 'stock.create_product',
+	'transfers.view_own', 'transfers.view_all', 'transfers.create_request', 'transfers.cancel_own_request',
+	'transfers.manage_requests', 'transfers.create', 'transfers.edit_destination', 'transfers.edit_quantity',
+	'transfers.collect', 'transfers.ship', 'transfers.receive', 'transfers.post', 'transfers.resolve_shortage', 'transfers.cancel',
+	'realizations.view', 'realizations.create', 'realizations.post', 'realizations.delete', 'realizations.cancel',
+	'inventory.view', 'inventory.create', 'inventory.count', 'inventory.manage', 'inventory.post', 'inventory.delete',
+];
+export const WAREHOUSE_PERMISSIONS = ACCESS_PERMISSIONS.filter((permission) => WAREHOUSE_PERMISSION_IDS.includes(permission.id));
 export type AccessProfileId = 'legacy' | 'manager' | 'supply' | 'administrator' | 'leadership';
 
 export interface AccessProfileDefinition {
@@ -159,21 +176,22 @@ const permissionsIn = (...groups: string[]): AccessPermissionId[] =>
 export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 	{
 		id: 'legacy',
-		label: 'Текущие права',
-		description: 'Ничего не меняет: сотрудник продолжает работать по действующим правилам.',
+		label: 'По отделу / прежние права',
+		description: 'Использовать настройки отдела. Если отдел не настроен — сохранить прежний доступ.',
 		decisions: {},
 	},
 	{
 		id: 'manager',
 		label: 'Менеджер',
-		description: 'Каталог, сделки, реализации, свои заявки на перемещение и обычная работа с ремонтом.',
+		description: 'Просмотр склада, реализации, свои заявки, сборка, отправка и приём перемещений, пересчёт своей точки.',
 		decisions: allow(
 			'catalog.view', 'catalog.search', 'catalog.view_all_stores', 'catalog.export_comparison', 'catalog.print_price_tags',
 			'deals.view', 'deals.add_products', 'deals.edit_quantity', 'deals.edit_prices', 'deals.apply_discount',
 			'deals.remove_products', 'deals.reserve', 'deals.change_source_store', 'deals.create_supply_request',
 			'deals.export_xlsx', 'deals.create_quote', 'deals.create_contract',
-			'realizations.view', 'realizations.create', 'realizations.edit_draft', 'realizations.post', 'realizations.return',
-			'stock.view', 'transfers.view_own', 'transfers.create_request', 'transfers.cancel_own_request',
+			'realizations.view', 'realizations.create', 'realizations.edit_draft', 'realizations.post', 'realizations.return', 'realizations.delete',
+			'stock.view', 'stock.view_movements', 'transfers.view_own', 'transfers.create_request', 'transfers.cancel_own_request',
+			'transfers.collect', 'transfers.ship', 'transfers.receive', 'inventory.view', 'inventory.count',
 			'repairs.view', 'repairs.create', 'repairs.edit', 'repairs.change_status', 'repairs.request_price_approval',
 			'repairs.print_acceptance', 'repairs.print_issue',
 		),
@@ -181,23 +199,23 @@ export const ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
 	{
 		id: 'supply',
 		label: 'Снабжение',
-		description: 'Полная рабочая зона каталога, склада, перемещений и закупок без административных настроек.',
+		description: 'Работа со складскими документами, всеми заявками, перемещениями и инвентаризациями.',
 		decisions: allow(
 			...permissionsIn('Каталог', 'Склад', 'Перемещения', 'Снабжение', 'Инвентаризация', 'Маркетплейсы'),
-			'realizations.cancel',
+			'realizations.view', 'realizations.cancel',
 			'reports.stock_movements', 'reports.export',
 		),
 	},
 	{
 		id: 'administrator',
 		label: 'Администратор',
-		description: 'Полный доступ ко всем рабочим разделам и настройке прав приложения.',
+		description: 'Все действия складского учёта и управление правами. Назначать администраторов могут только Сергей и Владимир Дранишников.',
 		decisions: allow(...ACCESS_PERMISSIONS.map((item) => item.id)),
 	},
 	{
 		id: 'leadership',
 		label: 'Руководитель',
-		description: 'Все рабочие действия и отчёты. Управление правами оставлено отдельным явным разрешением.',
+		description: 'Все настраиваемые действия складского учёта без управления правами сотрудников.',
 		decisions: allow(...ACCESS_PERMISSIONS
 			.filter((item) => !item.id.startsWith('admin.'))
 			.map((item) => item.id)),

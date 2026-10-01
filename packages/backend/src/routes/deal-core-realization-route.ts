@@ -206,7 +206,7 @@ export function registerDealCoreRealizationRoute(
 					return reply.code(400).send({ ok: false, error: 'укажите одну реализацию и номер сделки' });
 				}
 				const access = await stockAccess(client);
-				if (!appPermission(req, 'stock.edit_submitted', access.canManage)) {
+				if (!appPermission(req, 'realizations.cancel', access.canManage)) {
 					return reply.code(403).send({ ok: false, error: 'отменить проведённую реализацию может только снабжение или складской руководитель' });
 				}
 				const document = await erp.get<Record<string, unknown>>('Delivery Note', name);

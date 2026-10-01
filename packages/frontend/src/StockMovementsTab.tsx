@@ -35,9 +35,10 @@ export function StockMovementsTab({ kind, form, showCreate = true, store = '', o
 	const [busyDoc, setBusyDoc] = useState<string | null>(null);
 	const [prod, setProd] = useState<StockItem | null>(null);
 	const [openDoc, setOpenDoc] = useState<{ name: string; doctype: string; edit?: boolean } | null>(null);
-	const canPost = Boolean(form?.canCreate) && kind !== 'delivery' && kind !== 'return';
+	const canPost = Boolean(form?.canPost ?? form?.canCreate) && kind !== 'delivery' && kind !== 'return';
+	const canCreate = kind === 'receipt' ? Boolean(form?.canCreateReceipt ?? form?.canCreate) : kind === 'issue' && Boolean(form?.canCreateIssue ?? form?.canCreate);
 	const canEditSubmitted = Boolean(form?.canEditSubmitted) && (kind === 'issue' || kind === 'receipt' || kind === 'return');
-	const canCancelRealization = Boolean(form?.canEditSubmitted) && kind === 'delivery';
+	const canCancelRealization = Boolean(form?.canCancelRealization ?? form?.canEditSubmitted) && kind === 'delivery';
 	const showActions = canPost || canEditSubmitted || canCancelRealization;
 
 	useEffect(() => {
@@ -77,7 +78,7 @@ export function StockMovementsTab({ kind, form, showCreate = true, store = '', o
 
 	return (
 		<>
-			{showCreate && canPost && (
+			{showCreate && canCreate && (
 				<div style={{ marginBottom: 10 }}>
 					<button className="btn-primary" onClick={() => setShowForm(true)}>{createLabel}</button>
 				</div>

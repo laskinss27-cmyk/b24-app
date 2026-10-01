@@ -54,7 +54,9 @@ export function registerTransferRequestManagementRoutes(
 		try {
 			const [request, me] = await Promise.all([loadTransferRequest(client, id), currentUser(client)]);
 			if (!request) return reply.code(404).send({ ok: false, error: 'заявка не найдена' });
-			if (!appPermission(req, 'transfers.cancel_own_request', me.isSupply || request.createdById === me.id)) {
+			const canCancelOwn = request.createdById === me.id && appPermission(req, 'transfers.cancel_own_request', true);
+			const canManage = appPermission(req, 'transfers.manage_requests', me.isSupply);
+			if (!canCancelOwn && !canManage) {
 				return reply.code(403).send({ ok: false, error: 'можно отменить только свою заявку' });
 			}
 			if (request.status !== 'pending') return reply.code(409).send({ ok: false, error: 'заявка уже обработана' });
