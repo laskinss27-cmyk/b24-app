@@ -622,6 +622,75 @@ test('deal plan preserves duplicate product lines with separate prices and line 
 	]);
 });
 
+test('saving a reordered plan keeps native row names, legacy keys and sold duplicate identities', async () => {
+	const erp = new FakeErp([{ name: 'DN-IDENTITY', docstatus: 1, items: [
+		item('DN-A', 202, 1, 100, { [REALIZATION_SEGMENT_FIELD]: 'line:key-a' }),
+		item('DN-B', 202, 1, 200, { [REALIZATION_SEGMENT_FIELD]: 'line:key-b' }),
+		item('DN-LEGACY', 203, 1, 80, { [REALIZATION_SEGMENT_FIELD]: 'line:SO-LEGACY' }),
+	] }], { name: 'SO-SAVE', docstatus: 0, items: [
+		item('SO-A', 202, 1, 100, { b24_line_key: 'key-a' }),
+		item('SO-B', 202, 1, 200, { b24_line_key: 'key-b' }), item('SO-LEGACY', 203, 1, 80),
+	] });
+	const history = await listDealRealizations(erp.asClient(), 95);
+	await upsertDealPlan(erp.asClient(), 95, [
+		{ productId: 202, qty: 1, priceListRate: 200, discountPercent: 0, lineKey: 'key-b' },
+		{ productId: 203, qty: 1, priceListRate: 80, discountPercent: 0 },
+		{ productId: 202, qty: 1, priceListRate: 100, discountPercent: 0, lineKey: 'key-a' },
+	], '2026-10-01');
+	const saved = await erp.get('Sales Order', 'SO-SAVE');
+	assert.deepEqual((saved?.items as Array<Record<string, unknown>>).map((r) => [r.name, r.b24_line_key, r.price_list_rate]),
+		[['SO-B', 'key-b', 200], ['SO-LEGACY', 'SO-LEGACY', 80], ['SO-A', 'key-a', 100]]);
+	assert.deepEqual(await listDealRealizations(erp.asClient(), 95), history);
+});
+
+test('omitting a sold duplicate retains that exact row instead of charging its quantity to another line', async () => {
+	const erp = new FakeErp([{ name: 'DN-BASELINE', docstatus: 1, items: [
+		item('DN-A', 202, 1, 100, { [REALIZATION_SEGMENT_FIELD]: 'line:key-a' }),
+	] }], { name: 'SO-BASELINE', docstatus: 0, items: [
+		item('SO-A', 202, 1, 100, { b24_line_key: 'key-a' }),
+		item('SO-B', 202, 2, 200, { b24_line_key: 'key-b' }),
+	] });
+	await upsertDealPlan(erp.asClient(), 96, [
+		{ productId: 202, qty: 2, priceListRate: 200, discountPercent: 0, lineKey: 'key-b' },
+	], '2026-10-01');
+	const saved = await erp.get('Sales Order', 'SO-BASELINE');
+	assert.deepEqual((saved?.items as Array<Record<string, unknown>>).map((r) => [r.name, r.b24_line_key, r.qty, r.price_list_rate]),
+		[['SO-B', 'key-b', 2, 200], ['SO-A', 'key-a', 1, 100]]);
+});
+
+test('explicit new duplicate cannot steal the existing native row from a later unkeyed line', async () => {
+	const erp = new FakeErp([], { name: 'SO-MIXED', docstatus: 0, items: [item('SO-OLD', 202, 1, 100, { b24_line_key: 'old' })] });
+	await upsertDealPlan(erp.asClient(), 97, [
+		{ productId: 202, qty: 1, priceListRate: 200, discountPercent: 0, lineKey: 'new' },
+		{ productId: 202, qty: 1, priceListRate: 100, discountPercent: 0 },
+	], '2026-10-01');
+	const saved = await erp.get('Sales Order', 'SO-MIXED');
+	assert.deepEqual((saved?.items as Array<Record<string, unknown>>).map((r) => [r.name, r.b24_line_key]), [[undefined, 'new'], ['SO-OLD', 'old']]);
+});
+
+test('ambiguous or duplicate line identities reject a save without changing the plan', async () => {
+	const original = { name: 'SO-GUARD', docstatus: 0, items: [
+		item('SO-A', 202, 1, 100, { b24_line_key: 'a' }), item('SO-B', 202, 1, 200, { b24_line_key: 'b' }),
+	] };
+	const erp = new FakeErp([], original);
+	const line = { productId: 202, qty: 1, priceListRate: 100, discountPercent: 0 };
+	await assert.rejects(upsertDealPlan(erp.asClient(), 98, [line], '2026-10-01'), /однозначно/);
+	await assert.rejects(upsertDealPlan(erp.asClient(), 98, [{ ...line, lineKey: 'a' }, { ...line, lineKey: 'a' }], '2026-10-01'), /повторяется/);
+	assert.deepEqual(await erp.get('Sales Order', 'SO-GUARD'), original);
+});
+
+test('fully returned line may be removed without changing the surviving duplicate identity', async () => {
+	const erp = new FakeErp([
+		{ name: 'DN-SALE', docstatus: 1, items: [item('DN-A', 202, 1, 100, { [REALIZATION_SEGMENT_FIELD]: 'line:a' })] },
+		{ name: 'DN-RETURN', docstatus: 1, is_return: 1, return_against: 'DN-SALE', items: [item('DN-R', 202, -1, 100, { [REALIZATION_SEGMENT_FIELD]: 'line:a' })] },
+	], { name: 'SO-RETURN-KEY', docstatus: 0, items: [
+		item('SO-A', 202, 1, 100, { b24_line_key: 'a' }), item('SO-B', 202, 1, 200, { b24_line_key: 'b' }),
+	] });
+	await upsertDealPlan(erp.asClient(), 99, [{ productId: 202, qty: 1, priceListRate: 200, discountPercent: 0, lineKey: 'b' }], '2026-10-01');
+	const saved = await erp.get('Sales Order', 'SO-RETURN-KEY');
+	assert.deepEqual((saved?.items as Array<Record<string, unknown>>).map((r) => [r.name, r.b24_line_key]), [['SO-B', 'b']]);
+});
+
 test('deal plan cannot be expanded after a submitted sale even when its draft still exists', async () => {
 	const erp = new FakeErp([
 		{ name: 'DN-SALE', docstatus: 1, b24_deal_id: '38484', items: [item('SALE-ROW', 12668, 2, 2100)] },
@@ -842,6 +911,39 @@ test('editing and removing another stage keeps already sold duplicate plan rows 
 			[['SO-101', 'key-stage'], ['SO-202-A', 'key-a'], ['SO-202-B', 'key-b'], ['SO-LEGACY', 'SO-LEGACY']]);
 		assert.deepEqual(await listDealRealizations(erp.asClient(), 93), beforeSales);
 	}
+});
+
+test('removing a stage subtracts its quantity once and preserves another duplicate base row', async () => {
+	const erp = new FakeErp([], { name: 'SO-STAGE-DUPLICATES', docstatus: 0,
+		b24_deal_stages: JSON.stringify([{ id: 'stage', items: [{ productId: 202, qty: 1, price: 350, isService: false }] }]),
+		items: [item('SO-A', 202, 2, 100, { b24_line_key: 'a' }), item('SO-B', 202, 1, 200, { b24_line_key: 'b' })],
+	});
+	const plan = await removeDealStageItem(erp.asClient(), 96, 'stage', 202);
+	assert.deepEqual(plan.map((r) => [r.lineKey, r.qty, r.priceListRate]), [['a', 1, 100], ['b', 1, 200]]);
+	const saved = await erp.get('Sales Order', 'SO-STAGE-DUPLICATES');
+	assert.deepEqual((saved?.items as Array<Record<string, unknown>>).map((r) => r.name), ['SO-A', 'SO-B']);
+});
+
+test('missing historical line links block further saves instead of guessing by product', async () => {
+	const original = { name: 'SO-MISSING', docstatus: 0, items: [item('SO-NEW', 202, 1, 100)] };
+	const erp = new FakeErp([{ name: 'DN-OLD', docstatus: 1, items: [item('DN-A', 202, 1, 100, { [REALIZATION_SEGMENT_FIELD]: 'line:old-key' })] }], original);
+	await assert.rejects(upsertDealPlan(erp.asClient(), 96, [{ productId: 202, qty: 1, priceListRate: 100, discountPercent: 0, lineKey: 'SO-NEW' }], '2026-10-01'), /требуется восстановление связей/);
+	assert.deepEqual(await erp.get('Sales Order', 'SO-MISSING'), original);
+});
+
+test('stage edits cannot hide an active realization and a complete return permits removal', async () => {
+	const original = { name: 'SO-SOLD-STAGE', docstatus: 0,
+		b24_deal_stages: JSON.stringify([{ id: 'stage', items: [{ productId: 202, qty: 2, price: 350, isService: false }] }]),
+		items: [item('SO-A', 202, 3, 100, { b24_line_key: 'a' })],
+	};
+	const sale: Doc = { name: 'DN-STAGE', docstatus: 1, items: [item('DN-A', 202, 2, 350, { [REALIZATION_SEGMENT_FIELD]: 'stage:stage' })] };
+	const erp = new FakeErp([sale], original);
+	await assert.rejects(removeDealStageItem(erp.asClient(), 96, 'stage', 202), /сначала оформите возврат/);
+	await assert.rejects(updateDealStageItem(erp.asClient(), 96, 'stage', 202, 1, 350, 0), /сначала оформите возврат/);
+	assert.deepEqual(await erp.get('Sales Order', 'SO-SOLD-STAGE'), original);
+	const returned = new FakeErp([sale, { name: 'DN-RETURN', docstatus: 1, is_return: 1, return_against: sale.name,
+		items: [item('DN-R', 202, -2, 350, { [REALIZATION_SEGMENT_FIELD]: 'stage:stage' })] }], original);
+	assert.deepEqual((await removeDealStageItem(returned.asClient(), 96, 'stage', 202)).map((r) => [r.lineKey, r.qty]), [['a', 1]]);
 });
 
 test('returned stage quantity reduces both the stage and the accumulated plan', async () => {

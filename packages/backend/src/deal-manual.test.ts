@@ -34,7 +34,7 @@ class FakeCore {
 		this.so = { ...this.so, name, ...fields };
 		if (Array.isArray(fields.items)) this.so.items = fields.items.map((item: Record<string, unknown>, index) => {
 			assert.ok(Number(item.item_code) > 0);
-			return { ...item, name: `row-${index}`, item_name: `Catalog ${item.item_code}`, rate: Number(item.price_list_rate) * (1 - Number(item.discount_percentage) / 100) };
+			return { ...item, name: item.name || `row-${index}`, item_name: `Catalog ${item.item_code}`, rate: Number(item.price_list_rate) * (1 - Number(item.discount_percentage) / 100) };
 		});
 		return this.so;
 	}
@@ -96,6 +96,42 @@ test('manual lines survive editing, variant copies, selecting, and replacement b
 		if (previous === undefined) delete process.env.B24_STATE_DIR; else process.env.B24_STATE_DIR = previous;
 		await rm(dir, { recursive: true, force: true });
 	}
+});
+
+test('HTTP additions preserve duplicate working and alternative rows, including their keys and prices', async (t) => {
+	const core = new FakeCore();
+	const erp = core.client();
+	t.mock.method(ErpClient, 'fromEnv', () => erp);
+	const client = { call: async () => [], callBatch: async () => ({ result: {} }) } as unknown as B24Client;
+	const app = Fastify();
+	registerDealProductManagementRoutes(app, () => client, async () => {});
+	const original = [
+		{ productId: 101, itemName: 'Product', qty: 1, priceListRate: 100, discountPercent: 0, lineKey: 'a' },
+		{ productId: 101, itemName: 'Product', qty: 2, priceListRate: 200, discountPercent: 10, lineKey: 'b' },
+	];
+	const view = (rows: typeof original) => rows.map((r) => [r.lineKey, r.qty, r.priceListRate, r.discountPercent]);
+	try {
+		await upsertDealPlan(erp, 504, original, '2026-10-01');
+		const post = async (payload: Record<string, unknown>) => (await app.inject({ method: 'POST', url: '/api/deal/add-products', payload: { dealId: 504, ...payload } })).json();
+		const stage = await post({ stage: true, items: [{ productId: 202, quantity: 1, price: 300 }] });
+		assert.equal(stage.ok, true, JSON.stringify(stage));
+		assert.deepEqual(view((await listDealPlan(erp, 504)).filter((r) => r.productId === 101)), view(original));
+		assert.deepEqual((core.so!.items as Record<string, unknown>[]).slice(0, 2).map((r) => [r.name, r.b24_line_key]), [['row-0', 'a'], ['row-1', 'b']]);
+		const sameProductStage = await post({ stage: true, items: [{ productId: 101, quantity: 1, price: 350 }] });
+		assert.equal(sameProductStage.ok, true, JSON.stringify(sameProductStage));
+		const staged = [{ ...original[0]!, qty: 2 }, original[1]!];
+		assert.deepEqual(view((await listDealPlan(erp, 504)).filter((r) => r.productId === 101)), view(staged));
+		const state = await createDealQuoteVariant(erp, 504, { name: 'Alternative', createdById: '1', createdByName: 'Manager' });
+		const id = state.variants[0]!.id;
+		const addition = await post({ variantId: id, items: [{ productId: 303, quantity: 1, price: 400 }] });
+		assert.equal(addition.ok, true, JSON.stringify(addition));
+		const variant = (await listDealQuoteVariants(erp, 504)).variants[0]!;
+		assert.deepEqual(view(variant.items.filter((r) => r.productId === 101) as typeof original), view(staged));
+		assert.equal((await listDealPlan(erp, 504)).some((r) => r.productId === 303), false);
+		await updateDealQuoteVariantItems(erp, 504, id, [variant.items[1]!, variant.items[0]!]);
+		await selectDealQuoteVariant(erp, 504, id, '2026-10-01');
+		assert.deepEqual((core.so!.items as Record<string, unknown>[]).map((r) => [r.name, r.b24_line_key]), [['row-1', 'b'], ['row-0', 'a']]);
+	} finally { await app.close(); }
 });
 
 test('manual HTTP add, edit, proposal, delete and invalid update retain the correct total', async (t) => {

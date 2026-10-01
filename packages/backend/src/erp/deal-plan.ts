@@ -21,17 +21,19 @@ import { DEAL_FIELD, TECH_CUSTOMER, ensureErpSetup } from './erp-setup.js';
 import { ensureCoreItem } from './stock-catalog.js';
 import { erpContext } from './warehouse-context.js';
 import { isDealServiceProductId } from '../deal-service-product-ids.js';
+import { planRowKey, prepareDealPlanLines } from './deal-plan-line-identity.js';
 
 // ── ПЛАН СДЕЛКИ = черновик Sales Order с b24_deal_id ──────────────────────────────────────
 // Что менеджер собрал в сделку (реальные товары) живёт ЗДЕСЬ, а не в Б24 (Б24 несёт свёрнутую
 // услугу «Выезд инженера»). Реализация (Delivery Note) идёт против заказа; остаток к отгрузке
 // ERPNext считает сам (delivered_qty/per_delivered). Источник правды о составе сделки.
 /** Уже проведённая часть сделки не должна исчезнуть из накопительного плана при следующем изменении. */
-async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanLine[]): Promise<PlanLine[]> {
+async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanLine[], previousItems: Array<Record<string, unknown>>): Promise<PlanLine[]> {
 	// Product ID is not a line identity: one deal may legitimately contain the same
 	// service more than once with different prices. Preserve every requested line.
 	const durable = lines.map((line) => ({ ...line }));
 	const history = new Map<number, { itemName: string; qty: number; amount: number }>();
+	const lineHistory = new Map<string, { key: string; productId: number; qty: number }>();
 	for (const document of await listDealRealizations(erp, dealId)) {
 		for (const item of document.items) {
 			if (item.productId <= 0) continue;
@@ -40,7 +42,28 @@ async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanL
 			current.amount += item.qty * item.rate;
 			if (item.qty > 0 && item.itemName) current.itemName = item.itemName;
 			history.set(item.productId, current);
+			if (item.segmentId.startsWith('line:')) {
+				const key = item.segmentId.slice(5);
+				const identity = `${item.productId}\u0000${key}`;
+				const old = lineHistory.get(identity);
+				lineHistory.set(identity, { key, productId: item.productId, qty: (old?.qty ?? 0) + item.qty });
+			}
 		}
+	}
+	// Keep each realized identity, even when another row of the same product has enough quantity.
+	for (const { key, ...item } of lineHistory.values()) {
+		if (item.qty <= 0.000001) continue;
+		const line = durable.find((candidate) => candidate.lineKey === key);
+		if (line) {
+			if (line.productId !== item.productId) throw new Error('нельзя заменить товар в строке с действующей реализацией');
+			line.qty = Math.max(line.qty, item.qty);
+			continue;
+		}
+		const previous = previousItems.find((row) => planRowKey(row) === key && Number(row.item_code) === item.productId);
+		if (!previous) throw new Error(`в плане не найдена строка реализации товара #${item.productId} — требуется восстановление связей`);
+		durable.push({ lineKey: key, productId: item.productId, itemName: String(previous.item_name ?? ''), qty: item.qty,
+			priceListRate: Number(previous.price_list_rate ?? previous.rate ?? 0), discountPercent: Number(previous.discount_percentage ?? 0),
+			isService: isDealServiceProductId(item.productId) });
 	}
 	for (const [productId, item] of history) {
 		if (item.qty <= 0.000001) continue;
@@ -52,7 +75,10 @@ async function withRealizedBaseline(erp: ErpClient, dealId: number, lines: PlanL
 			if (planned + 0.000001 < item.qty) existing[0]!.qty += item.qty - planned;
 			continue;
 		}
+		const previous = previousItems.filter((row) => Number(row.item_code) === productId);
+		if (previous.length > 1) throw new Error(`невозможно однозначно сохранить реализованные строки товара #${productId} — требуется восстановление связей`);
 		durable.push({
+			...(previous[0] ? { lineKey: planRowKey(previous[0]) } : {}),
 			productId,
 			itemName: item.itemName,
 			qty: item.qty,
@@ -103,15 +129,17 @@ export async function upsertDealPlan(
 	const existing = await findDealPlan(erp, dealId);
 	// Обычный состав проведённой сделки остаётся зафиксированным. Новый этап — явная
 	// следующая партия той же сделки, поэтому он может расширить накопительный план.
-	if (!options.allowExpansionAfterSale) await assertPlanDoesNotExpandAfterSale(erp, dealId, existing, lines);
 	for (const line of lines) {
 		if (line.manual) validateManualLine(line);
 		else if (!Number.isSafeInteger(line.productId) || line.productId <= 0) throw new Error('bad productId');
 	}
 	const manualLines = lines.filter((line) => line.manual).map((line) => ({ ...line, lineKey: `manual:${-line.productId}` }));
 	const manualState = await readManualState(dealId);
-	const durableLines = await withRealizedBaseline(erp, dealId, lines.filter((line) => !line.manual));
 	const existingDoc = existing ? await erp.get<Record<string, unknown>>('Sales Order', existing) : null;
+	const existingItems = Array.isArray(existingDoc?.['items']) ? existingDoc.items as Array<Record<string, unknown>> : [];
+	const requested = prepareDealPlanLines(lines.filter((line) => !line.manual), existingItems);
+	if (!options.allowExpansionAfterSale) await assertPlanDoesNotExpandAfterSale(erp, dealId, existing, [...requested, ...manualLines]);
+	const durableLines = await withRealizedBaseline(erp, dealId, requested, existingItems);
 	const saveManual = async (): Promise<void> => {
 		if (manualLines.length || manualState) await writeManualState(dealId, {
 			lines: manualLines,
@@ -125,19 +153,8 @@ export async function upsertDealPlan(
 	}
 	for (const l of durableLines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}`, ...(l.isService !== undefined ? { isService: l.isService } : {}) });
 
-	const existingItems = Array.isArray(existingDoc?.['items']) ? existingDoc.items as Array<Record<string, unknown>> : [];
-	const existingByProduct = new Map<number, Array<Record<string, unknown>>>();
-	for (const item of existingItems) {
-		const productId = Number(item['item_code']);
-		if (!Number.isInteger(productId) || productId <= 0) continue;
-		existingByProduct.set(productId, [...(existingByProduct.get(productId) ?? []), item]);
-	}
 	// Скидку храним нативно: price_list_rate (база) + discount_percentage → rate ERPNext посчитает сам.
-	const preparedLines = durableLines.map((line) => {
-		const previous = existingByProduct.get(line.productId)?.shift();
-		const lineKey = line.lineKey?.trim() || String(previous?.[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || randomUUID();
-		return { ...line, lineKey, rowName: String(previous?.['name'] ?? '').trim() };
-	});
+	const preparedLines = prepareDealPlanLines(durableLines, existingItems);
 	const items = preparedLines.map((l) => ({
 		...(l.rowName ? { name: l.rowName } : {}),
 		item_code: String(l.productId),
@@ -256,7 +273,7 @@ function parseDealQuoteVariants(raw: unknown): DealQuoteVariants {
 				const discountPercent = Number(source.discountPercent ?? 0);
 				if (source.manual) validateManualLine(source as PlanLine);
 				if (!Number.isInteger(productId) || (!source.manual && productId <= 0) || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(priceListRate) || priceListRate < 0) return [];
-				return [{ ...(source.manual ? { manual: true, unit: source.unit!, lineKey: source.lineKey || `manual:${-productId}` } : {}), productId, itemName: String(source.itemName ?? `#${productId}`), qty, priceListRate, discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0, isService: Boolean(source.isService) }];
+				return [{ ...(source.manual ? { manual: true, unit: source.unit!, lineKey: source.lineKey || `manual:${-productId}` } : source.lineKey?.trim() ? { lineKey: source.lineKey.trim() } : {}), productId, itemName: String(source.itemName ?? `#${productId}`), qty, priceListRate, discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0, isService: Boolean(source.isService) }];
 			});
 			return [{ id, name, createdAt: String(row.createdAt ?? ''), createdById: String(row.createdById ?? ''), createdByName: String(row.createdByName ?? ''), items }];
 		});
@@ -558,6 +575,13 @@ export async function renameDealStage(erp: ErpClient, dealId: number, stageId: s
 	return stages;
 }
 
+async function assertStageQuantityKeepsRealizations(erp: ErpClient, dealId: number, stageId: string, productId: number, qty: number): Promise<void> {
+	const realized = (await listDealRealizations(erp, dealId)).flatMap((document) => document.items)
+		.filter((item) => item.productId === productId && item.segmentId === `stage:${stageId}`)
+		.reduce((sum, item) => sum + item.qty, 0);
+	if (qty + 0.000001 < realized) throw new Error('позиция этапа имеет действующую реализацию — сначала оформите возврат уменьшаемого количества');
+}
+
 /** Правит одну строку этапа и ту же агрегированную позицию плана одним обновлением Sales Order. */
 export async function updateDealStageItem(
 	erp: ErpClient,
@@ -577,6 +601,7 @@ export async function updateDealStageItem(
 	if (!stage) throw new Error('этап сделки не найден');
 	const stageItem = stage.items.find((row) => row.productId === productId);
 	if (!stageItem) throw new Error('позиция этапа не найдена');
+	await assertStageQuantityKeepsRealizations(erp, dealId, stageId, productId, qty);
 
 	const items = ((plan?.['items'] as Array<Record<string, unknown>>) ?? []).map((row) => ({ ...row }));
 	const planItem = items.find((row) => Number(row['item_code']) === productId);
@@ -621,11 +646,16 @@ export async function removeDealStageItem(
 	if (!stage) throw new Error('этап сделки не найден');
 	const stageItem = stage.items.find((row) => row.productId === productId);
 	if (!stageItem) throw new Error('позиция этапа не найдена');
+	await assertStageQuantityKeepsRealizations(erp, dealId, stageId, productId, 0);
 
 	stage.items = stage.items.filter((row) => row.productId !== productId);
+	let quantityToRemove = stageItem.qty;
 	const lines = ((plan?.['items'] as Array<Record<string, unknown>>) ?? []).flatMap((row): PlanLine[] => {
 		const rowProductId = Number(row['item_code']);
-		const qty = Number(row['qty'] ?? 0) - (rowProductId === productId ? stageItem.qty : 0);
+		const previousQty = Number(row['qty'] ?? 0);
+		const decrement = rowProductId === productId ? Math.min(previousQty, quantityToRemove) : 0;
+		quantityToRemove -= decrement;
+		const qty = previousQty - decrement;
 		if (!Number.isInteger(rowProductId) || rowProductId <= 0 || qty <= 0.000001) return [];
 		return [{
 			lineKey: String(row[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(row['name'] ?? '').trim(),
@@ -636,24 +666,20 @@ export async function removeDealStageItem(
 			discountPercent: Number(row['discount_percentage'] ?? 0),
 		}];
 	});
-	const durableLines = await withRealizedBaseline(erp, dealId, lines);
+	const previousItems = (plan?.['items'] as Array<Record<string, unknown>>) ?? [];
+	const durableLines = await withRealizedBaseline(erp, dealId, lines, previousItems);
 	if (!durableLines.length) {
 		await erp.request('DELETE', `/api/resource/Sales%20Order/${encodeURIComponent(name)}`);
 		return [];
 	}
 
 	const deliveryDate = String(plan?.['delivery_date'] ?? new Date().toISOString().slice(0, 10));
-	const previousItems = (plan?.['items'] as Array<Record<string, unknown>>) ?? [];
-	const previousByKey = new Map(previousItems.map((row) => [
-		String(row[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(row['name'] ?? '').trim(), row,
-	]));
 	await erp.update('Sales Order', name, {
 		delivery_date: deliveryDate,
-		items: durableLines.map((row) => {
-			const previous = row.lineKey ? previousByKey.get(row.lineKey) : previousItems.find((item) => Number(item['item_code']) === row.productId);
+		items: prepareDealPlanLines(durableLines, previousItems).map((row) => {
 			return {
-				...(previous?.['name'] ? { name: String(previous['name']) } : {}),
-				[DEAL_PLAN_LINE_KEY_FIELD]: row.lineKey || String(previous?.[DEAL_PLAN_LINE_KEY_FIELD] ?? '').trim() || String(previous?.['name'] ?? '').trim() || randomUUID(),
+				...(row.rowName ? { name: row.rowName } : {}),
+				[DEAL_PLAN_LINE_KEY_FIELD]: row.lineKey,
 				item_code: String(row.productId),
 				qty: row.qty,
 				price_list_rate: row.priceListRate,

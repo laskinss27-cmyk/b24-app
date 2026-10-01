@@ -103,13 +103,16 @@ export function registerDealProductManagementRoutes(
 					const state = await listDealQuoteVariants(erp, dealId);
 					const variant = state.variants.find((row) => row.id === variantId);
 					if (!variant) throw new Error('вариант КП не найден');
-					const byId = new Map(variant.items.map((item) => [item.productId, { ...item }]));
+					const variantItems = variant.items.map((item) => ({ ...item }));
+					const byId = new Map(variantItems.map((item) => [item.productId, item]));
 					for (const item of priced) {
 						const previous = byId.get(item.productId);
 						if (previous) { previous.qty += item.quantity; previous.priceListRate = item.price; previous.isService = previous.isService || item.isService; }
-						else byId.set(item.productId, { productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, priceListRate: item.price, discountPercent: 0, isService: item.isService });
+						else {
+							const added = { productId: item.productId, itemName: item.name || `#${item.productId}`, qty: item.quantity, priceListRate: item.price, discountPercent: 0, isService: item.isService };
+							variantItems.push(added); byId.set(item.productId, added);
+						}
 					}
-					const variantItems = [...byId.values()];
 					await updateDealQuoteVariantItems(erp, dealId, variantId, variantItems);
 					const total = Math.round(variantItems.reduce((sum, item) => sum + item.priceListRate * (1 - item.discountPercent / 100) * item.qty, 0) * 100) / 100;
 					return { ok: true, added: priced.length, plan: variantItems.length, total };
@@ -121,7 +124,7 @@ export function registerDealProductManagementRoutes(
 				const targetStageId = String(b.stageId ?? '').trim();
 				const addingToStage = Boolean(targetStageId) || b.stage === true;
 				const currentPlan = await listDealPlan(erp, dealId);
-				const initialLines = currentPlan.map((p) => ({
+				const lines: DealPlanDraftLine[] = currentPlan.map((p) => ({
 					...p,
 					productId: p.productId,
 					itemName: p.itemName,
@@ -130,7 +133,11 @@ export function registerDealProductManagementRoutes(
 					discountPercent: p.discountPercent,
 					isService: p.isService,
 				}));
-				for (const p of initialLines) byId.set(p.productId, p);
+				// The map locates an addition target; the array retains every existing row.
+				for (const p of lines) {
+					// Stage quantities are allocated from the first plan row in the table and stage editor.
+					if (!addingToStage || !byId.has(p.productId)) byId.set(p.productId, p);
+				}
 				for (const it of priced) {
 					const prev = byId.get(it.productId);
 					// Новый товар добавляется БЕЗ скидки. У существующего копим количество;
@@ -140,9 +147,11 @@ export function registerDealProductManagementRoutes(
 						if (!addingToStage) prev.priceListRate = it.price;
 						prev.isService = prev.isService || it.isService;
 					}
-					else byId.set(it.productId, { productId: it.productId, qty: it.quantity, priceListRate: it.price, discountPercent: 0, isService: it.isService, ...(it.name ? { itemName: it.name } : {}) });
+					else {
+						const added = { productId: it.productId, qty: it.quantity, priceListRate: it.price, discountPercent: 0, isService: it.isService, ...(it.name ? { itemName: it.name } : {}) };
+						lines.push(added); byId.set(it.productId, added);
+					}
 				}
-				const lines = [...byId.values()];
 				const today = new Date().toISOString().slice(0, 10);
 				const savedPlan = await upsertDealPlan(erp, dealId, lines, today, {
 					allowExpansionAfterSale: addingToStage,
