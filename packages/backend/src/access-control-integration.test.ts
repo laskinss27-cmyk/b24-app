@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import { emptyAccessControlDraft, type AccessSubjectRule } from '@b24-app/shared';
-import { B24Client } from './b24/client.js';
+import { B24ApiError, B24Client } from './b24/client.js';
+import { ErpClient } from './erp/client.js';
 import { appPermission, invalidateAccessPolicyCache } from './access-policy.js';
 import { registerAccessPolicyHook, permissionsFor } from './access-policy-hook.js';
 import { registerApiAccessControlRoute } from './routes/api-access-control.js';
 import { readAccessPolicy, writeAccessPolicy } from './access-policy-store.js';
 import { registerTransferRequestManagementRoutes } from './routes/transfer-request-management-routes.js';
+import { registerStockCatalogRoutes } from './routes/api-stock-catalog-routes.js';
 
 const rule = (profileId: AccessSubjectRule['profileId'], overrides: AccessSubjectRule['overrides'] = {}): AccessSubjectRule => ({ profileId, overrides });
 async function fixture(t: TestContext) {
@@ -142,4 +144,38 @@ test('allowing cancellation of own requests never grants cancellation of another
 	await writeAccessPolicy(f.domain, policy); invalidateAccessPolicyCache(f.domain);
 	assert.equal((await f.call('/api/transfer-requests/cancel', { id: 42 })).statusCode, 403); assert.equal(writes, 0);
 	author = '3000'; assert.equal((await f.call('/api/transfer-requests/cancel', { id: 42 })).statusCode, 200); assert.equal(writes, 1);
+});
+
+test('ERP administrator permission cannot override Bitrix catalog denial or fall back to a technical account', async (t) => {
+	const f = await fixture(t); f.setActor('2000');
+	const policy = emptyAccessControlDraft(); policy.policyMode = 'active'; policy.employees['2000'] = rule('administrator');
+	await writeAccessPolicy(f.domain, policy); invalidateAccessPolicyCache(f.domain);
+	const calls: string[] = []; let deniedCode = 'ACCESS_DENIED';
+	t.mock.method(B24Client.prototype, 'call', async (method: string) => {
+		calls.push(method);
+		if (method === 'user.current') return { ID: '2000', UF_DEPARTMENT: [10] };
+		if (method === 'catalog.product.add') throw new B24ApiError(method, deniedCode, 'Native Bitrix permission denied', 403);
+		throw new Error(`Unexpected Bitrix method: ${method}`);
+	});
+	// No inventory mirror may be written after the native API refuses the operation.
+	t.mock.method(ErpClient, 'fromEnv', () => new Proxy({} as ErpClient, { get() { assert.fail('ERP must not be accessed after Bitrix denial'); } }));
+	registerStockCatalogRoutes(f.app);
+	for (const code of ['ACCESS_DENIED', 'insufficient_scope']) {
+		deniedCode = code; calls.length = 0;
+		const response = await f.call('/api/stock/create-product', { name: 'Проверка доступа' });
+		assert.equal(response.json().ok, false); assert.match(response.json().error, new RegExp(code));
+		assert.equal(calls.filter((method) => method === 'catalog.product.add').length, 1, 'no privileged retry');
+	}
+});
+
+test('native portal administration does not override an explicit ERP warehouse restriction', async (t) => {
+	const f = await fixture(t); f.setActor('3000');
+	const policy = emptyAccessControlDraft(); policy.policyMode = 'active';
+	policy.employees['3000'] = rule('legacy', { 'stock.create_product': 'deny' });
+	await writeAccessPolicy(f.domain, policy); invalidateAccessPolicyCache(f.domain);
+	// fixture permits only user.current and reports ADMIN:true: any native catalog write fails the test.
+	registerStockCatalogRoutes(f.app);
+	const response = await f.call('/api/stock/create-product', { name: 'Проверка доступа' });
+	assert.equal(response.statusCode, 403);
+	assert.deepEqual(response.json().deniedPermissions, ['stock.create_product']);
 });
