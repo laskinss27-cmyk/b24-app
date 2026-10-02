@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CatalogReservationLabel } from './CatalogReservationLabel.js';
 import {StockConditionEditor} from './StockConditionEditor.js';
 import {STOCK_CONDITIONS, isPassThroughProduct} from '@b24-app/shared';
 import { photoFullUrl, type BaseRow, type CatalogProductUpdateInput, type StoreInfo } from './b24.js';
@@ -325,8 +326,9 @@ export function CatalogProductCard({
 						{!row.isService && <section>
 							<h3>Остатки по складам</h3>
 							<div className="catalog-product-stocks">
-								{stockRows.map((store) => <div key={store.id}><span>{store.title}</span><b className={store.qty > 0 ? '' : 'zero'}>{fmt(store.qty)} шт.</b></div>)}
+								{stockRows.map((store) => <div key={store.id}><span>{store.title}<CatalogReservationLabel row={row} storeId={store.id} /></span><b className={store.qty > 0 ? '' : 'zero'}>{fmt(store.qty)} шт.</b></div>)}
 							</div>
+							{row.reservedByStore === null && <p role="status">Данные резервов недоступны. Обновите каталог.</p>}
 						</section>}
 						{error && <div className="new-product-error">{error}</div>}
 					</main>

@@ -1,3 +1,4 @@
+import { CatalogReservationLabel } from './CatalogReservationLabel.js';
 import { photoFullUrl, type BaseRow } from './b24.js';
 import { formatCatalogNumber as fmt, productStatuses } from './catalog-product-display.js';
 import { CatalogQuantityInput } from './CatalogQuantityInput.js';
@@ -106,7 +107,8 @@ export function CatalogProductTable({
 									<td className="num c-store"><span className={`stock${qty > 0 ? '' : ' zero'}`}>{isAll ? '' : qty}</span></td>
 									<td>
 										<div className="whs">
-											{others.length ? others.map((o) => <span className={`wh${storeIds.includes(o.id) ? ' sel' : ''}`} key={o.id}>{storeName(o.id)}: <b>{o.qty}</b></span>) : <span className="muted">—</span>}
+											{d.reservedByStore === null && <span role="status">Резервы недоступны</span>}
+											{others.length ? others.map((o) => <span className={`wh${storeIds.includes(o.id) ? ' sel' : ''}`} key={o.id}>{storeName(o.id)}: <b>{o.qty}</b><CatalogReservationLabel row={d} storeId={o.id} /></span>) : <span className="muted">—</span>}
 										</div>
 									</td>
 									{(canQuickSale || pickMode) && (

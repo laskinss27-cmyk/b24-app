@@ -31,6 +31,8 @@ export interface BaseRow {
 	photoPath?: string | undefined;
 	total: number;
 	stockByStore: Record<number, number>;
+	/** Active SQL reserves; null means the read failed, absent means reservations are disabled. */
+	reservedByStore?: Record<number, number> | null;
 }
 
 export interface ProductBaseResult {

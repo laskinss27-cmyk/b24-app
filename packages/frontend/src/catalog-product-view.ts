@@ -24,9 +24,9 @@ export function indexCatalogRows(
 		.map((row) => ({
 			d: row,
 			search: `${row.id} ${marketplaceMode ? row.marketplaceOldId ?? '' : ''} ${row.name} ${row.article ?? ''} ${row.manufacturer ?? ''} ${row.model ?? ''} ${row.sectionName ?? ''} ${row.status ?? ''}`.toLowerCase(),
-			stockEntries: Object.entries(row.stockByStore)
-				.map(([storeId, quantity]) => ({ id: Number(storeId), qty: quantity }))
-				.filter((stock) => stock.qty > 0 && (!allowedStoreTitles.length || visibleStoreIds.has(stock.id)))
+			stockEntries: [...new Set([...Object.keys(row.stockByStore), ...Object.keys(row.reservedByStore ?? {})])]
+				.map(storeId => ({ id: Number(storeId), qty: row.stockByStore[Number(storeId)] ?? 0 }))
+				.filter((stock) => (stock.qty > 0 || (row.reservedByStore?.[stock.id] ?? 0) > 0) && (!allowedStoreTitles.length || visibleStoreIds.has(stock.id)))
 				.sort((a, b) => b.qty - a.qty),
 		}));
 }

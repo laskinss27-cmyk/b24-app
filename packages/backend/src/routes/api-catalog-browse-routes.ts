@@ -8,6 +8,8 @@ import type { AuthBody } from './api-catalog-types.js';
 import { catalogAccess, catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
 import { baseCache, CACHE_TTL_MS } from './api-catalog-cache.js';
 import { buildCoreProductBase } from './api-catalog-core-base.js';
+import { catalogReservations } from './catalog-reservations.js';
+import { erpContext, erpWarehouse } from '../erp/warehouse-context.js';
 
 export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 	app.post('/api/catalog/stores', async (req, reply) => {
@@ -62,10 +64,21 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 				baseCache.set(cacheKey, { data: metadata, expires: now + CACHE_TTL_MS });
 			}
 			const { data, stores } = await buildCoreProductBase(erp, metadata);
+			let stockRows: Array<(typeof data.rows)[number] & { reservedByStore?: Record<number, number> | null }> = data.rows;
+			if (app.reservationRuntime?.canWrite) {
+				try {
+					const context = await erpContext(erp);
+					stockRows = await catalogReservations(data.rows, app.reservationRuntime,
+						new Map(stores.map(store => [erpWarehouse(context, store.title), store.id])));
+				} catch (error) {
+					app.log.warn(`[api/catalog/browse] reservations unavailable — ${errInfo(error)}`);
+					stockRows = data.rows.map(row => ({ ...row, reservedByStore: null }));
+				}
+			}
 			app.log.info({ rows: data.rows.length, ms: Date.now() - t0, cached, source: 'core' }, '[api/catalog/browse] ok');
 			const pricedRows = canViewPurchasePrices
-				? data.rows
-				: data.rows.map((row) => ({ ...row, purchase: null }));
+				? stockRows
+				: stockRows.map((row) => ({ ...row, purchase: null }));
 			const rows = marketplaceMode
 				? pricedRows
 				: pricedRows.map(({ marketplaceOldId: _marketplaceOldId, ...row }) => row);
