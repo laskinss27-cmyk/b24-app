@@ -41,7 +41,7 @@ export function registerSupplyPurchaseRoutes(app: FastifyInstance): void {
 			if (Number(request.dealId) !== dealId) throw new Error('заявка больше не относится к этой сделке');
 			const scheduleDate = new Date().toISOString().slice(0, 10);
 			if (supplier) await ensureB24SupplierCompany(client, supplier);
-			const { name } = await createPurchaseOrderDraft(erp, { dealId, supplyRequest: requestName, supplyRequestKey: request.requestKey, scheduleDate, ...(supplier ? { supplier } : {}), lines });
+			const { name } = await createPurchaseOrderDraft(erp, { dealId, supplyRequest: requestName, supplyRequestKey: request.requestKey, sourceStages: request.sourceStages, scheduleDate, ...(supplier ? { supplier } : {}), lines });
 			app.log.info({ dealId, requestName, supplier, lines: lines.length, name }, '[api/supply/purchase-order] created');
 			return { ok: true, name };
 		} catch (err) {

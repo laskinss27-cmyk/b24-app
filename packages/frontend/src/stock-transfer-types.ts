@@ -7,6 +7,7 @@ export interface TransferHistoryChangeDto { productId: number; name: string; fie
 export interface TransferHistoryEventDto { at: string; status: TransferStatus; byId: string; byName?: string; action?: string; note?: string; changes?: TransferHistoryChangeDto[] }
 
 export interface TransferDoc {
+	sourceStages?: import('@b24-app/shared').SupplySourceStage[];
 	id: number;
 	name: string;
 	supplyRequest: string;

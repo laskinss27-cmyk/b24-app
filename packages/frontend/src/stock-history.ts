@@ -1,6 +1,6 @@
 import { bx24Auth } from './bitrix-auth.js';
 
-export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string; ownerName: string }
+export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string; ownerName: string; sourceStages?: import('@b24-app/shared').SupplySourceStage[] }
 export async function fetchMovements(kind: 'issue' | 'receipt' | 'delivery' | 'return', period?: { from?: string; to?: string; productId?: number; store?: string }): Promise<CoreMovement[]> {
 	const res = await fetch('/api/stock/movements', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -18,6 +18,7 @@ export interface StockDocumentHistoryEvent {
 }
 export interface CoreDocItem { rowId: string; sourceRow: string; productId: number; itemName: string; qty: number; store: string; rate: number }
 export interface CoreDocDetail {
+	sourceStages?: import('@b24-app/shared').SupplySourceStage[];
 	name: string; doctype: string; date: string; submitted: boolean; dealId: string;
 	supplier: string; reason: string; note: string; items: CoreDocItem[]; ownerName: string;
 	kind: 'issue' | 'receipt' | 'return' | null; amendedFrom: string; editBlockedReason: string;

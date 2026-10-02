@@ -83,7 +83,7 @@ export function createDealSupplyOrderActions({
 		setSupplyBusy(true);
 		setNotice(null);
 		try {
-			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)! }));
+			const lines = supplyGoods.map((row) => ({ productId: row.productId, itemName: row.name, qty: quantities.get(row.id)!, stageId: row.segmentKind === 'stage' ? row.stageId ?? '' : 'base' }));
 			await createDealSupplyRequest(dealId, lines, { toStore: supplyToStore, deadline: supplyDeadline, note });
 			setSelected({});
 			setSupplyQty({});

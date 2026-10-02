@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { AccessDecision, AccessPermissionId } from '@b24-app/shared';
+import { supplySourceStagesLabel } from '@b24-app/shared';
 import { getContext } from './b24-context.js';
 import {
 	cancelTransfer, collectTransfer, deleteTransfer, fetchCurrentAppAccess, fetchCurrentUserId, fetchStockFormData,
@@ -37,7 +38,7 @@ function TransferBasisCell({ transfer, onOpenTransfer }: { transfer: TransferDoc
 	} else {
 		basis = <span>Самостоятельное перемещение</span>;
 	}
-	return <div><b>Перемещение {transferNumberLabel(transfer)}</b><div>{basis}</div><div style={{ color: 'var(--app-muted)', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
+	return <div><b>Перемещение {transferNumberLabel(transfer)}</b><div>{basis}</div>{transfer.sourceStages?.length ? <div>{supplySourceStagesLabel(transfer.sourceStages)}</div> : null}<div style={{ color: 'var(--app-muted)', fontSize: 12 }}>{(transfer.createdAt || '').slice(0, 10)}</div></div>;
 }
 
 const transferHasFinalDiscrepancy = (transfer: TransferDoc): boolean => {
@@ -169,7 +170,7 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 		if (prod && !t.lines.some((l) => l.productId === prod.productId)) return false;
 		const q = search.trim().toLowerCase();
 		if (!q) return true;
-		const hay = `${transferNumberSearchValues(t).join(' ')} ${t.dealId} ${t.ownerName ?? ''} ${t.supplyRequest ?? ''} ${t.supplyRequestKey ?? ''} ${t.purchaseOrder ?? ''} ${t.correctionOf ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
+		const hay = `${transferNumberSearchValues(t).join(' ')} ${supplySourceStagesLabel(t.sourceStages)} ${t.dealId} ${t.ownerName ?? ''} ${t.supplyRequest ?? ''} ${t.supplyRequestKey ?? ''} ${t.purchaseOrder ?? ''} ${t.correctionOf ?? ''} ${t.fromStore} ${t.toStore} ${transferStatusText(t)} ${t.lines.map((l) => l.name || '').join(' ')}`.toLowerCase();
 		return q.split(/\s+/).every((w) => hay.includes(w));
 	});
 

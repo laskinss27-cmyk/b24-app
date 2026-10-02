@@ -1,4 +1,5 @@
 import type { CoreMovement } from './stock-history.js';
+import { supplySourceStagesLabel } from '@b24-app/shared';
 
 export const MOVEMENT_PAGE_SIZE = 50;
 
@@ -8,7 +9,7 @@ export function stockMovementPage(list: CoreMovement[], search: string, status: 
 	const filtered = list.filter((movement) => {
 		if (status === 'submitted' && !movement.submitted) return false;
 		if (status === 'draft' && movement.submitted) return false;
-		const hay = `${movement.name} ${movement.dealId} ${movement.ownerName ?? ''} ${movement.summary} ${movement.date}`.toLowerCase();
+		const hay = `${movement.name} ${supplySourceStagesLabel(movement.sourceStages)} ${movement.dealId} ${movement.ownerName ?? ''} ${movement.summary} ${movement.date}`.toLowerCase();
 		return words.every((word) => hay.includes(word));
 	});
 	const pages = Math.max(1, Math.ceil(filtered.length / MOVEMENT_PAGE_SIZE));

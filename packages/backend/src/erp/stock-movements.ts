@@ -1,4 +1,6 @@
 import { ErpClient } from './client.js';
+import { parseSupplySourceStages, type SupplySourceStage } from '@b24-app/shared';
+import { ensureSupplySourceStagesField, SUPPLY_SOURCE_STAGES_FIELD } from './supply-source-stages.js';
 import { DEAL_FIELD } from './erp-setup.js';
 import { INV_FIELD } from './inventory-reconciliation.js';
 import { b24StoreTitle, erpContext, erpWarehouse } from './warehouse-context.js';
@@ -37,7 +39,7 @@ export async function ensureNoteField(erp: ErpClient, doctype: string): Promise<
 
 // ── Складской учёт: журнал движений (read-only вкладки) ───────────────────────
 
-export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string }
+export interface CoreMovement { name: string; doctype: 'Stock Entry' | 'Purchase Receipt' | 'Delivery Note'; date: string; submitted: boolean; summary: string; dealId: string; sourceStages?: SupplySourceStage[] }
 
 /**
  * Документы движения по типу: 'issue' (списание) / 'receipt' (оприходование) / 'delivery' (реализация).
@@ -75,15 +77,17 @@ export async function listCoreMovements(
 	}
 	const withNote = (base: string, note: string): string => note ? (base ? `${base} · ${note}` : note) : base;
 	if (kind === 'receipt') {
+		await ensureSupplySourceStagesField(erp, 'Purchase Receipt');
 		await ensureNoteField(erp, 'Purchase Receipt'); // поле может ещё не существовать — select упал бы
 		await ensureNoteField(erp, 'Stock Entry');
 		const [purchaseReceipts, materialReceipts] = await Promise.all([
-			erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER),
+			erp.list('Purchase Receipt', ['name', 'posting_date', 'grand_total', 'supplier', 'docstatus', DEAL_FIELD, NOTE_FIELD, SUPPLY_SOURCE_STAGES_FIELD], [['docstatus', '!=', 2], ...dateFilters, ...child('Purchase Receipt Item')], limit, ORDER),
 			erp.list('Stock Entry', ['name', 'posting_date', 'docstatus', DEAL_FIELD, NOTE_FIELD], [['stock_entry_type', '=', 'Material Receipt'], ['docstatus', '!=', 2], ...dateFilters, ...child('Stock Entry Detail', 't_warehouse')], limit, ORDER),
 		]);
 		return unique([
 			...purchaseReceipts.map((row) => ({
 				name: String(row['name']), doctype: 'Purchase Receipt' as const, date: String(row['posting_date'] ?? ''), submitted: Number(row['docstatus']) === 1,
+				...(row[SUPPLY_SOURCE_STAGES_FIELD] ? { sourceStages: parseSupplySourceStages(row[SUPPLY_SOURCE_STAGES_FIELD]) } : {}),
 				summary: withNote(String(row['supplier'] ?? ''), String(row[NOTE_FIELD] ?? '')), dealId: String(row[DEAL_FIELD] ?? ''),
 			})),
 			...materialReceipts.map((row) => ({
@@ -102,6 +106,7 @@ export async function listCoreMovements(
 
 export interface CoreDocItem { rowId: string; sourceRow: string; productId: number; itemName: string; qty: number; store: string; rate: number }
 export interface CoreDocDetail {
+	sourceStages?: SupplySourceStage[];
 	name: string; doctype: string; date: string; submitted: boolean; dealId: string;
 	supplier: string; reason: string; note: string; items: CoreDocItem[];
 	kind: EditableStockDocumentKind | null; amendedFrom: string; editBlockedReason: string;
@@ -134,6 +139,7 @@ export async function fetchCoreDocDetail(erp: ErpClient, doctype: string, name: 
 	const editable = editableStockDocumentDescriptor(doctype, doc);
 	return {
 		name: String(doc['name']), doctype, date: String(doc['posting_date'] ?? ''),
+		...(doc[SUPPLY_SOURCE_STAGES_FIELD] ? { sourceStages: parseSupplySourceStages(doc[SUPPLY_SOURCE_STAGES_FIELD]) } : {}),
 		submitted: Number(doc['docstatus']) === 1, dealId: String(doc[DEAL_FIELD] ?? ''),
 		supplier: String(doc['supplier'] ?? ''), reason: String(doc[WRITEOFF_REASON_FIELD] ?? ''),
 		note: String(doc[NOTE_FIELD] ?? ''), items,

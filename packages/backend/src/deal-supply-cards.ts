@@ -1,4 +1,5 @@
 import type { B24Client } from './b24/client.js';
+import { withSupplySourceStages } from '@b24-app/shared';
 import { ErpClient } from './erp/client.js';
 import { listSupplyRequestsForDeal } from './erp/operations.js';
 import { calculateRequestProgress } from './supply/progress.js';
@@ -73,7 +74,7 @@ export async function listCoreSupplyCards(dealId: number, client: B24Client, erp
 		return {
 			id: 0,
 			closed,
-			title: `${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`,
+			title: withSupplySourceStages(`${r.name}${r.toStore ? ` - ${r.toStore}` : ''}`, r.sourceStages),
 			stageId: `CORE:${closed && r.status !== 'Stopped' ? 'Completed' : r.status || 'Draft'}`,
 			source: 'core',
 			productIds: r.productIds,

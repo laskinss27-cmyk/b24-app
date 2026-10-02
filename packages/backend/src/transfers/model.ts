@@ -1,3 +1,5 @@
+import { parseSupplySourceStages } from '@b24-app/shared';
+
 export type TransferStatus =
 	| 'draft'
 	| 'collected'
@@ -48,6 +50,7 @@ export interface TransferHistoryEvent {
 }
 
 export interface TransferData {
+	sourceStages?: import('@b24-app/shared').SupplySourceStage[];
 	supplyRequest: string;
 	supplyRequestKey: string;
 	purchaseOrder: string;
@@ -120,6 +123,7 @@ export function parseTransferItem(item: Record<string, unknown>): StoredTransfer
 		id,
 		name: String(item['NAME'] ?? item['name'] ?? ''),
 		supplyRequest: String(data.supplyRequest ?? ''),
+		...(data.sourceStages ? { sourceStages: parseSupplySourceStages(data.sourceStages) } : {}),
 		supplyRequestKey: String(data.supplyRequestKey ?? ''),
 		purchaseOrder: String(data.purchaseOrder ?? ''),
 		dealId: String(data.dealId ?? ''),
@@ -152,6 +156,7 @@ export function parseTransferItem(item: Record<string, unknown>): StoredTransfer
 }
 
 export function newTransferData(args: {
+	sourceStages?: import('@b24-app/shared').SupplySourceStage[] | undefined;
 	supplyRequest?: string;
 	supplyRequestKey?: string;
 	purchaseOrder?: string;
@@ -167,6 +172,7 @@ export function newTransferData(args: {
 }): TransferData {
 	return {
 		supplyRequest: args.supplyRequest ?? '',
+		...(args.sourceStages?.length ? { sourceStages: parseSupplySourceStages(args.sourceStages) } : {}),
 		supplyRequestKey: args.supplyRequestKey ?? '',
 		purchaseOrder: args.purchaseOrder ?? '',
 		dealId: args.dealId ?? '',

@@ -50,6 +50,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 					...purchase,
 					displayTitle: readableDocumentTitle({
 						kind: 'purchase_order',
+						sourceStages: o.sourceStages,
 						dealId: o.dealId,
 						parent: o.name,
 						supplier: purchase.supplier,
@@ -58,6 +59,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 						...receipt,
 						displayTitle: readableDocumentTitle({
 							kind: 'purchase_receipt',
+							sourceStages: o.sourceStages,
 							dealId: o.dealId,
 							parent: purchase.name,
 							toStore: [...new Set(receipt.lines.map((line) => line.warehouse).filter(Boolean))].join(', '),
@@ -68,6 +70,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 					...transfer,
 					displayTitle: readableDocumentTitle({
 						kind: 'transfer',
+						sourceStages: o.sourceStages,
 						dealId: o.dealId,
 						parent: transfer.purchaseOrder || o.name,
 						fromStore: transfer.fromStore,
@@ -76,7 +79,7 @@ export function registerSupplyOrdersRoute(app: FastifyInstance): void {
 				}));
 				return {
 					...o,
-					displayTitle: readableDocumentTitle({ kind: 'supply_request', dealId: o.dealId, toStore: o.toStore }),
+					displayTitle: readableDocumentTitle({ kind: 'supply_request', dealId: o.dealId, toStore: o.toStore, sourceStages: o.sourceStages }),
 					items: remaining,
 					originalItems: o.items.map(withFreeStocks).map((item) => ({
 						...item,

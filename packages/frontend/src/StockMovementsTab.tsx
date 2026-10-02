@@ -7,6 +7,7 @@ import { StockListFilterBar, mkPeriod } from './StockListFilterBar.js';
 import { StockProductFilter } from './StockProductFilter.js';
 import { StockMovementPagination } from './StockMovementPagination.js';
 import { stockMovementPage } from './stock-movement-view.js';
+import { withSupplySourceStages } from '@b24-app/shared';
 import type { StockForm, StockMovementKind } from './StockWorkspaceTypes.js';
 
 const KIND_DOCTYPE: Record<StockMovementKind, string> = { issue: 'Stock Entry', receipt: 'Purchase Receipt', delivery: 'Delivery Note', return: 'Delivery Note' };
@@ -97,7 +98,7 @@ export function StockMovementsTab({ kind, form, showCreate = true, store = '', o
 					<tbody>
 						{shown.map((m) => (
 							<tr key={m.name}>
-								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind] }); }} style={{ color: 'var(--app-link)', textDecoration: 'none' }}>{m.name}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
+								<td style={TD}><a href="#" onClick={(e) => { e.preventDefault(); setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind] }); }} style={{ color: 'var(--app-link)', textDecoration: 'none' }}>{withSupplySourceStages(m.name, m.sourceStages)}</a></td><td style={TD}>{m.date}</td><td style={TD}><StockDealCell dealId={m.dealId} ownerName={m.ownerName} /></td><td style={TD}>{m.summary}</td><td style={TD}>{m.submitted ? 'проведён' : 'черновик'}</td>
 								{showActions && <td style={TD}>
 									{canPost && !m.submitted && <button className="btn-primary" disabled={busyDoc != null} onClick={() => void submit(m)}>{busyDoc === m.name ? '…' : 'Провести'}</button>}
 									{canEditSubmitted && m.submitted && <button className="btn-secondary" onClick={() => setOpenDoc({ name: m.name, doctype: m.doctype ?? KIND_DOCTYPE[kind], edit: true })}>✎ Редактировать</button>}

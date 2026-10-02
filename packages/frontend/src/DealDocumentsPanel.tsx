@@ -1,6 +1,7 @@
 import type { CoreRealization, StoredDealContractDocument, SupplyCard, TransferDoc } from './b24.js';
 import { rub, stageLabel, transferDocStatusLabel } from './deal-display-formatters.js';
 import { transferNumberLabel } from './transfer-number.js';
+import { withSupplySourceStages } from '@b24-app/shared';
 
 export function DealDocumentsPanel({
 	contracts,
@@ -77,7 +78,7 @@ export function DealDocumentsPanel({
 					<h3>Перемещения</h3>
 					{transfers.map((document) => (
 						<button type="button" className="deal-document-row clickable" key={document.id} onClick={(event) => onOpenTransfer(document, event.currentTarget)}>
-							<span><b>{document.name || 'Перемещение'}</b><small>Перемещение {transferNumberLabel(document)} · {document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
+							<span><b>{withSupplySourceStages(document.name || 'Перемещение', document.sourceStages)}</b><small>Перемещение {transferNumberLabel(document)} · {document.fromStore} → {document.toStore} · {document.lines.length} поз.</small></span>
 							<span className="deal-document-status">{transferDocStatusLabel(document.status)}</span>
 						</button>
 					))}

@@ -1,4 +1,6 @@
 import { ErpClient } from './client.js';
+import { parseSupplySourceStages, type SupplySourceStage } from '@b24-app/shared';
+import { ensureSupplySourceStagesField, SUPPLY_SOURCE_STAGES_FIELD } from './supply-source-stages.js';
 import { DEAL_FIELD, TECH_SUPPLIER, ensureErpSetup } from './erp-setup.js';
 import { ensureCoreItem, ensureSupplier, fetchErpPurchasing } from './stock-catalog.js';
 import { SUPPLY_PURCHASE_ORDER_FIELD, SUPPLY_REQUEST_FIELD, SUPPLY_REQUEST_KEY_FIELD } from './stock-transfers.js';
@@ -97,7 +99,7 @@ export interface PurchaseDraftLine { productId: number; itemName?: string; qty: 
 /** Черновик закупки по заявке снабжения. Не проводим: снабжение дальше выбирает поставщика/цены штатно. */
 export async function createPurchaseOrderDraft(
 	erp: ErpClient,
-	args: { dealId?: number; supplyRequest?: string; supplyRequestKey?: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string },
+	args: { dealId?: number; supplyRequest?: string; supplyRequestKey?: string; scheduleDate: string; lines: PurchaseDraftLine[]; supplier?: string; sourceStages?: SupplySourceStage[] | undefined },
 ): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensurePurchaseFields(erp);
@@ -105,7 +107,10 @@ export async function createPurchaseOrderDraft(
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
 	const supplier = args.supplier ? await ensureSupplier(erp, args.supplier) : TECH_SUPPLIER;
 	const rates = await fetchErpPurchasing(erp, args.lines.map((l) => l.productId));
+	const sourceStages = parseSupplySourceStages(args.sourceStages);
+	if (sourceStages.length) await ensureSupplySourceStagesField(erp, 'Purchase Order');
 	const doc = await erp.create('Purchase Order', {
+		...(sourceStages.length ? { [SUPPLY_SOURCE_STAGES_FIELD]: JSON.stringify(sourceStages) } : {}),
 		company: ctx.company,
 		supplier,
 		schedule_date: args.scheduleDate,
@@ -216,7 +221,10 @@ export async function createSupplyPurchaseReceipt(
 		if (incoming > remaining + 0.000001) throw new Error(`нельзя оприходовать товар #${productId}: осталось ${remaining}, указано ${incoming}`);
 	}
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: `#${l.productId}` });
+	const sourceStages = parseSupplySourceStages(order[SUPPLY_SOURCE_STAGES_FIELD]);
+	if (sourceStages.length) await ensureSupplySourceStagesField(erp, 'Purchase Receipt');
 	const doc = await erp.create('Purchase Receipt', {
+		...(sourceStages.length ? { [SUPPLY_SOURCE_STAGES_FIELD]: JSON.stringify(sourceStages) } : {}),
 		company: ctx.company,
 		supplier: String(order['supplier'] ?? '') || TECH_SUPPLIER,
 		set_posting_time: 1,

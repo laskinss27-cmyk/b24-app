@@ -4,6 +4,7 @@ import { StockDealCell } from './StockDealCell.js';
 import { StockBlank, transferToPrint } from './StockDocumentPrint.js';
 import { TRANSFER_STATUS, transferStatusText } from './StockTransferStatus.js';
 import { transferNumberLabel } from './transfer-number.js';
+import { withSupplySourceStages } from '@b24-app/shared';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
@@ -71,7 +72,7 @@ export function StockTransferDetailModal({ t, stores, editable, editDestination,
 		<div style={{ ...overlay, zIndex: 1100 }}>
 			<div style={modalCard}>
 				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-					<div><div style={{ color: 'var(--app-muted)', fontSize: 12 }}>Перемещение {transferNumberLabel(t)}</div><h2 style={{ fontSize: 16, margin: 0 }}>{t.name}</h2></div>
+					<div><div style={{ color: 'var(--app-muted)', fontSize: 12 }}>Перемещение {transferNumberLabel(t)}</div><h2 style={{ fontSize: 16, margin: 0 }}>{withSupplySourceStages(t.name, t.sourceStages)}</h2></div>
 					<div style={{ display: 'flex', gap: 8 }}>
 						{canDelete && <button className="btn-danger" disabled={busy} onClick={onDelete}>Удалить</button>}
 						<button style={btnGhost} onClick={() => setHistoryOpen((open) => !open)}>История</button>

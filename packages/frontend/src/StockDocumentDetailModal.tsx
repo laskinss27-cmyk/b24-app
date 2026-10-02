@@ -4,6 +4,7 @@ import { StockDealCell } from './StockDealCell.js';
 import { StockBlank, docToPrint } from './StockDocumentPrint.js';
 import { StockDocumentEditForm } from './StockDocumentEditForm.js';
 import type { StockForm } from './StockWorkspaceTypes.js';
+import { withSupplySourceStages } from '@b24-app/shared';
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e);
 const TH: CSSProperties = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #e3e8ef', fontSize: 12, color: 'var(--app-muted)' };
@@ -29,7 +30,7 @@ export function StockDocumentDetailModal({ doctype, name, printKind: requestedPr
 		<div style={{ ...overlay, zIndex: 1100 }}>
 			<div style={{ ...modalCard, maxWidth: editing ? 900 : 700 }}>
 				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-					<h2 style={{ fontSize: 16, margin: 0 }}>{name}</h2>
+					<h2 style={{ fontSize: 16, margin: 0 }}>{withSupplySourceStages(name, d?.sourceStages)}</h2>
 					<div style={{ display: 'flex', gap: 8 }}>
 						{d && !editing && d.canEdit && form && <button className="btn-primary" onClick={() => setEditing(true)}>✎ Редактировать</button>}
 						{d && !editing && printKind && <button style={btnGhost} onClick={() => window.print()}>🖨 Печать</button>}

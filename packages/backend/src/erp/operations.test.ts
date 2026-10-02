@@ -321,6 +321,7 @@ test('supply request lifecycle keeps deal linkage, notes, stocks and destination
 		scheduleDate: '2026-08-25',
 		toStore: 'Main',
 		note: 'Срочная поставка',
+		sourceStages: [{ id: 'first', name: 'Черновой монтаж' }, { id: 'second', name: 'Чистовой монтаж' }],
 		lines: [{ productId: 101, itemName: 'Product 101', qty: 2, note: 'Белый корпус' }],
 	});
 	const request = erp.requestDoc(created.name);
@@ -330,6 +331,8 @@ test('supply request lifecycle keeps deal linkage, notes, stocks and destination
 	assert.equal(request['b24_deal_id'], '501');
 	assert.equal(request['b24_to_store'], 'Main');
 	assert.equal(request['b24_note'], 'Срочная поставка');
+	const sourceStages = [{ id: 'first', name: 'Черновой монтаж' }, { id: 'second', name: 'Чистовой монтаж' }];
+	assert.deepEqual(JSON.parse(String(request['b24_supply_source_stages'])), sourceStages);
 	assert.deepEqual((request['items'] as Array<Record<string, unknown>>).map((row) => ({
 		itemCode: row['item_code'],
 		qty: row['qty'],
@@ -345,8 +348,10 @@ test('supply request lifecycle keeps deal linkage, notes, stocks and destination
 	const summaries = await listSupplyRequestsForDeal(erp.asClient(), 501);
 	assert.equal(summaries[0]?.requestKey, `${created.name}@2026-08-01T00:00:01.000Z`);
 	assert.deepEqual(summaries[0]?.productIds, [101]);
+	assert.deepEqual(summaries[0]?.sourceStages, sourceStages);
 	const requests = await listSupplyRequests(erp.asClient());
 	assert.deepEqual(requests[0]?.items[0]?.stocks, { Main: 7 });
+	assert.deepEqual(requests[0]?.sourceStages, sourceStages);
 	assert.equal(await updateSupplyRequestNote(erp.asClient(), created.name, '  Новый комментарий  '), 'Новый комментарий');
 	assert.equal(await updateSupplyRequestStore(erp.asClient(), {
 		requestName: created.name,
@@ -355,6 +360,7 @@ test('supply request lifecycle keeps deal linkage, notes, stocks and destination
 	}), 'Reserve');
 	const updated = erp.requestDoc(created.name)!;
 	assert.equal(updated['b24_to_store'], 'Reserve');
+	assert.deepEqual(JSON.parse(String(updated['b24_supply_source_stages'])), sourceStages);
 	assert.equal((updated['items'] as Array<Record<string, unknown>>)[0]?.['warehouse'], 'Reserve - TEST');
 });
 
@@ -1677,6 +1683,7 @@ test('supply purchase drafts keep create, edit and stage payloads', async () => 
 		dealId: 77,
 		supplyRequest: 'MR-1',
 		supplyRequestKey: 'MR-1::v1',
+		sourceStages: [{ id: 'second', name: 'Чистовой монтаж' }],
 		scheduleDate: '2026-08-20',
 		supplier: ' Vendor A ',
 		lines: [
@@ -1693,6 +1700,7 @@ test('supply purchase drafts keep create, edit and stage payloads', async () => 
 	assert.equal(order['b24_deal_id'], '77');
 	assert.equal(order[SUPPLY_REQUEST_FIELD], 'MR-1');
 	assert.equal(order[SUPPLY_REQUEST_KEY_FIELD], 'MR-1::v1');
+	assert.deepEqual(JSON.parse(String(order['b24_supply_source_stages'])), [{ id: 'second', name: 'Чистовой монтаж' }]);
 	assert.equal(order[SUPPLY_PURCHASE_STAGE_FIELD], 'draft');
 	assert.equal(order[SUPPLY_PURCHASE_EXPECTED_AT_FIELD], '2026-08-20');
 	assert.deepEqual(order['items'], [
@@ -1755,7 +1763,9 @@ test('supply purchase drafts keep create, edit and stage payloads', async () => 
 });
 
 test('supply purchase receipt keeps limits, ERP payload and submit rollback', async () => {
+	const stageSnapshot = JSON.stringify([{ id: 'second', name: 'Чистовой монтаж' }]);
 	const order = {
+		b24_supply_source_stages: stageSnapshot,
 		name: 'PO-7',
 		docstatus: 0,
 		supplier: 'Vendor A',
@@ -1826,6 +1836,7 @@ test('supply purchase receipt keeps limits, ERP payload and submit rollback', as
 		supplier: 'Vendor A',
 		set_posting_time: 1,
 		remarks: 'Supply purchase order PO-7',
+		b24_supply_source_stages: stageSnapshot,
 		b24_deal_id: '77',
 		[SUPPLY_REQUEST_FIELD]: 'MR-7',
 		[SUPPLY_REQUEST_KEY_FIELD]: 'MR-7::v1',

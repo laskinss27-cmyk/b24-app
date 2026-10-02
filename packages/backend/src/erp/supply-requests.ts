@@ -1,4 +1,6 @@
 import { ErpClient } from './client.js';
+import { parseSupplySourceStages, type SupplySourceStage } from '@b24-app/shared';
+import { ensureSupplySourceStagesField, SUPPLY_SOURCE_STAGES_FIELD } from './supply-source-stages.js';
 import { ensurePlanField } from './deal-plan-state.js';
 import { DEAL_FIELD, ensureErpSetup } from './erp-setup.js';
 import { ensureCoreItem, fetchErpStocks } from './stock-catalog.js';
@@ -165,16 +167,19 @@ async function ensureMrField(erp: ErpClient): Promise<void> {
 export interface SupplyReqLine { productId: number; itemName?: string; qty: number; note?: string }
 
 /** Создать заявку в снабжение (Material Request, тип Purchase) по выбранным товарам сделки. */
-export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string }): Promise<{ name: string }> {
+export async function createSupplyRequest(erp: ErpClient, args: { dealId: number; scheduleDate: string; lines: SupplyReqLine[]; toStore?: string; note?: string; sourceStages?: SupplySourceStage[] }): Promise<{ name: string }> {
 	const ctx = await erpContext(erp);
 	await ensureErpSetup(erp);
 	await ensureMrField(erp);
 	if (args.note) await ensureNoteField(erp, 'Material Request');
+	const sourceStages = parseSupplySourceStages(args.sourceStages);
+	if (sourceStages.length) await ensureSupplySourceStagesField(erp, 'Material Request');
 	if (!args.lines.length) throw new Error('пустая заявка');
 	for (const l of args.lines) await ensureCoreItem(erp, { productId: l.productId, name: l.itemName ?? `#${l.productId}` });
 	const doc = await erp.create('Material Request', {
 		company: ctx.company,
 		material_request_type: 'Purchase',
+		...(sourceStages.length ? { [SUPPLY_SOURCE_STAGES_FIELD]: JSON.stringify(sourceStages) } : {}),
 		schedule_date: args.scheduleDate,
 		[DEAL_FIELD]: String(args.dealId),
 		...(args.toStore ? { [MR_TO_STORE_FIELD]: args.toStore } : {}),
@@ -191,8 +196,9 @@ export async function createSupplyRequest(erp: ErpClient, args: { dealId: number
 }
 
 export interface SupplyReqItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number>; rowName: string }
-export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; items: SupplyReqItem[] }
+export interface SupplyRequest { name: string; requestKey: string; createdAt: string; dealId: string; date: string; deadline: string; status: string; toStore: string; note: string; items: SupplyReqItem[]; sourceStages?: SupplySourceStage[] }
 export interface SupplyRequestSummary {
+	sourceStages?: SupplySourceStage[];
 	name: string;
 	requestKey: string;
 	createdAt: string;
@@ -236,6 +242,7 @@ export async function listSupplyRequestsForDeal(erp: ErpClient, dealId: number):
 			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
 			note: String(mr?.[NOTE_FIELD] ?? ''),
 			productIds: items.map((item) => item.productId),
+			sourceStages: parseSupplySourceStages(mr?.[SUPPLY_SOURCE_STAGES_FIELD]),
 			items,
 		});
 	}
@@ -274,6 +281,7 @@ export async function listSupplyRequests(erp: ErpClient): Promise<SupplyRequest[
 			status: String(h['status'] ?? ''),
 			toStore: String(mr?.[MR_TO_STORE_FIELD] ?? ''),
 			note: String(mr?.[NOTE_FIELD] ?? ''),
+			sourceStages: parseSupplySourceStages(mr?.[SUPPLY_SOURCE_STAGES_FIELD]),
 			items,
 		});
 	}

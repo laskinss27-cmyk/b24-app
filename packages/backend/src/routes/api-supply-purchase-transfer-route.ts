@@ -114,6 +114,7 @@ export function registerSupplyPurchaseTransferRoute(app: FastifyInstance, supply
 			// перепроверяем живой остаток и активные резервы всех перемещений.
 			await validateTransferReservation(erp, client, 0, fromStore, transferLines, app.reservationRuntime);
 			let baseData = newTransferData({
+				sourceStages: request.sourceStages,
 				supplyRequest: requestName,
 				supplyRequestKey: request.requestKey,
 				purchaseOrder,

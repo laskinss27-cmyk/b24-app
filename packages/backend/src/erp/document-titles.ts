@@ -1,4 +1,6 @@
-export type ReadableDocumentTitleInput =
+import { withSupplySourceStages, type SupplySourceStage } from '@b24-app/shared';
+
+export type ReadableDocumentTitleInput = (
 	| { kind: 'deal_plan'; dealId: string | number }
 	| { kind: 'supply_request'; dealId: string | number; toStore?: string }
 	| { kind: 'purchase_order'; dealId?: string | number; parent: string; supplier?: string }
@@ -7,7 +9,8 @@ export type ReadableDocumentTitleInput =
 	| { kind: 'realization'; dealId: string | number; store?: string }
 	| { kind: 'realization_return'; dealId: string | number; parent: string }
 	| { kind: 'issue'; dealId?: string | number; store?: string }
-	| { kind: 'supplier_return'; dealId?: string | number; parent: string; supplier?: string };
+	| { kind: 'supplier_return'; dealId?: string | number; parent: string; supplier?: string }
+) & { sourceStages?: readonly SupplySourceStage[] | undefined };
 
 const clean = (value: unknown): string => String(value ?? '').replace(/\s+/g, ' ').trim();
 const dealPart = (dealId: string | number | undefined): string => {
@@ -26,6 +29,10 @@ const join = (...parts: Array<string | undefined>): string => parts.map(clean).f
 
 /** Человеческое название, которое не заменяет первичный ключ ERPNext. */
 export function readableDocumentTitle(input: ReadableDocumentTitleInput): string {
+	return withSupplySourceStages(baseDocumentTitle(input), input.sourceStages);
+}
+
+function baseDocumentTitle(input: ReadableDocumentTitleInput): string {
 	switch (input.kind) {
 		case 'deal_plan':
 			return join('План', dealPart(input.dealId));

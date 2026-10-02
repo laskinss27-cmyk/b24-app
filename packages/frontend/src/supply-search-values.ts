@@ -10,6 +10,7 @@ export const searchMatches = (query: string, values: Array<string | number | und
 };
 export const orderSearchValues = (order: SupplyOrderRow): Array<string | number | undefined> => [
 	order.name,
+	order.displayTitle,
 	order.dealId,
 	order.dealTitle,
 	order.toStore,
@@ -21,11 +22,11 @@ export const orderSearchValues = (order: SupplyOrderRow): Array<string | number 
 	...(order.transfers ?? []).flatMap((transfer) => [...transferNumberSearchValues(transfer), transfer.name, transfer.fromStore, transfer.toStore, ...transfer.lines.flatMap((line) => [line.productId, line.name])]),
 ];
 export const purchaseSearchValues = (order: SupplyOrderRow, purchase: SupplyPurchaseChild): Array<string | number | undefined> => [
-	order.name, order.dealId, order.dealTitle, order.toStore, purchase.name, purchase.supplier,
+	order.name, order.displayTitle, order.dealId, order.dealTitle, order.toStore, purchase.name, purchase.displayTitle, purchase.supplier,
 	...purchase.lines.flatMap((line) => [line.productId, line.name, line.warehouse]),
 	...purchase.receipts.flatMap((receipt) => [receipt.name, ...receipt.lines.flatMap((line) => [line.productId, line.name, line.warehouse])]),
 ];
 export const transferSearchValues = (order: SupplyOrderRow, transfer: SupplyTransferChild): Array<string | number | undefined> => [
-	order.name, order.dealId, order.dealTitle, order.toStore, ...transferNumberSearchValues(transfer), transfer.name, transfer.purchaseOrder, transfer.fromStore, transfer.toStore,
+	order.name, order.displayTitle, order.dealId, order.dealTitle, order.toStore, ...transferNumberSearchValues(transfer), transfer.name, transfer.displayTitle, transfer.purchaseOrder, transfer.fromStore, transfer.toStore,
 	...transfer.lines.flatMap((line) => [line.productId, line.name, line.warehouse]),
 ];

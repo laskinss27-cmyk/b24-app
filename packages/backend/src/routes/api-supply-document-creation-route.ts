@@ -150,6 +150,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 					continue;
 				}
 				const { name } = await createPurchaseOrderDraft(erp, {
+					sourceStages: request.sourceStages,
 					dealId,
 					supplyRequest: requestName,
 					supplyRequestKey: request.requestKey,
@@ -167,6 +168,7 @@ export function registerSupplyDocumentCreationRoute(app: FastifyInstance, supply
 			for (const [fromStore, storeLines] of transfersByStore.entries()) {
 				const transferLines = storeLines.map((l) => ({ productId: l.productId, name: l.itemName || `#${l.productId}`, qty: l.qty }));
 				let baseData = newTransferData({
+					sourceStages: request.sourceStages,
 					supplyRequest: requestName,
 					supplyRequestKey: request.requestKey,
 					dealId: String(dealId),

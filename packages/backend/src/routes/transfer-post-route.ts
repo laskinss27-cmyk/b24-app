@@ -87,6 +87,7 @@ export function registerTransferPostRoute(
 					const toStore = shortage ? doc.fromStore : doc.toStore;
 					const correctionData: TransferData = {
 						...newTransferData({
+							sourceStages: doc.sourceStages,
 							supplyRequest: doc.supplyRequest,
 							supplyRequestKey: doc.supplyRequestKey,
 							purchaseOrder: doc.purchaseOrder,
