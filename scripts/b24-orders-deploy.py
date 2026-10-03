@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.error
 from contextlib import closing
 
 NAMES = ('b24-orders-receiver-1', 'b24-orders-worker-1')
@@ -84,6 +85,24 @@ def health(url, sha):
     raise RuntimeError('Receiver health/version check failed')
 
 
+def public_receiver_ready(url):
+    status = None
+    for attempt in range(15):
+        try:
+            request = urllib.request.Request(url, data=b'{}', headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                status = response.status
+        except urllib.error.HTTPError as error:
+            status = error.code
+            if status == 401:
+                return
+        except Exception:
+            status = 'unavailable'
+        # nginx reload returns before the new workers necessarily accept requests.
+        time.sleep(1)
+    raise RuntimeError('Public callback endpoint check failed: ' + str(status))
+
+
 def main(image, sha, baseline):
     if not re.fullmatch('[a-f0-9]{40}', sha) or image != 'b24-orders:git-' + sha:
         raise RuntimeError('Full SHA image required')
@@ -153,8 +172,7 @@ def main(image, sha, baseline):
             # Public health uses existing reverse proxy hostname, derived from its server_name.
             hostname = re.search(r'server_name\s+([^;\s]+)', text).group(1)
             # /health belongs to main backend; prove receiver routing with a rejected, empty request.
-            script = "fetch(process.argv[1],{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(r=>{if(r.status!==401)process.exit(1)})"
-            run(['node', '-e', script, 'https://' + hostname + '/api/integrations/umniydom/v1/callback-requests'])
+            public_receiver_ready('https://' + hostname + '/api/integrations/umniydom/v1/callback-requests')
             result_backend = inspect('b24-backend')
             if result_backend['Id'] != main_backend['Id'] or 'erpnext_frappe_network' not in result_backend['NetworkSettings']['Networks']:
                 raise RuntimeError('Main backend changed during receiver deployment')

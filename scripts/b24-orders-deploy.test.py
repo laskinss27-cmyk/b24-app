@@ -36,6 +36,14 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(body['NetworkingConfig']['EndpointsConfig'], {'b24-orders_orders': {'Aliases': ['receiver']}})
         self.assertEqual(old['Config']['Env'][-1], 'UMNIYDOM_CALLBACK_ENABLED=0')
 
+    def test_public_check_waits_for_new_nginx_workers_but_requires_unauthorized_response(self):
+        url = 'https://example.test/callback'
+        unavailable = deploy.urllib.error.HTTPError(url, 404, 'old configuration', {}, None)
+        ready = deploy.urllib.error.HTTPError(url, 401, 'unauthorized', {}, None)
+        with patch.object(deploy.urllib.request, 'urlopen', side_effect=[unavailable, ready]), patch.object(deploy.time, 'sleep') as delay:
+            deploy.public_receiver_ready(url)
+            delay.assert_called_once_with(1)
+
     def test_failed_health_restores_both_old_container_ids_and_configuration(self):
         sha = 'a' * 40
         image = 'b24-orders:git-' + sha
