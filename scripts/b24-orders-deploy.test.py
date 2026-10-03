@@ -48,7 +48,7 @@ class DeploymentTests(unittest.TestCase):
         events = []
         with tempfile.TemporaryDirectory() as folder:
             root = pathlib.Path(folder)
-            original_path = pathlib.Path
+            original_path = type(root)
             def path(value):
                 return root / str(value).lstrip('/')
             nginx = path('/etc/nginx/sites-available/b24')
