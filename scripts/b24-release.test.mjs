@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { cleanHead, prepare, run, validateImageIdentity } from './b24-release.mjs';
@@ -78,6 +78,15 @@ test('legacy comparison tolerates only text line endings while new images and bi
   assert.notEqual(sourceHash('a\r\nb'), sourceHash('a\nb'));
   assert.notEqual(sourceHash('a\r\nc', true), sourceHash('a\nb', true));
   assert.notEqual(sourceHash(Buffer.from([0, 13, 10]), true), sourceHash(Buffer.from([0, 10]), true));
+});
+
+test('orders CLI reaches the guard without a circular top-level await', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'orders-guard-dispatch-'));
+  t.after(() => rmSync(cwd, {recursive:true,force:true}));
+  const result = spawnSync(process.execPath, [resolve('scripts/b24-release.mjs'), 'guard', 'invalid-image', 'a'.repeat(40)], {cwd,env:{...process.env,B24_RELEASE_TARGET:'orders'},encoding:'utf8',windowsHide:true});
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /git status failed/);
+  assert.doesNotMatch(result.stderr, /unsettled top-level await/);
 });
 
 test('retired one-off deploy entry points stop before accessing Git, SSH or production', () => {

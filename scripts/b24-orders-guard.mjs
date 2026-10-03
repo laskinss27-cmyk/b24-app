@@ -1,8 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {run,cleanHead,gitManifest,validateImageIdentity} from './b24-release.mjs';
 import {compareFiles,sha256,validSha} from './b24-release-integrity.mjs';
-export function guardOrders(cwd,image,sha,bootstrap) {
+export function guardOrders(cwd,image,sha,bootstrap,{run,cleanHead,gitManifest,validateImageIdentity}) {
   cleanHead(cwd,sha);
   if(image!==`b24-orders:git-${sha}`)throw Error('Use a full-SHA orders image');
   const expected=gitManifest(cwd,sha),candidate=JSON.parse(run('docker',['image','inspect',image]))[0];

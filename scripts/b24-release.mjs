@@ -139,7 +139,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       } finally { rmSync(parent, { recursive: true, force: true }); }
     } else if (command === 'guard') {
       if (!arg || !sha) throw new Error('Usage: guard IMAGE FULL_SHA [LEGACY_BASELINE_FULL_SHA]');
-      const result = process.env.B24_RELEASE_TARGET === 'orders' ? (await import('./b24-orders-guard.mjs')).guardOrders(cwd,arg,sha,bootstrap) : guard(cwd, arg, sha, bootstrap);
+      const result = process.env.B24_RELEASE_TARGET === 'orders' ? (await import('./b24-orders-guard.mjs')).guardOrders(cwd,arg,sha,bootstrap,{run,cleanHead,gitManifest,validateImageIdentity}) : guard(cwd, arg, sha, bootstrap);
       console.log(JSON.stringify(result));
     } else throw new Error('Usage: b24-release.mjs prepare|build|guard ...');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
