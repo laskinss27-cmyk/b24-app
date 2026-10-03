@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_IMAGE=node:20-alpine
-FROM ${NODE_IMAGE} AS base
+FROM node:24-alpine AS base
 WORKDIR /app
 
 # ── Слой 1: зависимости.
@@ -14,7 +13,18 @@ RUN npm ci --ignore-scripts
 
 # ── Слой 2: код и сборка.
 COPY tsconfig.base.json ./
+COPY Dockerfile Dockerfile.orders .dockerignore ./
 COPY packages ./packages
+COPY docs/contracts/order-created.v1.example.json ./docs/contracts/order-created.v1.example.json
+COPY scripts/b24-release-integrity.mjs ./scripts/b24-release-integrity.mjs
+COPY scripts/test-source.mjs ./scripts/test-source.mjs
+COPY deploy/orders-healthcheck.mjs ./deploy/orders-healthcheck.mjs
+COPY .release/source.json ./.release/source.json
+ARG RELEASE_SHA
+ARG RELEASE_TREE
+# Missing provenance or a changed build context blocks the build before tests/build.
+RUN node scripts/b24-release-integrity.mjs check-input "$RELEASE_SHA" "$RELEASE_TREE"
+RUN npm -w @b24-app/backend test && npm -w @b24-app/frontend test && rm -rf packages/backend/.tmp
 # Backend imports runtime access-policy helpers from the shared workspace.
 # Bundle that workspace for plain Node.js and point only the container copy at it.
 RUN npm -w @b24-app/frontend run build \
@@ -22,7 +32,11 @@ RUN npm -w @b24-app/frontend run build \
  && test -s packages/backend/dist/catalog-mirror/reader.js \
  && test -s packages/backend/dist/catalog-mirror/live-stock.js \
  && npx esbuild packages/shared/src/index.ts --bundle --platform=node --format=esm --outfile=packages/shared/dist/index.js \
- && sed -i 's#\./src/index\.ts#./dist/index.js#g' packages/shared/package.json
+ && sed -i 's#\./src/index\.ts#./dist/index.js#g' packages/shared/package.json \
+ && node scripts/b24-release-integrity.mjs seal
+
+LABEL org.opencontainers.image.revision=$RELEASE_SHA \
+      com.b24.git-tree=$RELEASE_TREE
 
 # ── Рантайм-настройки
 ENV NODE_ENV=production
@@ -32,9 +46,6 @@ ENV HOST=0.0.0.0
 EXPOSE 8080
 
 # Бэкенд при старте сам отдаёт статику фронта из ../frontend/dist (см. app.ts)
-CMD ["node", "packages/backend/dist/server.js"]
-
-# Keep the standalone receiver and backup command paths compatible.
 RUN ln -s packages/backend/dist/integrations/umniydom /app/app
-CMD ["node", "app/cli.js", "serve"]
 COPY deploy/orders-healthcheck.mjs /app/healthcheck.mjs
+CMD ["node", "app/cli.js", "serve"]

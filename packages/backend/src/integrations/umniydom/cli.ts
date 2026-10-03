@@ -13,6 +13,7 @@ import { processPlanner } from './planner/worker.js';
 import { CallbackInbox } from './callback/store.js';
 import { registerCallbackRoute } from './callback/route.js';
 import { processCallback } from './callback/worker.js';
+import { receiverIdentity } from './release.js';
 
 async function main(): Promise<void> {
 	const config = loadOrdersConfig();
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
 		if (planner) await registerPlannerRoute(app, config, planner);
 		if (callbacks) await registerCallbackRoute(app, config, callbacks);
 		if (config.statusMode !== 'off') await registerOrderStatusRoute(app, config, store, new BitrixOrderStatusCrm(webhookCall(config.webhook!)));
-		app.get('/health', async () => ({ ok: true, integration: 'umniydom-orders', mode: config.mode }));
+		app.get('/health', async () => ({ ok: true, integration: 'umniydom-orders', mode: config.mode, ...receiverIdentity() }));
 		app.get('/ready', async () => { store.db.prepare('SELECT 1').get(); return { ok: true }; });
 		try {
 			const address = await app.listen(receiverAddress());
