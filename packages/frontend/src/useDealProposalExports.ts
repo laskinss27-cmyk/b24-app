@@ -15,17 +15,17 @@ export function useDealProposalExports({
 	onNotice: (notice: ExportNotice) => void;
 }): {
 	exportBusy: boolean;
-	exportXlsx: () => Promise<void>;
-	exportDocx: () => Promise<void>;
+	exportXlsx: (withoutModels?: boolean) => Promise<void>;
+	exportDocx: (withoutModels?: boolean) => Promise<void>;
 } {
 	const [exportBusy, setExportBusy] = useState(false);
 
-	const exportXlsx = async (): Promise<void> => {
+	const exportXlsx = async (withoutModels = false): Promise<void> => {
 		if (dealId == null || exportBusy) return;
 		setExportBusy(true);
 		onNotice(null);
 		try {
-			await downloadDealXlsx(dealId, variantId);
+			await downloadDealXlsx(dealId, variantId, withoutModels);
 			onNotice({ kind: 'ok', text: '✅ КП в Excel сформировано и скачано.' });
 		} catch (error) {
 			onNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });
@@ -34,12 +34,12 @@ export function useDealProposalExports({
 		}
 	};
 
-	const exportDocx = async (): Promise<void> => {
+	const exportDocx = async (withoutModels = false): Promise<void> => {
 		if (dealId == null || exportBusy || dev) return;
 		setExportBusy(true);
 		onNotice(null);
 		try {
-			await downloadDealKpDocx(dealId, variantId);
+			await downloadDealKpDocx(dealId, variantId, withoutModels);
 			onNotice({ kind: 'ok', text: '✅ КП в Word сформировано и скачано.' });
 		} catch (error) {
 			onNotice({ kind: 'err', text: `⛔ ${String(error instanceof Error ? error.message : error)}` });

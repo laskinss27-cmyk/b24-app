@@ -15,6 +15,7 @@ export interface KpRow {
 	photoPath?: string;
 }
 export interface KpData {
+	withoutModels?: boolean;
 	number: number;
 	date: string;
 	title: string;
@@ -29,10 +30,10 @@ export interface KpData {
 	total: number;
 }
 
-export async function fetchDealKp(dealId: number, variantId?: string): Promise<KpData> {
+export async function fetchDealKp(dealId: number, variantId?: string, withoutModels = false): Promise<KpData> {
 	const res = await fetch('/api/deal/kp', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), dealId, ...(variantId ? { variantId } : {}) }),
+		body: JSON.stringify({ ...bx24Auth(), dealId, ...(variantId ? { variantId } : {}), ...(withoutModels ? { withoutModels: true } : {}) }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; kp?: KpData };
 	if (!json.ok || !json.kp) throw new Error(json.error ?? 'не удалось собрать КП');
@@ -40,8 +41,8 @@ export async function fetchDealKp(dealId: number, variantId?: string): Promise<K
 }
 
 /** Скачать редактируемую Word-версию КП. */
-export async function downloadDealKpDocx(dealId: number, variantId?: string): Promise<void> {
-	const kp = await fetchDealKp(dealId, variantId);
+export async function downloadDealKpDocx(dealId: number, variantId?: string, withoutModels = false): Promise<void> {
+	const kp = await fetchDealKp(dealId, variantId, withoutModels);
 	const res = await fetch('/api/deal/kp-docx', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -73,8 +74,8 @@ export async function downloadDealKpDocx(dealId: number, variantId?: string): Pr
 }
 
 /** Скачать клиентскую Excel-версию КП. */
-export async function downloadDealXlsx(dealId: number, variantId?: string): Promise<void> {
-	const kp = await fetchDealKp(dealId, variantId);
+export async function downloadDealXlsx(dealId: number, variantId?: string, withoutModels = false): Promise<void> {
+	const kp = await fetchDealKp(dealId, variantId, withoutModels);
 	const res = await fetch('/api/deal/kp-xlsx', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

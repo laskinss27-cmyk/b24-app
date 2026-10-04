@@ -73,7 +73,7 @@ export interface DealProductsWorkspaceProps {
 	onReplace: (row: EnrichedRow) => void;
 	onStage: (stageName: string) => void;
 	onAddToStage: (stageId: string, stageName: string) => void;
-	onPrintDocument: (kind: DealPrintKind, variantId?: string) => void;
+	onPrintDocument: (kind: DealPrintKind, variantId?: string, withoutModels?: boolean) => void;
 	onReload: () => Promise<void>;
 }
 
@@ -459,9 +459,9 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onRenameVariant={() => { if (activeVariant) { setVariantError(null); setVariantDialog({ kind: 'rename', value: activeVariant.name }); } }}
 				onRemoveVariant={() => void removeVariant()}
 				onToggleSummary={() => { setSummaryView((shown) => !shown); setSelected({}); requestB24FitWindow(160); }}
-				onExportWord={() => void exportDocx()}
-				onExportExcel={() => void exportXlsx()}
-				onPrintProposal={() => onPrintDocument('kp', documentVariantId)}
+				onExportWord={(withoutModels) => void exportDocx(withoutModels)}
+				onExportExcel={(withoutModels) => void exportXlsx(withoutModels)}
+				onPrintProposal={(withoutModels) => onPrintDocument('kp', documentVariantId, withoutModels)}
 				onPrintReceipt={() => onPrintDocument('receipt', documentVariantId)}
 				onOpenContract={() => setShowContract(true)}
 				onToggleVariantSelection={() => void (viewingSelected ? cancelVariantSelection() : chooseVariant())}

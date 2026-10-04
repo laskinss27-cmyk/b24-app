@@ -42,6 +42,44 @@ class FakeCore {
 	client(): ErpClient { return this as unknown as ErpClient; }
 }
 
+test('model-free proposal is read-only, retains separate goods and discounted amounts, and leaves work names intact', async (t) => {
+	const core = new FakeCore();
+	core.so = { name: 'SO-TEST', docstatus: 0, items: [
+		{ name: 'row-a', item_code: '101', item_name: 'IP-камера Hikvision DS-2CD-A', qty: 2, price_list_rate: 1000, discount_percentage: 10 },
+		{ name: 'row-b', item_code: '102', item_name: 'IP-камера Hikvision DS-2CD-B', qty: 3, price_list_rate: 1000, discount_percentage: 10 },
+		{ name: 'work', item_code: '9916', item_name: 'Монтаж DS-2CD-A', qty: 1, price_list_rate: 500, discount_percentage: 0 },
+	] };
+	const before = structuredClone(core.so);
+	const baseList = core.list.bind(core);
+	t.mock.method(core, 'list', async (type: string) => type === 'Item' ? [
+		{ name: '101', b24_model: 'DS-2CD-A', b24_brand: 'Hikvision' },
+		{ name: '102', b24_model: 'DS-2CD-B', b24_brand: 'Hikvision' },
+		{ name: '9916', is_stock_item: 0 },
+	] : baseList(type));
+	t.mock.method(ErpClient, 'fromEnv', () => core.client());
+	const client = { call: async () => [], callBatch: async () => ({ result: {}, result_error: {}, result_total: {} }) } as unknown as B24Client;
+	const app = Fastify(); registerDealCommercialProposalRoute(app, () => client);
+	try {
+		const normal = (await app.inject({ method: 'POST', url: '/api/deal/kp', payload: { dealId: 99501 } })).json();
+		const hidden = (await app.inject({ method: 'POST', url: '/api/deal/kp', payload: { dealId: 99501, withoutModels: true } })).json();
+		assert.equal(hidden.ok, true, JSON.stringify(hidden));
+		assert.equal(normal.kp.goods[0].name, 'IP-камера Hikvision DS-2CD-A');
+		assert.deepEqual(hidden.kp.goods.map((row: { name: string; article: string; qty: number; price: number; sum: number }) => [row.name, row.article, row.qty, row.price, row.sum]), [['IP-камера', '', 2, 900, 1800], ['IP-камера', '', 3, 900, 2700]]);
+		assert.deepEqual(hidden.kp.works, normal.kp.works);
+		assert.equal(hidden.kp.total, normal.kp.total);
+		assert.deepEqual(core.so, before);
+		const readWithIdentity = core.list.bind(core);
+		t.mock.method(core, 'list', async (type: string, fields?: string[]) => {
+			if (type === 'Item' && fields?.includes('b24_model')) throw new Error('identity unavailable');
+			return readWithIdentity(type);
+		});
+		const failed = (await app.inject({ method: 'POST', url: '/api/deal/kp', payload: { dealId: 99501, withoutModels: true } })).json();
+		assert.equal(failed.ok, false);
+		assert.equal(failed.kp, undefined, 'never return a leaking ordinary proposal when hiding failed');
+		assert.equal((await app.inject({ method: 'POST', url: '/api/deal/kp', payload: { dealId: 99501 } })).json().ok, true);
+	} finally { await app.close(); }
+});
+
 test('manual lines survive editing, variant copies, selecting, and replacement by catalog goods', async () => {
 	const previous = process.env.B24_STATE_DIR;
 	const dir = await mkdtemp(join(tmpdir(), 'b24-manual-'));

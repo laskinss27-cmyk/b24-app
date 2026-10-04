@@ -15,6 +15,7 @@ export interface DealKpDocumentRow {
 }
 
 export interface DealKpDocumentData {
+	withoutModels?: boolean;
 	number: number;
 	date: string;
 	title: string;
@@ -96,11 +97,16 @@ function mergeDocumentRows(rows: DealKpDocumentRow[]): DealKpDocumentRow[] {
 export function normalizeDealKpDocument(value: unknown): DealKpDocumentData {
 	if (!value || typeof value !== 'object') throw new Error('нет данных коммерческого предложения');
 	const input = value as Record<string, unknown>;
-	const rows = (key: 'goods' | 'works', isWork: boolean): DealKpDocumentRow[] =>
-		mergeDocumentRows((Array.isArray(input[key]) ? input[key] : [])
+	const withoutModels = input.withoutModels === true;
+	const rows = (key: 'goods' | 'works', isWork: boolean): DealKpDocumentRow[] => {
+		const normalized = (Array.isArray(input[key]) ? input[key] : [])
 			.slice(0, 500)
 			.map((row) => normalizeRow(row, isWork))
-			.filter((row): row is DealKpDocumentRow => Boolean(row)));
+			.filter((row): row is DealKpDocumentRow => Boolean(row));
+		// The API has already merged original positions before hiding identity.
+		// Distinct models with the same printed name/price must stay separate.
+		return withoutModels ? normalized : mergeDocumentRows(normalized);
+	};
 	const goods = rows('goods', false);
 	const works = rows('works', true);
 	if (!goods.length && !works.length) throw new Error('в сделке нет товаров и услуг');
@@ -109,6 +115,7 @@ export function normalizeDealKpDocument(value: unknown): DealKpDocumentData {
 	const sumGoods = goods.reduce((sum, row) => sum + row.sum, 0);
 	const sumWorks = works.reduce((sum, row) => sum + row.sum, 0);
 	return {
+		...(withoutModels ? { withoutModels: true } : {}),
 		number: Math.max(0, Math.trunc(finite(input.number))),
 		date: clean(input.date, 40),
 		title: clean(input.title),

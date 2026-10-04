@@ -64,9 +64,9 @@ export function DealActionsBar({
 	onRenameVariant: () => void;
 	onRemoveVariant: () => void;
 	onToggleSummary: () => void;
-	onExportWord: () => void;
-	onExportExcel: () => void;
-	onPrintProposal: () => void;
+	onExportWord: (withoutModels: boolean) => void;
+	onExportExcel: (withoutModels: boolean) => void;
+	onPrintProposal: (withoutModels: boolean) => void;
 	onPrintReceipt: () => void;
 	onOpenContract: () => void;
 	onToggleVariantSelection: () => void;

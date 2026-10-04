@@ -108,3 +108,21 @@ test('Excel proposal download preserves variant loading and fallback filename', 
 	assert.equal(requests[1]!.url, '/api/deal/kp-xlsx');
 	assert.deepEqual(clickedDownloads, ['kp-501.xlsx']);
 });
+
+test('all proposal formats pass model-free selection with the current variant and preserve generated data', async () => {
+	const kp = { ...kpData(), withoutModels: true };
+	let requests = captureResponses([jsonResponse({ ok: true, kp })]);
+	await fetchDealKp(501, 'variant-c', true);
+	assert.equal(requests[0]!.body.withoutModels, true);
+	assert.equal(requests[0]!.body.variantId, 'variant-c');
+	for (const [download, contentType] of [
+		[downloadDealKpDocx, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+		[downloadDealXlsx, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+	] as const) {
+		requests = captureResponses([jsonResponse({ ok: true, kp }), new Response('file', { headers: { 'Content-Type': contentType } })]);
+		await download(501, 'variant-c', true);
+		assert.equal(requests[0]!.body.withoutModels, true);
+		assert.equal(requests[0]!.body.variantId, 'variant-c');
+		assert.deepEqual(requests[1]!.body.kp, kp);
+	}
+});

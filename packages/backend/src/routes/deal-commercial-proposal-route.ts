@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { B24ApiError, type B24Client } from '../b24/client.js';
 import { enrichProducts as enrichCatalogProducts } from '../b24/catalog.js';
 import { dealExportRows } from '../deal-export-rows.js';
+import { kpNameWithoutModel, type KpProductIdentity } from '../deal-kp-models.js';
 import { contactCaption, receiptContactId, type DealContactBinding } from '../deal-receipt-client.js';
 import { ErpClient } from '../erp/client.js';
 import { listDealPlan, listDealQuoteVariants, listDealStages, type DealStage, type PlanItem } from '../erp/operations.js';
@@ -21,7 +22,7 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 	// Данные для КП (коммерческого предложения) из сделки: клиент, менеджер, товары/работы,
 	// артикулы, фото из товарной базы Б24 и итоги. Документ собирает фронт.
 	app.post('/api/deal/kp', async (req, reply) => {
-		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown };
+		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; variantId?: unknown; withoutModels?: unknown };
 		const client = clientFrom(b);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const dealId = Number(b.dealId);
@@ -109,6 +110,17 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 				}
 			}
 			const printRows = [...flattened.values()];
+			const withoutModels = b.withoutModels === true;
+			const identities = new Map<number, KpProductIdentity>();
+			const goodsIds = [...new Set(printRows.filter((row) => row.type !== 7 && row.productId > 0).map((row) => String(row.productId)))];
+			if (withoutModels && erp && goodsIds.length) {
+				// Current identity lives in ERPNext; include archived items used by old deals.
+				// This is a read-only targeted query, with no schema/catalog writes.
+				const items = await erp.list('Item', ['name', 'b24_model', 'b24_article', 'b24_brand'], [['name', 'in', goodsIds]]);
+				for (const item of items) identities.set(Number(item['name']), {
+					model: String(item['b24_model'] ?? ''), article: String(item['b24_article'] ?? ''), manufacturer: String(item['b24_brand'] ?? ''),
+				});
+			}
 			const catalogInfo = await enrichCatalogProducts(
 				client,
 				printRows.filter((row) => row.type !== 7 && row.productId > 0).map((row) => row.productId),
@@ -121,11 +133,13 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 				.filter((r) => Number.isFinite(r.qty) && r.qty > 0)
 				.map((r) => {
 					const info = catalogInfo.get(r.productId);
+					const article = info?.article || info?.model || articleOf(r.name);
+					const identity = identities.get(r.productId) ?? { model: info?.model, article, manufacturer: info?.manufacturer };
 					return {
 						productId: r.productId,
-						name: r.name,
+						name: withoutModels && r.type !== 7 ? kpNameWithoutModel(r.name, identity) : r.name,
 						...(r.unit ? { unit: r.unit } : {}),
-						article: info?.article || info?.model || articleOf(r.name),
+						article: withoutModels && r.type !== 7 ? '' : article,
 						qty: r.qty,
 						price: r.price,
 						sum: r.price * r.qty,
@@ -141,6 +155,7 @@ export function registerDealCommercialProposalRoute(app: FastifyInstance, client
 			return {
 				ok: true,
 				kp: {
+					...(withoutModels ? { withoutModels: true } : {}),
 					number: dealId, date: String(deal?.['DATE_CREATE'] ?? ''), title: String(deal?.['TITLE'] ?? ''),
 					client: primaryClient,
 					receiptClient,

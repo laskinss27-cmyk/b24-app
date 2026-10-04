@@ -70,15 +70,22 @@ function ReceiptDocument({ kp }: { kp: KpData }): JSX.Element {
 	);
 }
 
-export function KpDocument({ dealId, variantId, mock, kind, onBack }: { dealId: number | null; variantId?: string; mock: boolean; kind: DealPrintKind; onBack: () => void }): JSX.Element {
+export function KpDocument({ dealId, variantId, mock, kind, withoutModels = false, onBack }: { dealId: number | null; variantId?: string; mock: boolean; kind: DealPrintKind; withoutModels?: boolean; onBack: () => void }): JSX.Element {
 	const [kp, setKp] = useState<KpData | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (mock) { setKp(MOCK_KP); return; }
+		if (mock) {
+			setKp(withoutModels && kind === 'kp' ? { ...MOCK_KP, withoutModels: true, goods: MOCK_KP.goods.map((row) => ({ ...row, article: '' })) } : MOCK_KP);
+			return;
+		}
 		if (dealId == null) { setErr('Не пришёл ID сделки.'); return; }
-		withTimeout(fetchDealKp(dealId, variantId), 30000, 'deal/kp').then(setKp).catch((e: unknown) => setErr(String(e instanceof Error ? e.message : e)));
-	}, [dealId, mock, variantId]);
+		let active = true;
+		setKp(null); setErr(null);
+		withTimeout(fetchDealKp(dealId, variantId, kind === 'kp' && withoutModels), 30000, 'deal/kp')
+			.then((data) => { if (active) setKp(data); }).catch((e: unknown) => { if (active) setErr(String(e instanceof Error ? e.message : e)); });
+		return () => { active = false; };
+	}, [dealId, mock, variantId, kind, withoutModels]);
 
 	const printKp = async (): Promise<void> => {
 		const pending = [...document.querySelectorAll<HTMLImageElement>('.kp-doc img, .deal-receipt img')]

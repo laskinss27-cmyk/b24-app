@@ -160,47 +160,30 @@ body.deal-placement-body #root.deal-placement-root {
 	background: #eef5ff;
 	color: #174f8a;
 }
-.deal-document-menu { position: relative; }
-.deal-document-menu > summary {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	list-style: none;
-	cursor: pointer;
-	user-select: none;
+.deal-print-dialog {
+	width: min(420px, calc(100% - 32px));
+	max-height: calc(100dvh - 32px);
+	box-sizing: border-box;
+	padding: 24px;
+	border: 1px solid var(--app-line);
+	border-radius: 12px;
+	background: var(--app-surface);
+	color: var(--app-text);
+	box-shadow: 0 18px 60px #17283e44;
 }
-.deal-document-menu > summary::-webkit-details-marker { display: none; }
-.deal-document-menu[open] > summary {
-	border-color: #8da9cf;
-	background: #eef5ff;
-	color: #174f8a;
-}
-.deal-document-menu-list {
-	position: absolute;
-	z-index: 80;
-	top: calc(100% + 6px);
-	left: 0;
-	display: grid;
-	min-width: 210px;
-	padding: 6px;
-	border: 1px solid #cfd7e3;
-	border-radius: 9px;
-	background: #fff;
-	box-shadow: 0 12px 30px rgba(31, 45, 67, .18);
-}
-.deal-document-menu-list button {
-	border: 0;
-	border-radius: 6px;
-	padding: 9px 11px;
-	background: transparent;
-	color: #1f2937;
-	text-align: left;
-	font: inherit;
-	font-size: 13px;
-	cursor: pointer;
-}
-.deal-document-menu-list button:hover:not(:disabled) { background: #eef5ff; color: #174f8a; }
-.deal-document-menu-list button:disabled { color: #a0a8b5; cursor: not-allowed; }
+.deal-print-dialog::backdrop { background: #17283e66; }
+.deal-print-dialog h2 { margin: 0 0 20px; font-size: 20px; }
+.deal-print-options { display: grid; gap: 4px; margin: 0; padding: 0; border: 0; }
+.deal-print-options legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.deal-print-options label, .deal-print-models { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
+.deal-print-options label:has(input:disabled) { opacity: .55; cursor: not-allowed; }
+.deal-print-dialog input { width: 18px; height: 18px; margin: 0; flex-shrink: 0; accent-color: var(--app-link); }
+.deal-print-models { align-items: flex-start; margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--app-line); }
+.deal-print-models input { margin-top: 2px; }
+.deal-print-models small { display: block; margin-top: 6px; font-size: 12px; line-height: 1.5; }
+.deal-print-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.deal-print-footer button { min-height: 40px; }
+.deal-print-dialog :focus-visible { outline: 2px solid var(--app-link); outline-offset: 3px; }
 .deal-stage-band td {
 	padding: 12px 14px;
 	border-top: 10px solid #f4f6f9;
@@ -582,6 +565,8 @@ body.deal-placement-body #root.deal-placement-root {
 }
 .deal-products-tab .btn-primary,
 .deal-products-tab .btn-secondary,
+.deal-print-dialog .btn-primary,
+.deal-print-dialog .btn-secondary,
 .deal-products-tab .btn-stage {
 	border-radius: 7px;
 	padding: 9px 13px;
@@ -589,12 +574,12 @@ body.deal-placement-body #root.deal-placement-root {
 	font-weight: 700;
 	cursor: pointer;
 }
-.deal-products-tab .btn-primary {
+.deal-products-tab .btn-primary, .deal-print-dialog .btn-primary {
 	background: #1f6feb;
 	color: #fff;
 	border: 1px solid #1f6feb;
 }
-.deal-products-tab .btn-secondary {
+.deal-products-tab .btn-secondary, .deal-print-dialog .btn-secondary {
 	background: #fff;
 	color: #374151;
 	border: 1px solid #cfd6e3;
@@ -605,10 +590,10 @@ body.deal-placement-body #root.deal-placement-root {
 	color: #fff;
 	box-shadow: 0 2px 7px rgba(217, 91, 11, .24);
 }
-.deal-products-tab .btn-primary:hover:not(:disabled) {
+.deal-products-tab .btn-primary:hover:not(:disabled), .deal-print-dialog .btn-primary:hover:not(:disabled) {
 	background: #195fc8;
 }
-.deal-products-tab .btn-secondary:hover:not(:disabled) {
+.deal-products-tab .btn-secondary:hover:not(:disabled), .deal-print-dialog .btn-secondary:hover:not(:disabled) {
 	background: #f8fafc;
 	border-color: #aeb8c7;
 }
@@ -617,7 +602,7 @@ body.deal-placement-body #root.deal-placement-root {
 	background: #c85208;
 }
 .deal-products-tab .btn-primary:disabled,
-.deal-products-tab .btn-secondary:disabled {
+.deal-products-tab .btn-secondary:disabled, .deal-print-dialog .btn-primary:disabled, .deal-print-dialog .btn-secondary:disabled {
 	opacity: .45;
 	cursor: not-allowed;
 }
