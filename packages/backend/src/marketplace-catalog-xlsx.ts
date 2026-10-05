@@ -30,6 +30,27 @@ export function marketplaceCatalogItemType(row: Pick<BaseRow, 'isMarketplaceBund
 	return row.isMarketplaceBundle ? 'Комплект' : 'Товар';
 }
 
+/** Narrow read-only export; never serializes other catalog fields into the workbook. */
+export function createArticlePurchaseWorkbook(rows: BaseRow[], createdAt = new Date()): ExcelJS.Workbook {
+	const workbook = new ExcelJS.Workbook();
+	workbook.creator = 'Умный дом';
+	workbook.created = createdAt;
+	const sheet = workbook.addWorksheet('Артикул — закупка');
+	sheet.columns = [
+		{ header: 'Артикул', key: 'article', width: 32 },
+		{ header: 'Закупка, ₽', key: 'purchase', width: 20 },
+	];
+	sheet.views = [{ state: 'frozen', ySplit: 1 }];
+	sheet.getRow(1).font = { bold: true };
+	for (const row of rows.filter((item) => !item.isService)) {
+		sheet.addRow({ article: safeText(row.article) || null, purchase: row.purchase });
+	}
+	sheet.getColumn(1).numFmt = '@';
+	sheet.getColumn(2).numFmt = '#,##0.00';
+	sheet.autoFilter = { from: 'A1', to: `B${Math.max(1, sheet.rowCount)}` };
+	return workbook;
+}
+
 export function createMarketplaceCatalogWorkbook(input: MarketplaceCatalogExportInput): ExcelJS.Workbook {
 	const createdAt = input.createdAt ?? new Date();
 	const stores = input.stores.filter((store) => isCatalogStoreId(store.id));

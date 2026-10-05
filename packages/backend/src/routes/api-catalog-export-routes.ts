@@ -3,14 +3,14 @@ import { buildProductBase } from '../b24/catalog.js';
 import { ErpClient } from '../erp/client.js';
 import { fetchCoreCatalogItems, fetchErpStocks } from '../erp/operations.js';
 import { createCatalogComparisonWorkbook } from '../catalog-comparison-xlsx.js';
-import { createMarketplaceCatalogWorkbook } from '../marketplace-catalog-xlsx.js';
+import { createMarketplaceCatalogWorkbook, createArticlePurchaseWorkbook } from '../marketplace-catalog-xlsx.js';
+import { catalogAccessForUser, type CatalogAccessUser } from '../catalog-access.js';
 import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import type { AuthBody, CoreProductBaseRow } from './api-catalog-types.js';
 import { catalogExportStoreIds } from '../catalog-store-ids.js';
 import {
 	canExportCatalogComparison,
-	catalogAccess,
 	catalogClientFrom,
 	errInfo,
 } from './api-catalog-route-helpers.js';
@@ -67,13 +67,22 @@ export function registerCatalogExportRoutes(app: FastifyInstance): void {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = catalogClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
-		const legacyAccess = await catalogAccess(client);
-		const canExport = body.marketplaceMode === true && (
+		if (body.marketplaceMode !== true) {
+			return reply.code(403).send({ ok: false, error: 'выгрузка доступна только в разделе маркетплейсов' });
+		}
+		let user: CatalogAccessUser;
+		try { user = await client.call<CatalogAccessUser>('user.current', {}); }
+		catch { return reply.code(503).send({ ok: false, error: 'Не удалось проверить доступ к выгрузке. Повторите позже.' }); }
+		const legacyAccess = catalogAccessForUser(user);
+		// Owner-approved 05.10.2026: this identity may export only article/current purchase.
+		// Keep it local to this read route; it grants no catalog writes or marketplace operations.
+		const articlePurchaseOnly = String(user?.ID ?? '') === '3712';
+		const canExport = articlePurchaseOnly || (
 			appPermission(req, 'supply.view', legacyAccess.canEditPrices || legacyAccess.canEditCard)
 			|| appPermission(req, 'marketplaces.view', legacyAccess.canEditCard)
 		);
 		if (!canExport) {
-			return reply.code(403).send({ ok: false, error: 'выгрузка доступна только в разделе маркетплейсов' });
+			return reply.code(403).send({ ok: false, error: 'Нет доступа к выгрузке товаров маркетплейсов. Обратитесь к Сергею.' });
 		}
 		const productIds = [...new Set((Array.isArray(body['productIds']) ? body['productIds'] : [])
 			.map(Number)
@@ -93,7 +102,7 @@ export function registerCatalogExportRoutes(app: FastifyInstance): void {
 				.map((row) => canViewPurchasePrices ? row : { ...row, purchase: null });
 			const selectedStores = stores.filter((store) => storeIds.has(store.id));
 			const createdAt = new Date();
-			const workbook = createMarketplaceCatalogWorkbook({
+			const workbook = articlePurchaseOnly ? createArticlePurchaseWorkbook(rows, createdAt) : createMarketplaceCatalogWorkbook({
 				rows,
 				stores: selectedStores,
 				selectedStoreLabel: cleanText(body['selectedStoreLabel']).slice(0, 500),
