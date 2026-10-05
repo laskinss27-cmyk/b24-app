@@ -30,24 +30,33 @@ export function marketplaceCatalogItemType(row: Pick<BaseRow, 'isMarketplaceBund
 	return row.isMarketplaceBundle ? 'Комплект' : 'Товар';
 }
 
-/** Narrow read-only export; never serializes other catalog fields into the workbook. */
+/** Narrow read-only export with the owner-approved product identifiers and name. */
 export function createArticlePurchaseWorkbook(rows: BaseRow[], createdAt = new Date()): ExcelJS.Workbook {
 	const workbook = new ExcelJS.Workbook();
 	workbook.creator = 'Умный дом';
 	workbook.created = createdAt;
 	const sheet = workbook.addWorksheet('Артикул — закупка');
 	sheet.columns = [
+		{ header: 'Старый ID', key: 'oldId', width: 20 },
 		{ header: 'Артикул', key: 'article', width: 32 },
+		{ header: 'Наименование', key: 'name', width: 60 },
 		{ header: 'Закупка, ₽', key: 'purchase', width: 20 },
 	];
 	sheet.views = [{ state: 'frozen', ySplit: 1 }];
 	sheet.getRow(1).font = { bold: true };
 	for (const row of rows.filter((item) => !item.isService)) {
-		sheet.addRow({ article: safeText(row.article) || null, purchase: row.purchase });
+		sheet.addRow({
+			oldId: safeText(row.marketplaceOldId, 120) || null,
+			article: safeText(row.article) || null,
+			name: safeText(row.name) || null,
+			purchase: row.purchase,
+		});
 	}
 	sheet.getColumn(1).numFmt = '@';
-	sheet.getColumn(2).numFmt = '#,##0.00';
-	sheet.autoFilter = { from: 'A1', to: `B${Math.max(1, sheet.rowCount)}` };
+	sheet.getColumn(2).numFmt = '@';
+	sheet.getColumn(3).numFmt = '@';
+	sheet.getColumn(4).numFmt = '#,##0.00';
+	sheet.autoFilter = { from: 'A1', to: `D${Math.max(1, sheet.rowCount)}` };
 	return workbook;
 }
 

@@ -74,7 +74,7 @@ export function registerCatalogExportRoutes(app: FastifyInstance): void {
 		try { user = await client.call<CatalogAccessUser>('user.current', {}); }
 		catch { return reply.code(503).send({ ok: false, error: 'Не удалось проверить доступ к выгрузке. Повторите позже.' }); }
 		const legacyAccess = catalogAccessForUser(user);
-		// Owner-approved 05.10.2026: this identity may export only article/current purchase.
+		// Owner-approved 05.10.2026: old ID, article, name and current purchase only.
 		// Keep it local to this read route; it grants no catalog writes or marketplace operations.
 		const articlePurchaseOnly = String(user?.ID ?? '') === '3712';
 		const canExport = articlePurchaseOnly || (

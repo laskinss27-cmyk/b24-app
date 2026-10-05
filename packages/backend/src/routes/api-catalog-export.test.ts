@@ -25,7 +25,7 @@ async function fixture(t: TestContext) {
 			erpReads++;
 			if (type === 'Company') return [{ name: 'Test', abbr: 'T' }];
 			if (type === 'Item') return [
-				{ name: '101', item_name: 'Private name', b24_article: '001-A', is_stock_item: 1, last_purchase_rate: 700 },
+				{ name: '101', item_name: 'Камера', b24_article: '001-A', b24_marketplace_old_id: '000123', description: 'Private description', is_stock_item: 1, last_purchase_rate: 700 },
 				{ name: '102', item_name: 'No price', b24_article: '=1+1', is_stock_item: 1 },
 				{ name: '103', item_name: 'Service', b24_article: 'SERVICE', is_stock_item: 0 },
 			];
@@ -54,7 +54,7 @@ async function fixture(t: TestContext) {
 		fail: () => { failIdentity = true; }, reads: () => erpReads };
 }
 
-test('approved identity receives only article and purchase in a real XLSX, preserving selection and missing prices', async (t) => {
+test('approved identity receives old ID, article, name and purchase in a real XLSX, preserving selection and missing values', async (t) => {
 	const f = await fixture(t);
 	const response = await f.call({ productIds: [102, 101, 101, 103, 999], fullExport: true, articlePurchaseOnly: false });
 	assert.equal(response.statusCode, 200, response.body);
@@ -63,14 +63,19 @@ test('approved identity receives only article and purchase in a real XLSX, prese
 	await workbook.xlsx.load(response.rawPayload as unknown as Parameters<typeof workbook.xlsx.load>[0]);
 	assert.equal(workbook.worksheets.length, 1);
 	const sheet = workbook.worksheets[0]!;
-	assert.equal(sheet.columnCount, 2);
+	assert.equal(sheet.columnCount, 4);
 	assert.equal(sheet.rowCount, 3);
-	assert.deepEqual(sheet.getRow(1).values, [, 'Артикул', 'Закупка, ₽']);
-	assert.equal(sheet.getCell('A2').value, '=1+1');
-	assert.equal(sheet.getCell('B2').value, null);
-	assert.equal(sheet.getCell('A3').value, '001-A');
-	assert.equal(sheet.getCell('B3').value, 700);
-	assert.ok(!JSON.stringify(workbook.model).includes('Private name'));
+	assert.deepEqual(sheet.getRow(1).values, [, 'Старый ID', 'Артикул', 'Наименование', 'Закупка, ₽']);
+	assert.equal(sheet.getCell('A2').value, null);
+	assert.equal(sheet.getCell('B2').value, '=1+1');
+	assert.equal(sheet.getCell('C2').value, 'No price');
+	assert.equal(sheet.getCell('D2').value, null);
+	assert.equal(sheet.getCell('A3').value, '000123');
+	assert.equal(sheet.getCell('B3').value, '001-A');
+	assert.equal(sheet.getCell('C3').value, 'Камера');
+	assert.equal(sheet.getCell('D3').value, 700);
+	assert.equal(sheet.getCell('A3').numFmt, '@');
+	assert.ok(!JSON.stringify(workbook.model).includes('Private description'));
 });
 
 test('export permission cannot be spoofed and identity failures do not read ERP', async (t) => {
