@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
 	createDealReservation,
 	fetchDealReservations,
-	newReservationKey,
 	requestReservationRelease,
 	type ReservationRequestView,
+	type ReleaseSelection,
 } from './reservation-api.js';
 
 export function useDealReservations(dealId: number | null, dev: boolean) {
@@ -42,10 +42,10 @@ export function useDealReservations(dealId: number | null, dev: boolean) {
 		finally { setBusy(false); }
 	}, [refresh]);
 
-	const release = useCallback(async (reservationId: string, reason: string) => {
+	const release = useCallback(async (reservationId: string, reason: string, lines: ReleaseSelection[], requestKey: string) => {
 		if (!dealId) throw new Error('Сделка не определена');
 		setBusy(true); setError(null);
-		try { await requestReservationRelease(dealId, reservationId, reason, newReservationKey()); await refresh(); }
+		try { await requestReservationRelease(dealId, reservationId, reason, requestKey, lines); await refresh(); }
 		catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); throw failure; }
 		finally { setBusy(false); }
 	}, [dealId, refresh]);

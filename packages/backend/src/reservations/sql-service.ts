@@ -1,3 +1,4 @@
+import { selectReleaseLines, readReleaseSelection, type ReleaseSelection } from './release-selection.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolConnection } from 'mariadb';
 import type { ErpClient } from '../erp/client.js';
@@ -39,6 +40,7 @@ export interface CreateManualReservationInput {
 }
 
 export interface ReservationReleaseRequestView {
+	lines: ReleaseSelection[] | null;
 	id: string;
 	status: string;
 	requestedReason: string | null;
@@ -87,6 +89,7 @@ export interface ReservationListItem {
 	releaseRequests: ReservationReleaseRequestView[];
 	events: ReservationEventView[];
 	lines: Array<{
+		reservationLineId: string | null;
 		id: string;
 		sourceLineKey: string;
 		itemCode: string;
@@ -232,7 +235,7 @@ async function hydrateRequests(connection: PoolConnection, rows: RequestRow[]): 
 	const placeholders = requestIds.map(() => '?').join(', ');
 	const lines = await connection.query<RequestLineRow[]>(`
 		SELECT ql.id, ql.request_id, ql.source_line_key, ql.item_code,
-			ql.erp_warehouse_name, ql.requested_qty, rl.active_qty
+			ql.erp_warehouse_name, ql.requested_qty, rl.active_qty, rl.id AS reservation_line_id
 		FROM stock_reservation_request_lines ql
 		LEFT JOIN stock_reservations r ON r.approved_request_id = ql.request_id
 		LEFT JOIN stock_reservation_lines rl ON rl.reservation_id = r.id
@@ -247,7 +250,7 @@ async function hydrateRequests(connection: PoolConnection, rows: RequestRow[]): 
 	const reservationIds = rows.flatMap((row) => row.reservation_id == null ? [] : [row.reservation_id]);
 	const releases = reservationIds.length ? await connection.query<ReleaseRequestRow[]>(`
 		SELECT id, reservation_id, status, requested_reason, requested_by, requested_at,
-			reviewed_by, reviewed_at, decision_reason
+			reviewed_by, reviewed_at, decision_reason, release_lines_json
 		FROM stock_reservation_release_requests
 		WHERE reservation_id IN (${reservationIds.map(() => '?').join(', ')})
 		ORDER BY requested_at DESC, id DESC
@@ -272,6 +275,7 @@ async function hydrateRequests(connection: PoolConnection, rows: RequestRow[]): 
 		reservationId: row.reservation_id == null ? null : id(row.reservation_id), reservationStatus: row.reservation_status,
 		releaseRequestId: row.release_request_id == null ? null : id(row.release_request_id), releaseRequestStatus: row.release_request_status,
 		releaseRequests: (releasesByReservation.get(id(row.reservation_id)) ?? []).map((release) => ({
+			lines: readReleaseSelection(release['release_lines_json']),
 			id: id(release.id), status: release.status, requestedReason: release.requested_reason,
 			requestedBy: release.requested_by, requestedAt: iso(release.requested_at), reviewedBy: release.reviewed_by,
 			reviewedAt: nullableIso(release.reviewed_at), decisionReason: release.decision_reason,
@@ -284,6 +288,7 @@ async function hydrateRequests(connection: PoolConnection, rows: RequestRow[]): 
 			toDealId: event.to_deal_id == null ? null : Number(event.to_deal_id),
 		})),
 		lines: (byRequest.get(id(row.id)) ?? []).map((line) => ({
+			reservationLineId: line['reservation_line_id'] == null ? null : id(line['reservation_line_id']),
 			id: id(line.id), sourceLineKey: line.source_line_key, itemCode: line.item_code,
 			itemName: `#${line.item_code}`, erpWarehouseName: line.erp_warehouse_name,
 			quantity: quantityText(String(line.requested_qty)), activeQuantity: line.active_qty == null ? '0' : nonNegativeQuantityText(String(line.active_qty)),
@@ -854,7 +859,22 @@ export class ReservationService {
 		return { warnings };
 	}
 
-	async releaseBySupply(actor: ReservationActor, reservationId: string, reason: string, requestKey?: string): Promise<void> {
+	private async releaseSelection(connection: PoolConnection, reservationId: string, selection: unknown): Promise<ReleaseSelection[]> {
+		const lines = await connection.query<Array<Record<string, unknown>>>('SELECT id, active_qty FROM stock_reservation_lines WHERE reservation_id = ? FOR UPDATE', [reservationId]);
+		return selectReleaseLines(lines.map((line) => ({ id: id(line['id']), activeQuantity: String(line['active_qty']) })), selection);
+	}
+
+	private async applyRelease(connection: PoolConnection, reservationId: string, selected: ReleaseSelection[], commandId: bigint | number | string, version: number, actorId: string): Promise<void> {
+		for (const [index, line] of selected.entries()) {
+			const result = await connection.query<{ affectedRows: number }>('UPDATE stock_reservation_lines SET released_qty = released_qty + ?, version = version + 1 WHERE id = ? AND reservation_id = ? AND active_qty >= ?', [line.quantity, line.lineId, reservationId, line.quantity]);
+			if (result.affectedRows !== 1) throw new Error('Резерв изменился. Обновите данные');
+			await connection.query(`INSERT INTO stock_reservation_events (reservation_id, reservation_line_id, command_id, event_index, event_type, quantity, reservation_version, actor_id) VALUES (?, ?, ?, ?, 'released', ?, ?, ?)`, [reservationId, line.lineId, commandId, index, line.quantity, version, actorId]);
+		}
+		const remaining = await connection.query<Array<Record<string, unknown>>>('SELECT id FROM stock_reservation_lines WHERE reservation_id = ? AND active_qty > 0', [reservationId]);
+		await connection.query("UPDATE stock_reservations SET status = CASE WHEN ? = 0 THEN 'released' ELSE status END, version = version + 1 WHERE id = ?", [remaining.length, reservationId]);
+	}
+
+	async releaseBySupply(actor: ReservationActor, reservationId: string, reason: string, requestKey?: string, selection?: unknown): Promise<void> {
 		this.requireWrite();
 		const key = requestKey?.trim() || randomUUID();
 		await this.runtime.transaction(async (connection) => {
@@ -865,29 +885,26 @@ export class ReservationService {
 			if (!reservation) throw new Error('Резерв не найден');
 			const command = await beginReservationCommand(connection, {
 				idempotencyKey: `supply_release:${key}`, commandType: 'approve_release',
-				requestHash: requestHash({ reservationId, reason }), actorId: actor.id, reservationId,
+				requestHash: requestHash({ reservationId, reason, selection }), actorId: actor.id, reservationId,
 			});
 			if (command.disposition === 'replay') return;
 			if (command.disposition === 'in_progress') throw new Error('Снятие уже обрабатывается');
 			if (!['active', 'shortfall'].includes(String(reservation['status'])) || new Date(String(reservation['expires_at'])).getTime() <= Date.now()) throw new Error('Активный резерв не найден');
+			const pending = await connection.query<Array<Record<string, unknown>>>("SELECT id FROM stock_reservation_release_requests WHERE reservation_id = ? AND status = 'pending' FOR UPDATE", [reservationId]);
+			if (pending.length) throw new Error('Сначала согласуйте или отклоните текущий запрос на снятие');
+			const selected = await this.releaseSelection(connection, reservationId, selection);
 			const release = await connection.query<{ insertId: bigint | number | string }>(`
 				INSERT INTO stock_reservation_release_requests (
-					request_key, reservation_id, status, requested_reason, requested_by, reviewed_by, reviewed_at, decision_reason
-				) VALUES (?, ?, 'approved', ?, ?, ?, NOW(6), 'Снято снабжением')
-			`, [key, reservationId, reason.trim() || null, actor.id, actor.id]);
+					request_key, reservation_id, status, requested_reason, requested_by, reviewed_by, reviewed_at, decision_reason, release_lines_json
+				) VALUES (?, ?, 'approved', ?, ?, ?, NOW(6), 'Снято снабжением', ?)
+			`, [key, reservationId, reason.trim() || null, actor.id, actor.id, JSON.stringify(selected)]);
 			await connection.query('UPDATE stock_reservation_commands SET release_request_id = ? WHERE id = ?', [release.insertId, command.command.id]);
-			const lines = await connection.query<Array<Record<string, unknown>>>(`SELECT id, active_qty FROM stock_reservation_lines WHERE reservation_id = ? AND active_qty > 0 FOR UPDATE`, [reservationId]);
-			let eventIndex = 0;
-			for (const line of lines) {
-				await connection.query('UPDATE stock_reservation_lines SET released_qty = released_qty + active_qty, version = version + 1 WHERE id = ?', [line['id']]);
-				await connection.query(`INSERT INTO stock_reservation_events (reservation_id, reservation_line_id, command_id, event_index, event_type, quantity, reservation_version, actor_id) VALUES (?, ?, ?, ?, 'released', ?, ?, ?)`, [reservationId, line['id'], command.command.id, eventIndex++, line['active_qty'], Number(reservation['version']) + 1, actor.id]);
-			}
-			await connection.query("UPDATE stock_reservations SET status = 'released', version = version + 1 WHERE id = ?", [reservationId]);
+			await this.applyRelease(connection, reservationId, selected, command.command.id, Number(reservation['version']) + 1, actor.id);
 			await finishReservationCommand(connection, command.command.id, 'applied');
 		});
 	}
 
-	async requestRelease(actor: ReservationActor, dealId: number, reservationId: string, reason: string, requestKey?: string): Promise<void> {
+	async requestRelease(actor: ReservationActor, dealId: number, reservationId: string, reason: string, requestKey?: string, selection?: unknown): Promise<void> {
 		this.requireWrite();
 		const effectiveRequestKey = requestKey?.trim() || randomUUID();
 		await this.runtime.transaction(async (connection) => {
@@ -901,14 +918,17 @@ export class ReservationService {
 			if (reservations.length !== 1) throw new Error('Активный резерв этой сделки не найден');
 			const command = await beginReservationCommand(connection, {
 				idempotencyKey: `request_release:${effectiveRequestKey}`, commandType: 'request_release',
-				requestHash: requestHash({ dealId, reservationId, reason }), actorId: actor.id, reservationId,
+				requestHash: requestHash({ dealId, reservationId, reason, selection }), actorId: actor.id, reservationId,
 			});
 			if (command.disposition === 'replay') return;
 			if (command.disposition === 'in_progress') throw new Error('Запрос уже обрабатывается');
+			const pending = await connection.query<Array<Record<string, unknown>>>("SELECT id FROM stock_reservation_release_requests WHERE reservation_id = ? AND status = 'pending' FOR UPDATE", [reservationId]);
+			if (pending.length) throw new Error('По резерву уже есть запрос на снятие. Дождитесь решения снабжения');
+			const selected = await this.releaseSelection(connection, reservationId, selection);
 			const result = await connection.query<{ insertId: bigint | number | string }>(`
-				INSERT INTO stock_reservation_release_requests (request_key, reservation_id, status, requested_reason, requested_by)
-				VALUES (?, ?, 'pending', ?, ?)
-			`, [effectiveRequestKey, reservationId, reason.trim() || null, actor.id]);
+				INSERT INTO stock_reservation_release_requests (request_key, reservation_id, status, requested_reason, requested_by, release_lines_json)
+				VALUES (?, ?, 'pending', ?, ?, ?)
+			`, [effectiveRequestKey, reservationId, reason.trim() || null, actor.id, JSON.stringify(selected)]);
 			await connection.query('UPDATE stock_reservation_commands SET release_request_id = ? WHERE id = ?', [result.insertId, command.command.id]);
 			await finishReservationCommand(connection, command.command.id, 'applied');
 		});
@@ -918,6 +938,10 @@ export class ReservationService {
 		this.requireWrite();
 		const key = args.idempotencyKey?.trim() || randomUUID();
 		await this.runtime.transaction(async (connection) => {
+			const refs = await connection.query<Array<Record<string, unknown>>>('SELECT reservation_id FROM stock_reservation_release_requests WHERE id = ?', [args.releaseRequestId]);
+			if (!refs[0]) throw new Error('Запрос снятия не найден');
+			const reservations = await connection.query<Array<Record<string, unknown>>>('SELECT id, version, status, expires_at FROM stock_reservations WHERE id = ? FOR UPDATE', [refs[0]['reservation_id']]);
+			const reservation = reservations[0];
 			const rows = await connection.query<Array<Record<string, unknown>>>(`SELECT * FROM stock_reservation_release_requests WHERE id = ? FOR UPDATE`, [args.releaseRequestId]);
 			const release = rows[0];
 			if (!release) throw new Error('Запрос снятия не найден');
@@ -931,17 +955,9 @@ export class ReservationService {
 			if (command.disposition === 'in_progress') throw new Error('Решение уже обрабатывается');
 			await connection.query(`UPDATE stock_reservation_release_requests SET status = ?, reviewed_by = ?, reviewed_at = NOW(6), decision_reason = ?, version = version + 1 WHERE id = ?`, [args.decision === 'approve' ? 'approved' : 'rejected', actor.id, String(args.reason ?? '').trim() || null, args.releaseRequestId]);
 			if (args.decision === 'approve') {
-				const lines = await connection.query<Array<Record<string, unknown>>>(`
-					SELECT rl.id, rl.active_qty, r.version AS reservation_version
-					FROM stock_reservation_lines rl JOIN stock_reservations r ON r.id = rl.reservation_id
-					WHERE rl.reservation_id = ? AND rl.active_qty > 0 FOR UPDATE
-				`, [reservationId]);
-				let eventIndex = 0;
-				for (const line of lines) {
-					await connection.query(`UPDATE stock_reservation_lines SET released_qty = released_qty + active_qty, version = version + 1 WHERE id = ?`, [line['id']]);
-					await connection.query(`INSERT INTO stock_reservation_events (reservation_id, reservation_line_id, command_id, event_index, event_type, quantity, reservation_version, actor_id) VALUES (?, ?, ?, ?, 'released', ?, ?, ?)`, [reservationId, line['id'], command.command.id, eventIndex++, line['active_qty'], Number(line['reservation_version']) + 1, actor.id]);
-				}
-				await connection.query(`UPDATE stock_reservations SET status = 'released', version = version + 1 WHERE id = ?`, [reservationId]);
+				if (!reservation || !['active', 'shortfall'].includes(String(reservation['status'])) || new Date(String(reservation['expires_at'])).getTime() <= Date.now()) throw new Error('Резерв больше не активен; отклоните запрос на снятие');
+				const selected = await this.releaseSelection(connection, reservationId, readReleaseSelection(release['release_lines_json']) ?? undefined);
+				await this.applyRelease(connection, reservationId, selected, command.command.id, Number(reservation['version']) + 1, actor.id);
 			}
 			await finishReservationCommand(connection, command.command.id, 'applied');
 		});

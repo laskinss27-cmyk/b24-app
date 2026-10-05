@@ -149,14 +149,14 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 	});
 
 	app.post('/api/reservations/release-request', async (req, reply) => {
-		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; reservationId?: unknown; reason?: unknown; requestKey?: unknown };
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown; reservationId?: unknown; reason?: unknown; requestKey?: unknown; lines?: unknown };
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		try {
 			if (!service) throw new Error('Запись резервов пока не включена');
 			const dealId = Number(body.dealId);
 			await client.call('crm.deal.get', { id: dealId });
-			await service.requestRelease(await actorFrom(client), dealId, String(body.reservationId ?? ''), String(body.reason ?? ''), String(body.requestKey ?? '').trim() || undefined);
+			await service.requestRelease(await actorFrom(client), dealId, String(body.reservationId ?? ''), String(body.reason ?? ''), String(body.requestKey ?? '').trim() || undefined, body.lines);
 			return { ok: true };
 		} catch (error) { return errorReply(reply, error); }
 	});
@@ -236,13 +236,13 @@ export function registerApiReservationsRoute(app: FastifyInstance, runtime?: Res
 	});
 
 	app.post('/api/reservations/supply/release', async (req, reply) => {
-		const body = (req.body ?? {}) as AuthBody & { reservationId?: unknown; reason?: unknown; requestKey?: unknown };
+		const body = (req.body ?? {}) as AuthBody & { reservationId?: unknown; reason?: unknown; requestKey?: unknown; lines?: unknown };
 		const client = accessClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		try {
 			if (!(await stockAccess(client)).canManage) return reply.code(403).send({ ok: false, error: 'Только для снабжения' });
 			if (!service) throw new Error('Запись резервов пока не включена');
-			await service.releaseBySupply(await actorFrom(client), String(body.reservationId ?? ''), String(body.reason ?? ''), String(body.requestKey ?? '').trim() || undefined);
+			await service.releaseBySupply(await actorFrom(client), String(body.reservationId ?? ''), String(body.reason ?? ''), String(body.requestKey ?? '').trim() || undefined, body.lines);
 			return { ok: true };
 		} catch (error) { return errorReply(reply, error); }
 	});

@@ -1,0 +1,12 @@
+.reservation-release-overlay { position: fixed; inset: 0; z-index: 1200; background: #172b4d66; display: grid; place-items: center; padding: 16px; }
+.reservation-release-dialog { background: var(--surface, #fff); color: var(--text, #202b3d); border-radius: 12px; padding: 24px; width: min(720px, 100%); max-height: 90vh; overflow: auto; box-sizing: border-box; }
+.reservation-release-dialog h2 { margin: 0 0 12px; }
+.reservation-release-dialog p { line-height: 1.5; }
+.reservation-release-lines { margin: 16px 0; }
+.reservation-release-lines label { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #dfe5eb; }
+.reservation-release-lines span { flex: 1; min-width: 0; }
+.reservation-release-lines small { display: block; margin-top: 5px; }
+.reservation-release-lines input { width: 95px; padding: 8px; }
+.reservation-release-dialog textarea { display: block; width: 100%; min-height: 65px; box-sizing: border-box; margin-top: 6px; }
+.reservation-release-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.reservation-release-dialog [role=alert] { color: #c0392b; }

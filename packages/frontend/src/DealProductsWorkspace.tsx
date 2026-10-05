@@ -1,3 +1,4 @@
+import { ReservationReleaseDialog } from './ReservationReleaseDialog.js';
 import { useState } from 'react';
 import { dealSupplyOrderCandidates } from './deal-product-availability.js';
 import type { DealPrintKind } from './Kp.js';
@@ -176,6 +177,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 	/** Перемещения этой сделки — для отражения статуса (запрошено/в пути) на строках. */
 	const { dealTransfers, refreshDealTransfers } = useDealTransfers(dealId);
 	const dealReservations = useDealReservations(dealId, dev);
+	const [showRelease, setShowRelease] = useState(false);
 	const [showReservation, setShowReservation] = useState(false);
 	const variantSelectionLocked = Boolean(data.quoteVariants.selectedId) && (workingVariantHasActivity || dealTransfers.length > 0);
 	const {
@@ -418,15 +420,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onDeleteDrafts={() => void doDeleteDrafts()}
 				onOrderSupply={openSupplyOrder}
 				onReserve={() => setShowReservation(true)}
-				onReleaseReservation={() => {
-					const reservationId = dealReservations.open?.reservationId;
-					if (!reservationId) return;
-					const reason = window.prompt('Причина досрочного снятия резерва (необязательно):', '');
-					if (reason === null) return;
-					void dealReservations.release(reservationId, reason)
-						.then(() => setNotice({ kind: 'ok', text: 'Запрос на снятие отправлен снабжению.' }))
-						.catch(() => undefined);
-				}}
+				onReleaseReservation={() => setShowRelease(true)}
 			/>}
 
 			{data.quoteVariants.enabled && <DealQuoteVariantTabs quoteVariants={data.quoteVariants} activeVariantId={activeVariantId} onActiveVariant={onActiveVariant} />}
@@ -524,6 +518,11 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				onSubmit={() => void doCreateSupply()}
 			/>
 
+			{showRelease && dealReservations.open && <ReservationReleaseDialog request={dealReservations.open} busy={dealReservations.busy} error={dealReservations.error} onClose={() => setShowRelease(false)} onSubmit={(lines, reason, requestKey) => {
+				void dealReservations.release(dealReservations.open!.reservationId!, reason, lines, requestKey)
+					.then(() => { setShowRelease(false); setNotice({ kind: 'ok', text: 'Запрос на снятие выбранных позиций отправлен снабжению.' }); })
+					.catch(() => undefined);
+			}} />}
 			<DealReservationDialog
 				visible={workingMode && showReservation}
 				lines={reserveGoods.map((row) => ({

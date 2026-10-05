@@ -4260,6 +4260,19 @@ html[data-theme="dark"] .rb-state {
 html[data-theme="dark"] .rb-denied h1 {
     color: #e5edf8
 }
+html[data-theme="dark"] .reservation-release-overlay {
+    background: color-mix(in srgb, rgb(23 43 77) 40%, transparent)
+}
+html[data-theme="dark"] .reservation-release-dialog {
+    background: var(--surface, #202c3d);
+    color: var(--text, #e5edf8)
+}
+html[data-theme="dark"] .reservation-release-lines label {
+    border-bottom: 1px solid #34445a
+}
+html[data-theme="dark"] .reservation-release-dialog [role=alert] {
+    color: hsl(6 63% 72%)
+}
 html[data-theme="dark"] .supply-reservation-toolbar > div:first-child > b {
     color: #e5edf8
 }

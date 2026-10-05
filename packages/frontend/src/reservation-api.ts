@@ -1,6 +1,9 @@
 import { bx24Auth } from './bitrix-auth.js';
 
+export interface ReleaseSelection { lineId: string; quantity: string }
+
 export interface ReservationLineView {
+	reservationLineId?: string | null;
 	id: string;
 	sourceLineKey: string;
 	itemCode: string;
@@ -36,6 +39,7 @@ export interface ReservationRequestView {
 	releaseRequestId: string | null;
 	releaseRequestStatus: string | null;
 	releaseRequests?: Array<{
+		lines?: ReleaseSelection[] | null;
 		id: string; status: string; requestedReason: string | null; requestedBy: string; requestedAt: string;
 		reviewedBy: string | null; reviewedAt: string | null; decisionReason: string | null;
 	}>;
@@ -70,8 +74,8 @@ export async function createDealReservation(input: {
 	return response.request;
 }
 
-export async function requestReservationRelease(dealId: number, reservationId: string, reason: string, requestKey: string): Promise<void> {
-	await post('/api/reservations/release-request', { dealId, reservationId, reason, requestKey });
+export async function requestReservationRelease(dealId: number, reservationId: string, reason: string, requestKey: string, lines: ReleaseSelection[]): Promise<void> {
+	await post('/api/reservations/release-request', { dealId, reservationId, reason, requestKey, lines });
 }
 
 export async function fetchSupplyReservations(): Promise<{ enabled: boolean; canWrite: boolean; requests: ReservationRequestView[] }> {
@@ -108,8 +112,8 @@ export async function setSupplyReservationDeal(reservationId: string, dealId: nu
 	return response.warnings ?? [];
 }
 
-export async function releaseSupplyReservation(reservationId: string, reason: string, requestKey: string): Promise<void> {
-	await post('/api/reservations/supply/release', { reservationId, reason, requestKey });
+export async function releaseSupplyReservation(reservationId: string, reason: string, requestKey: string, lines: ReleaseSelection[]): Promise<void> {
+	await post('/api/reservations/supply/release', { reservationId, reason, requestKey, lines });
 }
 
 export function newReservationKey(): string {

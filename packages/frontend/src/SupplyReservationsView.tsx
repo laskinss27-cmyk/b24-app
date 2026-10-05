@@ -1,3 +1,5 @@
+import { ReservationReleaseDialog } from './ReservationReleaseDialog.js';
+import { releaseSelectionDescription } from './reservation-release-ui.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import './supply-reservations-sql.css';
 import { fetchStockFormData, openDeal, type StockItem } from './b24.js';
@@ -5,7 +7,7 @@ import { StockProductFilter } from './StockProductFilter.js';
 import {
 	createSupplyReservation, fetchReservationsRegistry, fetchSupplyReservations, lookupReservationDeal, newReservationKey,
 	releaseSupplyReservation, reviewReservationRelease, reviewReservationRequest, setSupplyReservationDeal,
-	type ReservationRequestView,
+	type ReservationRequestView, type ReleaseSelection,
 } from './reservation-api.js';
 import { reservationDisplayNumber, reservationProductSummary } from './supply-reservation-summary.js';
 
@@ -47,6 +49,7 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 	const [enabled, setEnabled] = useState(false);
 	const [canWrite, setCanWrite] = useState(false);
 	const [loading, setLoading] = useState(true);
+	const [releaseTarget, setReleaseTarget] = useState<ReservationRequestView | null>(null);
 	const [busy, setBusy] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
@@ -167,12 +170,10 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 		finally { setBusy(''); }
 	};
 
-	const directRelease = async (request: ReservationRequestView): Promise<void> => {
+	const directRelease = async (request: ReservationRequestView, lines: ReleaseSelection[], reason: string, requestKey: string): Promise<void> => {
 		if (!request.reservationId) return;
-		const reason = window.prompt('Причина снятия резерва:', '') ?? '';
-		if (!window.confirm('Снять резерв сейчас? Товар снова станет доступен для продаж.')) return;
 		setBusy(`direct-release-${request.id}`); setError(null);
-		try { await releaseSupplyReservation(request.reservationId, reason, newReservationKey()); await refresh(); }
+		try { await releaseSupplyReservation(request.reservationId, reason, requestKey, lines); setReleaseTarget(null); await refresh(); }
 		catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
 		finally { setBusy(''); }
 	};
@@ -181,6 +182,7 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 	if (error && !enabled) return <div className="supply-proto-card empty"><p>{error}</p><button type="button" onClick={() => void refresh()}>Повторить</button></div>;
 	if (!enabled) return <div className="supply-proto-card empty">Механизм резервирования пока выключен.</div>;
 	return <div className="supply-reservations">
+		{releaseTarget && <ReservationReleaseDialog request={releaseTarget} direct busy={Boolean(busy)} error={error} onClose={() => setReleaseTarget(null)} onSubmit={(lines, reason, requestKey) => void directRelease(releaseTarget, lines, reason, requestKey)} />}
 		{error && <div className="supply-proto-notice"><span>{error}</span><button type="button" onClick={() => setError(null)}>Закрыть</button></div>}
 		{notice && <div className="supply-proto-notice"><span>{notice}</span><button type="button" onClick={() => setNotice(null)}>Закрыть</button></div>}
 		<div className="supply-reservation-toolbar"><div><b>Все резервы</b><span>{visibleRequests.length} из {requests.length} записей</span></div>{!readOnly && <div className="supply-proto-actions"><button className="primary" type="button" disabled={!canWrite} onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Закрыть создание' : 'Создать резерв'}</button></div>}</div>
@@ -193,7 +195,7 @@ export function SupplyReservationsView({ readOnly = false }: { readOnly?: boolea
 		<section className="supply-proto-card supply-reservation-registry">
 			<div className="supply-reservation-registry-columns" aria-hidden="true"><span>Номер</span><span>Товар / количество</span><span>Сделка</span><span>Срок</span><span>Статус</span><span></span></div>
 			{!visibleRequests.length && <div className="empty">{requests.length ? 'По заданным условиям резервов нет.' : 'Резервов пока нет.'}</div>}
-			{visibleRequests.map((request) => <ReservationCard key={request.id} request={request} selected={selected?.id === request.id} canWrite={canWrite} busy={busy} expires={expires[request.id] ?? ''} linkInput={linkInput} onToggle={() => setSelectedId(selectedId === request.id ? null : request.id)} onExpires={(value) => setExpires((current) => ({ ...current, [request.id]: value }))} onReview={(decision) => void review(request, decision)} onReleaseDecision={(decision) => void decideRelease(request, decision)} onLinkInput={setLinkInput} onChangeDeal={(dealId) => void changeDeal(request, dealId)} onRelease={() => void directRelease(request)} />)}
+			{visibleRequests.map((request) => <ReservationCard key={request.id} request={request} selected={selected?.id === request.id} canWrite={canWrite} busy={busy} expires={expires[request.id] ?? ''} linkInput={linkInput} onToggle={() => setSelectedId(selectedId === request.id ? null : request.id)} onExpires={(value) => setExpires((current) => ({ ...current, [request.id]: value }))} onReview={(decision) => void review(request, decision)} onReleaseDecision={(decision) => void decideRelease(request, decision)} onLinkInput={setLinkInput} onChangeDeal={(dealId) => void changeDeal(request, dealId)} onRelease={() => { setError(null); setReleaseTarget(request); }} />)}
 		</section>
 	</div>;
 }
@@ -249,9 +251,9 @@ function ReservationCard({ request, selected, canWrite, busy, expires, linkInput
 			{request.dealId && <div><button type="button" className="supply-order-deal-link" onClick={() => openDeal(request.dealId!)}>Открыть сделку №{request.dealId}</button></div>}
 			<div className="supply-reservation-lines">{request.lines.map((line) => <div key={line.id}><span><b>{line.itemName}</b><small>{line.erpWarehouseName}</small></span><strong>{line.activeQuantity !== '0' ? line.activeQuantity : line.quantity} шт.</strong></div>)}</div>
 			{canWrite && request.status === 'pending' && <div className="supply-reservation-actions"><label><span>Срок резерва</span><input type="datetime-local" value={expires} disabled={Boolean(busy)} onChange={(event) => onExpires(event.target.value)} /></label><button type="button" disabled={Boolean(busy)} onClick={() => onReview('reject')}>Отклонить</button><button className="primary" type="button" disabled={Boolean(busy)} onClick={() => onReview('approve')}>Одобрить целиком</button></div>}
-			{canWrite && request.releaseRequestStatus === 'pending' && <div className="supply-reservation-actions"><span className="supply-reservation-release-note">Запрошено досрочное снятие.</span><button type="button" disabled={Boolean(busy)} onClick={() => onReleaseDecision('reject')}>Оставить</button><button className="primary danger" type="button" disabled={Boolean(busy)} onClick={() => onReleaseDecision('approve')}>Снять</button></div>}
-			{canWrite && request.reservationId && ['active', 'shortfall'].includes(request.reservationStatus ?? '') && <div className="supply-reservation-actions"><input placeholder="Новый № сделки / ссылка" value={linkInput} onChange={(event) => onLinkInput(event.target.value)} /><button type="button" disabled={!parseDealId(linkInput) || Boolean(busy)} onClick={() => onChangeDeal(parseDealId(linkInput))}>{request.dealId ? 'Заменить сделку' : 'Привязать сделку'}</button>{request.dealId && <button type="button" disabled={Boolean(busy)} onClick={() => onChangeDeal(null)}>Отвязать</button>}<button type="button" className="danger" disabled={Boolean(busy)} onClick={onRelease}>Снять резерв</button></div>}
-			{(request.releaseRequests ?? []).length > 0 && <div className="supply-reservation-history"><b>Запросы снятия</b>{request.releaseRequests!.map((release) => <div key={release.id}>{new Date(release.requestedAt).toLocaleString('ru-RU')} · {request.actorNames?.[release.requestedBy] ?? `#${release.requestedBy}`} · {release.status}{release.requestedReason ? ` · ${release.requestedReason}` : ''}{release.reviewedAt ? ` · обработан ${new Date(release.reviewedAt).toLocaleString('ru-RU')}` : ''}{release.decisionReason ? ` · ${release.decisionReason}` : ''}</div>)}</div>}
+			{canWrite && request.releaseRequestStatus === 'pending' && <div className="supply-reservation-actions"><span className="supply-reservation-release-note">Запрошено снятие: {releaseSelectionDescription(request, request.releaseRequests?.find((release) => release.id === request.releaseRequestId)?.lines)}</span><button type="button" disabled={Boolean(busy)} onClick={() => onReleaseDecision('reject')}>Оставить</button><button className="primary danger" type="button" disabled={Boolean(busy)} onClick={() => onReleaseDecision('approve')}>Снять</button></div>}
+			{canWrite && request.reservationId && ['active', 'shortfall'].includes(request.reservationStatus ?? '') && <div className="supply-reservation-actions"><input placeholder="Новый № сделки / ссылка" value={linkInput} onChange={(event) => onLinkInput(event.target.value)} /><button type="button" disabled={!parseDealId(linkInput) || Boolean(busy)} onClick={() => onChangeDeal(parseDealId(linkInput))}>{request.dealId ? 'Заменить сделку' : 'Привязать сделку'}</button>{request.dealId && <button type="button" disabled={Boolean(busy)} onClick={() => onChangeDeal(null)}>Отвязать</button>}<button type="button" className="danger" disabled={Boolean(busy) || request.releaseRequestStatus === 'pending'} onClick={onRelease}>Снять резерв</button></div>}
+			{(request.releaseRequests ?? []).length > 0 && <div className="supply-reservation-history"><b>Запросы снятия</b>{request.releaseRequests!.map((release) => <div key={release.id}>{new Date(release.requestedAt).toLocaleString('ru-RU')} · {request.actorNames?.[release.requestedBy] ?? `#${release.requestedBy}`} · {release.status} · {releaseSelectionDescription(request, release.lines)}{release.requestedReason ? ` · ${release.requestedReason}` : ''}{release.reviewedAt ? ` · обработан ${new Date(release.reviewedAt).toLocaleString('ru-RU')}` : ''}{release.decisionReason ? ` · ${release.decisionReason}` : ''}</div>)}</div>}
 			{(request.events ?? []).length > 0 && <div className="supply-reservation-history"><b>История</b>{request.events!.map((event) => <div key={event.id}>{new Date(event.occurredAt).toLocaleString('ru-RU')} · {event.eventType} · {request.actorNames?.[event.actorId] ?? `#${event.actorId}`}{event.quantity ? ` · ${event.quantity} шт.` : ''}{event.fromDealId || event.toDealId ? ` · ${event.fromDealId ? `№${event.fromDealId}` : 'без сделки'} → ${event.toDealId ? `№${event.toDealId}` : 'без сделки'}` : ''}</div>)}</div>}
 		</div>}
 	</article>;
