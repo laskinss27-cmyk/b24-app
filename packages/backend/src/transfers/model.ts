@@ -50,6 +50,8 @@ export interface TransferHistoryEvent {
 }
 
 export interface TransferData {
+	/** Durable intent prevents acceptance while a failed cancellation is resumed. */
+	shipmentCancellation?: { reason: string; at: string; byId: string; byName: string; entry?: string };
 	sourceStages?: import('@b24-app/shared').SupplySourceStage[];
 	supplyRequest: string;
 	supplyRequestKey: string;
@@ -121,6 +123,7 @@ export function parseTransferItem(item: Record<string, unknown>): StoredTransfer
 	const receivedLines = normalizeTransferLines(data.receivedLines);
 	return {
 		id,
+		...(data.shipmentCancellation ? { shipmentCancellation: data.shipmentCancellation } : {}),
 		name: String(item['NAME'] ?? item['name'] ?? ''),
 		supplyRequest: String(data.supplyRequest ?? ''),
 		...(data.sourceStages ? { sourceStages: parseSupplySourceStages(data.sourceStages) } : {}),

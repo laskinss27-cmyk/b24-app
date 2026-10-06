@@ -48,9 +48,9 @@ export function registerApiTransfersRoute(app: FastifyInstance): void {
 	registerTransferEditRoutes(app, clientFrom);
 	registerTransferCollectRoute(app, clientFrom, notifications);
 	registerTransferShipRoute(app, clientFrom, operationLocks, notifications);
-	registerTransferReceiveRoute(app, clientFrom, notifications);
+	registerTransferReceiveRoute(app, clientFrom, notifications, operationLocks);
 	registerTransferPostRoute(app, clientFrom, operationLocks);
 	registerTransferShortageRoute(app, clientFrom);
-	registerTransferCancelRoute(app, clientFrom);
+	registerTransferCancelRoute(app, clientFrom, operationLocks);
 	registerTransferDeleteRoute(app, clientFrom, operationLocks);
 }

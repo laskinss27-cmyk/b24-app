@@ -1,3 +1,4 @@
+import type { ShipmentCancellationInput } from './transfer-shipment-cancellation.js';
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import {
 	cancelTransfer,
@@ -40,7 +41,7 @@ type SupplyOpenDocumentActions = {
 	receiveOpenPurchase: (lines: Array<{ productId: number; qty: number; rate: number }>) => Promise<void>;
 	createOpenPurchaseTransfer: (lines: Array<{ productId: number; qty: number }>) => Promise<void>;
 	changeOpenTransferDestination: (toStore: string) => Promise<SupplyTransferChild>;
-	moveOpenTransfer: (action: TransferAction, lines?: Array<{ productId: number; qty: number }>) => Promise<void>;
+	moveOpenTransfer: (action: TransferAction, lines?: Array<{ productId: number; qty: number }>, cancellation?: ShipmentCancellationInput) => Promise<void>;
 	deleteOpenDocument: () => Promise<void>;
 };
 
@@ -130,7 +131,7 @@ export function useSupplyOpenDocumentActions({
 		return nextTransfer;
 	};
 
-	const moveOpenTransfer = async (action: TransferAction, lines: Array<{ productId: number; qty: number }> = []): Promise<void> => {
+	const moveOpenTransfer = async (action: TransferAction, lines: Array<{ productId: number; qty: number }> = [], cancellation?: ShipmentCancellationInput): Promise<void> => {
 		const target = openDocument;
 		if (!target || target.kind !== 'transfer' || documentBusy) return;
 		setDocumentBusy(true);
@@ -140,7 +141,7 @@ export function useSupplyOpenDocumentActions({
 					: action === 'ship' ? await shipTransfer(target.transfer.id)
 						: action === 'receive' ? await receiveTransfer(target.transfer.id, lines)
 							: action === 'post' ? await postTransfer(target.transfer.id)
-								: action === 'cancel' ? await cancelTransfer(target.transfer.id)
+								: action === 'cancel' ? await cancelTransfer(target.transfer.id, cancellation)
 								: await resolveTransferShortage(target.transfer.id);
 			await refreshOpenDocument(target);
 			setNotice(updated.actionWarning || `${transferDocumentLabel(target.transfer)}: статус обновлён.`);

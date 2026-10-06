@@ -1,3 +1,4 @@
+import type { ShipmentCancellationInput } from './transfer-shipment-cancellation.js';
 import { bx24Auth } from './bitrix-auth.js';
 import type { SupplyRequestLineDto, TransferDoc, TransferLineDto, TransferRequestDoc } from './stock-transfer-types.js';
 
@@ -140,10 +141,10 @@ export async function postTransfer(id: number): Promise<TransferDoc> {
 	return json.transfer;
 }
 
-export async function cancelTransfer(id: number): Promise<TransferDoc> {
+export async function cancelTransfer(id: number, cancellation?: ShipmentCancellationInput): Promise<TransferDoc> {
 	const res = await fetch('/api/transfers/cancel', {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...bx24Auth(), id }),
+		body: JSON.stringify({ ...bx24Auth(), id, ...cancellation }),
 	});
 	const json = (await res.json()) as { ok: boolean; error?: string; transfer?: TransferDoc };
 	if (!json.ok || !json.transfer) throw new Error(json.error ?? 'не удалось отменить перемещение');

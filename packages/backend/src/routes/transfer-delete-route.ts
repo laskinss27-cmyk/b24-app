@@ -32,17 +32,18 @@ export function registerTransferDeleteRoute(
 		if (!canDeleteTransferDocuments(me.id)) return reply.code(403).send({ ok: false, error: 'удаление документов недоступно' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
+		const lockKey = `transfer:${id}`;
+		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'с этим перемещением сейчас выполняется складская операция' });
+		operationLocks.add(lockKey);
 		try {
 			const allTransfers = await loadTransfers(client);
 			const doc = allTransfers.find((transfer) => transfer.id === id) ?? null;
 			if (!doc) return { ok: true };
+			if (doc.shipmentCancellation) return reply.code(409).send({ ok: false, error: 'История отмены ошибочной отправки сохраняется; удаление недоступно' });
 			if (doc.correctionOf) {
 				return reply.code(409).send({ ok: false, error: `корректировка удаляется вместе с основным перемещением #${doc.correctionOf}; открой основной документ` });
 			}
 			const rootId = doc.correctionOf ?? doc.id;
-			if (operationLocks.has(`ship:${rootId}`) || operationLocks.has(`post:${rootId}`)) {
-				return reply.code(409).send({ ok: false, error: 'с этим перемещением сейчас выполняется складская операция' });
-			}
 			const root = allTransfers.find((transfer) => transfer.id === rootId) ?? doc;
 			const corrections = allTransfers.filter((transfer) => transfer.correctionOf === rootId);
 			const family = [...corrections, root].filter((transfer, index, rows) => rows.findIndex((row) => row.id === transfer.id) === index);
@@ -80,6 +81,8 @@ export function registerTransferDeleteRoute(
 		} catch (err) {
 			app.log.error({ id, by: me.id }, `[api/transfers/delete] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			operationLocks.delete(lockKey);
 		}
 	});
 }

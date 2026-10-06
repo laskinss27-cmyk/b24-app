@@ -38,7 +38,7 @@ export function registerTransferShipRoute(
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно (нет ERPNEXT_URL/TOKEN)' });
-		const lockKey = `ship:${id}`;
+		const lockKey = `transfer:${id}`;
 		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'отправка этого перемещения уже выполняется' });
 		operationLocks.add(lockKey);
 		try {

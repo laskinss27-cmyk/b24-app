@@ -1,3 +1,4 @@
+import { confirmMistakenShipment } from './transfer-shipment-cancellation.js';
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { AccessDecision, AccessPermissionId } from '@b24-app/shared';
 import { supplySourceStagesLabel } from '@b24-app/shared';
@@ -127,7 +128,9 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 
 	const act = async (t: TransferDoc, kind: 'ship' | 'post' | 'cancel'): Promise<void> => {
 		setBusy(t.id); setErr(null);
-		try { const updated = await (kind === 'ship' ? shipTransfer(t.id) : kind === 'post' ? postTransfer(t.id) : cancelTransfer(t.id)); setNotice(updated.actionWarning ?? null); await load(); }
+		const cancellation = kind === 'cancel' && t.status === 'in_transit' ? confirmMistakenShipment(t.fromStore) : undefined;
+		if (kind === 'cancel' && (t.status === 'in_transit' ? !cancellation : !window.confirm('Отменить перемещение и освободить резерв?'))) { setBusy(null); return; }
+		try { const updated = await (kind === 'ship' ? shipTransfer(t.id) : kind === 'post' ? postTransfer(t.id) : cancelTransfer(t.id, cancellation ?? undefined)); setNotice(updated.actionWarning ?? null); await load(); }
 		catch (e) { setErr(errText(e)); }
 		finally { setBusy(null); }
 	};
@@ -200,10 +203,10 @@ export function StockTransfersTab({ form, showCreate = true, supplyMode = false,
 								<td style={TD}>{t.lines.map((l) => `${l.name || ('#' + l.productId)} × ${l.qty}`).join(', ')}</td>
 								<td style={TD}>{transferStatusText(t)}</td>
 								<td style={TD}>
-									{permit('transfers.cancel', canManage) && ['draft', 'collected', 'requested'].includes(t.status) && <button disabled={busy != null} onClick={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void act(t, 'cancel'); }}>Отменить</button>}
+									{permit('transfers.cancel', canManage) && ['draft', 'collected', 'requested', 'in_transit'].includes(t.status) && <button disabled={busy != null} onClick={() => { void act(t, 'cancel'); }}>{t.status === 'in_transit' ? 'Отменить ошибочную отправку' : 'Отменить'}</button>}
 									{permit('transfers.collect', true) && (t.status === 'draft' || t.status === 'requested') && <button className="btn-primary" disabled={busy != null} onClick={() => setCollectT(t)}>{busy === t.id ? '…' : 'Собрано'}</button>}
 									{permit('transfers.ship', true) && t.status === 'collected' && <button className="btn-primary" disabled={busy != null || !t.lines.every((line) => Math.abs(line.qty - (t.collectedLines.find((actual) => actual.productId === line.productId)?.qty ?? 0)) < 0.000001)} onClick={() => void act(t, 'ship')}>{busy === t.id ? '…' : 'Отправлено'}</button>}
-									{permit('transfers.receive', true) && t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
+									{permit('transfers.receive', true) && t.status === 'in_transit' && <button className="btn-primary" disabled={busy != null || Boolean(t.shipmentCancellation)} title={t.shipmentCancellation ? 'Сначала заверши отмену ошибочной отправки' : undefined} onClick={() => setReceiveT(t)}>{busy === t.id ? '…' : 'Принять'}</button>}
 									{permit('transfers.post', canManage) && t.status === 'accepted' && (transferPlanMatchesAccepted(t)
 										? <button className="btn-primary" disabled={busy != null} onClick={() => void act(t, 'post')}>{busy === t.id ? '…' : transferHasFinalDiscrepancy(t) ? 'Провести и скорректировать' : 'Провести'}</button>
 										: <button className="btn-primary" disabled={busy != null} onClick={() => setOpenT(t)}>Скорректировать</button>)}

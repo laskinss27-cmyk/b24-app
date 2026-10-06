@@ -27,6 +27,7 @@ export function registerTransferReceiveRoute(
 	app: FastifyInstance,
 	clientFrom: TransferClientFrom,
 	notifications: TransferNotificationService,
+	operationLocks: Set<string> = new Set(),
 ): void {
 	// «Принято»: склад назначения фиксирует факт. Проводка выполняется позже снабжением.
 	app.post('/api/transfers/receive', async (req, reply) => {
@@ -35,9 +36,13 @@ export function registerTransferReceiveRoute(
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const id = Number(b.id);
 		if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'bad id' });
+		const lockKey = `transfer:${id}`;
+		if (operationLocks.has(lockKey)) return reply.code(409).send({ ok: false, error: 'С перемещением уже выполняется операция' });
+		operationLocks.add(lockKey);
 		try {
 			const [doc, me] = await Promise.all([loadTransfer(client, id), currentUser(client)]);
 			if (!doc) return reply.code(404).send({ ok: false, error: 'перемещение не найдено' });
+			if (doc.shipmentCancellation) return reply.code(409).send({ ok: false, error: 'Начата отмена ошибочной отправки; снабжению нужно завершить отмену' });
 			if (doc.status !== 'in_transit') return reply.code(409).send({ ok: false, error: `нельзя принять из статуса ${doc.status}` });
 			const actualByProduct = new Map<number, number>();
 			if (Array.isArray(b.lines)) {
@@ -89,6 +94,8 @@ export function registerTransferReceiveRoute(
 		} catch (err) {
 			app.log.error({}, `[api/transfers/receive] failed — ${errInfo(err)}`);
 			return reply.code(200).send({ ok: false, error: errInfo(err) });
+		} finally {
+			operationLocks.delete(lockKey);
 		}
 	});
 }

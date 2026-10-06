@@ -5,6 +5,7 @@ import type { TransferDoc, TransferHistoryEventDto, TransferLineDto } from './st
 /** Заявка в снабжение для «Снаб»: один Material Request = нехватка по одной сделке. */
 export interface SupplyOrderItem { productId: number; itemName: string; qty: number; note: string; stocks: Record<string, number>; rowName?: string; dealLineKey?: string; dealQty?: number; requestedQty?: number; allocatedQty?: number }
 export interface SupplyTransferChild {
+	shipmentCancellation?: { reason: string; at: string; byId: string; byName: string; entry?: string };
 	id: number; name: string; displayTitle?: string; purchaseOrder?: string; status: string; fromStore: string; toStore: string;
 	shipEntry?: string; receiveEntry?: string; shortageReturnEntry?: string;
 	correctionOf?: number | null; correctionKind?: 'shortage_return' | 'overage_transfer' | null; correctionIds?: number[];

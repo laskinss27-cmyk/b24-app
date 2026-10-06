@@ -155,7 +155,7 @@ export function SupplyDocumentDetail({ document, suppliers, busy, canDelete, onC
 						<div><span className="supply-document-eyebrow">Заявка поставщику</span><h2>{currentPurchase.displayTitle || currentPurchase.name}</h2><p>{currentPurchase.displayTitle ? `${currentPurchase.name} · ${order.name}` : order.standalone ? 'Самостоятельная закупка' : `${order.name} · сделка #${order.dealId}`}</p></div>
 						<div className="supply-document-modal-head"><span>{status.label}</span><button type="button" aria-label="Закрыть" title="Закрыть" onClick={onClose}>×</button></div>
 					</header>
-					<dl className="supply-document-facts">
+				<dl className="supply-document-facts">
 						<div><dt>Поставщик</dt><dd><SupplySupplierField id="supply-document-supplier" value={supplier} suppliers={suppliers} onChange={setSupplier} onCreate={onCreateSupplier} /></dd></div>
 						<div><dt>Склад заявки</dt><dd>{order.toStore || 'Не указан'}</dd></div>
 						<div><dt>Ожидаем</dt><dd><input type="date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} /></dd></div>
@@ -223,6 +223,7 @@ export function SupplyDocumentDetail({ document, suppliers, busy, canDelete, onC
 					{canEditDestination && <button className="transfer-destination-save" type="button" disabled={savingDestination || !toStore || toStore === transfer.toStore} onClick={() => void saveDestination()}>{savingDestination ? 'Сохраняю...' : 'Изменить'}</button>}
 				</div>
 				{destinationError && <p className="supply-standalone-error">{destinationError}</p>}
+				{transfer.shipmentCancellation && transfer.status !== 'canceled' && <p role="alert">Начата отмена ошибочной отправки. Заверши отмену; приёмка заблокирована.</p>}
 				<dl className="supply-document-facts">
 					<div><dt>Позиций</dt><dd>{transfer.lines.length}</dd></div>
 					<div><dt>Количество</dt><dd>{transfer.lines.reduce((sum, line) => sum + line.qty, 0)}</dd></div>
@@ -241,13 +242,13 @@ export function SupplyDocumentDetail({ document, suppliers, busy, canDelete, onC
 				</div>
 				{historyOpen && <section className="supply-document-receipts"><h3>История</h3>{[...(transfer.history ?? [])].reverse().map((event, index) => <div key={`${event.at}-${index}`}><b>{new Date(event.at).toLocaleString('ru-RU')} · {event.byName || 'Система'}</b><span>{transferHistoryLabel(event)}</span>{event.changes?.length ? <small>{event.changes.map((change) => `${change.name}: ${change.from} → ${change.to}`).join(' · ')}</small> : null}</div>)}</section>}
 				<footer className="supply-document-modal-footer">
-					<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}{['draft', 'collected', 'requested'].includes(transfer.status) && <button className="danger" type="button" disabled={busy} onClick={onCancelTransfer}>Отменить</button>}<button type="button" onClick={() => setHistoryOpen((open) => !open)}>История</button></div>
+					<div>{canDelete && <button className="danger" type="button" disabled={busy} onClick={onDelete}>Удалить</button>}{['draft', 'collected', 'requested', 'in_transit'].includes(transfer.status) && <button className="danger" type="button" disabled={busy} onClick={onCancelTransfer}>{transfer.status === 'in_transit' ? 'Отменить ошибочную отправку' : 'Отменить'}</button>}<button type="button" onClick={() => setHistoryOpen((open) => !open)}>История</button></div>
 					<div>
 						<button type="button" onClick={onClose}>Закрыть</button>
 						{canEditPlan && <button type="button" disabled={busy || !planDirty} onClick={() => onUpdateTransfer(planPayload)}>{busy ? 'Сохраняю...' : 'Сохранить количество'}</button>}
 						{(transfer.status === 'draft' || transfer.status === 'requested') && <button className="primary" type="button" disabled={busy || planDirty} title={planDirty ? 'Сначала сохрани количество' : ''} onClick={() => onCollectTransfer(collectPayload)}>{busy ? 'Сохраняю...' : 'Собрано'}</button>}
 						{transfer.status === 'collected' && <button className="primary" type="button" disabled={busy || planDirty || !quantitiesMatch} title={planDirty ? 'Сначала сохрани количество' : quantitiesMatch ? '' : 'Снабжению нужно скорректировать количество по факту сборки'} onClick={onShipTransfer}>{busy ? 'Провожу...' : 'Отправлено'}</button>}
-						{transfer.status === 'in_transit' && <button className="primary" type="button" disabled={busy} onClick={() => onReceiveTransfer(receivePayload)}>{busy ? 'Сохраняю...' : 'Принять'}</button>}
+						{transfer.status === 'in_transit' && <button className="primary" type="button" disabled={busy || Boolean(transfer.shipmentCancellation)} onClick={() => onReceiveTransfer(receivePayload)}>{busy ? 'Сохраняю...' : 'Принять'}</button>}
 						{transfer.status === 'accepted' && <button className="primary" type="button" disabled={busy || planDirty || !acceptedMatchesPlan} title={planDirty ? 'Сначала сохрани количество' : acceptedMatchesPlan ? '' : 'Скорректируй количество по факту приемки'} onClick={onPostTransfer}>{busy ? 'Провожу...' : transferHasDiscrepancy(transfer) ? 'Провести и скорректировать' : 'Провести'}</button>}
 						{transfer.status === 'shortage' && <button className="primary" type="button" disabled={busy} onClick={onResolveShortage}>{busy ? 'Провожу...' : 'Завершить недовоз'}</button>}
 					</div>

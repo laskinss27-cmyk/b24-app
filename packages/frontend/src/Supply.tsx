@@ -1,3 +1,4 @@
+import { confirmMistakenShipment } from './transfer-shipment-cancellation.js';
 import { useEffect, useState } from 'react';
 import { getContext } from './b24-context.js';
 import { DealSupplyFallback } from './DealSupplyFallback.js';
@@ -223,7 +224,12 @@ export function Supply(): JSX.Element {
 				onShipTransfer={() => void moveOpenTransfer('ship')}
 				onReceiveTransfer={(lines) => void moveOpenTransfer('receive', lines)}
 				onPostTransfer={() => void moveOpenTransfer('post')}
-				onCancelTransfer={() => { if (window.confirm('Отменить перемещение и освободить резерв?')) void moveOpenTransfer('cancel'); }}
+				onCancelTransfer={() => {
+					if (openDocument.kind === 'transfer' && openDocument.transfer.status === 'in_transit') {
+						const confirmation = confirmMistakenShipment(openDocument.transfer.fromStore);
+						if (confirmation) void moveOpenTransfer('cancel', [], confirmation);
+					} else if (window.confirm('Отменить перемещение и освободить резерв?')) void moveOpenTransfer('cancel');
+				}}
 				onResolveShortage={() => void moveOpenTransfer('resolve')}
 			/>}
 			{printApprovalOrder && <SupplyApprovalPrint order={printApprovalOrder} />}
