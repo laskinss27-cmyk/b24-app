@@ -142,8 +142,12 @@ export class ErpClient {
 	}
 
 	/** Проведение документа. Бросает, если docstatus в ответе не стал 1. */
-	async submit(doctype: string, name: string): Promise<void> {
-		const data = await this.update(doctype, name, { docstatus: 1 });
+	async submit(doctype: string, name: string, options: { useCurrentPostingTime?: boolean } = {}): Promise<void> {
+		// ERPNext assigns its own current date/time during the same submission transaction.
+		const data = await this.update(doctype, name, {
+			docstatus: 1,
+			...(options.useCurrentPostingTime ? { set_posting_time: 0 } : {}),
+		});
 		if (Number(data['docstatus'] ?? 0) !== 1) {
 			throw new ErpApiError('PUT', `${doctype}/${name}`, 200, `submit прошёл без ошибки, но docstatus=${data['docstatus']}`);
 		}

@@ -167,6 +167,8 @@ function deliveryNoteCopy(
 	args: { amendedFrom?: string; returnAgainst?: string; sourceRows?: ReadonlyMap<string, string>; keepItemIdentity?: boolean } = {},
 ): Record<string, unknown> {
 	const out = pickDefined(snapshot.doc, DELIVERY_NOTE_COPY_FIELDS);
+	// Replacements preserve the original ledger date even when the sale used ERP's current clock.
+	if (snapshot.doc['posting_date']) out['set_posting_time'] = 1;
 	out[DEAL_FIELD] = String(snapshot.doc[DEAL_FIELD] ?? '');
 	if (snapshot.doc[NOTE_FIELD] !== undefined && snapshot.doc[NOTE_FIELD] !== null) out[NOTE_FIELD] = snapshot.doc[NOTE_FIELD];
 	if (snapshot.isReturn) {
@@ -675,7 +677,11 @@ export async function createRealizationDraft(
 }
 
 export async function submitRealization(erp: ErpClient, name: string): Promise<void> {
-	await erp.submit('Delivery Note', name);
+	const document = await erp.get('Delivery Note', name);
+	if (!document || Number(document['docstatus']) !== 0 || Number(document['is_return'] ?? 0) !== 0) {
+		throw new Error(`реализация ${name} не является непроведённой продажей; обнови сделку`);
+	}
+	await erp.submit('Delivery Note', name, { useCurrentPostingTime: true });
 }
 
 /** Удаляет только непроведённую обычную реализацию указанной сделки. */

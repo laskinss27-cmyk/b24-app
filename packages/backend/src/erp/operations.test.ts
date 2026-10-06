@@ -1020,6 +1020,8 @@ test('stage price change amends only that stage realization and its return witho
 			company: 'Test',
 			customer: 'Customer',
 			posting_date: '2026-07-23',
+			posting_time: '10:11:12',
+			set_posting_time: 0,
 			b24_deal_id: '37314',
 			is_return: 0,
 			items: [
@@ -1034,6 +1036,8 @@ test('stage price change amends only that stage realization and its return witho
 			company: 'Test',
 			customer: 'Customer',
 			posting_date: '2026-07-23',
+			posting_time: '10:11:12',
+			set_posting_time: 0,
 			b24_deal_id: '37314',
 			is_return: 1,
 			return_against: 'DN-1',
@@ -1048,6 +1052,8 @@ test('stage price change amends only that stage realization and its return witho
 			company: 'Test',
 			customer: 'Customer',
 			posting_date: '2026-07-23',
+			posting_time: '10:11:12',
+			set_posting_time: 0,
 			b24_deal_id: '37314',
 			is_return: 0,
 			items: [item('DN-DRAFT-ROW-1', 101, 1, 110, { [REALIZATION_SEGMENT_FIELD]: 'stage:stage-1' })],
@@ -1066,6 +1072,11 @@ test('stage price change amends only that stage realization and its return witho
 	assert.ok(sale);
 	assert.ok(returned);
 	assert.ok(draft);
+	for (const replacement of [sale, returned]) {
+		assert.equal(replacement['posting_date'], '2026-07-23');
+		assert.equal(replacement['posting_time'], '10:11:12');
+		assert.equal(replacement['set_posting_time'], 1);
+	}
 	assert.equal((sale.items[0] as Record<string, unknown>)['rate'], 100);
 	assert.equal((sale.items[1] as Record<string, unknown>)['rate'], 120);
 	assert.equal((sale.items[2] as Record<string, unknown>)['rate'], 50);

@@ -33,6 +33,7 @@
 | REAL-03 | Полностью возвращённая реализация и её возвраты не переписываются при изменении текущей цены сделки. | B/erp/deal-realizations.ts: outstandingPriceChanges | **Тесты, восстановлено**: B/erp/operations.test.ts: fully returned, price sync preserves returned history; отдельная новая продажа, service aliases и черновики возвратов; исторический фикс `7fd5e18` |
 
 | REAL-04 | Создание и проведение реализации проверяют остаток плана: старый `base` учитывается у единственной соответствующей строки с `lineKey`, неоднозначные/утраченные активные связи блокируются. Дополнительный общий лимит товара сохраняется между этапами. Черновики продаж занимают количество, только проведённые возвраты освобождают его. Перед каждым проведением данные перечитываются; изменения реализаций одной сделки сериализованы в единственном процессе backend. | B/routes/deal-realization-quantity.ts; B/routes/deal-core-realization-route.ts | B/routes/deal-realization-quantity.test.ts; B/routes/deal-realization-safety.test.ts; **Тесты**; [контракт и ограничения](deal-realization-quantity-safety.md) |
+| REAL-05 | Первичное проведение реализации использует текущую дату/время ERPNext в одной транзакции. Проведённая история не мигрируется; исправление цен и восстановление сохраняют исходные даты. | B/erp/client.ts; B/erp/deal-realizations.ts | B/erp/realization-posting-date.test.ts; B/erp/operations.test.ts; B/routes/deal-realization-safety.test.ts; [решение и границы](realization-posting-date.md) |
 
 ## Каталог, резервы, снабжение и склад
 
