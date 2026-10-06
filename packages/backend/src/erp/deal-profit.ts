@@ -1,5 +1,6 @@
 import { isPassThroughProduct, type DealActualProfit } from '@b24-app/shared';
 import { dealProductIdFromCoreItemCode } from '../deal-service-product-ids.js';
+import { PAID_REPAIR_SERVICE_PRODUCT_ID } from '../deal-service.js';
 import type { ErpClient } from './client.js';
 import { listWithBatchedInFilters as list } from './list-batched.js';
 
@@ -32,6 +33,10 @@ export function calculateDealActualProfit(documents: Row[], ledger: Row[], items
 			}
 			if (Number(item.is_stock_item) === 0) {
 				result.worksRevenue += amount;
+				if (id === PAID_REPAIR_SERVICE_PRODUCT_ID) {
+					result.repairRevenue = money((result.repairRevenue ?? 0) + amount);
+					result.repairQty = (result.repairQty ?? 0) + (finite(row.qty) ?? qty ?? NaN);
+				}
 				if (!isPassThroughProduct(id)) result.worksProfitBase += amount;
 				continue;
 			}

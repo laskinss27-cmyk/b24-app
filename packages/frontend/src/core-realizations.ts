@@ -1,3 +1,4 @@
+import type { DealRepairProfit } from '@b24-app/shared';
 import { bx24Auth } from './bitrix-auth.js';
 
 export interface CoreRealizationItem {
@@ -117,4 +118,15 @@ export async function addProductToDeal(dealId: number, productId: number, quanti
 	const json = (await res.json()) as { ok: boolean; error?: string; row?: { id: number; name: string; price: number; quantity: number } };
 	if (!json.ok || !json.row) throw new Error(json.error ?? 'не удалось добавить товар');
 	return json.row;
+}
+
+/** Separate optional calculation: an unavailable repair entity must not hide stock documents. */
+export async function fetchDealRepairProfit(dealId: number): Promise<DealRepairProfit | null> {
+	const res = await fetch('/api/deal/repair-profit', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...bx24Auth(), dealId }),
+	});
+	const json = await res.json() as { ok: boolean; repairProfit?: DealRepairProfit | null };
+	if (!json.ok) throw new Error('Не удалось загрузить расчёт ремонта');
+	return json.repairProfit ?? null;
 }

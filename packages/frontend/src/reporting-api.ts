@@ -38,7 +38,7 @@ export interface SalesReportRow {
 	worksSum: number;
 	goodsProfit: number | null;
 	profitStatus?: string;
-	worksProfit: number;
+	worksProfit: number | null;
 	goodsNoPurchase: number;
 }
 

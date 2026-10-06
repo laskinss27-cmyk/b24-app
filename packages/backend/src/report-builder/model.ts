@@ -43,7 +43,7 @@ export const REPORT_DATASETS: ReportDataset[] = [
 			{ id: 'worksSum', label: 'Продажа работ', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
 			{ id: 'totalSum', label: 'Общая продажа', type: 'number', role: 'measure', aggregate: 'sum' },
 			{ id: 'goodsProfit', label: 'Прибыль товаров', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
-			{ id: 'worksProfit', label: 'Прибыль работ — оценка', type: 'number', role: 'measure', aggregate: 'sum' },
+			{ id: 'worksProfit', label: 'Прибыль услуг и ремонтов', type: 'number', role: 'measure', aggregate: 'sum' },
 			{ id: 'totalProfit', label: 'Прибыль с оценкой услуг', type: 'number', role: 'measure', aggregate: 'sum', defaultVisible: true },
 			{ id: 'profitStatus', label: 'Основание прибыли', type: 'text', role: 'dimension' },
 			{ id: 'goodsNoPurchase', label: 'Строк без себестоимости', type: 'number', role: 'measure', aggregate: 'sum' },
@@ -197,7 +197,7 @@ export function buildReportResult(definitionInput: unknown, sourceRows: ReportRo
 				const field = fields.get(id);
 				if (field?.role !== 'measure') continue;
 				const rawValue = source[id];
-				if (definition.datasetId === 'sales_deals' && ['goodsProfit', 'totalProfit'].includes(id) && rawValue == null) group.incompleteProfit.add(id);
+				if (definition.datasetId === 'sales_deals' && ['goodsProfit', 'worksProfit', 'totalProfit'].includes(id) && rawValue == null) group.incompleteProfit.add(id);
 				if (rawValue == null || rawValue === '') continue;
 				const value = Number(rawValue);
 				if (!Number.isFinite(value)) continue;

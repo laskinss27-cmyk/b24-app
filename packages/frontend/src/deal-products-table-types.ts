@@ -25,6 +25,7 @@ export interface EnrichedRow extends DealProductRow {
 
 export interface TableData {
 	actualProfit?: import('@b24-app/shared').DealActualProfit | null;
+	repairProfit?: import('@b24-app/shared').DealRepairProfit | null;
 	rows: EnrichedRow[];
 	coef: number;
 	/** Реализации сделки ИЗ ЯДРА (Delivery Note по b24_deal_id): черновики + проведённые. */

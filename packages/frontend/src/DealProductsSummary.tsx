@@ -11,6 +11,7 @@ export function DealProductsSummaryHeader({
 	unknownGoods,
 	pricedGoodsCount,
 	actualProfit,
+	repairProfit,
 }: {
 	dealId: number | null;
 	rowCount: number;
@@ -22,18 +23,20 @@ export function DealProductsSummaryHeader({
 	unknownGoods: number;
 	pricedGoodsCount: number;
 	actualProfit?: import('@b24-app/shared').DealActualProfit | null | undefined;
+	repairProfit?: import('@b24-app/shared').DealRepairProfit | null | undefined;
 }): JSX.Element {
+	const showGoodsProfit = !repairProfit || pricedGoodsCount > 0 || (actualProfit?.goodsRevenue ?? 0) !== 0 || (actualProfit?.goodsProfit ?? 0) !== 0 || (actualProfit?.missingCostLines ?? 0) > 0;
 	return (
 		<header className="deal-head">
 			<div>
 				<h1>Товары сделки</h1>
 				<p className="subtitle">Сделка #{dealId ?? '—'} · {rowCount} {plural(rowCount, 'строка', 'строки', 'строк')} · смотрит: {viewer}</p>
 			</div>
-			<div className="deal-head-stats">
+			<div className={`deal-head-stats${repairProfit && showGoodsProfit ? ' has-repair-and-goods' : ''}`}>
 				<div><span>Сумма товаров</span><b>{rub(goodsTotal)}</b></div>
 				<div><span>Сумма работ</span><b>{rub(worksTotal)}</b></div>
 				<div><span>Общая сумма</span><b>{rub(total)}</b></div>
-				<div className="deal-profit-card">
+				{showGoodsProfit && <div className="deal-profit-card">
 					<span>Прибыль товаров</span>
 					<dl className="deal-profit-comparison">
 						{actualProfit !== undefined && <>
@@ -45,7 +48,16 @@ export function DealProductsSummaryHeader({
 					</dl>
 					{actualProfit !== undefined && <small>{!actualProfit ? 'Себестоимость недоступна' : !actualProfit.documentCount ? 'Нет проведённых реализаций' : actualProfit.missingCostLines ? `Нет полных данных: ${actualProfit.missingCostLines} строк` : 'Реализации минус возвраты'}</small>}
 					{unknownGoods > 0 && <small>План без {unknownGoods} из {pricedGoodsCount} строк: нет закупочной цены</small>}
-				</div>
+				</div>}
+				{repairProfit && <div className="deal-profit-card">
+					<span>Прибыль ремонта</span>
+					<b className={`deal-profit-value${(repairProfit.profit ?? 0) > 0 ? ' positive' : (repairProfit.profit ?? 0) < 0 ? ' negative' : ''}`}>{repairProfit.profit == null ? '—' : rub(repairProfit.profit)}</b>
+					<dl className="deal-profit-comparison">
+						<dt>Цена клиенту</dt><dd>{repairProfit.clientPrice == null ? '—' : rub(repairProfit.clientPrice)}</dd>
+						<dt>Цена СЦ</dt><dd>{repairProfit.serviceCost == null ? '—' : rub(repairProfit.serviceCost)}</dd>
+					</dl>
+					<small>{repairProfit.status}</small>
+				</div>}
 			</div>
 		</header>
 	);

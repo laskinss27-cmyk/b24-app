@@ -1,10 +1,11 @@
 import { isPassThroughProduct } from '@b24-app/shared';
 import { isDealServiceProductId } from '../deal-service-product-ids.js';
+import { PAID_REPAIR_SERVICE_PRODUCT_ID } from '../deal-service.js';
 import type { ErpClient } from './client.js';
 import { listWithBatchedInFilters as list } from './list-batched.js';
 
 type Row = Record<string, unknown>;
-export interface ClosedDealServices { revenue: number; profitBase: number; goodsQty: number; serviceQty: number }
+export interface ClosedDealServices { revenue: number; profitBase: number; goodsQty: number; serviceQty: number; repairRevenue?: number; repairQty?: number }
 const round = (n: number): number => Math.round(n * 100) / 100;
 function positiveNumber(value: unknown, label: string): number {
 	if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) || Number(value) < 0) {
@@ -13,7 +14,7 @@ function positiveNumber(value: unknown, label: string): number {
 	return Number(value);
 }
 
-/** Called only for deals selected as successfully closed. No posting or setup writes.
+/** Working composition; reports select successfully closed deals, the deal UI previews it. No posting or setup writes.
  * Old service deliveries are not added to this composition a second time. */
 export async function readClosedDealServices(erp: ErpClient, dealIds: number[]): Promise<Map<number, ClosedDealServices | null>> {
 	const result = new Map<number, ClosedDealServices | null>(dealIds.map((id) => [id, null]));
@@ -43,7 +44,7 @@ export async function readClosedDealServices(erp: ErpClient, dealIds: number[]):
 			if (discount > 100) throw new Error('Некорректная скидка услуги закрытой сделки');
 			staged.set(code, [...(staged.get(code) ?? []), { qty: positiveNumber(item.qty, 'количество'), rate: positiveNumber(item.price, 'цена') * (1 - discount / 100) }]);
 		}
-		let revenue = 0, profitBase = 0, goodsQty = 0, serviceQty = 0;
+		let revenue = 0, profitBase = 0, goodsQty = 0, serviceQty = 0, repairRevenue = 0, repairQty = 0;
 		for (const item of order.items as Row[]) {
 			const code = String(item.item_code), productId = Number(code);
 			const stockType = typeByCode.get(code);
@@ -51,6 +52,7 @@ export async function readClosedDealServices(erp: ErpClient, dealIds: number[]):
 			let qty = positiveNumber(item.qty, 'количество');
 			if (stockType === 1 && !isDealServiceProductId(productId)) { goodsQty += qty; continue; }
 			serviceQty += qty;
+			if (productId === PAID_REPAIR_SERVICE_PRODUCT_ID) repairQty += qty;
 			let amount = 0;
 			for (const segment of staged.get(code) ?? []) {
 				const allocated = Math.min(qty, segment.qty);
@@ -59,9 +61,11 @@ export async function readClosedDealServices(erp: ErpClient, dealIds: number[]):
 			}
 			amount += qty * positiveNumber(item.rate, 'цена');
 			revenue += amount;
+			if (productId === PAID_REPAIR_SERVICE_PRODUCT_ID) repairRevenue += amount;
 			if (!isPassThroughProduct(productId)) profitBase += amount;
 		}
-		result.set(id, { revenue: round(revenue), profitBase: round(profitBase), goodsQty, serviceQty });
+		result.set(id, { revenue: round(revenue), profitBase: round(profitBase), goodsQty, serviceQty,
+			...(repairQty ? { repairRevenue: round(repairRevenue), repairQty } : {}) });
 	}
 	return result;
 }

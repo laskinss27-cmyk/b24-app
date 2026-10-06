@@ -2,7 +2,7 @@
  * Sales report: successfully closed deals selected by CLOSEDATE. Revenue and goods
  * profit come from posted ERP deliveries net of returns; stock cost is the signed
  * ledger value. Services use the successfully closed working composition; old
- * deliveries are a fallback only without a plan. Profit uses profit_coef.
+ * deliveries are a fallback only without a plan. Paid repairs use client price minus service-centre cost; other services use profit_coef.
  * buildPlannedSalesReport retains the old calculation for migration/regression
  * reference; production report routes call buildSalesReport only.
  */
@@ -12,6 +12,7 @@ import { ErpClient } from '../erp/client.js';
 import { readConsumablesReportRows } from './sales-report-consumables.js';
 import { readDealsActualProfit } from '../erp/deal-profit.js';
 import { readClosedDealServices } from '../erp/closed-deal-services.js';
+import { readDealRepairProfits } from '../repair-profit.js';
 
 /** TYPE строки сделки: 1 = товар, 7 = работа/услуга (как в crm.deal.productrows). */
 const WORK_TYPE = 7;
@@ -39,7 +40,7 @@ export interface SalesReportRow {
 	worksSum: number;
 	goodsProfit: number | null;
 	profitStatus?: string;
-	worksProfit: number;
+	worksProfit: number | null;
 	/** Сколько товарных позиций сделки без заполненной закупки (прибыль по ним не учтена). */
 	goodsNoPurchase: number;
 }
@@ -243,10 +244,17 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 		readDealsActualProfit(erp, deals.map(d => Number(d.ID))),
 		readClosedDealServices(erp, deals.map(d => Number(d.ID))),
 	]);
+	const repairs = await readDealRepairProfits(client, new Map(deals.map(d => {
+		const id = Number(d.ID);
+		return [id, services.get(id) ?? profits.get(id)];
+	})));
 	return { coef, generatedAt: new Date().toISOString(), rows: deals.map(d => {
 		const dealId = Number(d.ID);
 		const profit = profits.get(dealId)!;
 		const closedServices = services.get(dealId);
+		const repair = repairs.get(dealId);
+		const repairRevenue = (closedServices ?? profit).repairRevenue ?? 0;
+		const worksProfit = repair?.profit === null ? null : Math.round(((closedServices?.profitBase ?? profit.worksProfitBase) * coef - repairRevenue * coef + (repair?.profit ?? 0)) * 100) / 100;
 		const serviceOnly = closedServices?.goodsQty === 0 && closedServices.serviceQty > 0 && profit.goodsRevenue === 0 && profit.missingCostLines === 0;
 		const goodsStatus = serviceOnly ? 'Без товаров' : !profit.documentCount ? 'Нет проведённых реализаций' : profit.missingCostLines ? `Неполные данные: ${profit.missingCostLines} строк` : 'По проведённым реализациям и возвратам';
 		return {
@@ -255,9 +263,9 @@ export async function buildSalesReport(client: B24Client, params: SalesReportPar
 			dateCreate: String(d.DATE_CREATE ?? ''), dateClosed: String(d.CLOSEDATE ?? ''),
 			title: String(d.TITLE ?? `Сделка #${dealId}`), manager: managers.get(Number(d.ASSIGNED_BY_ID)) ?? String(d.ASSIGNED_BY_ID ?? ''),
 			goodsSum: profit.goodsRevenue, worksSum: closedServices?.revenue ?? profit.worksRevenue,
-			goodsProfit: profit.goodsProfit ?? (serviceOnly ? 0 : null), worksProfit: Math.round((closedServices?.profitBase ?? profit.worksProfitBase) * coef * 100) / 100,
+			goodsProfit: profit.goodsProfit ?? (serviceOnly ? 0 : null), worksProfit,
 			goodsNoPurchase: profit.missingCostLines,
-			profitStatus: closedServices ? `${goodsStatus}; услуги по составу закрытой сделки` : goodsStatus,
+			profitStatus: (closedServices ? `${goodsStatus}; услуги по составу закрытой сделки` : goodsStatus) + (repair ? `; ремонт: ${repair.status}` : ''),
 		};
 	}) };
 }

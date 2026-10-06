@@ -15,12 +15,12 @@ import {
 } from './b24.js';
 import type { EnrichedRow, TableData } from './deal-products-table-types.js';
 import { isDealServiceProductId } from './deal-service-product-ids.js';
-import { fetchDealRealizationsData } from './core-realizations.js';
+import { fetchDealRealizationsData, fetchDealRepairProfit } from './core-realizations.js';
 
 export async function loadDealProductsData(dealId: number): Promise<TableData> {
 	// Критические данные ядра завершают загрузку явной ошибкой. Для второстепенных данных остаются
 	// мягкие фолбэки, чтобы зависший BX24-вызов (например app.option.get) не блокировал вкладку.
-	const [stores, coef, shippedInfo, realizationData, plan, stages, quoteVariants, contracts] = await Promise.all([
+	const [stores, coef, shippedInfo, realizationData, plan, stages, quoteVariants, contracts, loadedRepairProfit] = await Promise.all([
 		withTimeout(fetchStores(), 15000, 'склады ядра'),
 		withTimeout(fetchProfitCoef(), 10000, 'app.option.get').catch(() => 0.5),
 		// /api/deal/shipped нужен ради строк сделки (серверным клиентом, BX24 флапает) и заявок снабжения.
@@ -30,8 +30,11 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 		withTimeout(fetchDealStages(dealId), 15000, 'этапы сделки из ядра'),
 		withTimeout(fetchDealQuoteVariants(dealId), 15000, 'варианты КП из ядра'),
 		withTimeout(fetchDealContracts(dealId), 20000, 'contracts/list').catch(() => [] as StoredDealContractDocument[]),
+		withTimeout(fetchDealRepairProfit(dealId), 10000, 'прибыль ремонта').catch(() => ({ clientPrice: null, serviceCost: null, profit: null, status: 'Не удалось загрузить расчёт ремонта' })),
 	]);
 	const { realizations: coreReals, actualProfit } = realizationData;
+	const hasRepair = plan.some(line => line.productId === 19108) || (!plan.length && coreReals.some(doc => doc.submitted && doc.items.some(line => line.productId === 19108)));
+	const repairProfit = hasRepair ? loadedRepairProfit ?? { clientPrice: null, serviceCost: null, profit: null, status: 'Обновите вкладку: состав ремонта изменился' } : null;
 	const rows: EnrichedRow[] = [];
 	const storeMap = new Map(stores.map((s) => [s.id, s.title]));
 	// Остатки/закупки тянем только для состава сделки из ядра.
@@ -117,5 +120,5 @@ export async function loadDealProductsData(dealId: number): Promise<TableData> {
 			purchasingPrice: dealLinePurchasingPrice(item.productId, rate, isService ? null : enrich[item.productId]?.purchasingPrice),
 		} satisfies EnrichedRow;
 	})]));
-	return { rows, planRows, coef, coreReals, actualProfit, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, supplyError: shippedInfo.supplyError ?? null, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
+	return { rows, planRows, coef, coreReals, actualProfit, repairProfit: repairProfit ?? null, plan, payment: shippedInfo.payment, sourceStoreId: shippedInfo.sourceStoreId, supply: shippedInfo.supply, supplyError: shippedInfo.supplyError ?? null, contracts, stores: stores.filter((s) => s.active), stages, quoteVariants, variantRows };
 }

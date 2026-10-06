@@ -7,6 +7,8 @@ import { fetchServiceProductIds } from '../deal-product-catalog.js';
 import { dealProductIdFromCoreItemCode } from '../deal-service-product-ids.js';
 import { ErpClient } from '../erp/client.js';
 import { readDealsActualProfit } from '../erp/deal-profit.js';
+import { readClosedDealServices } from '../erp/closed-deal-services.js';
+import { readDealRepairProfits, unavailableRepairProfit } from '../repair-profit.js';
 import { DEAL_FIELD } from '../erp/erp-setup.js';
 import {
 	assertDealQuoteVariantSelected,
@@ -59,6 +61,25 @@ export function registerDealCoreRealizationRoute(
 		await previous;
 		return () => { if (pending.get(dealId) === current) pending.delete(dealId); unlock(); };
 	}
+	// Keep the app-owned repair scan independent of critical stock/document loading.
+	app.post('/api/deal/repair-profit', async (req, reply) => {
+		const body = (req.body ?? {}) as AuthBody & { dealId?: unknown };
+		const client = clientFrom(body);
+		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
+		const dealId = Number(body.dealId);
+		if (!Number.isInteger(dealId) || dealId <= 0) return reply.code(400).send({ ok: false, error: 'bad dealId' });
+		const erp = ErpClient.fromEnv();
+		try {
+			if (!erp) throw new Error('ERP unavailable');
+			const services = (await readClosedDealServices(erp, [dealId])).get(dealId);
+			const composition = services ?? (await readDealsActualProfit(erp, [dealId])).get(dealId);
+			const repairProfit = (await readDealRepairProfits(client, new Map([[dealId, composition]]))).get(dealId) ?? null;
+			return { ok: true, repairProfit };
+		} catch (error) {
+			req.log.warn({ err: error, dealId }, 'Repair profit unavailable');
+			return { ok: true, repairProfit: unavailableRepairProfit('Не удалось загрузить расчёт ремонта') };
+		}
+	});
 	app.post('/api/deal/realize-core', async (req, reply) => {
 		const b = (req.body ?? {}) as AuthBody & { dealId?: unknown; action?: unknown; groups?: unknown; names?: unknown; note?: unknown; lines?: unknown };
 		const client = clientFrom(b);

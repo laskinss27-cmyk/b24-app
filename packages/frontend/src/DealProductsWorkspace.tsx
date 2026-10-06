@@ -392,6 +392,7 @@ export function DealProductsWorkspace({ data, viewer, dev, canReturn, dealId, ac
 				unknownGoods={unknownGoods}
 				pricedGoodsCount={pricedGoods.length}
 				actualProfit={alternativeView ? undefined : data.actualProfit}
+				repairProfit={alternativeView ? undefined : data.repairProfit}
 			/>
 
 			{dev && <div className="dev-banner">Dev-режим: данные мок. В проде будут реальные строки сделки.</div>}

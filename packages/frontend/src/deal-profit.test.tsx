@@ -8,6 +8,21 @@ import { DEAL_PRODUCTS_MOCK_DATA } from './deal-products-mock-data.js';
 
 const props = { dealId: 1, rowCount: 1, viewer: 'Test', goodsTotal: 900, worksTotal: 0, total: 900, plannedGoodsProfit: 123456, unknownGoods: 0, pricedGoodsCount: 1 };
 
+test('repair-only deal shows client and service-centre prices and repair profit without empty goods card', () => {
+	const html = renderToStaticMarkup(<DealProductsSummaryHeader {...props} pricedGoodsCount={0} repairProfit={{ clientPrice: 5000, serviceCost: 3000, profit: 2000, status: 'Цена клиенту минус цена СЦ' }} />);
+	assert.match(html, /Прибыль ремонта/); assert.match(html, /Цена клиенту/); assert.match(html, /Цена СЦ/);
+	assert.match(html, /2\s000 ₽/); assert.match(html, /5\s000 ₽/); assert.match(html, /3\s000 ₽/);
+	assert.ok(!html.includes('Прибыль товаров')); assert.ok(!html.includes('Нет проведённых реализаций'));
+});
+
+test('mixed deal keeps goods and repair cards; missing repair cost stays unknown and loss is signed', () => {
+	const html = renderToStaticMarkup(<DealProductsSummaryHeader {...props} repairProfit={{ clientPrice: 5000, serviceCost: null, profit: null, status: 'Не заполнена цена СЦ в карточке ремонта' }} />);
+	assert.match(html, /Прибыль товаров/); assert.match(html, /Прибыль ремонта/); assert.match(html, /Не заполнена цена СЦ/);
+	assert.match(html, /deal-profit-value">—/);
+	const loss = renderToStaticMarkup(<DealProductsSummaryHeader {...props} repairProfit={{ clientPrice: 5000, serviceCost: 6000, profit: -1000, status: 'Цена клиенту минус цена СЦ' }} />);
+	assert.match(loss, /deal-profit-value negative">-1\s000 ₽/);
+});
+
 test('one goods profit card distinguishes fact from plan and never substitutes zero for absent actual cost', () => {
 	const html = renderToStaticMarkup(<DealProductsSummaryHeader {...props} actualProfit={{ documentCount: 1, goodsRevenue: 900, worksRevenue: 0, worksProfitBase: 0, goodsCost: null, goodsProfit: null, missingCostLines: 1, issues: [] }} />);
 	assert.match(html, /План · оценка/);

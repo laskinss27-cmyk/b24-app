@@ -25,6 +25,16 @@ test('unknown deal profit makes grouped profit unknown instead of silently summi
 	assert.equal(result.rows[0]?.totalProfit, null);
 });
 
+test('a missing repair cost propagates into grouped service profit while goods remain independent', () => {
+	const result = buildReportResult({ datasetId: 'sales_deals', columns: ['manager', 'goodsProfit', 'worksProfit', 'totalProfit'], groupBy: ['manager'], filters: { from: '2026-10-01', to: '2026-10-06' }, sort: [] }, [
+		{ manager: 'A', goodsProfit: 100, worksProfit: 2000, totalProfit: 2100 },
+		{ manager: 'A', goodsProfit: 50, worksProfit: null, totalProfit: null },
+	]);
+	assert.equal(result.rows[0]?.goodsProfit, 150);
+	assert.equal(result.rows[0]?.worksProfit, null);
+	assert.equal(result.rows[0]?.totalProfit, null);
+});
+
 test('report result groups rows and applies field aggregations', () => {
 	const result = buildReportResult(definition, [
 		{ section: 'Домофония', soldQty: 5, daysOfStock: 10, __count: 1 },

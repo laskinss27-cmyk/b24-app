@@ -49,7 +49,7 @@ function salesRows(rows: Awaited<ReturnType<typeof buildSalesReport>>['rows']): 
 		totalSum: row.goodsSum + row.worksSum,
 		goodsProfit: row.goodsProfit,
 		worksProfit: row.worksProfit,
-		totalProfit: row.goodsProfit == null ? null : row.goodsProfit + row.worksProfit,
+		totalProfit: row.goodsProfit == null || row.worksProfit == null ? null : row.goodsProfit + row.worksProfit,
 		profitStatus: row.profitStatus ?? '',
 		goodsNoPurchase: row.goodsNoPurchase,
 		__count: 1,

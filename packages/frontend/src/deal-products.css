@@ -66,6 +66,9 @@ body.deal-placement-body #root.deal-placement-root {
 	overflow: hidden;
 	background: #d9dee7;
 }
+.deal-head-stats.has-repair-and-goods { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.deal-head-stats.has-repair-and-goods > div { grid-column: span 2; }
+.deal-head-stats.has-repair-and-goods > .deal-profit-card { grid-column: span 3; }
 .deal-head-stats > div {
 	min-width: 118px;
 	padding: 12px 14px;
@@ -800,6 +803,8 @@ body.deal-placement-body #root.deal-placement-root {
 }
 
 @media (max-width: 620px) {
+	.deal-head-stats.has-repair-and-goods > div:nth-child(-n+2) { grid-column: span 3; }
+	.deal-head-stats.has-repair-and-goods > .deal-profit-card { grid-column: 1 / -1; }
 	.deal-head-stats > div:nth-child(3),
 	.deal-head-stats .deal-profit-card { grid-column: 1 / -1; min-width: 0; }
 }
