@@ -45,6 +45,7 @@ import { registerApiAdminControlRoute } from './routes/api-admin-control.js';
 import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
 import { loadOrdersConfig } from './integrations/umniydom/config.js';
 import { registerSupportRoutes } from './support/routes.js';
+import { registerAnalyticsReadRoutes } from './analytics-access/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,6 +73,7 @@ export async function buildApp({ config, reservations }: AppOptions): Promise<Fa
 			// OAuth-токены не утекут в рабочие логи.
 			redact: {
 				paths: [
+					'req.headers.authorization', 'headers.authorization',
 					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'client_secret',
 					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.accessToken', '*.refreshToken', '*.client_secret',
 				],
@@ -151,6 +153,7 @@ export async function buildApp({ config, reservations }: AppOptions): Promise<Fa
 	registerApiAccessControlRoute(app);
 	registerApiReportBuilderRoute(app);
 	registerSupportRoutes(app);
+	registerAnalyticsReadRoutes(app);
 	registerPlacementReportBuilderRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);
