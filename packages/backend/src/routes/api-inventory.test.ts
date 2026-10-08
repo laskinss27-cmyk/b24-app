@@ -274,23 +274,26 @@ test('inventory document retry skips a submitted first document after the second
 	const persisted: InventoryDocumentSet[] = [];
 	let receiptFails = true;
 	const erp = {
-		get: async (_doctype: string, name: string) => ({ name, docstatus: 0 }),
-		submit: async (_doctype: string, name: string) => {
+		get: async (doctype: string, name: string) => doctype === 'Custom Field' ? {} : ({ name, docstatus: 0 }),
+		update: async (_doctype: string, name: string, body: Record<string, unknown>) => {
 			submitted.push(name);
 			if (name === 'STE-R' && receiptFails) throw new Error('receipt failed');
+			return { name, ...body };
 		},
 	} as unknown as ErpClient;
 	const persist = async (state: InventoryDocumentSet) => { persisted.push(structuredClone(state)); };
 
-	await assert.rejects(submitInventoryDocumentSet(erp, documents, persist), /receipt failed/);
+	await assert.rejects(submitInventoryDocumentSet(erp, documents, { id: receiptFails ? '78' : '1858', name: 'Confirmed user' }, persist), /receipt failed/);
 	assert.equal(documents.issue?.status, 'submitted');
 	assert.equal(documents.receipt?.status, 'draft');
 	assert.deepEqual(persisted.map((state) => [state.issue?.status, state.receipt?.status]), [['submitted', 'draft']]);
 
 	receiptFails = false;
-	await submitInventoryDocumentSet(erp, documents, persist);
+	await submitInventoryDocumentSet(erp, documents, { id: receiptFails ? '78' : '1858', name: 'Confirmed user' }, persist);
 	assert.deepEqual(submitted, ['STE-I', 'STE-R', 'STE-R']);
 	assert.equal(documents.receipt?.status, 'submitted');
+	assert.equal(documents.issue?.submittedById, '78');
+	assert.equal(documents.receipt?.submittedById, '1858');
 	assert.deepEqual(persisted.map((state) => [state.issue?.status, state.receipt?.status]), [
 		['submitted', 'draft'],
 		['submitted', 'submitted'],

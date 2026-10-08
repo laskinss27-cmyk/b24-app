@@ -6,6 +6,8 @@ export interface InventoryDocumentRecord {
 	lines: number;
 	savedAt?: string;
 	submittedAt?: string;
+	submittedById?: string;
+	submittedByName?: string;
 }
 
 export interface InventoryDocumentSet {

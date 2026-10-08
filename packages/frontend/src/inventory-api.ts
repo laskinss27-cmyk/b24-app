@@ -80,6 +80,8 @@ export interface InvPoint {
 }
 
 export interface ErpInvDoc {
+	submittedById?: string;
+	submittedByName?: string;
 	name: string;
 	status: 'draft' | 'submitted';
 	lines: number;

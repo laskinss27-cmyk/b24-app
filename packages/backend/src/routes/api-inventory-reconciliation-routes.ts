@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { INVENTORY_ENTITY } from '../b24/placement.js';
 import { ErpClient } from '../erp/client.js';
+import { inventoryPostingActor, submitAuditedInventoryDocument } from '../erp/inventory-posting-audit.js';
 import {
 	createInventoryAdjustmentDraft,
 	createInventoryRecoDraft,
 	deleteInventoryAdjustmentDraft,
 	deleteInventoryRecoDraft,
-	submitInventoryReco,
 	type InventoryAdjustmentLine,
 	type InventoryRecoLine,
 } from '../erp/operations.js';
@@ -178,15 +178,18 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(200).send({ ok: false, error: 'ядро склада не подключено (ERPNEXT_URL)' });
 		try {
+			const actor = await inventoryPostingActor(client);
 			const completed = await withInventoryUpdateLock(body.inventoryId, async () => {
 				const loaded = await loadInventoryPoint(client, body.inventoryId!, Number(body.storeId));
 				const legacy = legacyInventoryDocument(loaded.pt);
 				if (legacy) {
-					const live = await erp.get('Stock Reconciliation', legacy.name);
-					if (!live) throw new Error(`${legacy.name} не найден в ядре — пересоздай через «Записать»`);
-					if (Number(live['docstatus'] ?? 0) !== 1) await submitInventoryReco(erp, legacy.name);
+					const audit = await submitAuditedInventoryDocument(erp, 'Stock Reconciliation', legacy.name, actor);
 					legacy.status = 'submitted';
-					legacy.submittedAt = new Date().toISOString();
+					if (audit) {
+						legacy.submittedAt = audit.at;
+						legacy.submittedById = audit.id;
+						legacy.submittedByName = audit.name;
+					}
 					loaded.pt['erpDoc'] = legacy;
 					const inventoryStatus = synchronizeInventoryStatus(loaded.data, loaded.points);
 					await updateInventoryItem(client, loaded);
@@ -195,7 +198,7 @@ export function registerInventoryReconciliationRoutes(app: FastifyInstance): voi
 
 				const documents = inventoryDocumentSet(loaded.pt);
 				if (!inventoryDocumentCount(documents)) throw new Error('сначала «Записать» (черновиков ядра нет)');
-				await submitInventoryDocumentSet(erp, documents, async (currentDocuments) => {
+				await submitInventoryDocumentSet(erp, documents, actor, async (currentDocuments) => {
 					loaded.pt['erpDocs'] = currentDocuments;
 					// Сохраняем каждый успешный шаг: при ошибке второго документа повтор продолжит с него.
 					synchronizeInventoryStatus(loaded.data, loaded.points);

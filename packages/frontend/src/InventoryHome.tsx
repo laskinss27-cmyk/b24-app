@@ -1,3 +1,4 @@
+import { InventoryDocumentAudit } from './InventoryDocumentAudit.js';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { getContext, type B24Context } from './b24-context.js';
@@ -794,12 +795,14 @@ function ErpDocModal(props: {
 				{legacyDoc ? (
 					<p className="muted">
 						Старый документ сверки: {legacyDoc.status === 'submitted' ? `✓ ${legacyDoc.name} проведён` : `✎ черновик ${legacyDoc.name}`} · строк {legacyDoc.lines}
+						<InventoryDocumentAudit document={legacyDoc} />
 					</p>
 				) : documentList.length ? (
 					<div className="inventory-document-list">
 						{documentList.map(([kind, document]) => (
 							<p className="muted" key={kind}>
 								{document.status === 'submitted' ? '✓' : '✎'} {kind === 'issue' ? 'Списание недостачи' : 'Оприходование излишков'}: <b>{document.name}</b> · строк {document.lines} · {document.status === 'submitted' ? 'проведён' : 'черновик, остатки не тронуты'}
+								<InventoryDocumentAudit document={document} />
 							</p>
 						))}
 					</div>

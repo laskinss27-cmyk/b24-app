@@ -1,5 +1,5 @@
 import type { ErpClient } from '../erp/client.js';
-import { submitInventoryAdjustment } from '../erp/operations.js';
+import { submitAuditedInventoryDocument, type InventoryPostingActor } from '../erp/inventory-posting-audit.js';
 import type { InventoryDocumentKind, InventoryDocumentSet } from './api-inventory-document-state.js';
 
 /**
@@ -9,16 +9,19 @@ import type { InventoryDocumentKind, InventoryDocumentSet } from './api-inventor
 export async function submitInventoryDocumentSet(
 	erp: ErpClient,
 	documents: InventoryDocumentSet,
+	actor: InventoryPostingActor,
 	persist: (documents: InventoryDocumentSet, completedKind: InventoryDocumentKind) => Promise<void>,
 ): Promise<InventoryDocumentSet> {
 	for (const kind of ['issue', 'receipt'] as InventoryDocumentKind[]) {
 		const document = documents[kind];
 		if (!document || document.status === 'submitted') continue;
-		const live = await erp.get('Stock Entry', document.name);
-		if (!live) throw new Error(`${document.name} не найден в ядре — пересоздай документы`);
-		if (Number(live['docstatus'] ?? 0) !== 1) await submitInventoryAdjustment(erp, document.name);
+		const audit = await submitAuditedInventoryDocument(erp, 'Stock Entry', document.name, actor);
 		document.status = 'submitted';
-		document.submittedAt = new Date().toISOString();
+		if (audit) {
+			document.submittedAt = audit.at;
+			document.submittedById = audit.id;
+			document.submittedByName = audit.name;
+		}
 		await persist(documents, kind);
 	}
 	return documents;
