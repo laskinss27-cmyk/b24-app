@@ -28,4 +28,4 @@ Browser regression (включая фактическую отрисовку PDF
 
 Просмотр сам по себе не меняет схему SQLite или шифрование; отдельные добавочные таблицы MSG-11/12 описаны в telegram-account-lifecycle.md. Старые сообщения совместимы. Возврат предыдущего релиза просто убирает просмотр, временные файлы мигрировать или чистить на диске не нужно. WhatsApp/MAX в эту реализацию не входят.
 
-Результаты локальной проверки: [602 backend / 210 frontend и browser](audits/2026-10-09-telegram-accounts-preview-local.md). На сервер не выложено.
+Результаты локальной проверки: [602 backend / 210 frontend и browser](audits/2026-10-09-telegram-accounts-preview-local.md). Выложено 09.10 в `4a04c1e`; реальный PDF проверен. [Отчёт выпуска](audits/2026-10-09-telegram-accounts-release.md).
