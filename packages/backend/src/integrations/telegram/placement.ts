@@ -5,9 +5,9 @@ import { B24ApiError, type B24Client } from '../../b24/client.js';
 export async function bindTelegramPlacement(client: B24Client, base: string): Promise<void> {
 
     const handler=`${base.replace(/\/$/, '')}/placement/telegram`;
-    const rows=await client.call<{PLACEMENT:string;HANDLER:string;TITLE?:string}[]>('placement.get');
+    const rows=await client.call<{placement?:string;handler?:string;title?:string;PLACEMENT?:string;HANDLER?:string;TITLE?:string}[]>('placement.get');
     if(!Array.isArray(rows))throw new Error('Invalid placement list');
-    const previous=rows.find(row=>row.PLACEMENT==='CRM_DEAL_DETAIL_TAB' && row.HANDLER===handler);
+    const previous=rows.map(row=>({PLACEMENT:row.placement??row.PLACEMENT,HANDLER:row.handler??row.HANDLER,TITLE:row.title??row.TITLE})).find(row=>row.PLACEMENT==='CRM_DEAL_DETAIL_TAB' && row.HANDLER===handler);
     if(previous?.TITLE==='Сообщения')return;
     if(previous)await client.call('placement.unbind',{PLACEMENT:'CRM_DEAL_DETAIL_TAB',HANDLER:handler});
     try { await client.call('placement.bind',{PLACEMENT:'CRM_DEAL_DETAIL_TAB',HANDLER:handler,TITLE:'Сообщения',LANG_ALL:{ru:{TITLE:'Сообщения'},en:{TITLE:'Messages'}}}); }
