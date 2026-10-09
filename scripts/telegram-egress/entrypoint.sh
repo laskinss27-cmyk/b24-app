@@ -5,7 +5,7 @@ umask 077
 test -s /var/lib/cloudflare-warp/reg.json
 test -s /etc/xray/config.json
 mkdir -p /run/dbus
-dbus-daemon --system --fork
+dbus-daemon --system --fork --nopidfile
 warp_pid=''
 xray_pid=''
 cleanup() {
