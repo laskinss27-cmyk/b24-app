@@ -45,22 +45,26 @@ export class TelegramStore {
    CREATE TABLE IF NOT EXISTS telegram_accounts(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,label TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,telegram_id TEXT UNIQUE,session TEXT,active INTEGER NOT NULL DEFAULT 0);
    CREATE TABLE IF NOT EXISTS telegram_bindings(account_id TEXT NOT NULL REFERENCES telegram_accounts(id),chat_id TEXT NOT NULL,title TEXT NOT NULL,deal_id INTEGER NOT NULL,peer TEXT NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,reconcile_cursor INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(account_id,chat_id));
    CREATE TABLE IF NOT EXISTS telegram_messages(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,message_id INTEGER NOT NULL,deal_id INTEGER NOT NULL,date TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(account_id,chat_id,message_id));
+   CREATE TABLE IF NOT EXISTS telegram_deal_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL,chat_id TEXT NOT NULL,deal_id INTEGER NOT NULL,from_date TEXT NOT NULL,UNIQUE(account_id,chat_id,from_date));
+   CREATE INDEX IF NOT EXISTS telegram_deal_routes_lookup ON telegram_deal_routes(account_id,chat_id,from_date);
+   INSERT INTO telegram_deal_routes(account_id,chat_id,deal_id,from_date) SELECT b.account_id,b.chat_id,b.deal_id,'1970-01-01T00:00:00.000Z' FROM telegram_bindings b WHERE NOT EXISTS(SELECT 1 FROM telegram_deal_routes r WHERE r.account_id=b.account_id AND r.chat_id=b.chat_id);
    CREATE TABLE IF NOT EXISTS telegram_crm_credentials(owner_id TEXT PRIMARY KEY,payload TEXT NOT NULL);
-   CREATE TABLE IF NOT EXISTS telegram_auto_settings(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,last_run TEXT,error TEXT NOT NULL DEFAULT '');
+   CREATE TABLE IF NOT EXISTS telegram_auto_settings(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,last_run TEXT,enabled_at TEXT,error TEXT NOT NULL DEFAULT '');
    CREATE TABLE IF NOT EXISTS telegram_auto_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(account_id,chat_id));
    CREATE INDEX IF NOT EXISTS telegram_messages_deal ON telegram_messages(deal_id,date,message_id);
    CREATE INDEX IF NOT EXISTS telegram_messages_account_id ON telegram_messages(account_id,message_id);`);
+        if (!this.db.prepare('PRAGMA table_info(telegram_auto_settings)').all().some(r => r['name'] === 'enabled_at')) this.db.exec('ALTER TABLE telegram_auto_settings ADD COLUMN enabled_at TEXT');
         if (path !== ':memory:')
             chmodSync(path, 0o600);
     }
     autoState(id: string) {
         const row = this.db.prepare('SELECT * FROM telegram_auto_settings WHERE account_id=?').get(id);
         const count = this.db.prepare('SELECT count(*) AS n FROM telegram_auto_links WHERE account_id=?').get(id);
-        return { enabled: Boolean(row?.['enabled']), revision: Number(row?.['revision'] ?? 0), lastRun: row?.['last_run'] ? String(row['last_run']) : null, error: String(row?.['error'] ?? ''), matched: Number(count?.['n'] ?? 0) };
+        return { enabled: Boolean(row?.['enabled']), enabledAt: row?.['enabled_at'] ? String(row['enabled_at']) : null, revision: Number(row?.['revision'] ?? 0), lastRun: row?.['last_run'] ? String(row['last_run']) : null, error: String(row?.['error'] ?? ''), matched: Number(count?.['n'] ?? 0) };
     }
     setAuto(id: string, enabled: boolean): void {
         this.account(id);
-        this.db.prepare(`INSERT INTO telegram_auto_settings(account_id,enabled,revision) VALUES (?,?,1) ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,revision=revision+1,error=''`).run(id, Number(enabled));
+        this.db.prepare(`INSERT INTO telegram_auto_settings(account_id,enabled,revision,enabled_at) VALUES (?,?,1,?) ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,revision=revision+1,enabled_at=excluded.enabled_at,error=''`).run(id, Number(enabled), enabled ? new Date().toISOString() : null);
     }
     autoResult(id: string, revision: number, at: string, error: string): void {
         this.db.prepare('UPDATE telegram_auto_settings SET last_run=?,error=? WHERE account_id=? AND revision=? AND enabled=1').run(at, error, id, revision);
@@ -132,7 +136,34 @@ export class TelegramStore {
         if (!previous && this.bindings(accountId).length >= 100)
             throw new TelegramError('Лимит — 100 клиентских диалогов на аккаунт', 409);
         this.db.prepare(`INSERT INTO telegram_bindings(account_id,chat_id,title,deal_id,peer) VALUES (?,?,?,?,?) ON CONFLICT(account_id,chat_id) DO UPDATE SET enabled=1,title=excluded.title,peer=excluded.peer`).run(accountId, chatId, title.slice(0, 200), dealId, this.seal(`peer:${accountId}:${chatId}`, peer));
+        this.db.prepare(`INSERT INTO telegram_deal_routes(account_id,chat_id,deal_id,from_date) SELECT ?,?,?,'1970-01-01T00:00:00.000Z' WHERE NOT EXISTS(SELECT 1 FROM telegram_deal_routes WHERE account_id=? AND chat_id=?)`).run(accountId, chatId, dealId, accountId, chatId);
         return this.bindings(accountId).find(b => b.chatId === chatId)!;
+    }
+    /** Atomic boundary change: preserve cursor/history before the new deal, reroute only the delayed tail. */
+    rollover(binding: Binding, dealId: number, fromDate: string, revision: number): boolean {
+        if (!Number.isSafeInteger(dealId) || dealId <= 0 || !Number.isFinite(Date.parse(fromDate))) throw new TelegramError('Неверная граница сделки');
+        const cutoff = new Date(fromDate).toISOString();
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            const current = this.bindings(binding.accountId).find(b => b.chatId === binding.chatId), state = this.autoState(binding.accountId);
+            const latest = this.db.prepare('SELECT from_date FROM telegram_deal_routes WHERE account_id=? AND chat_id=? ORDER BY from_date DESC LIMIT 1').get(binding.accountId, binding.chatId);
+            if (!current?.enabled || current.dealId !== binding.dealId || current.dealId === dealId || !this.account(binding.accountId).active || !state.enabled || state.revision !== revision || !state.enabledAt || cutoff < state.enabledAt || (latest && cutoff <= String(latest['from_date']))) {
+                this.db.exec('ROLLBACK'); return false;
+            }
+            this.db.prepare('INSERT INTO telegram_deal_routes(account_id,chat_id,deal_id,from_date) VALUES (?,?,?,?)').run(binding.accountId, binding.chatId, dealId, cutoff);
+            this.db.prepare('UPDATE telegram_bindings SET deal_id=? WHERE account_id=? AND chat_id=?').run(dealId, binding.accountId, binding.chatId);
+            this.db.prepare('UPDATE telegram_messages SET deal_id=? WHERE account_id=? AND chat_id=? AND date>=?').run(dealId, binding.accountId, binding.chatId, cutoff);
+            this.recordAutoLink(binding.accountId, binding.chatId);
+            this.db.exec('COMMIT'); return true;
+        } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    }
+    bindingsForDeal(dealId: number): (Binding & { historical: boolean })[] {
+        const routes = this.db.prepare('SELECT DISTINCT account_id,chat_id FROM telegram_deal_routes WHERE deal_id=?').all(dealId);
+        return this.bindings().filter(b => routes.some(r => r['account_id'] === b.accountId && r['chat_id'] === b.chatId)).map(b => ({ ...b, dealId, historical: b.dealId !== dealId }));
+    }
+    private messageDeal(binding: Binding, date: string): number {
+        const route = this.db.prepare('SELECT deal_id FROM telegram_deal_routes WHERE account_id=? AND chat_id=? AND from_date<=? ORDER BY from_date DESC LIMIT 1').get(binding.accountId, binding.chatId, date);
+        return route ? Number(route['deal_id']) : binding.dealId;
     }
     pause(accountId: string, chatId: string): void { this.db.prepare('UPDATE telegram_bindings SET enabled=0 WHERE account_id=? AND chat_id=?').run(accountId, chatId); }
     peer<T>(binding: Binding): T { const row = this.db.prepare('SELECT peer FROM telegram_bindings WHERE account_id=? AND chat_id=?').get(binding.accountId, binding.chatId); return this.unseal<T>(`peer:${binding.accountId}:${binding.chatId}`, String(row!['peer'])); }
@@ -146,7 +177,7 @@ export class TelegramStore {
             }
             const insert = this.db.prepare(`INSERT INTO telegram_messages(account_id,chat_id,message_id,deal_id,date,payload) VALUES (?,?,?,?,?,?) ON CONFLICT(account_id,chat_id,message_id) DO UPDATE SET date=excluded.date,payload=excluded.payload`);
             for (const message of messages)
-                insert.run(binding.accountId, binding.chatId, message.id, binding.dealId, message.date, this.seal(`message:${binding.accountId}:${binding.chatId}:${message.id}`, message));
+                insert.run(binding.accountId, binding.chatId, message.id, this.messageDeal(binding, message.date), message.date, this.seal(`message:${binding.accountId}:${binding.chatId}:${message.id}`, message));
             this.db.prepare('UPDATE telegram_bindings SET cursor=max(cursor,?) WHERE account_id=? AND chat_id=?').run(cursor, binding.accountId, binding.chatId);
             this.db.exec('COMMIT');
         }
@@ -171,7 +202,9 @@ export class TelegramStore {
         return rows.map(r => Number(r['message_id']));
     }
     reconciled(binding: Binding, cursor: number): void { this.db.prepare('UPDATE telegram_bindings SET reconcile_cursor=? WHERE account_id=? AND chat_id=?').run(cursor, binding.accountId, binding.chatId); }
-    history(dealId: number, before?: string): {
+    history(dealId: number, before?: string, expectedRevision?: number): {
+        revision: number;
+        reset: boolean;
         messages: (Message & {
             accountId: string;
             chatId: string;
@@ -180,12 +213,15 @@ export class TelegramStore {
         })[];
         next: string | null;
     } {
+        const revision = Number(this.db.prepare('SELECT max(r.id) AS n FROM telegram_deal_routes r WHERE EXISTS(SELECT 1 FROM telegram_deal_routes h WHERE h.account_id=r.account_id AND h.chat_id=r.chat_id AND h.deal_id=?)').get(dealId)?.['n'] ?? 0);
+        const reset = expectedRevision !== undefined && expectedRevision !== revision;
+        if (reset) before = undefined;
         const parsed = before ? /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)\|([1-9]\d*)$/.exec(before) : null;
         if (before && (!parsed || !Number.isSafeInteger(Number(parsed[2]))))
             throw new TelegramError('Некорректная страница истории');
         const rows = parsed ? this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE deal_id=? AND (date<? OR (date=? AND rowid<?)) ORDER BY date DESC,rowid DESC LIMIT 201').all(dealId, parsed[1]!, parsed[1]!, Number(parsed[2])) : this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE deal_id=? ORDER BY date DESC,rowid DESC LIMIT 201').all(dealId);
         const page = rows.slice(0, 200), last = page[page.length - 1];
         const messages = page.map(row => ({ ...this.unseal<Message>(`message:${row['account_id']}:${row['chat_id']}:${row['message_id']}`, String(row['payload'])), accountId: String(row['account_id']), chatId: String(row['chat_id']), manager: this.account(String(row['account_id'])).label, dialog: this.bindings(String(row['account_id'])).find(b => b.chatId === row['chat_id'])?.title ?? 'Клиент' })).reverse();
-        return { messages, next: rows.length > 200 && last ? `${last['date']}|${last['ordinal']}` : null };
+        return { messages, revision, reset, next: rows.length > 200 && last ? `${last['date']}|${last['ordinal']}` : null };
     }
 }

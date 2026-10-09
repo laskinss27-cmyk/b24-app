@@ -15,7 +15,7 @@ function ids(value: unknown): number[] {
     return result;
 }
 /** Each query is sorted server-side: its first page contains its newest deal. */
-export async function newestOpenDeal(client: CrmReader, phone: string): Promise<number | null> {
+export async function newestOpenDealMatch(client: CrmReader, phone: string): Promise<{ id: number; createdAt: string } | null> {
     const normalized = telegramPhone(phone);
     if (!normalized) return null;
     const contacts = ids((await client.call<{ CONTACT?: unknown }>('crm.duplicate.findbycomm', { entity_type: 'CONTACT', type: 'PHONE', values: [normalized] })).CONTACT);
@@ -43,5 +43,17 @@ export async function newestOpenDeal(client: CrmReader, phone: string): Promise<
     // Recheck real access and current open state before associating any history.
     const deal = await client.call<{ ID: string; CLOSED: string; STAGE_SEMANTIC_ID: string }>('crm.deal.get', { id: Number(selected.id) });
     if (Number(deal.ID) !== Number(selected.id) || deal.CLOSED !== 'N' || deal.STAGE_SEMANTIC_ID !== 'P') return null;
-    return Number(selected.id);
+    return { id: Number(selected.id), createdAt: new Date(selected.createdTime).toISOString() };
+}
+
+export async function newestOpenDeal(client: CrmReader, phone: string): Promise<number | null> {
+    return (await newestOpenDealMatch(client, phone))?.id ?? null;
+}
+/** No rollover while the old deal is open or its lifecycle timestamps are unknown. */
+export async function closedDeal(client: CrmReader, id: number): Promise<{ createdAt: string; closedAt: string } | null> {
+    const deal = await client.call<{ ID: string; CLOSED: string; STAGE_SEMANTIC_ID: string; DATE_CREATE: string; MOVED_TIME: string }>('crm.deal.get', { id });
+    if (Number(deal.ID) !== id) throw new Error('CRM deal is inaccessible');
+    if (deal.CLOSED !== 'Y' || !['S', 'F'].includes(deal.STAGE_SEMANTIC_ID)) return null;
+    if (!Number.isFinite(Date.parse(deal.DATE_CREATE)) || !Number.isFinite(Date.parse(deal.MOVED_TIME))) throw new Error('CRM lifecycle timestamps missing');
+    return { createdAt: new Date(deal.DATE_CREATE).toISOString(), closedAt: new Date(deal.MOVED_TIME).toISOString() };
 }

@@ -1,7 +1,7 @@
 import type { Account } from './store.js';
 import { TelegramStore } from './store.js';
 import type { Dialog } from './transport.js';
-import { newestOpenDeal, telegramPhone, type CrmReader } from './crm-match.js';
+import { newestOpenDealMatch, closedDeal, telegramPhone, type CrmReader } from './crm-match.js';
 /** Discovery has its own error/backoff state: a CRM failure must not stop existing message collection. */
 export class TelegramAutoBinder {
     private readonly running = new Map<string, Promise<void>>();
@@ -18,34 +18,46 @@ export class TelegramAutoBinder {
         const task = (async () => {
             try {
                 if (!active()) return;
-                if (this.store.bindings(account.id).length >= 100) throw new Error('Binding limit');
                 const rows = await dialogs();
                 if (!active()) return;
                 const checked = this.checked.get(account.id) ?? new Map<string, { phone: string; at: number }>();
                 this.checked.set(account.id, checked);
                 const visible = new Set(rows.map(d => d.id));
                 for (const id of checked.keys()) if (!visible.has(id)) checked.delete(id);
-                const bound = new Set(this.store.bindings(account.id).map(b => b.chatId));
+                const bound = new Map(this.store.bindings(account.id).map(b => [b.chatId, b]));
                 const pending = rows.filter(d => {
                     const phone = telegramPhone(d.phone), previous = checked.get(d.id);
-                    return phone && !bound.has(d.id) && (!previous || previous.phone !== phone || previous.at + 300000 <= this.now());
+                    const binding = bound.get(d.id);
+                    return phone && (binding ? binding.enabled : bound.size < 100) && (!previous || previous.phone !== phone || previous.at + 300000 <= this.now());
                 }).sort((a, b) => (checked.get(a.id)?.at ?? 0) - (checked.get(b.id)?.at ?? 0)).slice(0, 10);
                 if (pending.length) {
                     const client = await this.clientForOwner(account.ownerId);
                     for (const dialog of pending) {
                         if (!active()) return;
                         const phone = telegramPhone(dialog.phone)!;
-                        const dealId = await newestOpenDeal(client, phone);
+                        const existing = this.store.bindings(account.id).find(b => b.chatId === dialog.id);
+                        if (existing && !existing.enabled) continue;
+                        const closed = existing ? await closedDeal(client, existing.dealId) : null;
+                        if (existing && !closed) { checked.set(dialog.id, { phone, at: this.now() }); continue; }
+                        const match = await newestOpenDealMatch(client, phone);
                         if (!active()) return;
                         // Recheck after awaits: manual binding/pause always wins over an in-flight match.
-                        if (dealId && !this.store.bindings(account.id).some(b => b.chatId === dialog.id)) {
-                            this.store.bind(account.id, dialog.id, dialog.title, dealId, dialog.peer);
+                        if (match && !existing && !this.store.bindings(account.id).some(b => b.chatId === dialog.id)) {
+                            this.store.bind(account.id, dialog.id, dialog.title, match.id, dialog.peer);
                             this.store.recordAutoLink(account.id, dialog.id);
+                        } else if (match && existing && closed && state.enabledAt &&
+                            (match.createdAt > closed.createdAt || (match.createdAt === closed.createdAt && match.id > existing.dealId))) {
+                            const stillClosed = await closedDeal(client, existing.dealId);
+                            if (!active()) return;
+                            if (stillClosed) {
+                                const cutoff = new Date(Math.max(Date.parse(match.createdAt), Date.parse(stillClosed.closedAt), Date.parse(state.enabledAt))).toISOString();
+                                this.store.rollover(existing, match.id, cutoff, state.revision);
+                            }
                         }
                         checked.set(dialog.id, { phone, at: this.now() });
                     }
                 }
-                if (active()) this.store.autoResult(account.id, state.revision, new Date(this.now()).toISOString(), '');
+                if (active()) this.store.autoResult(account.id, state.revision, new Date(this.now()).toISOString(), this.store.bindings(account.id).length >= 100 ? 'Достигнут лимит 100 диалогов. Поиск следующих сделок для уже привязанных продолжается' : '');
             } catch {
                 if (active()) {
                     this.next.set(account.id, this.now() + 300000);

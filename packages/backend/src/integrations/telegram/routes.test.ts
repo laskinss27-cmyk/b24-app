@@ -121,3 +121,15 @@ test('Auto binding enrollment cannot re-enable after concurrent disable', async 
         assert.equal((await running).statusCode, 409); assert.equal(f.store.autoState(f.a.id).enabled, false);
     } finally { release?.(); await f.close(); }
 });
+
+test('Old deal history remains visible with historical binding after rollover and does not disclose new deal id', async () => {
+    const f = await fixture();
+    try {
+        f.store.setAuto(f.a.id, true); f.store.db.prepare('UPDATE telegram_auto_settings SET enabled_at=?').run('2026-10-01T00:00:00.000Z');
+        const b = f.store.bindings()[0]!;
+        assert.equal(f.store.rollover(b, 50000, '2026-10-09T00:00:00.000Z', f.store.autoState(f.a.id).revision), true);
+        const r = await f.call('history', 'owner', { dealId: 37974 });
+        assert.equal(r.statusCode, 200); assert.equal(r.json().messages.length, 1); assert.equal(r.json().bindings[0].historical, true);
+        assert.equal(r.body.includes('50000'), false); assert.equal((await f.call('history', 'other', { dealId: 37974 })).statusCode, 403);
+    } finally { await f.close(); }
+});

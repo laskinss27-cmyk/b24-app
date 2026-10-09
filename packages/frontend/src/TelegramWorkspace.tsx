@@ -13,6 +13,7 @@ interface Account {
     autoBinding?: { enabled: boolean; lastRun: string | null; error: string; matched: number };
 }
 interface Binding {
+    historical?: boolean;
     accountId: string;
     chatId: string;
     dealId: number;
@@ -36,6 +37,8 @@ interface Message {
     deleted?: boolean;
 }
 interface History {
+    revision?: number;
+    reset?: boolean;
     messages: Message[];
     next: string | null;
     bindings: Binding[];
@@ -63,23 +66,23 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
         setAccounts(result.accounts);
         setConfigured(result.configured);
     } }, [api]);
-    const expanded = useRef(false);
+    const expanded = useRef(false), historyRevision = useRef<number | undefined>(undefined);
     const loadHistory = useCallback(async (before?: string) => {
         if (!dealId)
             return;
         const seq = ++historySequence.current;
         try {
-            const result = await api<History>('history', { dealId, ...(before ? { before } : {}) });
+            const result = await api<History>('history', { dealId, ...(before ? { before, revision: historyRevision.current } : {}) });
             if (live.current && seq === historySequence.current) {
                 setHistory(old => {
-                    if (!before && !expanded.current)
-                        return result;
+                    if (result.reset || (!before && (!expanded.current || old.revision !== result.revision))) { expanded.current = false; return result; }
                     const merged = new Map(old.messages.map(m => [`${m.accountId}:${m.chatId}:${m.id}`, m]));
                     for (const m of result.messages)
                         merged.set(`${m.accountId}:${m.chatId}:${m.id}`, m);
                     return { ...result, next: before ? result.next : old.next, messages: [...merged.values()].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id) };
                 });
-                if (before)
+                historyRevision.current = result.revision;
+                if (before && !result.reset)
                     expanded.current = true;
             }
         }
@@ -148,7 +151,7 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
   {loading ? <p role="status">Проверяем подключения…</p> : !configured ? <section className="tg-empty"><h2>Telegram ещё не настроен</h2><p>Администратору нужно включить интеграцию на сервере. После этого здесь можно подключить рабочий аккаунт.</p></section> : view === 'history' ? <>
    <div className="tg-summary"><span>Сообщения появляются автоматически</span><span>Ответы отправляйте в обычном Telegram</span></div>
    {history.bindings.length === 0 ? <section className="tg-empty"><h2>Переписка пока не привязана</h2><p>Подключите рабочий аккаунт и выберите клиентский диалог для этой сделки.</p><button className="tg-primary" onClick={() => setView('accounts')}>Выбрать диалог</button></section> : <>
-    <div className="tg-bindings">{history.bindings.map(b => <div key={`${b.accountId}:${b.chatId}`}><strong>{b.title}</strong><span>{b.manager} · {b.enabled ? (phases[b.status] ?? b.status) : 'Сбор приостановлен'}</span><small>{b.lastSync ? `Последняя проверка: ${time(b.lastSync)}` : 'Ожидаем первую загрузку'}</small></div>)}</div>
+    <div className="tg-bindings">{history.bindings.map(b => <div key={`${b.accountId}:${b.chatId}`}><strong>{b.title}</strong><span>{b.manager} · {b.historical ? 'Сохранённая история · сбор продолжен в другой сделке' : b.enabled ? (phases[b.status] ?? b.status) : 'Сбор приостановлен'}</span>{!b.historical && <small>{b.lastSync ? `Последняя проверка: ${time(b.lastSync)}` : 'Ожидаем первую загрузку'}</small>}</div>)}</div>
     {history.next && <button disabled={busy} onClick={() => void action(() => loadHistory(history.next!))}>Загрузить более ранние сообщения</button>}
     <ol className="tg-messages">{history.messages.map(m => <li key={`${m.accountId}:${m.chatId}:${m.id}`} className={m.outgoing ? 'tg-message tg-outgoing' : 'tg-message'}><div className="tg-message-meta"><strong>{m.outgoing ? m.manager : m.dialog}</strong><time dateTime={m.date}>{time(m.date)}</time></div>{m.deleted ? <p className="tg-muted">Сообщение удалено в Telegram</p> : <><p>{m.text}</p>{m.attachment && <p className="tg-attachment">{m.attachment} · откройте вложение в Telegram</p>}{m.edited && <small>Изменено</small>}</>}</li>)}</ol>
     {!history.messages.length && <p className="tg-empty">История ещё не загружена. Сообщения появятся после первой синхронизации.</p>}
@@ -160,7 +163,7 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
     {accounts.map(account => <article key={account.id} className={`tg-account${active === account.id ? ' tg-selected' : ''}`}><h3>{account.label}</h3><p>{phases[account.phase] ?? account.phase}</p>{account.error && <p className="tg-error">{account.error}</p>}
      {account.phase === 'ready' ? <button disabled={busy} onClick={() => void action(() => choose(account.id))}>Выбрать диалог</button> : ['offline', 'error', 'login_required', 'retry'].includes(account.phase) ? <button disabled={busy} onClick={() => void action(() => connect(account))}>Подключить снова</button> : <button disabled={busy} onClick={() => { setActive(account.id); setPassword(''); }}>Продолжить вход</button>}
      <div className="tg-auto"><strong>Автопривязка по телефону: {account.autoBinding?.enabled ? 'включена' : 'выключена'}</strong>
-      <p className="tg-muted">Уже привязанные диалоги остаются в своих сделках.</p>
+      <p className="tg-muted">После закрытия сделки переписка остаётся в ней до появления новой открытой сделки. Затем новые сообщения идут в новую сделку.</p>
       {account.autoBinding?.enabled && <small>Привязано автоматически: {account.autoBinding.matched}. {account.autoBinding.lastRun ? `Проверка: ${time(account.autoBinding.lastRun)}` : 'Ожидаем проверку'}</small>}
       {account.autoBinding?.error && <p className="tg-error">{account.autoBinding.error}</p>}
       <button disabled={busy || (!account.active && !account.autoBinding?.enabled)} onClick={() => void action(async () => { const enabled = !account.autoBinding?.enabled; await api('auto-binding', { accountId: account.id, enabled }); await loadAccounts(); setNotice(enabled ? 'Автопривязка включена. Сервер ищет сделки в фоне; первые результаты появятся через несколько минут.' : 'Автопривязка выключена. Существующие привязки и сбор сообщений сохранены.'); })}>{account.autoBinding?.enabled ? 'Выключить автопривязку' : 'Включить автопривязку'}</button>

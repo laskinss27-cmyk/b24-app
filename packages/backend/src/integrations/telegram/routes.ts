@@ -111,7 +111,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
     app.post('/api/telegram/pause', wrap((actor, body) => { const input = z.object({ accountId, chatId }).parse(body); own(actor, input.accountId); runtime().store.pause(input.accountId, input.chatId); return { ok: true }; }));
     app.post('/api/telegram/disconnect', wrap(async (actor, body) => { const input = z.object({ accountId }).parse(body); own(actor, input.accountId); return { ok: true, ...await runtime().disconnect(input.accountId) }; }));
     app.post('/api/telegram/history', wrap(async (_actor, body, client) => {
-        const input = z.object({ dealId, before: z.string().max(150).optional() }).parse(body);
+        const input = z.object({ dealId, before: z.string().max(150).optional(), revision: z.number().int().nonnegative().optional() }).parse(body);
         try {
             const deal = await client.call<{
                 ID?: string;
@@ -123,6 +123,6 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
             throw new TelegramError('Нет доступа к этой сделке', 403);
         }
         const s = runtime();
-        return { ok: true, ...s.store.history(input.dealId, input.before), bindings: s.store.bindings().filter(b => b.dealId === input.dealId).map(b => ({ ...b, manager: s.store.account(b.accountId).label, status: s.status(s.store.account(b.accountId)).phase, lastSync: s.status(s.store.account(b.accountId)).lastSync })) };
+        return { ok: true, ...s.store.history(input.dealId, input.before, input.revision), bindings: s.store.bindingsForDeal(input.dealId).map(b => ({ ...b, manager: s.store.account(b.accountId).label, status: s.status(s.store.account(b.accountId)).phase, lastSync: s.status(s.store.account(b.accountId)).lastSync })) };
     }));
 }
