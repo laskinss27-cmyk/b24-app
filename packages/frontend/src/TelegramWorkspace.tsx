@@ -10,6 +10,8 @@ interface Account {
     error: string;
     lastSync: string | null;
     active: boolean;
+    nextAttempt?: number;
+    limited?: boolean;
     loginAlert?: { needsLogin: boolean; state: string; error: string } | null;
     autoBinding?: { enabled: boolean; lastRun: string | null; error: string; matched: number };
 }
@@ -166,7 +168,7 @@ export function TelegramWorkspace({ dealId, contactId, managementOnly = false, a
    <p className="tg-intro">Подключите аккаунт по QR. Поиск по телефону включится автоматически: единственный контакт CRM → все его сделки. Проверяем 500 недавних диалогов; без доступного номера нужен ручной выбор. При первой привязке загрузятся последние 100 сообщений, затем — все новые. Во вкладке «Сообщения» доступны временный просмотр и прослушивание вложений.</p>
    <div className="tg-grid"><aside className="tg-accounts"><h2>Мои подключения</h2>
     {!accounts.length && <p className="tg-muted">Нет подключённых аккаунтов</p>}
-    {accounts.map(account => <article key={account.id} className={`tg-account${active === account.id ? ' tg-selected' : ''}`}><h3>{account.label}</h3><p>{phases[account.phase] ?? account.phase}</p>{account.error && <p className="tg-error">{account.error}</p>}
+    {accounts.map(account => <article key={account.id} className={`tg-account${active === account.id ? ' tg-selected' : ''}`}><h3>{account.label}</h3><p>{phases[account.phase] ?? account.phase}</p>{account.error && <p className="tg-error">{account.error}{account.limited && account.nextAttempt ? ` Следующая попытка: ${time(new Date(account.nextAttempt).toISOString())}. Переподключение не требуется.` : ''}</p>}
      {account.phase === 'ready' ? <button disabled={busy} onClick={() => void action(() => choose(account.id))}>Выбрать диалог</button> : ['offline', 'error', 'login_required', 'retry'].includes(account.phase) ? <button disabled={busy} onClick={() => void action(() => connect(account))}>Подключить снова</button> : <button disabled={busy} onClick={() => { setActive(account.id); setPassword(''); }}>Продолжить вход</button>}
      <div className="tg-auto"><strong>Поиск контактов по телефону: {account.autoBinding?.enabled ? 'работает автоматически' : 'потребуется подключить аккаунт снова'}</strong>
       <p className="tg-muted">Переписка принадлежит контакту и видна во всех его сделках. Диалоги разных менеджеров показываются отдельно.</p>

@@ -53,6 +53,7 @@ export class TelegramStore {
    CREATE TABLE IF NOT EXISTS telegram_auto_settings(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,last_run TEXT,enabled_at TEXT,error TEXT NOT NULL DEFAULT '');
    CREATE TABLE IF NOT EXISTS telegram_auto_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(account_id,chat_id));
    CREATE TABLE IF NOT EXISTS telegram_contact_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,contact_id INTEGER NOT NULL,PRIMARY KEY(account_id,chat_id),FOREIGN KEY(account_id,chat_id) REFERENCES telegram_bindings(account_id,chat_id));
+   CREATE TABLE IF NOT EXISTS telegram_request_cooldowns(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),until_ms INTEGER NOT NULL,method TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS telegram_manager_names(account_id TEXT NOT NULL REFERENCES telegram_accounts(id),from_date TEXT NOT NULL,label TEXT NOT NULL,PRIMARY KEY(account_id,from_date));
    INSERT INTO telegram_manager_names(account_id,from_date,label) SELECT a.id,'1970-01-01T00:00:00.000Z',a.label FROM telegram_accounts a WHERE NOT EXISTS(SELECT 1 FROM telegram_manager_names n WHERE n.account_id=a.id);
    CREATE TABLE IF NOT EXISTS telegram_connection_alerts(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),incident TEXT NOT NULL,needs_login INTEGER NOT NULL DEFAULT 1,state TEXT NOT NULL DEFAULT 'pending',next_at INTEGER NOT NULL DEFAULT 0,message_id TEXT,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);
@@ -125,6 +126,8 @@ export class TelegramStore {
             throw e;
         }
     }
+    cooldown(id: string) { const row=this.db.prepare('SELECT until_ms,method FROM telegram_request_cooldowns WHERE account_id=?').get(id);return {until:Number(row?.['until_ms']??0),method:String(row?.['method']??'')}; }
+    limitUntil(id:string,until:number,method:string): void {this.db.prepare('INSERT INTO telegram_request_cooldowns VALUES (?,?,?) ON CONFLICT(account_id) DO UPDATE SET until_ms=max(until_ms,excluded.until_ms),method=excluded.method').run(id,until,method);}
     managerAt(id: string, at: string): string {
         const row = this.db.prepare('SELECT label FROM telegram_manager_names WHERE account_id=? AND from_date<=? ORDER BY from_date DESC LIMIT 1').get(id, at);
         return row ? String(row['label']) : this.account(id).label;

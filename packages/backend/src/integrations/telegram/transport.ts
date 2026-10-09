@@ -1,3 +1,4 @@
+import { TelegramReadQueue } from './read-queue.js';
 import { downloadPreview, type MediaPreview } from './media.js';
 import type { SocksProxyType } from 'teleproto/network/connection/TCPMTProxy.js';
 import { TelegramClient, Api } from 'teleproto';
@@ -39,7 +40,7 @@ export interface Transport {
         type: 'delete';
         ids: number[];
     } | {
-        type: 'edit';
+        type: 'edit' | 'message';
         chatId: string;
         message: Message;
     }) => void): void;
@@ -58,6 +59,12 @@ export function telegramTransport(apiId: number, apiHash: string, proxy?: SocksP
     return (saved) => {
         const session = new StringSession(saved), client = new TelegramClient(session, apiId, apiHash, { ...(proxy ? { proxy } : {}), connectionRetries: 2, requestRetries: 1, floodSleepThreshold: 0, deviceModel: 'B24 CRM', appVersion: '1.0.0' });
         client.setLogLevel(LogLevel.NONE);
+        const queue = new TelegramReadQueue(), invoke = client.invoke.bind(client);
+        // Pace actual RPCs, including each internal page of getDialogs/getMessages.
+        client.invoke = (async (request, ...options) => {
+            const paced = ['messages.GetHistory', 'messages.GetMessages', 'messages.GetDialogs'].includes(request.className);
+            return paced ? queue.run(() => invoke(request, ...options)) : invoke(request, ...options);
+        }) as typeof client.invoke;
         return {
             preview: (peer, messageId, signal) => downloadPreview(client, peer, messageId, signal),
             connect: () => client.connect().then(() => undefined), authorized: () => client.checkAuthorization(), identity: async () => String((await client.getMe()).id), save: () => session.save(),
@@ -83,10 +90,12 @@ export function telegramTransport(apiId: number, apiHash: string, proxy?: SocksP
                     else
                         handler({ type: 'delete', ids: [update.message.id] });
                 }
-                else if (update instanceof Api.UpdateNewMessage || update instanceof Api.UpdatesTooLong)
-                    handler({ type: 'wake' });
+                else if (update instanceof Api.UpdateNewMessage && update.message instanceof Api.Message && update.message.peerId instanceof Api.PeerUser) {
+                    const message = toMessage(update.message);
+                    if (message) handler({ type: 'message', chatId: String(update.message.peerId.userId), message });
+                } else if (update instanceof Api.UpdatesTooLong) handler({ type: 'wake' });
             }),
-            logout: () => client.invoke(new Api.auth.LogOut()).then(() => undefined), close: () => client.destroy(),
+            logout: () => client.invoke(new Api.auth.LogOut()).then(() => undefined), close: () => { queue.close(); return client.destroy(); },
         };
     };
 }

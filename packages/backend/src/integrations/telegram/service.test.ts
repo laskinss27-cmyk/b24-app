@@ -204,3 +204,29 @@ test('Only revoked authorized sessions create login alerts; intentional disconne
  }
  const f=await fixture();try{await f.service.disconnect(f.a.id);assert.equal(f.store.loginAlert(f.a.id),null);}finally{await f.service.close();f.store.close();}
 });
+
+test('Live messages save both directions without scanning all dialogs or advancing a gap cursor',async()=>{
+ const f=await fixture();try{const b=f.store.bindContact(f.a.id,'200','Клиент',7,{});f.store.ingest(b,[f.client.messages[0]!],1);
+ const reads=f.client.reads.length;f.client.updates({type:'message',chatId:'200',message:{...f.client.messages[0]!,id:10,text:'Live'}});f.client.updates({type:'message',chatId:'200',message:{...f.client.messages[0]!,id:11,outgoing:true,text:'Reply'}});
+ assert.equal(f.client.reads.length,reads);assert.deepEqual(f.store.contactHistory(7,f.a.id,'200').messages.map(m=>m.id),[1,10,11]);assert.equal(f.store.bindings()[0]!.cursor,1);
+ f.store.pause(f.a.id,'200');f.client.updates({type:'message',chatId:'200',message:{...f.client.messages[0]!,id:12}});assert.equal(f.store.contactHistory(7,f.a.id,'200').messages.length,3);
+ }finally{await f.service.close();f.store.close();}
+});
+test('Routine tick does not poll every fifteen seconds; missed history is still reconciled after ten minutes',async t=>{
+ const f=await fixture();try{f.store.bindContact(f.a.id,'200','Клиент',7,{});await f.service.sync(f.a.id);const reads=f.client.reads.length;await f.service.tick();assert.equal(f.client.reads.length,reads);
+ const future=Date.now()+600001;t.mock.method(Date,'now',()=>future);await f.service.tick();await until(()=>f.client.reads.length>reads);
+ }finally{t.mock.restoreAll();await f.service.close();f.store.close();}
+});
+test('Telegram mandated cooldown survives service restart and blocks QR and all reconnect attempts until due',async t=>{
+ const f=await fixture();let second:TelegramService|undefined;try{f.client.dialogs=async()=>{throw {errorMessage:'FLOOD_WAIT_125',request:{className:'messages.GetHistory'}};};await assert.rejects(f.service.dialogs(f.a.id));await f.service.close();let calls=0;second=new TelegramService(f.store,()=>{calls++;return new FakeTransport();});
+ assert.equal(second.status(f.store.account(f.a.id)).phase,'retry');assert.equal(second.status(f.store.account(f.a.id)).limitMethod,'messages.GetHistory');await second.tick();await assert.rejects(second.connect(f.a.id),/ограничения/);assert.equal(calls,0);
+ const future=Date.now()+126000;t.mock.method(Date,'now',()=>future);await second.tick();await until(()=>calls===1);
+ }finally{t.mock.restoreAll();await second?.close();await f.service.close();f.store.close();}
+});
+test('Empty bound chats do not trigger initial history on every tick',async()=>{
+ const f=await fixture();try{f.client.messages=[];f.store.bindContact(f.a.id,'200','Клиент',7,{});await f.service.sync(f.a.id);const reads=f.client.reads.length;await f.service.tick();await f.service.tick();assert.equal(f.client.reads.length,reads);}finally{await f.service.close();f.store.close();}
+});
+
+test('Automatic discovery reuses dialog metadata for ten minutes while manual listing can refresh it',async t=>{
+ const f=await fixture();let lists=0;try{const original=f.client.dialogs.bind(f.client);f.client.dialogs=async()=>{lists++;return original();};await f.service.dialogs(f.a.id,true);await f.service.dialogs(f.a.id,true);assert.equal(lists,1);await f.service.dialogs(f.a.id);assert.equal(lists,2);const future=Date.now()+600001;t.mock.method(Date,'now',()=>future);await f.service.dialogs(f.a.id,true);assert.equal(lists,3);}finally{t.mock.restoreAll();await f.service.close();f.store.close();}
+});
