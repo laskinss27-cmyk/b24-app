@@ -1,3 +1,4 @@
+import { dialogKind, isGroup } from './peer.js';
 import { TelegramStore, TelegramError, type Account, type Binding } from './store.js';
 import type { Dialog, Transport, TransportFactory } from './transport.js';
 import type { TelegramAutoBinder } from './auto-binding.js';
@@ -40,6 +41,8 @@ export function safeTelegramError(error: unknown): {
     return { message: error instanceof TelegramError ? error.message : 'Сервер не смог связаться с Telegram. Подключение будет повторено автоматически', retrySeconds: 60, authLost: false };
 }
 export class TelegramService {
+    private readonly groupErrors = new Map<string, string>();
+    sourceError(accountId:string,chatId:string): string { return this.groupErrors.get(accountId+':'+chatId)??''; }
     private readonly nextInitialRead = new Map<string, number>();
     private readonly mediaRequests = new Map<string, AbortController>();
     private readonly storageErrors = new Map<string, string>();
@@ -62,7 +65,7 @@ export class TelegramService {
             if (live.stopped || this.closed || live.phase !== 'ready')
                 return;
             if (change.type === 'delete')
-                this.store.remove(id, change.ids);
+                this.store.remove(id, change.ids, change.chatId);
             if (change.type === 'edit' || change.type === 'message') {
                 const binding = this.store.bindings(id).find(b => b.chatId === change.chatId && b.enabled);
                 if (binding) {
@@ -181,10 +184,16 @@ export class TelegramService {
     async dialogs(id: string, cached = false): Promise<{
         id: string;
         title: string;
+        kind: 'private' | 'group';
+        collectedElsewhere: boolean;
         binding: Binding | null;
     }[]> {
         const live = this.requireLive(id);
-        if (cached && live.dialogsFetchedAt && Date.now() - live.dialogsFetchedAt < 600000) return [...live.dialogs.values()].map(d=>({id:d.id,title:d.title,binding:this.store.bindings(id).find(b=>b.chatId===d.id)??null}));
+        const view = (dialogs: Dialog[]) => {
+            const bindings=this.store.bindings(),own=new Map(bindings.filter(b=>b.accountId===id).map(b=>[b.chatId,b])),groups=new Map(bindings.filter(b=>isGroup(b.chatId)).map(b=>[b.chatId,b]));
+            return dialogs.map(d=>({id:d.id,title:d.title,kind:dialogKind(d.id),collectedElsewhere:Boolean(groups.has(d.id)&&groups.get(d.id)!.accountId!==id),binding:own.get(d.id)??null}));
+        };
+        if (cached && live.dialogsFetchedAt && Date.now() - live.dialogsFetchedAt < 600000) return view([...live.dialogs.values()]);
         let dialogs: Dialog[];
         try {
             dialogs = await live.transport.dialogs();
@@ -199,11 +208,11 @@ export class TelegramService {
             throw new TelegramError('Подключение закрыто', 409);
         live.dialogs = new Map(dialogs.map(d => [d.id, d]));
         live.dialogsFetchedAt = Date.now();
-        return dialogs.map(d => ({ id: d.id, title: d.title, binding: this.store.bindings(id).find(b => b.chatId === d.id) ?? null }));
+        return view(dialogs);
     }
     bind(id: string, chatId: string, dealId: number): Binding { const live = this.requireLive(id), dialog = live.dialogs.get(chatId); if (!dialog)
         throw new TelegramError('Загрузите список и выберите клиентский диалог'); const binding = this.store.bind(id, chatId, dialog.title, dealId, dialog.peer); void this.sync(id, live); return binding; }
-    bindContact(id: string, chatId: string, contactId: number): Binding { const live=this.requireLive(id),dialog=live.dialogs.get(chatId);if(!dialog)throw new TelegramError('Загрузите список и выберите клиентский диалог');const binding=this.store.bindContact(id,chatId,dialog.title,contactId,dialog.peer);void this.sync(id,live);return binding; }
+    bindContact(id: string, chatId: string, contactId: number): Binding { const live=this.requireLive(id),dialog=live.dialogs.get(chatId);if(!dialog)throw new TelegramError('Загрузите список и выберите клиентский диалог');const binding=this.store.bindContact(id,chatId,dialog.title,contactId,dialog.peer);if(binding.accountId===id)void this.sync(id,live);return binding; }
     async preview(contactId: number, id: string, chatId: string, messageId: number, signal: AbortSignal) {
         this.store.contactMessage(contactId, id, chatId, messageId);
         const live = this.requireLive(id);
@@ -235,32 +244,42 @@ export class TelegramService {
         try {
             for (const initial of this.store.bindings(id).filter(b => b.enabled && (!onlyUninitialized || b.cursor === 0 && (this.nextInitialRead.get(id+':'+b.chatId)??0)<=Date.now()))) {
                 if (!initial.cursor) this.nextInitialRead.set(id+':'+initial.chatId,Date.now()+600000);
-                let binding = initial;
-                for (let page = 0; page < 10; page++) {
+                try {
+                    let binding = initial;
+                    for (let page = 0; page < 10; page++) {
+                        if (live.stopped || this.closed || live.phase !== 'ready')
+                            return;
+                        if (!this.store.bindings(id).some(b => b.chatId === binding.chatId && b.enabled))
+                            break;
+                        const batch = await live.transport.history(this.store.peer<Dialog['peer']>(binding), binding.cursor);
+                        if (live.stopped || this.closed || live.phase !== 'ready')
+                            return;
+                        this.store.ingest(binding, batch.messages, batch.cursor);
+                        if (!batch.more || batch.cursor <= binding.cursor)
+                            break;
+                        binding = { ...binding, cursor: batch.cursor };
+                    }
                     if (live.stopped || this.closed || live.phase !== 'ready')
                         return;
                     if (!this.store.bindings(id).some(b => b.chatId === binding.chatId && b.enabled))
-                        break;
-                    const batch = await live.transport.history(this.store.peer<Dialog['peer']>(binding), binding.cursor);
-                    if (live.stopped || this.closed || live.phase !== 'ready')
-                        return;
-                    this.store.ingest(binding, batch.messages, batch.cursor);
-                    if (!batch.more || batch.cursor <= binding.cursor)
-                        break;
-                    binding = { ...binding, cursor: batch.cursor };
-                }
-                if (live.stopped || this.closed || live.phase !== 'ready')
-                    return;
-                if (!this.store.bindings(id).some(b => b.chatId === binding.chatId && b.enabled))
-                    continue;
-                const ids = this.store.reconcileWindow(binding);
-                if (ids.length && !onlyUninitialized) {
-                    const result = await live.transport.reconcile(this.store.peer<Dialog['peer']>(binding), ids);
-                    if (live.stopped || this.closed || live.phase !== 'ready')
-                        return;
-                    this.store.ingest(binding, result.messages, binding.cursor);
-                    this.store.remove(id, result.deleted);
-                    this.store.reconciled(binding, ids[ids.length - 1]!);
+                        continue;
+                    const ids = this.store.reconcileWindow(binding);
+                    if (ids.length && !onlyUninitialized) {
+                        const result = await live.transport.reconcile(this.store.peer<Dialog['peer']>(binding), ids);
+                        if (live.stopped || this.closed || live.phase !== 'ready')
+                            return;
+                        this.store.ingest(binding, result.messages, binding.cursor);
+                        this.store.remove(id, result.deleted, binding.chatId);
+                        this.store.reconciled(binding, ids[ids.length - 1]!);
+                    }
+                    this.groupErrors.delete(id+':'+initial.chatId);
+                } catch(error) {
+                    // Losing access to one group must not stop this account's private dialogs.
+                    if (isGroup(initial.chatId) && /^(CHANNEL_PRIVATE|CHANNEL_INVALID|CHAT_ID_INVALID|CHAT_FORBIDDEN|USER_NOT_PARTICIPANT)$/.test(String((error as {errorMessage?:string})?.errorMessage??''))) {
+                        this.groupErrors.set(id+':'+initial.chatId,'Нет доступа к группе. Восстановите участие аккаунта, через который идёт сбор. Сохранённая история доступна.');
+                        continue;
+                    }
+                    throw error;
                 }
             }
             if (live.stopped || this.closed || live.phase !== 'ready' || !this.store.account(id).active) return;

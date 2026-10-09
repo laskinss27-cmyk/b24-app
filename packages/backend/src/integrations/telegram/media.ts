@@ -1,5 +1,5 @@
 import { Api, type TelegramClient } from 'teleproto';
-import bigInt from 'big-integer';
+import { inputPeer, peerKey, storedPeerKey } from './peer.js';
 import { TelegramError } from './store.js';
 import type { Dialog } from './transport.js';
 
@@ -32,10 +32,10 @@ export function mediaInfo(message: Api.Message): { mime: string; kind: PreviewKi
 export async function downloadPreview(client: Pick<TelegramClient, 'getMessages' | 'downloadMedia'>, peer: Dialog['peer'], messageId: number, signal: AbortSignal): Promise<MediaPreview> {
     signal.throwIfAborted();
     // Fetch a fresh file reference; never accept a file location or URL supplied by the browser.
-    const rows = await client.getMessages(new Api.InputPeerUser({ userId: bigInt(peer.userId), accessHash: bigInt(peer.accessHash) }), { ids: [messageId] });
+    const rows = await client.getMessages(inputPeer(peer), { ids: [messageId] });
     signal.throwIfAborted();
     const message = rows.find(m => m.id === messageId);
-    if (!(message instanceof Api.Message) || !(message.peerId instanceof Api.PeerUser) || String(message.peerId.userId) !== peer.userId)
+    if (!(message instanceof Api.Message) || peerKey(message.peerId) !== storedPeerKey(peer))
         throw new TelegramError('Сообщение удалено или недоступно в этом диалоге', 404);
     const info = mediaInfo(message);
     if (!Number.isSafeInteger(info.size) || info.size <= 0 || info.size > MAX_PREVIEW_BYTES)

@@ -1,3 +1,4 @@
+import { isGroup } from './peer.js';
 import type { Account } from './store.js';
 import { TelegramStore } from './store.js';
 import type { Dialog } from './transport.js';
@@ -18,7 +19,7 @@ export class ContactAutoBinder {
             const checked=this.checked.get(account.id)??new Map<string,number>();this.checked.set(account.id,checked);
             for(const id of checked.keys())if(!rows.some(row=>row.id===id))checked.delete(id);
             const bindings=new Map(this.store.bindings(account.id).map(b=>[b.chatId,b]));
-            const candidates=rows.filter(d=>{const b=bindings.get(d.id);return !b?.contactId && (b?b.enabled:bindings.size<100) && (b||telegramPhone(d.phone)) && (checked.get(d.id)??0)+300000<=this.now();}).sort((a,b)=>(checked.get(a.id)??0)-(checked.get(b.id)??0)).slice(0,10);
+            const candidates=rows.filter(d=>{const b=bindings.get(d.id);return !isGroup(d.id) && !b?.contactId && (b?b.enabled:bindings.size<100) && (b||telegramPhone(d.phone)) && (checked.get(d.id)??0)+300000<=this.now();}).sort((a,b)=>(checked.get(a.id)??0)-(checked.get(b.id)??0)).slice(0,10);
             let unresolved=0;
             if(candidates.length){const client=await this.clientForOwner(account.ownerId);for(const dialog of candidates){
                 if(!active())return;const previous=this.store.bindings(account.id).find(b=>b.chatId===dialog.id);if(previous?.contactId||previous&&!previous.enabled)continue;

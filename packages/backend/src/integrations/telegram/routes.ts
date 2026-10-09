@@ -1,3 +1,4 @@
+import { dialogKind } from './peer.js';
 import { TelegramConnectionAlerts, managerAlertChat } from './connection-alerts.js';
 import { join } from 'node:path';
 import { readTelegramConfig, type TelegramConfig } from './config.js';
@@ -12,7 +13,7 @@ import { ContactAutoBinder } from './contact-auto-binding.js';
 import { contactFromCrm, dealContactIds, contactInDeal, legacyContact, validateLegacyChoice } from './contact-crm.js';
 import { TelegramCrmAccess } from './crm-access.js';
 const accountId = z.string().uuid();
-const chatId = z.string().regex(/^[1-9]\d{0,19}$/);
+const chatId = z.string().regex(/^(?:(?:g|s):)?[1-9]\d{0,19}$/);
 const dealId = z.number().int().positive().safe();
 export function registerTelegramRoutes(app: FastifyInstance, supplied?: TelegramService, clientFrom = accessClientFrom, suppliedCrmAccess?: Pick<TelegramCrmAccess, 'enroll' | 'forOwner'>): void {
     let service = supplied;
@@ -139,7 +140,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
             if(s.store.account(binding.accountId).ownerId===actor||actor===APP_OWNER_USER_ID){try{const contact=await legacyContact(client,s.store,binding);if(contact)s.store.attachContact(binding.accountId,binding.chatId,contact.id);}catch{/* Keep the original encrypted rows and association. */}}
             if(!s.store.contactId(binding.accountId,binding.chatId))pendingMigration++;
         }
-        return {ok:true,contacts,pendingMigration,dialogs:contacts.flatMap(contact=>s.store.contactBindings(contact.id).map(b=>({...b,contactId:contact.id,messenger:'telegram',manager:s.store.account(b.accountId).label,status:s.status(s.store.account(b.accountId)).phase,lastSync:s.status(s.store.account(b.accountId)).lastSync})))};
+        return {ok:true,contacts,pendingMigration,dialogs:contacts.flatMap(contact=>s.store.contactBindings(contact.id).map(b=>({...b,kind:dialogKind(b.chatId),sourceError:s.sourceError(b.accountId,b.chatId),contactId:contact.id,messenger:'telegram',manager:s.store.account(b.accountId).label,status:s.status(s.store.account(b.accountId)).phase,lastSync:s.status(s.store.account(b.accountId)).lastSync})))};
     }));
     app.post('/api/telegram/client-history',wrap(async(_actor,body,client)=>{
         const input=z.object({dealId,contactId:dealId,accountId,chatId,before:z.string().max(150).optional()}).parse(body);

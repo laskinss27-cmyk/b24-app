@@ -1,3 +1,4 @@
+import { isGroup } from './peer.js';
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
@@ -28,6 +29,8 @@ export interface Message {
     outgoing: boolean;
     text: string;
     attachment: string | null;
+    senderId?: string;
+    senderName?: string;
     edited?: boolean;
     deleted?: boolean;
 }
@@ -45,6 +48,7 @@ export class TelegramStore {
         this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
    CREATE TABLE IF NOT EXISTS telegram_accounts(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,label TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,telegram_id TEXT UNIQUE,session TEXT,active INTEGER NOT NULL DEFAULT 0);
    CREATE TABLE IF NOT EXISTS telegram_bindings(account_id TEXT NOT NULL REFERENCES telegram_accounts(id),chat_id TEXT NOT NULL,title TEXT NOT NULL,deal_id INTEGER NOT NULL,peer TEXT NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,reconcile_cursor INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(account_id,chat_id));
+   CREATE UNIQUE INDEX IF NOT EXISTS telegram_group_collector ON telegram_bindings(chat_id) WHERE chat_id GLOB 'g:*' OR chat_id GLOB 's:*';
    CREATE TABLE IF NOT EXISTS telegram_messages(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,message_id INTEGER NOT NULL,deal_id INTEGER NOT NULL,date TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(account_id,chat_id,message_id));
    CREATE TABLE IF NOT EXISTS telegram_deal_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL,chat_id TEXT NOT NULL,deal_id INTEGER NOT NULL,from_date TEXT NOT NULL,UNIQUE(account_id,chat_id,from_date));
    CREATE INDEX IF NOT EXISTS telegram_deal_routes_lookup ON telegram_deal_routes(account_id,chat_id,from_date);
@@ -167,7 +171,10 @@ export class TelegramStore {
     }
     deactivate(id: string): void { this.db.prepare('UPDATE telegram_accounts SET active=0,session=NULL WHERE id=?').run(id); }
     bindings(id?: string): Binding[] { return (id ? this.db.prepare('SELECT * FROM telegram_bindings WHERE account_id=?').all(id) : this.db.prepare('SELECT * FROM telegram_bindings').all()).map(r => ({ accountId: String(r['account_id']), chatId: String(r['chat_id']), title: String(r['title']), dealId: Number(r['deal_id']), contactId: this.contactId(String(r['account_id']), String(r['chat_id'])), cursor: Number(r['cursor']), reconcileCursor: Number(r['reconcile_cursor']), enabled: Boolean(r['enabled']) })); }
+    groupBinding(chatId: string): Binding | undefined { return isGroup(chatId) ? this.bindings().find(b => b.chatId === chatId) : undefined; }
     bind(accountId: string, chatId: string, title: string, dealId: number, peer: unknown): Binding {
+        const collector = this.groupBinding(chatId);
+        if (collector && collector.accountId !== accountId) throw new TelegramError('Группа уже собирается через другое подключение',409);
         const previous = this.bindings(accountId).find(b => b.chatId === chatId);
         if (previous && previous.dealId !== dealId)
             throw new TelegramError('Диалог уже связан с другой сделкой. Перенос истории требует отдельного решения', 409);
@@ -185,6 +192,11 @@ export class TelegramStore {
         this.db.prepare('INSERT OR IGNORE INTO telegram_contact_links(account_id,chat_id,contact_id) VALUES (?,?,?)').run(accountId,chatId,contactId);
     }
     bindContact(accountId: string, chatId: string, title: string, contactId: number, peer: unknown): Binding {
+        const collector = this.groupBinding(chatId);
+        if (collector && collector.accountId !== accountId) {
+            if (collector.contactId !== contactId) throw new TelegramError('Группа уже привязана к другому контакту',409);
+            return collector; // Never resume another owner's paused collector or copy its peer/cursor.
+        }
         const previous=this.bindings(accountId).find(b=>b.chatId===chatId);
         if(previous?.contactId && previous.contactId!==contactId) throw new TelegramError('Диалог уже связан с другим контактом',409);
         this.db.exec('BEGIN IMMEDIATE');
@@ -208,7 +220,15 @@ export class TelegramStore {
         if(before && (!parsed || !Number.isSafeInteger(Number(parsed[2])))) throw new TelegramError('Некорректная страница истории');
         const rows=parsed ? this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE account_id=? AND chat_id=? AND (date<? OR (date=? AND rowid<?)) ORDER BY date DESC,rowid DESC LIMIT 201').all(accountId,chatId,parsed[1]!,parsed[1]!,Number(parsed[2])) : this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE account_id=? AND chat_id=? ORDER BY date DESC,rowid DESC LIMIT 201').all(accountId,chatId);
         const page=rows.slice(0,200),last=page.at(-1),binding=this.bindings(accountId).find(b=>b.chatId===chatId)!;
-        return {messages:page.map(row=>({...this.unseal<Message>(`message:${accountId}:${chatId}:${row['message_id']}`,String(row['payload'])),accountId,chatId,manager:this.managerAt(accountId,String(row['date'])),dialog:binding.title})).reverse(),next:rows.length>200 && last ? `${last['date']}|${last['ordinal']}` : null};
+        const accounts=isGroup(chatId)?this.accounts():[];
+        return {messages:page.map(row=>{
+            const message=this.unseal<Message>(`message:${accountId}:${chatId}:${row['message_id']}`,String(row['payload']));
+            const manager=this.managerAt(accountId,String(row['date']));
+            if (!isGroup(chatId)) return {...message,accountId,chatId,manager,dialog:binding.title};
+            const sender=accounts.find(a=>a.telegramId && message.senderId==='u:'+a.telegramId);
+            const author=sender ? this.managerAt(sender.id,message.date) : message.senderName || (message.senderId?.startsWith('u:') ? 'Участник '+message.senderId.slice(2) : message.senderId ? 'От имени группы или канала' : 'Автор не указан Telegram');
+            return {...message,accountId,chatId,manager,dialog:binding.title,author,outgoing:Boolean(sender)};
+        }).reverse(),next:rows.length>200 && last ? `${last['date']}|${last['ordinal']}` : null};
     }
     /** Retired runtime rule, retained for migration and rollback tests. Atomic boundary change: preserve cursor/history before the new deal, reroute only the delayed tail. */
     rollover(binding: Binding, dealId: number, fromDate: string, revision: number): boolean {
@@ -248,8 +268,16 @@ export class TelegramStore {
                 return;
             }
             const insert = this.db.prepare(`INSERT INTO telegram_messages(account_id,chat_id,message_id,deal_id,date,payload) VALUES (?,?,?,?,?,?) ON CONFLICT(account_id,chat_id,message_id) DO UPDATE SET date=excluded.date,payload=excluded.payload`);
-            for (const message of messages)
-                insert.run(binding.accountId, binding.chatId, message.id, this.messageDeal(binding, message.date), message.date, this.seal(`message:${binding.accountId}:${binding.chatId}:${message.id}`, message));
+            for (const message of messages) {
+                const purpose=`message:${binding.accountId}:${binding.chatId}:${message.id}`;
+                let value=message;
+                // Compact updates can omit the sender entity; keep an already known name for the same sender.
+                if(isGroup(binding.chatId)&&message.senderId&&!message.senderName){
+                    const previous=this.db.prepare('SELECT payload FROM telegram_messages WHERE account_id=? AND chat_id=? AND message_id=?').get(binding.accountId,binding.chatId,message.id);
+                    if(previous){const old=this.unseal<Message>(purpose,String(previous['payload']));if(old.senderId===message.senderId&&old.senderName)value={...message,senderName:old.senderName};}
+                }
+                insert.run(binding.accountId,binding.chatId,message.id,this.messageDeal(binding,message.date),message.date,this.seal(purpose,value));
+            }
             this.db.prepare('UPDATE telegram_bindings SET cursor=max(cursor,?) WHERE account_id=? AND chat_id=?').run(cursor, binding.accountId, binding.chatId);
             this.db.exec('COMMIT');
         }
@@ -258,10 +286,10 @@ export class TelegramStore {
             throw e;
         }
     }
-    remove(accountId: string, ids: number[]): void {
-        const select = this.db.prepare('SELECT * FROM telegram_messages WHERE account_id=? AND message_id=?');
+    remove(accountId: string, ids: number[], chatId?: string): void {
+        const select = this.db.prepare("SELECT * FROM telegram_messages WHERE account_id=? AND message_id=? AND ((? IS NULL AND chat_id NOT GLOB 's:*') OR chat_id=?)");
         for (const messageId of new Set(ids))
-            for (const row of select.all(accountId, messageId)) {
+            for (const row of select.all(accountId, messageId, chatId ?? null, chatId ?? null)) {
                 const purpose = `message:${accountId}:${row['chat_id']}:${row['message_id']}`;
                 const m = this.unseal<Message>(purpose, String(row['payload']));
                 this.db.prepare('UPDATE telegram_messages SET payload=? WHERE account_id=? AND chat_id=? AND message_id=?').run(this.seal(purpose, { ...m, text: '', attachment: null, deleted: true }), accountId, String(row['chat_id']), Number(row['message_id']));

@@ -48,6 +48,8 @@ interface History {
     bindings: Binding[];
 }
 interface Dialog {
+    kind?: 'private' | 'group';
+    collectedElsewhere?: boolean;
     id: string;
     title: string;
     binding: Binding | null;
@@ -141,12 +143,13 @@ export function TelegramWorkspace({ dealId, contactId, managementOnly = false, a
         if (!Number.isSafeInteger(numeric) || numeric <= 0)
             throw new Error('Укажите номер контакта');
         const result = await api<{
+            binding: { enabled: boolean };
             contact: {
                 id: number;
                 title: string;
             };
         }>('bind-contact', { accountId: active, chatId: dialog.id, contactId: numeric, ...(dealId ? {dealId} : {}) });
-        setNotice(`Диалог «${dialog.title}» связан с контактом № ${result.contact.id}. Сбор сообщений включён.`);
+        setNotice(`Диалог «${dialog.title}» связан с контактом № ${result.contact.id}. ${result.binding?.enabled===false?'Сбор приостановлен у выбранного подключения.':'Сбор сообщений включён.'}`);
         await choose(active);
         if (dealId)
             await loadHistory();
@@ -190,7 +193,7 @@ export function TelegramWorkspace({ dealId, contactId, managementOnly = false, a
    </aside><section className="tg-dialogs">
     {selected?.qr ? <div className="tg-login"><h2>Подтвердите вход: {selected.label}</h2><img src={selected.qr} width={256} height={256} alt="QR-код входа в рабочий Telegram"/><p>Telegram → Настройки → Устройства → Подключить устройство.</p><p className="tg-muted">Подключение позволяет серверу читать аккаунт. К контактам привязываются диалоги, выбранные вручную или найденные по телефону автоматически после подключения.</p></div> : selected?.phase === 'password' ? <form className="tg-login" onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void action(async () => { await api('password', { accountId: active, password: value }); await loadAccounts(); }); }}><h2>Пароль Telegram</h2><label htmlFor="tg-password">Пароль двухэтапной проверки</label><input id="tg-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required maxLength={512}/><button className="tg-primary" disabled={busy}>Подтвердить вход</button></form> : selected?.phase === 'connecting' ? <p role="status">Соединяемся с Telegram…</p> : selected?.phase === 'ready' ? <>
      <h2>Диалоги · {selected.label}</h2><div className="tg-fields"><label>Поиск по имени<input value={search} onChange={e => setSearch(e.target.value)} type="search"/></label><label>Номер контакта<input type="number" min="1" step="1" value={target} onChange={e => setTarget(e.target.value)} required/></label></div>
-     {!dialogs.length ? <p>Нажмите «Выбрать диалог» у аккаунта, чтобы загрузить список личных переписок.</p> : <ul className="tg-dialog-list">{dialogs.filter(d => d.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(d => <li key={d.id}><div><strong>{d.title}</strong>{d.binding && <small>{d.binding.contactId ? `Контакт № ${d.binding.contactId}` : 'Прежняя связь: требуется выбор контакта'} · {d.binding.enabled ? 'Сбор включён' : 'Сбор приостановлен'}</small>}</div>{d.binding?.enabled && d.binding.contactId ? <button disabled={busy} onClick={() => void action(async () => { await api('pause', { accountId: active, chatId: d.id }); await choose(active); setNotice('Сбор приостановлен. История сохранена.'); })}>Приостановить</button> : <button disabled={busy || !target} onClick={() => void action(() => bind(d))}>{d.binding?.contactId ? 'Возобновить сбор' : 'Привязать к контакту'}</button>}</li>)}</ul>}
+     {!dialogs.length ? <p>Нажмите «Выбрать диалог» у аккаунта, чтобы загрузить список личных переписок и групп.</p> : <ul className="tg-dialog-list">{dialogs.filter(d => d.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(d => <li key={d.id}><div><strong>{d.kind==='group'?'Группа · ':''}{d.title}</strong>{d.kind==='group'&&<small>{d.collectedElsewhere?'Уже привязана через другое подключение. Повторная привязка не нужна.':'Выберите контакт вручную. Все участники будут видны в одной ленте.'}</small>}{d.binding && <small>{d.binding.contactId ? `Контакт № ${d.binding.contactId}` : 'Прежняя связь: требуется выбор контакта'} · {d.binding.enabled ? 'Сбор включён' : 'Сбор приостановлен'}</small>}</div>{d.collectedElsewhere ? <span className="tg-muted">Общая группа подключена</span> : d.binding?.enabled && d.binding.contactId ? <button disabled={busy} onClick={() => void action(async () => { await api('pause', { accountId: active, chatId: d.id }); await choose(active); setNotice('Сбор приостановлен. История сохранена.'); })}>Приостановить</button> : <button disabled={busy || !target} onClick={() => void action(() => bind(d))}>{d.binding?.contactId ? 'Возобновить сбор' : 'Привязать к контакту'}</button>}</li>)}</ul>}
     </> : <div className="tg-empty"><h2>Выберите рабочий аккаунт</h2><p>После подключения здесь появятся клиентские диалоги. Личные переписки можно оставить без привязки.</p></div>}
    </section></div>
   </>}
