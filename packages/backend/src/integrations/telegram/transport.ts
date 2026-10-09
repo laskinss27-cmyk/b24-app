@@ -8,6 +8,7 @@ import type { Message } from './store.js';
 export interface Dialog {
     id: string;
     title: string;
+    phone?: string | undefined;
     peer: {
         userId: string;
         accessHash: string;
@@ -57,7 +58,7 @@ export function telegramTransport(apiId: number, apiHash: string, proxy?: SocksP
         return {
             connect: () => client.connect().then(() => undefined), authorized: () => client.checkAuthorization(), identity: async () => String((await client.getMe()).id), save: () => session.save(),
             login: async (signal, qr, password) => String((await client.signInUserWithQrCode({ apiId, apiHash }, { abortSignal: signal, qrCode: async ({ token }) => qr(await QRCode.toDataURL(`tg://login?token=${token.toString('base64url')}`, { width: 256, margin: 2 })), password, onError: async () => true })).id),
-            dialogs: async () => (await client.getDialogs({ limit: 500 })).filter(d => d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && !d.entity.deleted && d.inputEntity instanceof Api.InputPeerUser).map(d => ({ id: String(d.id), title: d.title || 'Без имени', peer: { userId: String((d.inputEntity as Api.InputPeerUser).userId), accessHash: String((d.inputEntity as Api.InputPeerUser).accessHash) } })),
+            dialogs: async () => (await client.getDialogs({ limit: 500 })).filter(d => d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && !d.entity.deleted && d.inputEntity instanceof Api.InputPeerUser).map(d => ({ id: String(d.id), title: d.title || 'Без имени', phone: (d.entity as Api.User).phone, peer: { userId: String((d.inputEntity as Api.InputPeerUser).userId), accessHash: String((d.inputEntity as Api.InputPeerUser).accessHash) } })),
             history: async (peer, cursor) => {
                 const rows = await client.getMessages(new Api.InputPeerUser({ userId: bigInt(peer.userId), accessHash: bigInt(peer.accessHash) }), { limit: 100, ...(cursor ? { minId: cursor, reverse: true } : {}) });
                 return { messages: rows.filter((m): m is Api.Message => m instanceof Api.Message).map(toMessage).filter((m): m is Message => m !== null).sort((a, b) => a.id - b.id), cursor: Math.max(cursor, ...rows.map(m => m.id)), more: Boolean(cursor && rows.length === 100) };

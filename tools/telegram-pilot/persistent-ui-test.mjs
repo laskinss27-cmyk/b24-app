@@ -14,6 +14,7 @@ try{
  await page.route('**/api/**',async route=>{
   const action=new URL(route.request().url()).pathname.split('/').pop(),body=route.request().postDataJSON();let status=200,result={ok:true};
   if(action==='accounts')result={ok:true,configured,accounts};
+  if(action==='auto-binding'){accounts[0].autoBinding={enabled:body.enabled,matched:0,lastRun:null,error:''};}
   if(action==='history') {status=denied?403:200;result=denied?{ok:false,error:'Нет доступа к этой сделке'}:{ok:true,messages:binding?messages:[],bindings:binding?[{...binding,status:accounts[0]?.phase??'offline',lastSync:'2026-10-08T10:03:00.000Z'}]:[],next:null};}
   if(action==='connect'){accounts=[{id:'a',label:body.label,phase:'qr',qr:pixel,error:'',active:false,lastSync:null}];result={ok:true,account:accounts[0]};}
   if(action==='password'){accounts[0].phase='ready';accounts[0].qr=null;accounts[0].active=true;}
@@ -27,6 +28,11 @@ try{
  await page.getByRole('button',{name:'Выбрать диалог',exact:true}).click();await page.getByLabel('Название рабочего аккаунта').fill('Сергей · продажи');await page.getByRole('button',{name:'Подключить аккаунт по QR'}).click();await page.getByRole('img',{name:'QR-код входа в рабочий Telegram'}).waitFor();
  await page.screenshot({path:`${output}/qr.png`,fullPage:true});
  accounts[0].phase='password';accounts[0].qr=null;await page.getByRole('button',{name:'Обновить',exact:true}).click();await page.getByLabel('Пароль двухэтапной проверки').fill('dummy-test-password');await page.getByRole('button',{name:'Подтвердить вход'}).click();await page.getByRole('button',{name:'Выбрать диалог',exact:true}).click();await page.getByLabel('Номер сделки').fill('37974');await page.getByRole('button',{name:'Привязать к сделке'}).first().click();await page.getByText(/Сбор сообщений включён/).waitFor();
+ await page.getByRole('button',{name:'Включить автопривязку',exact:true}).click();
+ await page.getByRole('button',{name:'Выключить автопривязку',exact:true}).waitFor();
+ await page.getByText('Автопривязка по телефону: включена',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Выключить автопривязку',exact:true}).click();
+ await page.getByRole('button',{name:'Включить автопривязку',exact:true}).waitFor();
  await page.screenshot({path:`${output}/accounts-1280.png`,fullPage:true});
  await page.getByRole('button',{name:'Сообщения сделки',exact:true}).click();await page.getByText(messages[0].text,{exact:true}).waitFor();assert.equal(await page.evaluate(()=>window.bad),undefined);
  for(const width of [1280,768,360]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:`${output}/history-${width}.png`,fullPage:true});}

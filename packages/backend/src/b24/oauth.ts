@@ -95,6 +95,7 @@ export interface ExchangeParams {
 }
 
 export interface RefreshParams {
+    signal?: AbortSignal;
 	clientId: string;
 	clientSecret: string;
 	refreshToken: string;
@@ -149,6 +150,7 @@ export async function refreshAccessToken(params: RefreshParams): Promise<TokenRe
 		method: 'POST',
 		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 		body: body.toString(),
+        ...(params.signal ? { signal: params.signal } : {}),
 	});
 	const json = (await response.json()) as TokenSuccess | TokenErrorBody;
 	if (isTokenError(json)) throw new OAuthError(json.error, json.error_description, response.status);

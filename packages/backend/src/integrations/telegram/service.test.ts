@@ -182,3 +182,18 @@ test('Network retry keeps the saved Telegram session and does not claim a Telegr
  second.login=async()=>{logins++;return '100';};const service=new TelegramService(store,saved=>{assert.equal(saved,'saved-session');return creates++===0?first:second;});
  try{await service.tick();await until(()=>service.status(store.account(a.id)).phase==='retry');await assert.rejects(service.connect(a.id),e=>e instanceof Error&&e.message.includes('сетевой паузы')&&!e.message.includes('ограничения Telegram'));assert.equal(store.session(a.id),'saved-session');const future=Date.now()+120000;t.mock.method(Date,'now',()=>future);await service.connect(a.id);await until(()=>service.status(store.account(a.id)).phase==='ready');assert.equal(logins,0);assert.equal(creates,2);}finally{t.mock.restoreAll();await service.close();store.close();}
 });
+
+test('Background tick discovers and collects a new matching dialog without an open browser', async () => {
+    const { TelegramAutoBinder } = await import('./auto-binding.js');
+    const store = new TelegramStore(':memory:', key), a = store.create('1858', 'Рабочий'), client = new FakeTransport();
+    store.authorize(a.id, '100', 'saved-session'); store.setAuto(a.id, true);
+    client.dialogs = async () => [{ id: '200', title: 'Клиент', phone: '79991234567', peer: { userId: '200', accessHash: 'private' } }];
+    const crm = { call: async (method: string, p: Record<string, unknown> = {}) => method === 'crm.duplicate.findbycomm' ? p.entity_type === 'CONTACT' ? { CONTACT: [11] } : {} : method === 'crm.item.list' ? { items: [{ id: 37974, contactIds: [11], stageSemanticId: 'P', createdTime: '2026-01-01' }] } : { ID: '37974', CLOSED: 'N', STAGE_SEMANTIC_ID: 'P' } } as import('./crm-match.js').CrmReader;
+    const service = new TelegramService(store, () => client, new TelegramAutoBinder(store, async () => crm));
+    try {
+        await service.tick(); await until(() => service.status(store.account(a.id)).phase === 'ready');
+        await service.tick(); await until(() => store.bindings().length === 1);
+        await service.tick(); await until(() => store.history(37974).messages.length === 1);
+        assert.equal(store.autoState(a.id).matched, 1); assert.equal(service.status(store.account(a.id)).phase, 'ready');
+    } finally { await service.close(); store.close(); }
+});

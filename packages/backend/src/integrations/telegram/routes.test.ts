@@ -14,6 +14,8 @@ async function fixture() {
     store.ingest(b, [{ id: 1, date: '2026-10-08T10:00:00.000Z', outgoing: false, text: 'private message', attachment: null }], 1);
     const service = new TelegramService(store, () => { throw new Error('Transport must not be called'); });
     app.decorate('config', { portalDomain: 'umniydom.bitrix24.ru', nodeEnv: 'test', port: 3000, host: '127.0.0.1', publicBaseUrl: 'https://app.example.test', appSectionUrl: '', inventoryNotify: 'off' });
+    let enrolls = 0;
+    const crmAccess = { enroll: async () => { enrolls++; }, forOwner: async () => { throw new Error('Not used'); } };
     registerTelegramRoutes(app, service, (_app, body) => {
         if (body.domain !== 'umniydom.bitrix24.ru' || !['owner', 'other', 'inactive'].includes(String(body.accessToken)))
             return null;
@@ -26,8 +28,8 @@ async function fixture() {
                     return { ID: '37974', TITLE: 'Тест' };
                 throw new Error('ACCESS_DENIED');
             } } as unknown as B24Client;
-    });
-    return { app, store, a, other, call: (action: string, token = 'owner', body: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: `/api/telegram/${action}`, payload: { domain: 'umniydom.bitrix24.ru', accessToken: token, ...body } }), close: async () => { await app.close(); store.close(); } };
+    }, crmAccess);
+    return { app, store, a, other, crmAccess, enrolls: () => enrolls, call: (action: string, token = 'owner', body: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: `/api/telegram/${action}`, payload: { domain: 'umniydom.bitrix24.ru', accessToken: token, ...body } }), close: async () => { await app.close(); store.close(); } };
 }
 test('Telegram endpoints require authenticated active portal employee and isolate account controls', async () => {
     const f = await fixture();
@@ -39,8 +41,8 @@ test('Telegram endpoints require authenticated active portal employee and isolat
         assert.equal(list.accounts.length, 1);
         assert.equal(list.accounts[0].id, f.other.id);
         assert.equal(JSON.stringify(list).includes('secret'), false);
-        for (const action of ['dialogs', 'disconnect', 'pause', 'password'])
-            assert.equal((await f.call(action, 'other', { accountId: f.a.id, chatId: '200', password: 'secret' })).statusCode, 404);
+        for (const action of ['dialogs', 'disconnect', 'pause', 'password', 'auto-binding'])
+            assert.equal((await f.call(action, 'other', { accountId: f.a.id, chatId: '200', password: 'secret', enabled: false })).statusCode, 404);
     }
     finally {
         await f.close();
@@ -91,4 +93,31 @@ test('Telegram placement is a separate deal view, rejects foreign portal and esc
     finally {
         await app.close();
     }
+});
+
+
+test('Auto binding enrollment requires owner, active session and refresh grant; status never exposes tokens', async () => {
+    const f = await fixture();
+    try {
+        assert.equal((await f.call('auto-binding', 'owner', { accountId: f.a.id, enabled: true })).statusCode, 409);
+        assert.equal((await f.call('auto-binding', 'owner', { accountId: f.other.id, enabled: true, refreshToken: 'private' })).statusCode, 403);
+        assert.equal((await f.call('auto-binding', 'other', { accountId: f.a.id, enabled: true, refreshToken: 'private' })).statusCode, 404);
+        assert.equal((await f.call('auto-binding', 'owner', { accountId: f.a.id, enabled: true, refreshToken: 'private' })).statusCode, 200);
+        assert.equal(f.enrolls(), 1); assert.equal(f.store.autoState(f.a.id).enabled, true);
+        assert.equal((await f.call('accounts')).body.includes('private'), false);
+        assert.equal((await f.call('auto-binding', 'owner', { accountId: f.a.id, enabled: false })).statusCode, 200);
+        assert.equal(f.store.autoState(f.a.id).enabled, false); assert.equal(f.store.bindings()[0]?.enabled, true);
+    } finally { await f.close(); }
+});
+test('Auto binding enrollment cannot re-enable after concurrent disable', async () => {
+    const f = await fixture(); let release!: () => void;
+    try {
+        let started!: () => void; const ready = new Promise<void>(r => { started = r; });
+        const wait = new Promise<void>(r => { release = r; });
+        f.crmAccess.enroll = async () => { started(); await wait; };
+        const pending = f.call('auto-binding', 'owner', { accountId: f.a.id, enabled: true, refreshToken: 'private' });
+        const running = Promise.resolve(pending); await ready;
+        await f.call('auto-binding', 'owner', { accountId: f.a.id, enabled: false }); release();
+        assert.equal((await running).statusCode, 409); assert.equal(f.store.autoState(f.a.id).enabled, false);
+    } finally { release?.(); await f.close(); }
 });

@@ -3,15 +3,18 @@ import { readTelegramConfig, type TelegramConfig } from './config.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { APP_OWNER_USER_ID } from '@b24-app/shared';
-import { accessClientFrom } from '../../access-policy.js';
+import { accessClientFrom, hasAppPermissions } from '../../access-policy.js';
 import { TelegramStore, TelegramError } from './store.js';
 import { TelegramService } from './service.js';
 import { telegramTransport } from './transport.js';
+import { TelegramAutoBinder } from './auto-binding.js';
+import { TelegramCrmAccess } from './crm-access.js';
 const accountId = z.string().uuid();
 const chatId = z.string().regex(/^[1-9]\d{0,19}$/);
 const dealId = z.number().int().positive().safe();
-export function registerTelegramRoutes(app: FastifyInstance, supplied?: TelegramService, clientFrom = accessClientFrom): void {
+export function registerTelegramRoutes(app: FastifyInstance, supplied?: TelegramService, clientFrom = accessClientFrom, suppliedCrmAccess?: Pick<TelegramCrmAccess, 'enroll' | 'forOwner'>): void {
     let service = supplied;
+    let crmAccess: Pick<TelegramCrmAccess, 'enroll' | 'forOwner'> | undefined = suppliedCrmAccess;
     const stateDir = process.env['B24_STATE_DIR'] ?? '/app/state';
     let settings: TelegramConfig | null = null, configError = '';
     if (!supplied) { try { settings = readTelegramConfig(stateDir); } catch { configError = 'Проверьте серверную конфигурацию Telegram'; app.log.error('[telegram] invalid configuration'); } }
@@ -21,7 +24,12 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
             return service;
         if (!settings) throw new TelegramError(configError || 'Подключение Telegram ещё не настроено на сервере', 503);
         const { apiId, apiHash, key, proxy } = settings;
-        service = new TelegramService(new TelegramStore(join(stateDir, 'telegram', 'telegram.sqlite'), key), telegramTransport(apiId, apiHash, proxy));
+        const store = new TelegramStore(join(stateDir, 'telegram', 'telegram.sqlite'), key);
+        crmAccess = new TelegramCrmAccess(store, { domain: app.config.portalDomain, clientId: app.config.appClientId ?? '', clientSecret: app.config.appClientSecret ?? app.config.appSecret ?? '', allowed: async auth => {
+            const check = await hasAppPermissions(app, auth, ['deals.view']);
+            return Boolean(check.access && check.allowed);
+        } });
+        service = new TelegramService(store, telegramTransport(apiId, apiHash, proxy), new TelegramAutoBinder(store, owner => crmAccess!.forOwner(owner)));
         service.start();
         return service;
     };
@@ -84,6 +92,21 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
         if (String(deal.ID) !== String(input.dealId))
             throw new TelegramError('Сделка не найдена', 404);
         return { ok: true, binding: runtime().bind(input.accountId, input.chatId, input.dealId), deal: { id: input.dealId, title: deal.TITLE ?? '' } };
+    }));
+    app.post('/api/telegram/auto-binding', { bodyLimit: 16384 }, wrap(async (actor, body) => {
+        const input = z.object({ accountId, enabled: z.boolean(), refreshToken: z.string().min(1).max(4096).optional() }).parse(body);
+        const account = own(actor, input.accountId), s = runtime();
+        if (!input.enabled) { s.store.setAuto(account.id, false); return { ok: true }; }
+        if (actor !== account.ownerId) throw new TelegramError('Включить автопривязку должен владелец аккаунта', 403);
+        if (!account.active) throw new TelegramError('Сначала подключите Telegram', 409);
+        if (!input.refreshToken || !crmAccess) throw new TelegramError('Откройте вкладку в Битрикс24 заново, чтобы разрешить фоновый поиск сделок', 409);
+        const revision = s.store.autoState(account.id).revision;
+        await crmAccess.enroll(actor, input.refreshToken);
+        if (!s.store.account(account.id).active || s.store.autoState(account.id).revision !== revision) throw new TelegramError('Настройки уже изменились. Обновите список', 409);
+        s.store.setAuto(account.id, true);
+        s.autoBinder?.reset(account.id);
+        void s.tick();
+        return { ok: true };
     }));
     app.post('/api/telegram/pause', wrap((actor, body) => { const input = z.object({ accountId, chatId }).parse(body); own(actor, input.accountId); runtime().store.pause(input.accountId, input.chatId); return { ok: true }; }));
     app.post('/api/telegram/disconnect', wrap(async (actor, body) => { const input = z.object({ accountId }).parse(body); own(actor, input.accountId); return { ok: true, ...await runtime().disconnect(input.accountId) }; }));

@@ -102,7 +102,7 @@ function buildHeaders(auth: B24Auth): HeadersInit {
 }
 
 /** Один вызов метода Б24. Throttle применяется снаружи. */
-async function rawCall<T>(auth: B24Auth, method: string, params: Record<string, unknown>): Promise<B24SuccessResponse<T>> {
+async function rawCall<T>(auth: B24Auth, method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<B24SuccessResponse<T>> {
 	const url = buildMethodUrl(auth, method);
 	const body: Record<string, unknown> = { ...params };
 	if (auth.kind === 'oauth') {
@@ -113,6 +113,7 @@ async function rawCall<T>(auth: B24Auth, method: string, params: Record<string, 
 		method: 'POST',
 		headers: buildHeaders(auth),
 		body: JSON.stringify(body),
+        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
 	});
 
 	const json = (await response.json()) as B24Response<T>;
@@ -138,6 +139,7 @@ export interface B24ClientOptions {
 	auth: B24Auth;
 	/** Запросов в секунду. Лимит Б24 = 10. По умолчанию ставим 8 — запас на джиттер. */
 	requestsPerSecond?: number;
+    requestTimeoutMs?: number;
 }
 
 export class B24Client {
@@ -149,7 +151,7 @@ export class B24Client {
 		const rps = options.requestsPerSecond ?? 8;
 		const throttle = pThrottle({ limit: rps, interval: 1000 });
 		this.throttled = throttle(<T>(method: string, params: Record<string, unknown>) =>
-			rawCall<T>(this.auth, method, params),
+			rawCall<T>(this.auth, method, params, options.requestTimeoutMs),
 		);
 	}
 

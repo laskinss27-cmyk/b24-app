@@ -45,10 +45,35 @@ export class TelegramStore {
    CREATE TABLE IF NOT EXISTS telegram_accounts(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,label TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,telegram_id TEXT UNIQUE,session TEXT,active INTEGER NOT NULL DEFAULT 0);
    CREATE TABLE IF NOT EXISTS telegram_bindings(account_id TEXT NOT NULL REFERENCES telegram_accounts(id),chat_id TEXT NOT NULL,title TEXT NOT NULL,deal_id INTEGER NOT NULL,peer TEXT NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,reconcile_cursor INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(account_id,chat_id));
    CREATE TABLE IF NOT EXISTS telegram_messages(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,message_id INTEGER NOT NULL,deal_id INTEGER NOT NULL,date TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(account_id,chat_id,message_id));
+   CREATE TABLE IF NOT EXISTS telegram_crm_credentials(owner_id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS telegram_auto_settings(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,last_run TEXT,error TEXT NOT NULL DEFAULT '');
+   CREATE TABLE IF NOT EXISTS telegram_auto_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(account_id,chat_id));
    CREATE INDEX IF NOT EXISTS telegram_messages_deal ON telegram_messages(deal_id,date,message_id);
    CREATE INDEX IF NOT EXISTS telegram_messages_account_id ON telegram_messages(account_id,message_id);`);
         if (path !== ':memory:')
             chmodSync(path, 0o600);
+    }
+    autoState(id: string) {
+        const row = this.db.prepare('SELECT * FROM telegram_auto_settings WHERE account_id=?').get(id);
+        const count = this.db.prepare('SELECT count(*) AS n FROM telegram_auto_links WHERE account_id=?').get(id);
+        return { enabled: Boolean(row?.['enabled']), revision: Number(row?.['revision'] ?? 0), lastRun: row?.['last_run'] ? String(row['last_run']) : null, error: String(row?.['error'] ?? ''), matched: Number(count?.['n'] ?? 0) };
+    }
+    setAuto(id: string, enabled: boolean): void {
+        this.account(id);
+        this.db.prepare(`INSERT INTO telegram_auto_settings(account_id,enabled,revision) VALUES (?,?,1) ON CONFLICT(account_id) DO UPDATE SET enabled=excluded.enabled,revision=revision+1,error=''`).run(id, Number(enabled));
+    }
+    autoResult(id: string, revision: number, at: string, error: string): void {
+        this.db.prepare('UPDATE telegram_auto_settings SET last_run=?,error=? WHERE account_id=? AND revision=? AND enabled=1').run(at, error, id, revision);
+    }
+    recordAutoLink(id: string, chat: string): void {
+        this.db.prepare('INSERT OR IGNORE INTO telegram_auto_links(account_id,chat_id,created_at) VALUES (?,?,?)').run(id, chat, new Date().toISOString());
+    }
+    crmCredential<T>(owner: string): T | null {
+        const row = this.db.prepare('SELECT payload FROM telegram_crm_credentials WHERE owner_id=?').get(owner);
+        return row ? this.unseal<T>(`crm:${owner}`, String(row['payload'])) : null;
+    }
+    saveCrmCredential(owner: string, credential: unknown): void {
+        this.db.prepare('INSERT INTO telegram_crm_credentials(owner_id,payload) VALUES (?,?) ON CONFLICT(owner_id) DO UPDATE SET payload=excluded.payload').run(owner, this.seal(`crm:${owner}`, credential));
     }
     close(): void { this.db.close(); this.key.fill(0); }
     seal(purpose: string, value: unknown): string {

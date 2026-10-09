@@ -1,5 +1,6 @@
 import { TelegramStore, TelegramError, type Account, type Binding } from './store.js';
 import type { Dialog, Transport, TransportFactory } from './transport.js';
+import type { TelegramAutoBinder } from './auto-binding.js';
 type Phase = 'offline' | 'connecting' | 'qr' | 'password' | 'ready' | 'retry' | 'login_required' | 'error';
 interface Live {
     transport: Transport;
@@ -41,8 +42,8 @@ export class TelegramService {
     private readonly live = new Map<string, Live>();
     private timer: ReturnType<typeof setInterval> | null = null;
     private closed = false;
-    constructor(readonly store: TelegramStore, private readonly factory: TransportFactory) { }
-    status(account: Account) { const live = this.live.get(account.id); return { ...account, phase: this.storageErrors.has(account.id) ? 'error' : live?.phase ?? (account.active ? 'connecting' : 'offline'), qr: live?.qr ?? null, error: this.storageErrors.get(account.id) ?? live?.error ?? '', lastSync: live?.lastSync ?? null, nextAttempt: live?.nextAttempt ?? 0 }; }
+    constructor(readonly store: TelegramStore, private readonly factory: TransportFactory, readonly autoBinder?: TelegramAutoBinder) { }
+    status(account: Account) { const live = this.live.get(account.id); return { ...account, autoBinding: this.store.autoState(account.id), phase: this.storageErrors.has(account.id) ? 'error' : live?.phase ?? (account.active ? 'connecting' : 'offline'), qr: live?.qr ?? null, error: this.storageErrors.get(account.id) ?? live?.error ?? '', lastSync: live?.lastSync ?? null, nextAttempt: live?.nextAttempt ?? 0 }; }
     start(): void { this.timer = setInterval(() => { void this.tick(); }, 15000); this.timer.unref(); void this.tick(); }
     private make(id: string, saved: string): Live {
         const live: Live = { transport: this.factory(saved), phase: 'connecting', qr: null, error: '', lastSync: null, nextAttempt: 0, limited: false, syncing: false, task: null, abort: new AbortController(), password: null, rejectPassword: null, dialogs: new Map(), stopped: false };
@@ -236,8 +237,10 @@ export class TelegramService {
             const live = this.live.get(account.id);
             if (!live || (live.phase === 'retry' && !live.syncing && live.nextAttempt <= Date.now()))
                 void this.restore(account);
-            else if (live.phase === 'ready')
+            else if (live.phase === 'ready') {
                 void this.sync(account.id, live);
+                void this.autoBinder?.run(account, async () => { await this.dialogs(account.id); return [...live.dialogs.values()]; }, () => !live.stopped && live.phase === 'ready');
+            }
         }
     }
     private async stopLive(live: Live): Promise<void> { live.stopped = true; live.abort.abort(); live.rejectPassword?.(new Error('Cancelled')); live.qr = null; live.password = null; await live.transport.close().catch(() => { }); await live.task; while (live.syncing)
@@ -265,6 +268,7 @@ export class TelegramService {
         catch {
             revoked = false;
         }
+        this.store.setAuto(id, false);
         this.store.deactivate(id);
         if (live)
             await this.stopLive(live);
@@ -273,5 +277,5 @@ export class TelegramService {
         return { revoked };
     }
     async close(): Promise<void> { this.closed = true; if (this.timer)
-        clearInterval(this.timer); await Promise.all([...this.live.values()].map(live => this.stopLive(live))); }
+        clearInterval(this.timer); await this.autoBinder?.close(); await Promise.all([...this.live.values()].map(live => this.stopLive(live))); }
 }
