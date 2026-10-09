@@ -175,3 +175,10 @@ test('Real teleproto FloodWaitError preserves the server-mandated pause', () => 
  assert.equal(safeTelegramError(error).retrySeconds, 180);
  assert.equal(safeTelegramError({errorMessage: 'AUTH_KEY_DUPLICATED'}).authLost, true);
 });
+
+test('Network retry keeps the saved Telegram session and does not claim a Telegram rate limit',async t=>{
+ const store=new TelegramStore(':memory:',key),a=store.create('1858','Рабочий');store.authorize(a.id,'100','saved-session');
+ const first=new FakeTransport();first.connect=async()=>{throw new Error('ETIMEDOUT');};const second=new FakeTransport();let creates=0,logins=0;
+ second.login=async()=>{logins++;return '100';};const service=new TelegramService(store,saved=>{assert.equal(saved,'saved-session');return creates++===0?first:second;});
+ try{await service.tick();await until(()=>service.status(store.account(a.id)).phase==='retry');await assert.rejects(service.connect(a.id),e=>e instanceof Error&&e.message.includes('сетевой паузы')&&!e.message.includes('ограничения Telegram'));assert.equal(store.session(a.id),'saved-session');const future=Date.now()+120000;t.mock.method(Date,'now',()=>future);await service.connect(a.id);await until(()=>service.status(store.account(a.id)).phase==='ready');assert.equal(logins,0);assert.equal(creates,2);}finally{t.mock.restoreAll();await service.close();store.close();}
+});

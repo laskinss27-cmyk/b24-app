@@ -20,8 +20,8 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
         if (service)
             return service;
         if (!settings) throw new TelegramError(configError || 'Подключение Telegram ещё не настроено на сервере', 503);
-        const { apiId, apiHash, key } = settings;
-        service = new TelegramService(new TelegramStore(join(stateDir, 'telegram', 'telegram.sqlite'), key), telegramTransport(apiId, apiHash));
+        const { apiId, apiHash, key, proxy } = settings;
+        service = new TelegramService(new TelegramStore(join(stateDir, 'telegram', 'telegram.sqlite'), key), telegramTransport(apiId, apiHash, proxy));
         service.start();
         return service;
     };

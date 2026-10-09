@@ -8,6 +8,7 @@ interface Live {
     error: string;
     lastSync: string | null;
     nextAttempt: number;
+    limited: boolean;
     syncing: boolean;
     task: Promise<void> | null;
     abort: AbortController;
@@ -20,6 +21,7 @@ export function safeTelegramError(error: unknown): {
     message: string;
     retrySeconds: number;
     authLost: boolean;
+    limited?: boolean;
 } {
     const code = String((error as {
         errorMessage?: string;
@@ -27,12 +29,12 @@ export function safeTelegramError(error: unknown): {
     const suppliedSeconds = Number((error as { seconds?: number })?.seconds);
     const seconds = /^FLOOD_WAIT_(\d+)$/.exec(code)?.[1] ?? (code === 'FLOOD' && Number.isFinite(suppliedSeconds) && suppliedSeconds > 0 ? suppliedSeconds : null);
     if (seconds)
-        return { message: 'Telegram временно ограничил запросы. Сбор продолжится после паузы', retrySeconds: Math.max(30, Number(seconds)), authLost: false };
+        return { message: 'Telegram временно ограничил запросы. Сбор продолжится после паузы', retrySeconds: Math.max(30, Number(seconds)), authLost: false, limited: true };
     if (/AUTH_KEY_UNREGISTERED|AUTH_KEY_DUPLICATED|SESSION_REVOKED|SESSION_EXPIRED|USER_DEACTIVATED/.test(code))
         return { message: 'Подключение завершено в Telegram. Войдите снова по QR', retrySeconds: 0, authLost: true };
     if (/API_ID_INVALID|API_ID_HASH_INVALID|API_ID_PUBLISHED_FLOOD/.test(code))
         return { message: 'Telegram отклонил API-параметры приложения', retrySeconds: 0, authLost: true };
-    return { message: error instanceof TelegramError ? error.message : 'Telegram недоступен. Подключение будет повторено автоматически', retrySeconds: 60, authLost: false };
+    return { message: error instanceof TelegramError ? error.message : 'Сервер не смог связаться с Telegram. Подключение будет повторено автоматически', retrySeconds: 60, authLost: false };
 }
 export class TelegramService {
     private readonly storageErrors = new Map<string, string>();
@@ -43,7 +45,7 @@ export class TelegramService {
     status(account: Account) { const live = this.live.get(account.id); return { ...account, phase: this.storageErrors.has(account.id) ? 'error' : live?.phase ?? (account.active ? 'connecting' : 'offline'), qr: live?.qr ?? null, error: this.storageErrors.get(account.id) ?? live?.error ?? '', lastSync: live?.lastSync ?? null, nextAttempt: live?.nextAttempt ?? 0 }; }
     start(): void { this.timer = setInterval(() => { void this.tick(); }, 15000); this.timer.unref(); void this.tick(); }
     private make(id: string, saved: string): Live {
-        const live: Live = { transport: this.factory(saved), phase: 'connecting', qr: null, error: '', lastSync: null, nextAttempt: 0, syncing: false, task: null, abort: new AbortController(), password: null, rejectPassword: null, dialogs: new Map(), stopped: false };
+        const live: Live = { transport: this.factory(saved), phase: 'connecting', qr: null, error: '', lastSync: null, nextAttempt: 0, limited: false, syncing: false, task: null, abort: new AbortController(), password: null, rejectPassword: null, dialogs: new Map(), stopped: false };
         this.live.set(id, live);
         return live;
     }
@@ -107,9 +109,10 @@ export class TelegramService {
         if (previous && ['connecting', 'qr', 'password', 'ready'].includes(previous.phase))
             throw new TelegramError('Подключение уже выполняется или аккаунт подключён', 409);
         if (previous && previous.nextAttempt > Date.now())
-            throw new TelegramError('Дождитесь снятия ограничения Telegram', 429);
+            throw new TelegramError(previous.limited ? 'Дождитесь снятия ограничения Telegram' : 'Подключение будет повторено автоматически после сетевой паузы. Новый QR не нужен', previous.limited ? 429 : 503);
         if (previous)
             await this.stopLive(previous);
+        if (this.store.account(id).active) { void this.restore(this.store.account(id)); return; }
         const live = this.make(id, '');
         live.task = (async () => {
             await live.transport.connect();
@@ -145,6 +148,7 @@ export class TelegramService {
     private async failed(id: string, live: Live, error: unknown): Promise<void> {
         const safe = safeTelegramError(error);
         live.error = safe.message;
+        live.limited = safe.limited === true;
         live.qr = null;
         live.phase = safe.authLost ? 'login_required' : this.store.account(id).active ? 'retry' : 'error';
         live.nextAttempt = Date.now() + safe.retrySeconds * 1000;

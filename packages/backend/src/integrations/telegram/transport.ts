@@ -1,3 +1,4 @@
+import type { SocksProxyType } from 'teleproto/network/connection/TCPMTProxy.js';
 import { TelegramClient, Api } from 'teleproto';
 import { LogLevel } from 'teleproto/extensions/Logger.js';
 import { StringSession } from 'teleproto/sessions/index.js';
@@ -49,9 +50,9 @@ export function toMessage(message: Api.Message): Message | null {
     const attachment = message.media ? message.media instanceof Api.MessageMediaPhoto ? 'Фото' : 'Файл или другое вложение' : null;
     return { id: message.id, date: new Date(message.date * 1000).toISOString(), outgoing: Boolean(message.out), text: message.message ?? '', attachment, edited: Boolean(message.editDate) };
 }
-export function telegramTransport(apiId: number, apiHash: string): TransportFactory {
+export function telegramTransport(apiId: number, apiHash: string, proxy?: SocksProxyType): TransportFactory {
     return (saved) => {
-        const session = new StringSession(saved), client = new TelegramClient(session, apiId, apiHash, { connectionRetries: 2, requestRetries: 1, floodSleepThreshold: 0, deviceModel: 'B24 CRM', appVersion: '1.0.0' });
+        const session = new StringSession(saved), client = new TelegramClient(session, apiId, apiHash, { ...(proxy ? { proxy } : {}), connectionRetries: 2, requestRetries: 1, floodSleepThreshold: 0, deviceModel: 'B24 CRM', appVersion: '1.0.0' });
         client.setLogLevel(LogLevel.NONE);
         return {
             connect: () => client.connect().then(() => undefined), authorized: () => client.checkAuthorization(), identity: async () => String((await client.getMe()).id), save: () => session.save(),

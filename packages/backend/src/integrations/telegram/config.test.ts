@@ -17,3 +17,10 @@ test('Malformed Telegram configuration fails closed without disclosing file cont
  writeFileSync(join(dir,'telegram','config.json'),'private-secret');assert.throws(()=>readTelegramConfig(dir,{}),e=>e instanceof Error&&!e.message.includes('private-secret'));
  for(const value of [null,[],{apiId:1,apiHash:'bad',key:'secret'}]){writeFileSync(join(dir,'telegram','config.json'),JSON.stringify(value));assert.throws(()=>readTelegramConfig(dir,{}),/API-параметры/);}
 });
+test('Optional Telegram SOCKS5 settings are server-only, validated and do not mix with environment credentials',t=>{
+ const dir=mkdtempSync(join(tmpdir(),'telegram-config-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));mkdirSync(join(dir,'telegram'));
+ const file=join(dir,'telegram','config.json'),config={apiId:12345,apiHash:'a'.repeat(32),key:'b'.repeat(64)},proxy={ip:'telegram-egress',port:1080,socksType:5,username:'worker',password:'test-password'};
+ writeFileSync(file,JSON.stringify({...config,proxy}));assert.deepEqual(readTelegramConfig(dir,{}),{...config,proxy});
+ const env={TELEGRAM_API_ID:'12345',TELEGRAM_API_HASH:config.apiHash,TELEGRAM_SESSION_KEY:config.key};assert.equal(readTelegramConfig(dir,env)?.proxy,undefined);
+ for(const bad of [{...proxy,port:0},{...proxy,port:70000},{...proxy,ip:'http://proxy/'},{...proxy,socksType:4},{...proxy,extra:'unexpected'}]){writeFileSync(file,JSON.stringify({...config,proxy:bad}));assert.throws(()=>readTelegramConfig(dir,{}),/SOCKS5/);}
+});
