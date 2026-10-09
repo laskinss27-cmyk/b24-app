@@ -47,6 +47,8 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/quicksale/create': ['realizations.create'],
 	'/api/contracts/context': ['deals.view'],
 	'/api/contracts/list': ['deals.view'],
+	'/api/telegram/history': ['deals.view'],
+	'/api/telegram/bind': ['deals.view'],
 	'/api/contracts/file': ['deals.view'],
 	'/api/contracts/generate': ['deals.create_contract'],
 	'/api/reports/sales': ['reports.sales'],

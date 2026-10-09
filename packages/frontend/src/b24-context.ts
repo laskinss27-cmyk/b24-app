@@ -23,7 +23,7 @@ export interface B24Context {
 	returnRequestId?: number | null;
 	returnDecision?: 'approve' | 'reject' | null;
 	/** какой экран рендерить. 'inventory' — модуль (левое меню); 'mobileCount' — мобильный подсчёт (/m); 'salesReport' — отчёт по продажам (меню сделок); 'repairs' — ремонты (левое меню). */
-	view?: 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder' | 'returnApproval' | null;
+	view?: 'telegram' | 'inventory' | 'mobileCount' | 'salesReport' | 'repairs' | 'stock' | 'supply' | 'reportBuilder' | 'returnApproval' | null;
 	domain: string | null;
 	memberId: string | null;
 	/** Legacy-мобильный режим: старые страницы могли получать access_token в контексте. */

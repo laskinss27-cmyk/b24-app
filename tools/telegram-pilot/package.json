@@ -1,0 +1,1 @@
+{"name":"b24-telegram-local-pilot","private":true,"type":"module","scripts":{"start":"node server.mjs"},"dependencies":{"teleproto":"1.229.3","qrcode":"1.5.4"}}

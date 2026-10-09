@@ -268,6 +268,7 @@ export async function reconcilePlacements(opts: BindDealTabOptions): Promise<{ s
 		if (isDenied(err)) denied = true; else log.push(`placement.get FAIL ${err instanceof B24ApiError ? err.code : String(err)}`);
 	}
 	await bind(DEAL_TAB_PLACEMENT, '/placement/deal-tab', DEAL_TAB_TITLE, DEAL_TAB_TITLE);
+	await bind(DEAL_TAB_PLACEMENT, '/placement/telegram', 'Переписка', 'Conversations');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/inventory', INVENTORY_MENU_TITLE, 'Sales');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/repairs', REPAIRS_MENU_TITLE, 'Repairs');
 	await bind(INVENTORY_MENU_PLACEMENT, '/placement/stock', STOCK_MENU_TITLE, 'Stock');

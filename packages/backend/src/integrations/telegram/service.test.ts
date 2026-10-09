@@ -1,0 +1,177 @@
+import { FloodWaitError } from 'teleproto/errors/RPCErrorList.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TelegramStore, type Message } from './store.js';
+import { TelegramService, safeTelegramError } from './service.js';
+import type { Transport, Dialog, Batch } from './transport.js';
+const key = 'aa'.repeat(32);
+class FakeTransport implements Transport {
+    saved = 'saved-session';
+    reads: number[] = [];
+    closed = false;
+    loggedOut = false;
+    loggedIn = true;
+    id = '100';
+    updates: Parameters<Transport['changes']>[0] = () => { };
+    messages: Message[] = [{ id: 1, date: '2026-10-08T10:00:00.000Z', outgoing: false, text: 'Клиент', attachment: null }];
+    async connect() { }
+    async authorized() { return this.loggedIn; }
+    async identity() { return this.id; }
+    save() { return this.saved; }
+    async login(_signal: AbortSignal, _qr: (data: string) => Promise<void>, _password: () => Promise<string>) { return this.id; }
+    async dialogs(): Promise<Dialog[]> { return [{ id: '200', title: 'Клиент', peer: { userId: '200', accessHash: 'secret' } }]; }
+    async history(_peer: Dialog['peer'], cursor: number): Promise<Batch> { this.reads.push(cursor); const messages = this.messages.filter(m => m.id > cursor).slice(0, 100); return { messages, cursor: Math.max(cursor, ...messages.map(m => m.id)), more: messages.length === 100 }; }
+    async reconcile(_peer: Dialog['peer'], ids: number[]) { return { messages: this.messages.filter(m => ids.includes(m.id)), deleted: ids.filter(id => !this.messages.some(m => m.id === id)) }; }
+    changes(handler: Parameters<Transport['changes']>[0]) { this.updates = handler; }
+    async logout() { this.loggedOut = true; this.loggedIn = false; }
+    async close() { this.closed = true; }
+}
+async function until(predicate: () => boolean) { for (let i = 0; i < 100; i++) {
+    if (predicate())
+        return;
+    await new Promise(r => setTimeout(r, 5));
+} assert.fail('Timed out waiting for service'); }
+async function fixture() { const store = new TelegramStore(':memory:', key), client = new FakeTransport(), service = new TelegramService(store, () => client), a = store.create('1858', 'Рабочий'); await service.connect(a.id); await until(() => service.status(store.account(a.id)).phase === 'ready'); return { store, client, service, a }; }
+test('Telegram does not read histories until explicit binding; sync saves both directions without duplicates', async () => { const { store, client, service, a } = await fixture(); try {
+    assert.equal(client.reads.length, 0);
+    assert.throws(() => service.bind(a.id, '200', 37974), /выберите/);
+    await service.dialogs(a.id);
+    service.bind(a.id, '200', 37974);
+    await until(() => store.history(37974).messages.length === 1);
+    client.messages.push({ ...client.messages[0]!, id: 2, outgoing: true, text: 'Ответ' });
+    await service.sync(a.id);
+    await service.sync(a.id);
+    assert.deepEqual(store.history(37974).messages.map(m => m.outgoing), [false, true]);
+    assert.equal(store.bindings()[0]?.cursor, 2);
+}
+finally {
+    await service.close();
+    store.close();
+} });
+test('Telegram process restart resumes session without QR and catches more than 100 missed messages', async () => { const store = new TelegramStore(':memory:', key), client = new FakeTransport(), a = store.create('1858', 'Рабочий'); store.authorize(a.id, '100', 'saved-session'); const b = store.bind(a.id, '200', 'Клиент', 37974, { userId: '200', accessHash: 'secret' }); store.ingest(b, [client.messages[0]!], 1); client.messages = Array.from({ length: 250 }, (_, i) => ({ ...client.messages[0]!, id: i + 1 })); let login = false; client.login = async () => { login = true; return '100'; }; const service = new TelegramService(store, session => { assert.equal(session, 'saved-session'); return client; }); try {
+    await service.tick();
+    await until(() => store.bindings()[0]?.cursor === 250);
+    assert.equal(login, false);
+    assert.deepEqual(client.reads, [1, 101, 201]);
+    assert.equal(store.history(37974).messages.length, 200);
+}
+finally {
+    await service.close();
+    store.close();
+} });
+test('Telegram reconciliation applies offline edits and deletions without duplicating messages', async () => { const { store, client, service, a } = await fixture(); try {
+    await service.dialogs(a.id);
+    service.bind(a.id, '200', 37974);
+    await until(() => store.history(37974).messages.length === 1);
+    client.messages[0] = { ...client.messages[0]!, text: 'Изменено', edited: true };
+    await service.sync(a.id);
+    assert.equal(store.history(37974).messages[0]?.text, 'Изменено');
+    client.messages = [];
+    await service.sync(a.id);
+    assert.equal(store.history(37974).messages[0]?.deleted, true);
+    assert.equal(store.history(37974).messages[0]?.text, '');
+}
+finally {
+    await service.close();
+    store.close();
+} });
+test('Telegram shutdown preserves auth but explicit disconnect revokes and clears it', async () => { const { store, client, service, a } = await fixture(); await service.close(); assert.equal(client.loggedOut, false); assert.equal(store.session(a.id), 'saved-session'); const second = new FakeTransport(), next = new TelegramService(store, () => second); await next.tick(); await until(() => next.status(store.account(a.id)).phase === 'ready'); await next.disconnect(a.id); assert.equal(second.loggedOut, true); assert.equal(store.session(a.id), null); await next.close(); store.close(); });
+test('Telegram invalidated session requires login, does not retry login in a loop', async () => { const store = new TelegramStore(':memory:', key), a = store.create('1', 'a'); store.authorize(a.id, '100', 'saved-session'); let calls = 0; const client = new FakeTransport(); client.loggedIn = false; const service = new TelegramService(store, () => { calls++; return client; }); try {
+    await service.tick();
+    await until(() => service.status(store.account(a.id)).phase === 'login_required');
+    await service.tick();
+    assert.equal(calls, 1);
+    assert.equal(store.session(a.id), null);
+}
+finally {
+    await service.close();
+    store.close();
+} });
+test('Telegram error classification respects flood pauses and does not expose raw exceptions', () => { assert.equal(safeTelegramError({ errorMessage: 'FLOOD_WAIT_125' }).retrySeconds, 125); assert.equal(safeTelegramError(new Error('secret token')).message.includes('secret'), false); assert.equal(safeTelegramError({ errorMessage: 'SESSION_REVOKED' }).authLost, true); });
+test('Eight Telegram accounts resume independently; one network failure does not stop the other seven', async () => {
+    const store = new TelegramStore(':memory:', key), clients = new Map<string, FakeTransport>();
+    for (let i = 0; i < 8; i++) {
+        const a = store.create(String(i + 1), `Manager ${i + 1}`);
+        store.authorize(a.id, String(100 + i), `session-${i}`);
+        store.bind(a.id, '200', 'Клиент', 1000 + i, { userId: '200', accessHash: 'secret' });
+        const client = new FakeTransport();
+        client.id = String(100 + i);
+        client.saved = `session-${i}`;
+        if (i === 0)
+            client.connect = async () => { throw new Error('Network failed'); };
+        clients.set(`session-${i}`, client);
+    }
+    const service = new TelegramService(store, saved => clients.get(saved)!);
+    try {
+        await service.tick();
+        await until(() => store.accounts().filter(a => service.status(a).phase === 'ready').length === 7);
+        await until(() => store.history(1007).messages.length === 1);
+        assert.equal(service.status(store.accounts()[0]!).phase, 'retry');
+        for (let i = 1; i < 8; i++)
+            assert.equal(store.history(1000 + i).messages.length, 1);
+        assert.equal(store.history(1000).messages.length, 0);
+    }
+    finally {
+        await service.close();
+        store.close();
+    }
+});
+test('Unreadable saved Telegram session is visible, preserves encrypted data and does not loop', async () => {
+    const store = new TelegramStore(':memory:', key), a = store.create('1', 'Рабочий');
+    store.authorize(a.id, '100', 'saved-session');
+    store.db.prepare('UPDATE telegram_accounts SET session=? WHERE id=?').run('corrupted', a.id);
+    let created = 0;
+    const service = new TelegramService(store, () => { created++; return new FakeTransport(); });
+    try {
+        await service.tick();
+        await until(() => service.status(store.account(a.id)).phase === 'error');
+        assert.match(service.status(store.account(a.id)).error, /расшифровать/);
+        await service.tick();
+        assert.equal(created, 0);
+        assert.equal(store.account(a.id).active, true);
+        await assert.rejects(service.connect(a.id), /ключ хранения/);
+    }
+    finally {
+        await service.close();
+        store.close();
+    }
+});
+test('Dialog listing respects Telegram flood wait and never returns raw errors', async () => {
+    const { store, client, service, a } = await fixture();
+    client.dialogs = async () => { throw { errorMessage: 'FLOOD_WAIT_125', secret: 'must not leak' }; };
+    try {
+        await assert.rejects(service.dialogs(a.id), /ограничил/);
+        assert.equal(service.status(store.account(a.id)).phase, 'retry');
+        assert.ok(service.status(store.account(a.id)).nextAttempt > Date.now() + 120000);
+        await assert.rejects(service.connect(a.id), /ограничения/);
+    }
+    finally {
+        await service.close();
+        store.close();
+    }
+});
+test('Pause during an in-flight Telegram request prevents further history and reconciliation reads', async () => {
+    const { store, client, service, a } = await fixture();
+    await service.dialogs(a.id);
+    let reads = 0, reconciles = 0;
+    client.history = async () => { reads++; store.pause(a.id, '200'); return { messages: client.messages, cursor: 1, more: true }; };
+    client.reconcile = async () => { reconciles++; return { messages: [], deleted: [] }; };
+    try {
+        service.bind(a.id, '200', 37974);
+        await until(() => service.status(store.account(a.id)).lastSync !== null);
+        await service.sync(a.id);
+        assert.equal(reads, 1);
+        assert.equal(reconciles, 0);
+        assert.equal(store.history(37974).messages.length, 0);
+    }
+    finally {
+        await service.close();
+        store.close();
+    }
+});
+
+test('Real teleproto FloodWaitError preserves the server-mandated pause', () => {
+ const error = new FloodWaitError({capture: 180, request: null});
+ assert.equal(safeTelegramError(error).retrySeconds, 180);
+ assert.equal(safeTelegramError({errorMessage: 'AUTH_KEY_DUPLICATED'}).authLost, true);
+});

@@ -15,6 +15,8 @@ RUN npm ci --ignore-scripts
 COPY tsconfig.base.json ./
 COPY Dockerfile .dockerignore ./
 COPY packages ./packages
+COPY tools/telegram-pilot/server.mjs ./tools/telegram-pilot/server.mjs
+COPY tools/telegram-pilot/public ./tools/telegram-pilot/public
 COPY docs/contracts/order-created.v1.example.json ./docs/contracts/order-created.v1.example.json
 COPY scripts/b24-release-integrity.mjs ./scripts/b24-release-integrity.mjs
 COPY .release/source.json ./.release/source.json

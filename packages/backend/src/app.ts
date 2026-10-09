@@ -46,6 +46,8 @@ import { registerMobileSessionAuthHook } from './mobile-auth-hook.js';
 import { loadOrdersConfig } from './integrations/umniydom/config.js';
 import { registerSupportRoutes } from './support/routes.js';
 import { registerAnalyticsReadRoutes } from './analytics-access/routes.js';
+import { registerTelegramPlacement } from './integrations/telegram/placement.js';
+import { registerTelegramRoutes } from './integrations/telegram/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,7 +76,7 @@ export async function buildApp({ config, reservations }: AppOptions): Promise<Fa
 			redact: {
 				paths: [
 					'req.headers.authorization', 'headers.authorization',
-					'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'client_secret',
+					'password', '*.password', 'apiHash', '*.apiHash', 'qr', '*.qr', 'session', '*.session', 'AUTH_ID', 'REFRESH_ID', 'APPLICATION_TOKEN', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'client_secret',
 					'*.AUTH_ID', '*.REFRESH_ID', '*.APPLICATION_TOKEN', '*.access_token', '*.refresh_token', '*.accessToken', '*.refreshToken', '*.client_secret',
 				],
 				censor: '[REDACTED]',
@@ -154,6 +156,8 @@ export async function buildApp({ config, reservations }: AppOptions): Promise<Fa
 	registerApiReportBuilderRoute(app);
 	registerSupportRoutes(app);
 	registerAnalyticsReadRoutes(app);
+	registerTelegramRoutes(app);
+	registerTelegramPlacement(app);
 	registerPlacementReportBuilderRoute(app);
 	registerAppHandlerRoute(app);
 	registerMobileRoute(app);

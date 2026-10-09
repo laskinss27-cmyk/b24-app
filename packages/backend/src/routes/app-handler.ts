@@ -1,3 +1,4 @@
+import { bindTelegramPlacement } from '../integrations/telegram/placement.js';
 import type { FastifyInstance } from 'fastify';
 import {
 	PlacementBodySchema,
@@ -147,12 +148,15 @@ export function registerAppHandlerRoute(app: FastifyInstance): void {
 			try {
 				const result = await bindDealTabPlacement({ client, publicBaseUrl: app.config.publicBaseUrl });
 				status = result.status;
+
 				app.log.info({ placement: DEAL_TAB_PLACEMENT, status: result.status }, '[app/handler] deal placement bound');
 			} catch (err) {
 				status = 'failed';
 				const e = err instanceof B24ApiError ? `${err.code}: ${err.description ?? ''}` : String(err);
 				app.log.error({ placement: DEAL_TAB_PLACEMENT }, `[app/handler] deal placement.bind failed — ${e}`);
 			}
+
+			try { await bindTelegramPlacement(client, app.config.publicBaseUrl); } catch { app.log.warn('[telegram] placement registration failed'); }
 
 			// 2) Пункт «Инвентаризация» в левом меню — независимо; падение не ломает вкладку сделки.
 			try {

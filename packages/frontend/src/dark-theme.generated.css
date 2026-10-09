@@ -4490,4 +4490,108 @@ html[data-theme="dark"] .supply-reservation-create-footer {
 html[data-theme="dark"] .supply-reservation-create-footer > span {
     color: #b9c6d7
 }
+html[data-theme="dark"] .tg-workspace {
+    color: var(--app-text,#e5edf8)
+}
+html[data-theme="dark"] .tg-eyebrow {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-workspace button, html[data-theme="dark"] .tg-close {
+    border: 1px solid #34445a;
+    background: var(--app-surface,#202c3d);
+    color: var(--app-text,#e5edf8)
+}
+html[data-theme="dark"] .tg-workspace button:focus-visible, html[data-theme="dark"] .tg-workspace input:focus-visible, html[data-theme="dark"] .tg-close:focus-visible {
+    outline: 3px solid hsl(208 65% 53%)
+}
+html[data-theme="dark"] .tg-workspace .tg-primary {
+    background: rgb(21 95 165);
+    border-color: hsl(209 65% 53%)
+}
+html[data-theme="dark"] .tg-nav {
+    border-bottom: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .tg-nav button[aria-pressed=true] {
+    background: hsl(210 55% 22%);
+    border-color: hsl(209 65% 53%);
+    color: hsl(208 75% 72%)
+}
+html[data-theme="dark"] .tg-summary {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-accounts {
+    border-right: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .tg-account {
+    border-bottom: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .tg-account.tg-selected h3 {
+    color: hsl(209 77% 72%)
+}
+html[data-theme="dark"] .tg-workspace .tg-link {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-workspace input {
+    border: 1px solid #34445a;
+    background: var(--app-surface,#202c3d)
+}
+html[data-theme="dark"] .tg-dialog-list li {
+    border-bottom: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .tg-dialog-list small, html[data-theme="dark"] .tg-bindings span, html[data-theme="dark"] .tg-bindings small {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-empty {
+    background: #172233;
+    color: #e5edf8
+}
+html[data-theme="dark"] .tg-muted, html[data-theme="dark"] .tg-workspace small {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-error {
+    background: hsl(4 55% 22%);
+    border: 1px solid hsl(6 47% 37%);
+    color: hsl(5 63% 72%)
+}
+html[data-theme="dark"] .tg-notice {
+    background: hsl(144 38% 22%);
+    color: hsl(146 55% 72%)
+}
+html[data-theme="dark"] .tg-confirm {
+    background: hsl(35 55% 22%)
+}
+html[data-theme="dark"] .tg-bindings {
+    border-bottom: 1px solid var(--app-line,#34445a)
+}
+html[data-theme="dark"] .tg-message {
+    border: 1px solid #34445a;
+    background: var(--app-surface,#202c3d)
+}
+html[data-theme="dark"] .tg-message.tg-outgoing {
+    background: hsl(213 55% 22%)
+}
+html[data-theme="dark"] .tg-message-meta {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-attachment {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .tg-modal {
+    border: 1px solid #34445a;
+    background: var(--app-surface,#202c3d)
+}
+html[data-theme="dark"] .tg-modal::backdrop {
+    background: color-mix(in srgb, rgb(20 34 57) 50%, transparent)
+}
+@media (max-width:720px) {
+    html[data-theme="dark"] .tg-accounts {
+        border-bottom: 1px solid #34445a
+    }
+}
+html[data-theme="dark"] [data-theme=dark] .tg-empty, html[data-theme="dark"] [data-theme=dark] .tg-message.tg-outgoing {
+    background: rgb(25 43 64)
+}
+html[data-theme="dark"] [data-theme=dark] .tg-muted, html[data-theme="dark"] [data-theme=dark] .tg-workspace small, html[data-theme="dark"] [data-theme=dark] .tg-message-meta {
+    color: #aebdd0
+}
 }

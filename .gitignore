@@ -58,3 +58,5 @@ secrets.local.json
 
 # Generated document artifact; the editable user guide is docs/user-guide.md.
 /docs/Umny_Dom_User_Guide.docx
+
+/.local/telegram/

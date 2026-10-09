@@ -17,6 +17,7 @@ function fixture(t) {
   for (const name of ['package.json', 'package-lock.json', 'tsconfig.base.json']) write(name, '{}\n');
   for (const name of ['Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs']) write(name, '# fixture\n');
   write('docs/contracts/order-created.v1.example.json', '{}\n');
+  for (const name of ['server.mjs', 'public/index.html', 'public/app.js', 'public/style.css']) write('tools/telegram-pilot/' + name, 'fixture\n');
   write('packages/backend/src/app.ts', 'export const marker = "committed";\n');
   return { root, write };
 }
@@ -125,4 +126,13 @@ test('prepare blocks dirty, staged and unpushed changes and archives only commit
   assert.equal(existsSync(join(output, '.env')), false);
   assert.equal(existsSync(join(output, 'node_modules')), false);
   assert.equal(checkInput(output, manifest.gitSha, manifest.gitTree).gitSha, manifest.gitSha);
+});
+
+test('release manifest includes pilot HTTP fixtures and rejects changes to them', t => {
+  const {root,write,sha,tree}=imageFixture(t);
+  const input=checkInput(root,sha,tree);
+  assert.ok(input.files['tools/telegram-pilot/server.mjs']);
+  assert.ok(input.files['tools/telegram-pilot/public/index.html']);
+  write('tools/telegram-pilot/public/index.html','changed after archive');
+  assert.throws(()=>checkInput(root,sha,tree),/telegram-pilot\/public\/index.html/);
 });
