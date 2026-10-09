@@ -1,4 +1,4 @@
-import { Agent } from 'undici';
+import { Agent, Dispatcher1Wrapper } from 'undici';
 import { SocksClient } from 'socks';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { connect as tlsConnect } from 'node:tls';
@@ -29,5 +29,5 @@ export function whatsappNetwork(proxy?: string): {
                     callback(null, socket);
             }).catch(e => callback(e, null));
         } });
-    return { agent, options: { dispatcher } as RequestInit, close: async () => { agent.destroy(); await dispatcher.destroy(); } };
+    return { agent, options: { dispatcher: new Dispatcher1Wrapper(dispatcher) } as RequestInit, close: async () => { agent.destroy(); await dispatcher.destroy(); } };
 }
