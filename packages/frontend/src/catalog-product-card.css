@@ -381,6 +381,7 @@
 .catalog-product-stocks b.zero { color: #8b96a5; font-weight: 500; }
 .catalog-product-actions {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: 8px;
 	padding: 14px 22px 18px;

@@ -1,6 +1,11 @@
 import { SUPPLY_DEPARTMENT_ID } from '@b24-app/shared';
 
+export function canCopyCatalogProduct(user: CatalogAccessUser | null): boolean {
+	return new Set([78, 3606, 1858, 1]).has(Number(user?.ID));
+}
+
 export interface CatalogAccess {
+	canCopyProduct: boolean;
 	canEditCard: boolean;
 	canEditPrices: boolean;
 }
@@ -36,6 +41,7 @@ export function catalogAccessForUser(user: CatalogAccessUser | null): CatalogAcc
 	const canEditPrices = departments.includes(SUPPLY_DEPARTMENT_ID) || isKonstantinLaskin;
 	const isPortalAdmin = user?.ADMIN === true || String(user?.ADMIN ?? '').toUpperCase() === 'Y';
 	return {
+		canCopyProduct: canCopyCatalogProduct(user),
 		canEditPrices,
 		canEditCard: canEditPrices || isPortalAdmin || CATALOG_ADMIN_USER_IDS.has(Number(user?.ID)),
 	};

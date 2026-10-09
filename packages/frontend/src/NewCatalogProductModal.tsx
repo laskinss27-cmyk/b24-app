@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { catalogCopyFields, type CatalogCopyDraft } from './catalog-product-copy.js';
 import {
 	createCatalogProduct,
 	type BaseRow,
@@ -92,24 +93,27 @@ function catalogAttributeTemplate(rows: BaseRow[], sectionId: number): {
 	return { category, attributes, sourceCount: sourceRows.length };
 }
 
-export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
+export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose, copyDraft }: {
+	copyDraft?: CatalogCopyDraft;
 	rows: BaseRow[];
 	initialQuery: string;
 	onUse: (row: BaseRow) => void;
 	onClose: () => void;
 }): JSX.Element {
-	const [isService, setIsService] = useState(false);
-	const [productType, setProductType] = useState('');
-	const [manufacturer, setManufacturer] = useState('');
-	const [model, setModel] = useState(initialQuery.trim());
-	const [article, setArticle] = useState(initialQuery.trim());
-	const [sectionId, setSectionId] = useState('');
-	const [retailText, setRetailText] = useState('');
-	const [purchaseText, setPurchaseText] = useState('0');
-	const [summary, setSummary] = useState('');
-	const [statuses, setStatuses] = useState<string[]>([]);
-	const [attributes, setAttributes] = useState<NewCatalogAttributeDraft[]>([]);
-	const [filterCategory, setFilterCategory] = useState('');
+	const copied = copyDraft ? catalogCopyFields(copyDraft.row) : null;
+	const [bundle, setBundle] = useState(copyDraft?.bundle ?? null);
+	const [isService, setIsService] = useState(copyDraft?.row.isService ?? false);
+	const [productType, setProductType] = useState(copied?.name ?? '');
+	const [manufacturer, setManufacturer] = useState(copied?.manufacturer ?? '');
+	const [model, setModel] = useState(copied?.model ?? initialQuery.trim());
+	const [article, setArticle] = useState(copied?.article ?? initialQuery.trim());
+	const [sectionId, setSectionId] = useState(copied?.sectionId ?? '');
+	const [retailText, setRetailText] = useState(copied?.retail ?? '');
+	const [purchaseText, setPurchaseText] = useState(copied?.purchase ?? '0');
+	const [summary, setSummary] = useState(copied?.summary ?? '');
+	const [statuses, setStatuses] = useState<string[]>(copied?.status.split(',').map(s => s.trim()).filter(Boolean) ?? []);
+	const [attributes, setAttributes] = useState<NewCatalogAttributeDraft[]>(copied?.attributes ?? []);
+	const [filterCategory, setFilterCategory] = useState(copied?.filterCategory ?? '');
 	const [templateSourceCount, setTemplateSourceCount] = useState(0);
 	const [photo, setPhoto] = useState<PreparedCatalogPhoto | null>(null);
 	const [photoBusy, setPhotoBusy] = useState(false);
@@ -128,7 +132,7 @@ export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		}
 		return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 	}, [isService, rows]);
-	const preview = isService ? productType.trim().replace(/\s+/g, ' ') : productNamePreview(productType, manufacturer, model);
+	const preview = copyDraft || isService ? productType.trim().replace(/\s+/g, ' ') : productNamePreview(productType, manufacturer, model);
 	const localCandidates = useMemo(
 		() => localProductCandidates(rows, { name: preview, manufacturer, model, isService }),
 		[rows, preview, manufacturer, model, isService],
@@ -140,11 +144,13 @@ export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 	const section = sections.find((item) => item.id === Number(sectionId));
 	const validationError = (): string | null => {
 		if (productType.trim().length < 3) return isService ? 'Укажи название услуги.' : 'Укажи вид товара.';
-		if (!isService && manufacturer.trim().length < 2) return 'Укажи производителя.';
-		if (!isService && model.trim().length < 2) return 'Укажи полную модель или артикул.';
+		if (!copyDraft && !isService && manufacturer.trim().length < 2) return 'Укажи производителя.';
+		if (!copyDraft && !isService && model.trim().length < 2) return 'Укажи полную модель или артикул.';
+		if (copyDraft && productType.trim().length > 140) return 'Название новой карточки — не больше 140 символов.';
+		if (bundle && (!Number.isSafeInteger(bundle.units) || bundle.units < 2 || !rows.some(r => r.id === bundle.sourceProductId && !r.isService && !r.isMarketplaceBundle))) return 'Выбери товар и целое количество не меньше двух для комплекта.';
 		if (!section) return 'Выбери раздел каталога.';
 		if (!(retail > 0)) return 'Цена продажи должна быть больше нуля.';
-		if (!isService && (!Number.isFinite(purchase) || purchase < 0)) return 'Закупочная цена должна быть 0 или больше.';
+		if (!isService && (!purchaseText.trim() || !Number.isFinite(purchase) || purchase < 0)) return 'Закупочная цена должна быть 0 или больше.';
 		const filledAttributes = attributes.filter((attribute) => attribute.rawValue.trim());
 		if (filledAttributes.some((attribute) => attribute.label.trim().length < 2)) return 'У каждой заполненной характеристики должно быть название.';
 		if (exactCandidate) return 'Такая модель уже есть в каталоге. Выбери найденный товар.';
@@ -228,6 +234,7 @@ export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 		setErr(null);
 		try {
 			const input = {
+				...(copyDraft ? { copySourceId: copyDraft.row.id, ...(bundle ? { bundle } : {}) } : {}),
 				isService,
 				productType: productType.trim(),
 				manufacturer: isService ? '' : manufacturer.trim(),
@@ -271,17 +278,22 @@ export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 
 	return (
 		<div className="new-product-overlay" onClick={onClose}>
-			<div className="new-product-modal" onClick={(event) => event.stopPropagation()}>
+			<div className={`new-product-modal${copyDraft ? ' new-product-copy' : ''}`} onClick={(event) => event.stopPropagation()}>
 				<div className="new-product-head">
-					<div><span>Новая позиция каталога</span><h2>{preview || (isService ? 'Новая услуга' : 'Новый товар')}</h2></div>
+					<div><span>{copyDraft ? 'Копия карточки без фото' : 'Новая позиция каталога'}</span><h2>{preview || (isService ? 'Новая услуга' : 'Новый товар')}</h2></div>
 					<button type="button" className="icon-close" aria-label="Закрыть" onClick={onClose}>×</button>
 				</div>
+				{copyDraft && <p>Измени данные и сохрани новую карточку. Фото не копируется. Исходная карточка остаётся без изменений.</p>}
+				{bundle && <fieldset className="new-product-fields"><legend>Состав комплекта</legend>
+<label>Товар в комплекте<select value={bundle.sourceProductId} onChange={e => setBundle({ ...bundle, sourceProductId: Number(e.target.value) })}>{rows.filter(r => !r.isService && !r.isMarketplaceBundle).map(r => <option key={r.id} value={r.id}>{r.name} · ID {r.id}</option>)}</select></label>
+<label>Штук в комплекте<input type="number" min="2" step="1" value={bundle.units} onChange={e => setBundle({ ...bundle, units: Number(e.target.value) })} /></label>
+</fieldset>}
 				<div className="new-product-fields">
 					<label className="wide new-product-service-toggle">
-						<input type="checkbox" checked={isService} onChange={(event) => changeKind(event.target.checked)} />
+						<input type="checkbox" checked={isService} disabled={Boolean(copyDraft)} onChange={(event) => changeKind(event.target.checked)} />
 						<span><b>Услуга</b><small>Нескладская позиция: без остатков, закупки и товарных характеристик.</small></span>
 					</label>
-					<label>{isService ? 'Название услуги' : 'Вид товара'}<input autoFocus value={productType} placeholder={isService ? 'Монтаж видеокамеры' : 'IP-камера'} onChange={(event) => { setProductType(event.target.value); resetReview(); }} /></label>
+					<label>{copyDraft ? 'Название новой карточки' : isService ? 'Название услуги' : 'Вид товара'}<input autoFocus value={productType} placeholder={isService ? 'Монтаж видеокамеры' : 'IP-камера'} onChange={(event) => { setProductType(event.target.value); resetReview(); }} /></label>
 					{!isService && <label>Производитель<input value={manufacturer} placeholder="Hikvision" onChange={(event) => { setManufacturer(event.target.value); resetReview(); }} /></label>}
 					{!isService && <label>Модель / артикул<input value={model} placeholder="DS-2CD2043G2-I" onChange={(event) => {
 						const nextModel = event.target.value;
@@ -310,7 +322,7 @@ export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 					<label className="wide">Краткое описание<textarea rows={4} maxLength={4000} value={summary} placeholder={isService ? 'Что входит в услугу, условия и ограничения' : 'Что это за товар, для чего нужен, комплектация и совместимость'} onChange={(event) => setSummary(event.target.value)} /></label>
 				</div>
 
-				{!isService && <section className="new-product-photo-section">
+				{!isService && !copyDraft && <section className="new-product-photo-section">
 					<div className="new-product-section-head">
 						<div><b>Фото товара</b><span>Автоматически уменьшим до безопасного размера и сохраним в ядре.</span></div>
 						<label className="btn-secondary new-product-photo-button">
@@ -328,7 +340,7 @@ export function NewCatalogProductModal({ rows, initialQuery, onUse, onClose }: {
 					<div className="new-product-section-head">
 						<div>
 							<b>Характеристики</b>
-							<span>{section
+							<span>{copied && attributes.length ? 'Характеристики скопированы — проверь значения для новой карточки.' : section
 								? templateSourceCount > 0
 									? `Шаблон «${filterCategory || section.name}» собран по ${templateSourceCount} карточкам этого раздела.`
 									: 'Для этого раздела готового шаблона пока нет — добавь нужные поля вручную.'

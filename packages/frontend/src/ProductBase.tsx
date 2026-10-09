@@ -23,6 +23,7 @@ import { PriceTagsModal, type PriceTagSelection } from './PriceTags.js';
 import { CatalogPriceEditorModal } from './CatalogPriceEditorModal.js';
 import { catalogGeneratedTime as hhmm, formatCatalogNumber as fmt, normalizeStoreTitle, shortStoreTitle as shortStore } from './catalog-product-display.js';
 import { CatalogProductCard } from './CatalogProductCard.js';
+import { loadCatalogCopy, type CatalogCopyDraft } from './catalog-product-copy.js';
 import { NewCatalogProductModal } from './NewCatalogProductModal.js';
 import { QuickSaleCartModal } from './QuickSaleCartModal.js';
 import { CatalogProductTable, type CatalogSortKey as SortKey } from './CatalogProductTable.js';
@@ -99,6 +100,8 @@ export function ProductBase({
 	const [marketplaceExportError, setMarketplaceExportError] = useState('');
 	const [uid, setUid] = useState('');
 	const [appAccess, setAppAccess] = useState<Awaited<ReturnType<typeof fetchCurrentAppAccess>> | null>(null);
+	const [canCopyProduct, setCanCopyProduct] = useState(false);
+	const [copyDraft, setCopyDraft] = useState<CatalogCopyDraft | null>(null);
 	const [canEditCard, setCanEditCard] = useState(false);
 	const [canEditPrices, setCanEditPrices] = useState(false);
 	const [canEditMarketplaceOldId, setCanEditMarketplaceOldId] = useState(false);
@@ -165,6 +168,7 @@ export function ProductBase({
 				setStores(base.stores.filter((store) => store.active));
 				setMeta({ generatedAt: base.generatedAt, cached: base.cached });
 				setCanEditCard(base.canEditCard);
+				setCanCopyProduct(base.canCopyProduct);
 				setCanEditPrices(base.canEditPrices);
 				setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 				setAppAccess(appAccess);
@@ -225,6 +229,7 @@ export function ProductBase({
 			setStores(base.stores.filter((store) => store.active));
 			setMeta({ generatedAt: base.generatedAt, cached: false });
 			setCanEditCard(base.canEditCard);
+			setCanCopyProduct(base.canCopyProduct);
 			setCanEditPrices(base.canEditPrices);
 			setCanEditMarketplaceOldId(base.canEditMarketplaceOldId);
 		} catch {
@@ -548,6 +553,8 @@ export function ProductBase({
 
 			{canCreateCatalogProduct && showNewProduct && <NewCatalogProductModal rows={rows} initialQuery={q} onUse={useCatalogProduct} onClose={() => setShowNewProduct(false)} />}
 
+			{canCopyProduct && copyDraft && <NewCatalogProductModal rows={rows} initialQuery="" copyDraft={copyDraft} onUse={row => { setCopyDraft(null); setRows(current => current.some(r => r.id === row.id) ? current : [...current, row]); setOnlyStock(false); setQ(row.name); setCardRow(row); }} onClose={() => setCopyDraft(null)} />}
+
 			{priceRow && <CatalogPriceEditorModal row={priceRow} onSave={saveCatalogPrices} onClose={() => setPriceRow(null)} />}
 
 			{cardRow && <CatalogProductCard
@@ -559,6 +566,7 @@ export function ProductBase({
 				canEditPrices={canEditPrices}
 				showMarketplaceOldId={marketplaceMode}
 				canEditMarketplaceOldId={canEditMarketplaceOldId}
+				{...(canCopyProduct && (!readOnly || allowCreateProduct) && !pickMode ? { onCopy: async () => { const draft = await loadCatalogCopy(cardRow); setCopyDraft(draft); setCardRow(null); } } : {})}
 				onSave={saveCatalogProduct}
 				onSaveMarketplaceOldId={saveMarketplaceOldId}
 				{...(!ctx.__mock&&!readOnly&&!pickMode?{onStockChanged:refresh}:{})}

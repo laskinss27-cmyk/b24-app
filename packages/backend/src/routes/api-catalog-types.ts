@@ -25,6 +25,7 @@ export interface CacheEntry {
 }
 
 export interface CatalogCandidate {
+	isMarketplaceBundle?: boolean;
 	id: number;
 	iblockId: number;
 	name: string;

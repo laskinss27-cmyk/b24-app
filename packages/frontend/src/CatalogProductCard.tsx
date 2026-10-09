@@ -18,7 +18,9 @@ export function CatalogProductCard({
 	onSaveMarketplaceOldId,
 	onClose,
 	onStockChanged,
+	onCopy,
 }: {
+	onCopy?: () => Promise<void>;
 	row: BaseRow;
 	stores: StoreInfo[];
 	sections: Array<{ id: number; name: string }>;
@@ -339,7 +341,8 @@ export function CatalogProductCard({
 						<button type="button" className="btn-primary" disabled={busy || photoBusy} onClick={() => void save()}>{busy ? 'Сохраняю…' : 'Сохранить товар'}</button>
 					</> : <>
 						<button type="button" className="btn-secondary" onClick={onClose}>Закрыть</button>
-						{canEdit && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
+						{onCopy && <button type="button" className="btn-secondary" disabled={busy} onClick={() => { setBusy(true); setError(''); void onCopy().catch(e => setError(String(e.message ?? e))).finally(() => setBusy(false)); }}>{busy ? 'Подготавливаю…' : 'Копировать без фото'}</button>}
+					{canEdit && <button type="button" className="btn-primary" onClick={() => setEditing(true)}>Редактировать</button>}
 					</>}
 				</div>
 			</div>

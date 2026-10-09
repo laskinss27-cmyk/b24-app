@@ -334,3 +334,8 @@
 	padding-top: 14px;
 	border-top: 1px solid #e4e8ee;
 }
+
+@media (max-width: 600px) {
+	.new-product-copy .new-product-fields { grid-template-columns: minmax(0, 1fr); }
+	.new-product-copy .new-product-actions { flex-wrap: wrap; }
+}

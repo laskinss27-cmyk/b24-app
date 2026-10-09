@@ -36,6 +36,7 @@ export interface BaseRow {
 }
 
 export interface ProductBaseResult {
+	canCopyProduct: boolean;
 	rows: BaseRow[];
 	/** Активные склады Битрикса и складского ядра; ERP-only склады имеют служебные ID. */
 	stores: StoreInfo[];
@@ -62,13 +63,14 @@ export async function fetchProductBase(force = false, marketplaceMode = false): 
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...bx24Auth(), force, marketplaceMode }),
 	});
-	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
+	const json = (await res.json()) as { ok: boolean; error?: string; rows?: BaseRow[]; stores?: StoreInfo[]; generatedAt?: string; cached?: boolean; canCopyProduct?: boolean; canEditCard?: boolean; canEditPrices?: boolean; canEditMarketplaceOldId?: boolean };
 	if (!json.ok) throw new Error(json.error ?? 'не удалось собрать базу');
 	return {
 		rows: json.rows ?? [],
 		stores: json.stores ?? [],
 		generatedAt: json.generatedAt ?? '',
 		cached: Boolean(json.cached),
+		canCopyProduct: Boolean(json.canCopyProduct),
 		canEditCard: Boolean(json.canEditCard),
 		canEditPrices: Boolean(json.canEditPrices),
 		canEditMarketplaceOldId: Boolean(json.canEditMarketplaceOldId),
@@ -236,6 +238,8 @@ export async function updateCatalogProduct(input: CatalogProductUpdateInput): Pr
 }
 
 export interface NewCatalogProductInput {
+	copySourceId?: number;
+	bundle?: { sourceProductId: number; units: number };
 	isService: boolean;
 	productType: string;
 	manufacturer: string;

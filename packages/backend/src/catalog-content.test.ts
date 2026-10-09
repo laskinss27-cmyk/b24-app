@@ -116,38 +116,38 @@ test('catalog card access is independent from price access', () => {
 		NAME: 'Сотрудник',
 		LAST_NAME: 'Снабжения',
 		UF_DEPARTMENT: [10],
-	}), { canEditCard: true, canEditPrices: true });
+	}), { canCopyProduct: false, canEditCard: true, canEditPrices: true });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1,
 		NAME: 'Администратор',
 		LAST_NAME: 'Приложения',
 		UF_DEPARTMENT: [5],
-	}), { canEditCard: true, canEditPrices: false });
+	}), { canCopyProduct: true, canEditCard: true, canEditPrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 77,
 		NAME: 'Администратор',
 		LAST_NAME: 'Портала',
 		UF_DEPARTMENT: [5],
 		ADMIN: 'Y',
-	}), { canEditCard: true, canEditPrices: false });
+	}), { canCopyProduct: false, canEditCard: true, canEditPrices: false });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1246,
 		NAME: 'Константин',
 		LAST_NAME: 'Ласкин',
 		UF_DEPARTMENT: [5],
-	}), { canEditCard: true, canEditPrices: true });
+	}), { canCopyProduct: false, canEditCard: true, canEditPrices: true });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 1246,
 		NAME: 'Другое написание',
 		LAST_NAME: '',
 		UF_DEPARTMENT: [5],
-	}), { canEditCard: true, canEditPrices: true });
+	}), { canCopyProduct: false, canEditCard: true, canEditPrices: true });
 	assert.deepEqual(catalogAccessForUser({
 		ID: 77,
 		NAME: 'Обычный',
 		LAST_NAME: 'Сотрудник',
 		UF_DEPARTMENT: [5],
-	}), { canEditCard: false, canEditPrices: false });
+	}), { canCopyProduct: false, canEditCard: false, canEditPrices: false });
 });
 
 test('delegated catalog creation is restricted to Konstantin Bitrix ID', () => {

@@ -119,6 +119,7 @@ test('fetchProductBase preserves request flags and fills absent optional respons
 		stores: [],
 		generatedAt: '',
 		cached: false,
+		canCopyProduct: false,
 		canEditCard: false,
 		canEditPrices: false,
 		canEditMarketplaceOldId: false,

@@ -6,6 +6,7 @@ import { normalizeDomain } from '../security.js';
 import { appPermission } from '../access-policy.js';
 import {
 	canDelegateCatalogProductCreation,
+	canCopyCatalogProduct,
 	catalogAccessForUser,
 	type CatalogAccessUser,
 } from '../catalog-access.js';
@@ -21,21 +22,32 @@ import { catalogClientFrom, errInfo } from './api-catalog-route-helpers.js';
 import { baseCache } from './api-catalog-cache.js';
 import { catalogPhoto, cleanMultiline, cleanText, productTitle } from './api-catalog-value-helpers.js';
 import { freshExactCandidates, rankedCandidates } from './api-catalog-candidates.js';
+import { readCopySource, validateCopyBundle, registerCatalogCopyDetailsRoute } from './api-catalog-product-copy.js';
 import { serializeProductCreate } from './api-catalog-product-creation-queue.js';
 
 export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
+	registerCatalogCopyDetailsRoute(app);
 	app.post('/api/catalog/create-product', async (req, reply) => {
 		const body = (req.body ?? {}) as AuthBody & Record<string, unknown>;
 		const client = catalogClientFrom(app, body);
 		if (!client) return reply.code(403).send({ ok: false, error: 'bad auth / domain' });
 		const currentUser = await client.call<CatalogAccessUser>('user.current', {}).catch(() => null);
 		const legacyAccess = catalogAccessForUser(currentUser);
-		if (!appPermission(req, 'catalog.create', legacyAccess.canEditCard)) {
+		const copying = body['copySourceId'] !== undefined;
+		if (copying ? !canCopyCatalogProduct(currentUser) : !appPermission(req, 'catalog.create', legacyAccess.canEditCard)) {
 			return reply.code(403).send({ ok: false, error: 'нет права создавать карточки товаров' });
 		}
 		const erp = ErpClient.fromEnv();
 		if (!erp) return reply.code(503).send({ ok: false, error: 'ядро недоступно' });
 
+		let copySource: Awaited<ReturnType<typeof readCopySource>> | null = null;
+		let bundleFields: Record<string, unknown> = {};
+		if (copying) {
+			try {
+				copySource = await readCopySource(erp, body['copySourceId']);
+				bundleFields = await validateCopyBundle(erp, copySource.bundle, body['bundle']);
+			} catch (error) { return reply.code(400).send({ ok: false, error: errInfo(error) }); }
+		}
 		const productType = cleanText(body['productType']);
 		const manufacturer = cleanText(body['manufacturer']);
 		const model = cleanText(body['model']);
@@ -47,22 +59,24 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 		const status = cleanText(body['status']);
 		const retail = Number(body['retail']);
 		const purchase = Number(body['purchase'] ?? 0);
-		const isService = body['isService'] === true;
+		const isService = copySource ? copySource.isService : body['isService'] === true;
 		const similarReviewed = body['similarReviewed'] === true;
 		let content: CatalogProductContent;
 		let photo: ReturnType<typeof catalogPhoto>;
 		try {
 			content = createCatalogContent(summary, body['attributes'] ?? []);
-			photo = catalogPhoto(body['photo']);
+			photo = copying ? null : catalogPhoto(body['photo']);
 		} catch (error) {
 			return reply.code(400).send({ ok: false, error: errInfo(error) });
 		}
 		if (productType.length < 3) return reply.code(400).send({ ok: false, error: isService ? 'укажи название услуги' : 'укажи вид товара' });
-		if (!isService && manufacturer.length < 2) return reply.code(400).send({ ok: false, error: 'укажи производителя' });
-		if (!isService && model.length < 2) return reply.code(400).send({ ok: false, error: 'укажи полную модель или артикул' });
+		if (!copying && !isService && manufacturer.length < 2) return reply.code(400).send({ ok: false, error: 'укажи производителя' });
+		if (!copying && !isService && model.length < 2) return reply.code(400).send({ ok: false, error: 'укажи полную модель или артикул' });
 		if (!Number.isInteger(sectionId) || sectionId <= 0) return reply.code(400).send({ ok: false, error: 'выбери раздел каталога' });
-		if (!(retail > 0)) return reply.code(400).send({ ok: false, error: 'цена продажи должна быть больше нуля' });
+		if (!Number.isFinite(retail) || !(retail > 0)) return reply.code(400).send({ ok: false, error: 'цена продажи должна быть больше нуля' });
 		if (!isService && (!Number.isFinite(purchase) || purchase < 0)) return reply.code(400).send({ ok: false, error: 'закупочная цена должна быть 0 или больше' });
+		if (copying && !isService && (body['purchase'] == null || String(body['purchase']).trim() === '')) return reply.code(400).send({ ok: false, error: 'Укажи закупочную цену новой карточки' });
+		if (copying && productType.length > 140) return reply.code(400).send({ ok: false, error: 'Название новой карточки — не больше 140 символов' });
 		const allowedStatuses = new Set([
 			'После ремонта', 'Снят с производства', 'Недоступен к заказу', 'К удалению',
 			'Уценка', 'Витринный', 'Б/у', 'Распродажа', 'Повреждённый',
@@ -73,13 +87,19 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 			return reply.code(400).send({ ok: false, error: 'выбран неизвестный или повторяющийся статус товара' });
 		}
 
-		const name = isService ? productType : productTitle(productType, manufacturer, model);
+		const name = copying || isService ? productType : productTitle(productType, manufacturer, model);
 		const cacheKey = normalizeDomain(body.domain ?? '');
 		try {
 			return await serializeProductCreate(async () => {
 				const cachedRows = (baseCache.get(cacheKey)?.data.rows ?? []) as CatalogCandidate[];
 				const sectionName = cachedRows.find((row) => row.sectionId === sectionId)?.sectionName || sectionNameInput;
 				const fresh = await freshExactCandidates(client, { name, model });
+				// A copy must also check ERP: Bitrix metadata/cache may be unavailable or stale.
+				if (copying) {
+					const core = await erp.list('Item', ['name', 'item_name', 'is_stock_item', 'b24_model', 'b24_article', 'b24_brand'], [], 0);
+					for (const item of core) fresh.push({ id: Number(item.name), iblockId: 24, name: String(item.item_name), isService: Number(item.is_stock_item) === 0,
+						model: String(item.b24_model ?? ''), article: String(item.b24_article ?? ''), manufacturer: String(item.b24_brand ?? ''), retail: null, purchase: null, total: 0, stockByStore: {} });
+				}
 				const merged = new Map<number, CatalogCandidate>();
 				for (const row of [...cachedRows, ...fresh]) merged.set(row.id, row);
 				const candidates = rankedCandidates([...merged.values()], { name, model, manufacturer, isService });
@@ -96,7 +116,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 				try {
 					const written = await addCatalogProductWithAccessFallback<{ element?: { id?: number | string } }>({
 						userClient: client,
-						systemClient: canDelegateCatalogProductCreation(currentUser) && app.config.catalogWriteWebhook
+						systemClient: (canDelegateCatalogProductCreation(currentUser) || (copying && canCopyCatalogProduct(currentUser))) && app.config.catalogWriteWebhook
 							? new B24Client({ auth: { kind: 'webhook', url: app.config.catalogWriteWebhook } })
 							: null,
 						fields: {
@@ -127,6 +147,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 					});
 					coreCreated = true;
 					await erp.update('Item', String(productId), {
+						...bundleFields,
 						b24_product_status: statuses.join(', '),
 						b24_catalog_content: JSON.stringify(content),
 						b24_filter_category: category,
@@ -161,6 +182,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 					iblockId: 24,
 					name,
 					isService,
+					isMarketplaceBundle: Boolean(copySource?.bundle),
 					article: isService ? '' : article,
 					model: isService ? '' : model,
 					manufacturer: isService ? '' : manufacturer,
@@ -176,7 +198,7 @@ export function registerCatalogProductCreateRoute(app: FastifyInstance): void {
 					total: 0,
 					stockByStore: {},
 				};
-				app.log.info({ productId, name, sectionId, delegated }, '[api/catalog/create-product] ok');
+				app.log.info({ productId, name, sectionId, delegated, copySourceId: copying ? Number(body['copySourceId']) : undefined, actorId: currentUser?.ID }, '[api/catalog/create-product] ok');
 				return { ok: true, status: 'created', name, product: row };
 			});
 		} catch (error) {

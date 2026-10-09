@@ -88,6 +88,7 @@ export function registerCatalogBrowseRoutes(app: FastifyInstance): void {
 				stores,
 				generatedAt: data.generatedAt,
 				cached,
+				canCopyProduct: legacyAccess.canCopyProduct,
 				canEditCard,
 				canEditPrices,
 				canEditMarketplaceOldId,
