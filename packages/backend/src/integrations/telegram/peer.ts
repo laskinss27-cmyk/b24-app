@@ -2,7 +2,7 @@ import { Api } from 'teleproto';
 import bigInt from 'big-integer';
 // Legacy user peers remain readable without rewriting encrypted storage.
 export type TelegramPeer = { userId: string; accessHash: string } | { kind: 'group'; chatId: string } | { kind: 'supergroup'; channelId: string; accessHash: string };
-export const isGroup = (id: string): boolean => /^(g|s):[1-9]\d*$/.test(id);
+export const isGroup = (id: string): boolean => /^(g|s):[1-9]\d*(?:-\d+)?$/.test(id);
 export const dialogKind = (id: string): 'private' | 'group' => isGroup(id) ? 'group' : 'private';
 export function peerKey(peer: Api.TypePeer): string {
     if (peer instanceof Api.PeerUser) return String(peer.userId);

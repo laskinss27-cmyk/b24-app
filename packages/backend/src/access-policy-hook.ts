@@ -3,6 +3,16 @@ import { WAREHOUSE_PERMISSION_IDS, type AccessPermissionId } from '@b24-app/shar
 import { ACCESS_POLICY_ENFORCEMENT_ENABLED, hasAppPermissions, type AccessAuthBody } from './access-policy.js';
 
 const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>> = {
+    '/api/whatsapp/accounts': ['deals.view'],
+    '/api/whatsapp/connect': ['deals.view'],
+    '/api/whatsapp/rename': ['deals.view'],
+    '/api/whatsapp/dialogs': ['deals.view'],
+    '/api/whatsapp/disconnect': ['deals.view'],
+    '/api/whatsapp/pause': ['deals.view'],
+    '/api/whatsapp/bind-contact': ['deals.view'],
+    '/api/whatsapp/client-context': ['deals.view'],
+    '/api/whatsapp/client-history': ['deals.view'],
+    '/api/whatsapp/media': ['deals.view'],
 	'/api/catalog/stores': ['catalog.view'],
 	'/api/catalog/browse': ['catalog.view', 'catalog.search'],
 	'/api/catalog/export-comparison': ['catalog.export_comparison'],

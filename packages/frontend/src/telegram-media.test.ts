@@ -26,3 +26,10 @@ test('Media fetch uses authenticated POST and no browser cache; HTML and oversiz
         mime = 'audio/ogg'; size = String(26 * 1024 * 1024); await assert.rejects(loadTelegramMedia(target, new AbortController().signal), /25 МБ/);
     } finally { globalThis.fetch = previous; if (win) Object.defineProperty(globalThis, 'window', win); else Reflect.deleteProperty(globalThis, 'window'); }
 });
+
+test('WhatsApp media stays in its own namespace and uses the same cancellable transient preview',async()=>{
+ const previous=globalThis.fetch,win=Object.getOwnPropertyDescriptor(globalThis,'window');let url='';
+ Object.defineProperty(globalThis,'window',{configurable:true,value:{__B24_CONTEXT__:{domain:'portal.bitrix24.ru',accessToken:'access'}}});
+ globalThis.fetch=async(input,init)=>{url=String(input);assert.equal(init?.cache,'no-store');assert.ok(init?.signal);return new Response('OggS',{headers:{'Content-Type':'audio/ogg'}});};
+ try{const result=await loadTelegramMedia({...target,messenger:'whatsapp'},new AbortController().signal);assert.equal(url,'/api/whatsapp/media');assert.equal(result.kind,'audio');}finally{globalThis.fetch=previous;if(win)Object.defineProperty(globalThis,'window',win);else Reflect.deleteProperty(globalThis,'window');}
+});

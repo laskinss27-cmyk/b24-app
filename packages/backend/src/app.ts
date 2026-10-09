@@ -1,3 +1,4 @@
+import { registerWhatsAppRoutes } from './integrations/whatsapp/routes.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -156,7 +157,8 @@ export async function buildApp({ config, reservations }: AppOptions): Promise<Fa
 	registerApiReportBuilderRoute(app);
 	registerSupportRoutes(app);
 	registerAnalyticsReadRoutes(app);
-	registerTelegramRoutes(app);
+	const messengerCrmAccess=registerTelegramRoutes(app);
+	registerWhatsAppRoutes(app,messengerCrmAccess);
 	registerTelegramPlacement(app);
 	registerPlacementReportBuilderRoute(app);
 	registerAppHandlerRoute(app);

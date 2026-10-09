@@ -8,7 +8,7 @@ export function managerAlertChat(portal: string): string | null {
 export class TelegramConnectionAlerts {
     private running: Promise<void> | null = null;
     private closed = false;
-    constructor(private store: TelegramStore, private client: () => Promise<CrmReader>, private chat: string | null, private now = Date.now) {
+    constructor(private store: TelegramStore, private client: () => Promise<CrmReader>, private chat: string | null, private now = Date.now, private messenger = 'Telegram') {
         store.recoverLoginAlerts();
     }
     flush(): Promise<void> {
@@ -31,7 +31,7 @@ export class TelegramConnectionAlerts {
                 const name = account.label.replace(/[\[\]\x00-\x1f]/g, ' ');
                 attempted = true;
                 const id = await client.call<unknown>('im.message.add', { DIALOG_ID: this.chat, SYSTEM: 'N', URL_PREVIEW: 'N',
-                    MESSAGE: `Telegram: требуется повторный вход в аккаунт «${name}».\nСбор новых сообщений остановлен; сохранённая переписка доступна.\nВладелец подключения: сотрудник Битрикс24 № ${account.ownerId}. Откройте любую доступную сделку → Сообщения → Аккаунты и привязки → Подключить снова и войдите по QR.` });
+                    MESSAGE: `${this.messenger}: требуется повторный вход в аккаунт «${name}».\nСбор новых сообщений остановлен; сохранённая переписка доступна.\nВладелец подключения: сотрудник Битрикс24 № ${account.ownerId}. Откройте любую доступную сделку → Сообщения → ${this.messenger} → Аккаунты и привязки → Подключить снова и войдите по QR.` });
                 if (!/^\d+$/.test(String(id ?? ''))) throw new Error('Unknown send outcome');
                 this.store.finishLoginAlert(job.accountId, job.incident, 'sent', '', String(id));
             } catch (error) {

@@ -1,7 +1,7 @@
 import { bx24Auth } from './bitrix-auth.js';
 export type MediaKind = 'image' | 'audio' | 'video' | 'pdf';
 export interface PreviewFile { blob: Blob; kind: MediaKind; name: string }
-export interface MediaTarget { dealId: number; contactId: number; accountId: string; chatId: string; messageId: number }
+export interface MediaTarget { messenger?: 'telegram'|'whatsapp'; dealId: number; contactId: number; accountId: string; chatId: string; messageId: number }
 const MAX_BYTES = 25 * 1024 * 1024;
 const allowed: Record<string, MediaKind> = { 'image/jpeg':'image','image/png':'image','image/webp':'image','image/gif':'image','audio/ogg':'audio','audio/mpeg':'audio','audio/mp4':'audio','audio/wav':'audio','audio/x-wav':'audio','audio/webm':'audio','video/mp4':'video','video/webm':'video','application/pdf':'pdf' };
 export async function loadTelegramMedia(target: MediaTarget, signal: AbortSignal): Promise<PreviewFile> {
@@ -10,7 +10,7 @@ export async function loadTelegramMedia(target: MediaTarget, signal: AbortSignal
         window.BX24!.init(() => { clearTimeout(timer); resolve(); });
     });
     signal.throwIfAborted();
-    const response = await fetch('/api/telegram/media', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...target, ...bx24Auth() }), signal });
+    const response = await fetch(`/api/${target.messenger==='whatsapp'?'whatsapp':'telegram'}/media`, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...target, ...bx24Auth() }), signal });
     if (!response.ok) { const error = await response.json().catch(() => ({})) as { error?: string }; throw new Error(error.error || 'Не удалось загрузить вложение'); }
     const mime = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '', kind = allowed[mime];
     if (!kind || !response.body) { await response.body?.cancel(); throw new Error('Этот формат не поддерживает просмотр'); }

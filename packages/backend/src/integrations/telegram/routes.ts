@@ -15,7 +15,7 @@ import { TelegramCrmAccess } from './crm-access.js';
 const accountId = z.string().uuid();
 const chatId = z.string().regex(/^(?:(?:g|s):)?[1-9]\d{0,19}$/);
 const dealId = z.number().int().positive().safe();
-export function registerTelegramRoutes(app: FastifyInstance, supplied?: TelegramService, clientFrom = accessClientFrom, suppliedCrmAccess?: Pick<TelegramCrmAccess, 'enroll' | 'forOwner'>): void {
+export function registerTelegramRoutes(app: FastifyInstance, supplied?: TelegramService, clientFrom = accessClientFrom, suppliedCrmAccess?: Pick<TelegramCrmAccess, 'enroll' | 'forOwner'>): () => Pick<TelegramCrmAccess, 'enroll' | 'forOwner'> {
     let service = supplied;
     let crmAccess: Pick<TelegramCrmAccess, 'enroll' | 'forOwner'> | undefined = suppliedCrmAccess;
     const stateDir = process.env['B24_STATE_DIR'] ?? '/app/state';
@@ -172,4 +172,5 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
     }));
     // Cached clients must refresh instead of silently continuing the retired deal-scoped view.
     app.post('/api/telegram/history',wrap(async(_actor,body,client)=>{const input=z.object({dealId}).parse(body);await dealContactIds(client,input.dealId);throw new TelegramError('Привязка изменена: обновите вкладку «Сообщения»',409);}));
+    return () => { runtime(); if (!crmAccess) throw new TelegramError('Фоновый доступ CRM не настроен',503); return crmAccess; };
 }

@@ -4,6 +4,7 @@ import { TransientMedia, type MediaTarget, type OpenPreview } from './telegram-m
 const PdfPreview = lazy(() => import('./PdfPreview.js'));
 
 export function AttachmentViewer({ target, onClose }: { target: MediaTarget; onClose: () => void }): JSX.Element {
+    const brand=target.messenger==='whatsapp'?'WhatsApp':'Telegram';
     const dialog = useRef<HTMLDialogElement>(null), [preview, setPreview] = useState<OpenPreview | null>(null), [error, setError] = useState('');
     useEffect(() => {
         const lease = new TransientMedia(), element = dialog.current; let active = true;
@@ -32,10 +33,10 @@ export function AttachmentViewer({ target, onClose }: { target: MediaTarget; onC
     return <dialog ref={dialog} className="msg-preview" aria-label="Просмотр вложения" onCancel={onClose}>
         <header><h2>{preview?.name || 'Вложение'}</h2><button onClick={onClose} autoFocus>Закрыть просмотр</button></header>
         <p className="msg-hint">Временный просмотр. После закрытия файл нужно загрузить заново.</p>
-        {error ? <p role="alert">{error}</p> : !preview ? <p role="status">Загружаем из Telegram…</p> : <>
+        {error ? <p role="alert">{error}</p> : !preview ? <p role="status">Загружаем из {brand}…</p> : <>
             {preview.kind === 'image' && <img src={preview.url} alt={preview.name} />}
-            {preview.kind === 'audio' && <audio src={preview.url} controls controlsList="nodownload" preload="metadata" onError={() => setError('Браузер не смог воспроизвести аудио. Откройте его в Telegram')} />}
-            {preview.kind === 'video' && <video src={preview.url} controls controlsList="nodownload" preload="metadata" onError={() => setError('Браузер не смог воспроизвести видео. Откройте его в Telegram')} />}
+            {preview.kind === 'audio' && <audio src={preview.url} controls controlsList="nodownload" preload="metadata" onError={() => setError(`Браузер не смог воспроизвести аудио. Откройте его в ${brand}`)} />}
+            {preview.kind === 'video' && <video src={preview.url} controls controlsList="nodownload" preload="metadata" onError={() => setError(`Браузер не смог воспроизвести видео. Откройте его в ${brand}`)} />}
             {preview.kind === 'pdf' && <Suspense fallback={<p role="status">Открываем PDF…</p>}><PdfPreview url={preview.url} signal={preview.signal} /></Suspense>}
         </>}
     </dialog>;
