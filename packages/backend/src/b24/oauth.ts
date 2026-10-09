@@ -51,6 +51,8 @@ export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
 }
 
 export interface TokenResult {
+    /** Portal REST endpoint; domain in the OAuth response identifies the authorization server. */
+    clientEndpoint?: string;
 	accessToken: string;
 	refreshToken: string | null;
 	/** Время жизни access_token в секундах (обычно 3600). */
@@ -72,6 +74,7 @@ export class OAuthError extends Error {
 }
 
 interface TokenSuccess {
+    client_endpoint?: string;
 	access_token: string;
 	refresh_token?: string;
 	expires_in?: number;
@@ -129,6 +132,7 @@ export async function exchangeCodeForToken(params: ExchangeParams): Promise<Toke
 
 	return {
 		accessToken: json.access_token,
+        ...(typeof json.client_endpoint === 'string' ? { clientEndpoint: json.client_endpoint } : {}),
 		refreshToken: json.refresh_token ?? null,
 		expiresIn: json.expires_in ?? null,
 		domain: json.domain ?? null,
@@ -156,6 +160,7 @@ export async function refreshAccessToken(params: RefreshParams): Promise<TokenRe
 	if (isTokenError(json)) throw new OAuthError(json.error, json.error_description, response.status);
 	return {
 		accessToken: json.access_token,
+        ...(typeof json.client_endpoint === 'string' ? { clientEndpoint: json.client_endpoint } : {}),
 		refreshToken: json.refresh_token ?? null,
 		expiresIn: json.expires_in ?? null,
 		domain: json.domain ?? null,
