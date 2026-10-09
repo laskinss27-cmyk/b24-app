@@ -36,6 +36,8 @@ try {
  status.history={expandedChats:0,initialTimeout:true,requests:[{id:'1',state:'timeout',added:0}]};
  await page.getByText('Телефон не передал предыдущие сообщения за 90 секунд. Дальше ждать не нужно.').waitFor();
  await page.getByText('За 90 секунд расширенная история не получена. Дальше ждать не нужно: требуется проверка синхронизации.').waitFor();
+ status.history={expandedChats:0,initialTimeout:false,requests:[{id:'1',state:'empty',added:0}]};
+ await page.getByText('WhatsApp ответил на запрос, но не передал дополнительные сообщения. Это не означает, что на телефоне нет истории.').waitFor();
  status.history={expandedChats:1,initialTimeout:false,requests:[{id:'1',state:'received',added:1}]};
  await page.getByText('Из истории получены дополнительные сообщения: 1. Это не гарантия полного архива.').waitFor();
 

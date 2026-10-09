@@ -133,3 +133,15 @@ test('WhatsApp preview survives a restart with selection, phone aliases and hist
   await pilot.requestHistory(pn);assert.deepEqual(args,[50,{remoteJid:lid,id:'first',fromMe:false},2]);
   restored.select(pn,false);assert.throws(()=>restored.messages(lid),/не выбран/);
 });
+
+
+test('WhatsApp empty history replies finish only the correlated request, including a fast reply before bind', async () => {
+ const {HistoryMonitor}=await import(new URL('../../../../tools/whatsapp-pilot/history.mjs',import.meta.url).href);
+ const history=new HistoryMonitor(),model=new WhatsAppModel();model.ingest(message());
+ history.request(pn,new Set(model.chats.get(pn).messages.keys()));history.bind(pn,'request-one');
+ history.frame(6,[],model,{peerDataRequestSessionId:'another-request'});assert.equal(history.requestState(pn).state,'pending');
+ history.frame(6,[],model,{peerDataRequestSessionId:'request-one'});assert.equal(history.requestState(pn).state,'empty');
+ history.request(pn,new Set(model.chats.get(pn).messages.keys()));history.frame(6,[],model,{peerDataRequestSessionId:'fast-private-request'});history.bind(pn,'fast-private-request');assert.equal(history.requestState(pn).state,'empty');
+ assert.equal(JSON.stringify(history.summary()).includes('private-request'),false);
+ const older=message(pn,'old',true,0);model.ingest(older);history.frame(6,[older],model,{peerDataRequestSessionId:'fast-private-request'});assert.equal(history.requestState(pn).state,'received');
+});

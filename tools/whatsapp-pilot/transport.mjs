@@ -46,12 +46,12 @@ export class WhatsAppPilot {
     const on = (event, handler) => socket.ev.on(event, (...args) => { if (active()) { try { handler(...args); this.saveSession?.(); } catch { this.error = 'Часть данных WhatsApp не удалось обработать. Полнота истории пока не подтверждена.'; } } });
     on('creds.update', (update) => { Object.assign(this.auth.creds, update); this.saveSession?.(); this.model.setSelf(this.auth.creds.me?.id, this.auth.creds.me?.lid); });
     on('lid-mapping.update', ({ lid, pn }) => this.model.mapIds(lid, pn));
-    on('messaging-history.set', ({ chats = [], contacts = [], messages = [], lidPnMappings = [], syncType }) => {
+    on('messaging-history.set', ({ chats = [], contacts = [], messages = [], lidPnMappings = [], syncType, peerDataRequestSessionId }) => {
       for (const item of lidPnMappings) this.model.mapIds(item.lid, item.pn);
       for (const chat of chats) this.model.ensure(chat.id, chat.name);
       for (const item of contacts) this.model.contact(item);
       for (const message of messages) this.model.ingest(message);
-      this.model.historyReceived = true; this.model.revision++; this.history.frame(syncType,messages,this.model);
+      this.model.historyReceived = true; this.model.revision++; this.history.frame(syncType,messages,this.model,{chats,peerDataRequestSessionId});
     });
     for (const event of ['contacts.upsert','contacts.update']) on(event, (items) => { for (const item of items) this.model.contact(item); });
     for (const event of ['chats.upsert','chats.update']) on(event, (items) => { for (const item of items) this.model.ensure(item.id, item.name); });
@@ -95,12 +95,12 @@ export class WhatsAppPilot {
     const id = this.model.canonical(rawId), chat = this.model.chats.get(id);
     if (thread.messages.length >= 50) return { requested:false, note:'Уже загружены 50 сообщений — предел локальной пробы.' };
     const oldest = [...chat.messages.values()].sort((a,b) => a.time - b.time)[0];
-    if (!oldest) return { requested:false, note:'Нужна хотя бы одна полученная запись этого диалога. Откройте его в WhatsApp на телефоне и дождитесь синхронизации.' };
+    if (!oldest) return { requested:false, note:'WhatsApp не передал ни одного сообщения этого диалога. Без исходной записи запросить старую историю этим способом пока нельзя. Ожидание само по себе это не исправит.' };
     if (Date.now() - (this.historyRequests.get(id) || 0) < 90000) return { requested:false, note:'Запрос истории уже отправлен. Держите WhatsApp открытым на телефоне и результат будет показан в течение 90 секунд.' };
     this.historyRequests.set(id,Date.now()); this.history.request(id,new Set(chat.messages.keys()));
     const generation = this.generation;
     // Seconds are intentional: also confirmed by whatsmeow BuildHistorySyncRequest despite the Ms suffix.
-    try { await this.socket.fetchMessageHistory(50, oldest.sourceKey, oldest.time / 1000); } catch(error) { this.history.failed(id); throw error; }
+    try { const requestId=await this.socket.fetchMessageHistory(50, oldest.sourceKey, oldest.time / 1000); this.history.bind(id,requestId); } catch(error) { this.history.failed(id); throw error; }
     if (generation !== this.generation || !this.model.selected.has(id)) throw fail('Диалог больше не выбран.',409);
     return { requested:true, note:'Запрос отправлен. Откройте WhatsApp на телефоне; результат проверим в течение 90 секунд. Если ответа нет, экран покажет тайм-аут.' };
   }

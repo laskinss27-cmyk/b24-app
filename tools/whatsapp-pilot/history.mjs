@@ -1,9 +1,11 @@
 export const HISTORY_WAIT_MS=90000;
 export class HistoryMonitor {
-  constructor(now=()=>Date.now()) {this.now=now;this.startedAt=0;this.frames=0;this.expandedChats=0;this.totalMessages=0;this.notifications=[];this.failures=[];this.requests=new Map();}
+  constructor(now=()=>Date.now()) {this.now=now;this.startedAt=0;this.frames=0;this.expandedChats=0;this.totalMessages=0;this.notifications=[];this.failures=[];this.requests=new Map();this.recentFrames=[];}
   connected(model){this.startedAt=this.now();if(model)this.expandedChats=[...model.chats.values()].filter(chat=>chat.messages.size>1).length;}
   request(id,before){this.requests.set(id,{at:this.now(),before,state:'pending',added:0});}
-  frame(type,messages,model){
+  bind(id,requestId){const request=this.requests.get(id);if(!request||!requestId)return;request.requestId=requestId;const frame=this.recentFrames.find(f=>f.requestId===requestId);if(frame&&request.state==='pending'&&frame.messages===0)request.state='empty';}
+  frame(type,messages,model,meta={}){
+    this.recentFrames.push({type,messages:messages.length,chats:(meta.chats||[]).length,requestId:meta.peerDataRequestSessionId||null});this.recentFrames=this.recentFrames.slice(-20);
     this.frames++;this.totalMessages+=messages.length;
     this.expandedChats=[...model.chats.values()].filter(chat=>chat.messages.size>1).length;
     for(const [id,request] of this.requests){
@@ -11,11 +13,12 @@ export class HistoryMonitor {
       const incoming=new Set(messages.filter(message=>model.canonical(message.key?.remoteJid)===model.canonical(id)).map(message=>String(message.key.fromMe===true)+':'+message.key.id));
       const extra=[...incoming].filter(key=>chat.messages.has(key)&&!request.before.has(key)).length;
       if(extra>0){request.state='received';request.added=extra;}
+      else if(type===6&&meta.peerDataRequestSessionId&&request.requestId===meta.peerDataRequestSessionId&&request.state!=='received'){request.state='empty';}
     }
   }
   requestState(id){const value=this.requests.get(id);if(!value)return null;return {state:value.state==='pending'&&this.now()-value.at>=HISTORY_WAIT_MS?'timeout':value.state,added:value.added};}
   failed(id){const value=this.requests.get(id);if(value)value.state='failed';}
-  summary(){return {frames:this.frames,expandedChats:this.expandedChats,messagesInFrames:this.totalMessages,notifications:this.notifications.slice(-10),failures:this.failures.slice(-5),requests:[...this.requests].map(([id])=>({id,...this.requestState(id)})),initialTimeout:this.startedAt>0&&this.now()-this.startedAt>=HISTORY_WAIT_MS&&this.expandedChats===0};}
+  summary(){return {recentFrames:this.recentFrames.map(({requestId,...frame})=>({...frame,correlated:!!requestId})),frames:this.frames,expandedChats:this.expandedChats,messagesInFrames:this.totalMessages,notifications:this.notifications.slice(-10),failures:this.failures.slice(-5),requests:[...this.requests].map(([id])=>({id,...this.requestState(id)})),initialTimeout:this.startedAt>0&&this.now()-this.startedAt>=HISTORY_WAIT_MS&&this.expandedChats===0};}
   logger(){
     const log={level:'trace',child:()=>log};
     for(const level of ['trace','debug','info','warn','error','fatal'])log[level]=(...args)=>{
