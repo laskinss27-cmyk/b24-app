@@ -37,10 +37,3 @@ export function MessagesWorkspace({dealId,api=telegramApi}:{dealId:number|null;a
  </>}
  </main>;
 }
-
-export function MessagesLauncher({dealId}:{dealId:number|null}):JSX.Element {
- const [open,setOpen]=useState(false),dialog=useRef<HTMLDialogElement>(null),trigger=useRef<HTMLButtonElement>(null);
- useEffect(()=>{if(open)dialog.current?.showModal();return()=>dialog.current?.close();},[open]);
- const close=()=>{setOpen(false);trigger.current?.focus();};
- return <><button ref={trigger} onClick={()=>setOpen(true)}>Сообщения</button>{open&&<dialog className="tg-modal" ref={dialog} aria-label="Сообщения клиента" onCancel={close}><button className="tg-close" onClick={close}>Закрыть</button><MessagesWorkspace dealId={dealId}/></dialog>}</>;
-}

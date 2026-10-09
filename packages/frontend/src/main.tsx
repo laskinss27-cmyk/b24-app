@@ -1,4 +1,4 @@
-import { MessagesWorkspace, MessagesLauncher } from './MessagesWorkspace.js';
+import { MessagesWorkspace } from './MessagesWorkspace.js';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { getContext } from './b24-context.js';
@@ -76,7 +76,6 @@ createRoot(root).render(
 	<StrictMode>
 		<div className="appearance-toolbar no-print">
 			<SupportDesk ctx={ctx} />
-			{ctx.view !== 'telegram' && ctx.view !== 'mobileCount' && <MessagesLauncher dealId={ctx.dealId} />}
 			<LowVisionMode initialEnabled={lowVisionEnabled} />
 		</div>
 		{ctx.view === 'telegram' ? <MessagesWorkspace dealId={ctx.dealId} /> : ctx.view === 'returnApproval' ? <ReturnApproval /> : opensRepair || ctx.view === 'repairs' ? <Repairs /> : ctx.view === 'mobileCount' ? <MobileCount /> : ctx.view === 'salesReport' ? <SalesReport /> : ctx.view === 'reportBuilder' ? <ReportBuilder /> : ctx.view === 'stock' ? <StockLedger /> : ctx.view === 'supply' ? <Supply /> : ctx.view === 'inventory' ? <ProductBase /> : <DealProductsTab />}
