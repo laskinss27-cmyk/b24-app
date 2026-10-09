@@ -1,3 +1,4 @@
+import pThrottle from 'p-throttle';
 import { TelegramError, TelegramStore } from './store.js';
 import { B24Client } from '../../b24/client.js';
 import { refreshAccessToken, type TokenResult } from '../../b24/oauth.js';
@@ -13,6 +14,7 @@ export interface CrmAccessOptions {
 }
 /** One rotating credential per owner; all eight accounts share the owner's refresh lock. */
 export class TelegramCrmAccess {
+    private readonly scheduled = pThrottle({ limit: 2, interval: 1000 })(<T>(client: CrmReader, method: string, params: Record<string, unknown>) => client.call<T>(method, params));
     private readonly locks = new Map<string, Promise<unknown>>();
     constructor(private readonly store: TelegramStore, private readonly options: CrmAccessOptions) { }
     private async locked<T>(owner: string, work: () => Promise<T>): Promise<T> {
@@ -21,7 +23,9 @@ export class TelegramCrmAccess {
         try { return await pending; } finally { if (this.locks.get(owner) === pending) this.locks.delete(owner); }
     }
     private client(auth: CrmCredential): CrmReader {
-        return this.options.client?.(auth) ?? new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken }, requestsPerSecond: 2, requestTimeoutMs: 15000 });
+        const client = this.options.client?.(auth) ?? new B24Client({ auth: { kind: 'oauth', domain: auth.domain, accessToken: auth.accessToken }, requestsPerSecond: 2, requestTimeoutMs: 15000 });
+        // All owners share this limiter; eight accounts must not each burst at the portal limit.
+        return { call: <T>(method: string, params: Record<string, unknown> = {}) => this.scheduled<T>(client, method, params) };
     }
     private async validate(owner: string, auth: CrmCredential): Promise<CrmReader> {
         if (auth.domain.toLowerCase() !== this.options.domain.toLowerCase()) throw new TelegramError('Доступ CRM относится к другому порталу', 403);
