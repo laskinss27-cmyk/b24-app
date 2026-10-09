@@ -11,3 +11,19 @@
 Результаты server probe/deploy дополняются после фактического выполнения. Пока не заявлены серверная доставка рабочего аккаунта, работа восьми сессий и длительная стабильность.
 
 Первый кандидат 33a97a7 прошёл сборку, но server probe до переключения обнаружил native-fetch/Undici handler mismatch. Production не переключался. Исправлено штатным Dispatcher1Wrapper без глобальной подмены fetch; добавлена живая локальная SOCKS-регрессия с remote DNS и отменой запроса. Новый кандидат должен повторить полный build и probe, ожидаемый счётчик backend — 653.
+
+## Подтверждённая выкладка
+
+09.10.2026 около 17:29 МСК выложен **9825e0811fd41cf55c61563c653f12111485a301**, Git tree da26494c3f55bfc36c650ca5460c94585939927f. Ветка codex/whatsapp-work-accounts опубликована. Чистый server checkout /srv/b24-builds/whatsapp-33a97a7 обновлён fast-forward; сборка `node scripts/b24-release.mjs build` повторно прошла **653 backend / 214 frontend**, без fail/skip. Исходный кандидат 33a97a7 не выкладывался.
+
+Перед переключением исправленный образ прошёл настоящий server probe через тот же WARP SOCKS: native fetch WhatsApp HTTP 200, WebSocket получил QR. Проба использовала временную in-memory базу без входа и без создания рабочих аккаунтов. Ключи/QR в вывод не помещались, global fetch не менялся.
+
+Штатные guard и `bash scripts/b24-deploy.sh IMAGE FULL_SHA` успешны; source guard не нашёл отсутствующих production-файлов. Ancestry проверена относительно 09247835fbb7953ef7b27062521211cce54f001c. Проверенный до остановки image ID sha256:2b2a3ec043dba694195f4678f97051f6d28e092ef61243cc0d2bf068a0e00bd1; запущенный container ID 18cd1d5c285c57100a89a5649acdca0a2115f10fcaa86a332120da78ae50be45. Rollback сохранён: b24-backend-prev-before-9825e0811fd4-20261009T142838Z.
+
+Внутренний и публичный /health вернули полный новый SHA. OCI revision, baked release.json и runtime integrity verify совпали. Docker inspect подтвердил erpnext_frappe_network; авторизованный read-only ERPNext request успешен. Два стартовых connection reset обработаны штатными повторами health. Retention запущен установленной службой, Result=success/ExecMainStatus=0; часовой защитный интервал сохраняется.
+
+До переключения создан online SQLite backup /app/state/telegram/backups/pre-whatsapp-20261009-33a97a7.sqlite, integrity_check=ok. После переключения: 4 записи аккаунтов, 228 contact links, 3086 Telegram-сообщений. Сопоставление **расшифрованного содержимого** со snapshot: 3086 совпали, 0 пропали, 0 изменились; все 228 связей совпали. Зашифрованные payload менялись из-за свежего случайного IV при обычной повторной записи, это не изменение текста. Паузы/лимиты не сбрасывали.
+
+Новая WhatsApp DB: integrity_check=ok, 0 аккаунтов, 0 auth-записей, 0 сообщений. Настоящий авторизованный HTTP `/api/whatsapp/accounts` вернул configured=true и пустой список; `/client-context` для сделки 37974 вернул контакт 17422 и 0 диалогов. Доступный текущему диагностическому OAuth один Telegram-аккаунт returned ready/limited=false; состояние остальных трёх не выдаётся за проверенное через этот токен.
+
+Личный локальный пилот не переносился. Тестовые уведомления в реальный чат не отправлялись. Следующая живая приёмка после решения пользователя: подключить рабочий номер QR, проверить новое входящее и исходящее и автопривязку к контакту. Пока эта приёмка и длительная стабильность остаются неподтверждёнными.
