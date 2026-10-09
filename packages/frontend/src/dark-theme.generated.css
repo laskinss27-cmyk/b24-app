@@ -4083,6 +4083,45 @@ html[data-theme="dark"][data-theme=dark] .support-status {
     background: rgb(38 59 82);
     color: hsl(213 79% 78%)
 }
+html[data-theme="dark"] .msg-workspace {
+    color: #e5edf8
+}
+html[data-theme="dark"] .msg-header p, html[data-theme="dark"] .msg-hint {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .msg-workspace button, html[data-theme="dark"] .msg-workspace select {
+    border: 1px solid #34445a;
+    background: #202c3d;
+    color: #e5edf8
+}
+html[data-theme="dark"] .msg-workspace button:focus-visible, html[data-theme="dark"] .msg-workspace select:focus-visible {
+    outline: 3px solid hsl(207 65% 53%)
+}
+html[data-theme="dark"] .msg-workspace button[aria-pressed=true] {
+    border-color: hsl(207 65% 53%);
+    background: hsl(210 55% 22%);
+    color: hsl(206 74% 72%)
+}
+html[data-theme="dark"] .msg-workspace button:disabled {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .msg-client span {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .msg-messengers {
+    border-bottom: 1px solid #34445a
+}
+html[data-theme="dark"] .msg-dialog span, html[data-theme="dark"] .msg-dialog small {
+    color: #b9c6d7
+}
+html[data-theme="dark"] .msg-thread {
+    border-left: 1px solid #34445a
+}
+@media (max-width:720px) {
+    html[data-theme="dark"] .msg-thread {
+        border-top: 1px solid #34445a
+    }
+}
 html[data-theme="dark"] .rb-app {
     background: #172233
 }

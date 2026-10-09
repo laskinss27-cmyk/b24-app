@@ -24,6 +24,8 @@ async function fixture() {
             } = {}) => {
                 if (method === 'user.current')
                     return { ID: body.accessToken === 'owner' ? '1858' : '9', ACTIVE: body.accessToken !== 'inactive' };
+                if (method === 'crm.deal.contact.items.get' && params.id === 37974 && body.accessToken === 'owner') return [{CONTACT_ID:17422}];
+                if (method === 'crm.contact.get' && params.id === 17422 && body.accessToken === 'owner') return {ID:'17422',NAME:'Клиент'};
                 if (method === 'crm.deal.get' && params.id === 37974 && body.accessToken === 'owner')
                     return { ID: '37974', TITLE: 'Тест' };
                 throw new Error('ACCESS_DENIED');
@@ -51,15 +53,16 @@ test('Telegram endpoints require authenticated active portal employee and isolat
 test('Telegram message history rechecks actual CRM permission on every request; no system webhook fallback', async () => {
     const f = await fixture();
     try {
-        const allowed = await f.call('history', 'owner', { dealId: 37974 });
+        await f.call('client-context','owner',{dealId:37974});
+        const allowed = await f.call('client-history', 'owner', { dealId: 37974,contactId:17422,accountId:f.a.id,chatId:'200' });
         assert.equal(allowed.statusCode, 200);
         assert.equal(allowed.json().messages[0].text, 'private message');
         assert.equal(allowed.headers['cache-control'], 'no-store');
-        const denied = await f.call('history', 'other', { dealId: 37974 });
+        const denied = await f.call('client-history', 'other', { dealId: 37974,contactId:17422,accountId:f.a.id,chatId:'200' });
         assert.equal(denied.statusCode, 403);
         assert.equal(denied.body.includes('private message'), false);
-        assert.equal((await f.call('history', 'owner', { dealId: 99999 })).statusCode, 403);
-        assert.equal((await f.call('history', 'owner', { dealId: 37974, before: 'SQL injection' })).statusCode, 400);
+        assert.equal((await f.call('client-history', 'owner', { dealId: 99999,contactId:17422,accountId:f.a.id,chatId:'200' })).statusCode, 403);
+        assert.equal((await f.call('client-history', 'owner', { dealId: 37974,contactId:17422,accountId:f.a.id,chatId:'200', before: 'SQL injection' })).statusCode, 400);
     }
     finally {
         await f.close();
@@ -122,14 +125,14 @@ test('Auto binding enrollment cannot re-enable after concurrent disable', async 
     } finally { release?.(); await f.close(); }
 });
 
-test('Old deal history remains visible with historical binding after rollover and does not disclose new deal id', async () => {
+test('Retired deal history API requires refresh without deleting historical rows or leaking deal ids', async () => {
     const f = await fixture();
     try {
         f.store.setAuto(f.a.id, true); f.store.db.prepare('UPDATE telegram_auto_settings SET enabled_at=?').run('2026-10-01T00:00:00.000Z');
         const b = f.store.bindings()[0]!;
         assert.equal(f.store.rollover(b, 50000, '2026-10-09T00:00:00.000Z', f.store.autoState(f.a.id).revision), true);
         const r = await f.call('history', 'owner', { dealId: 37974 });
-        assert.equal(r.statusCode, 200); assert.equal(r.json().messages.length, 1); assert.equal(r.json().bindings[0].historical, true);
+        assert.equal(r.statusCode, 409); assert.equal(f.store.history(37974).messages.length,1); assert.equal(r.body.includes('private message'),false);
         assert.equal(r.body.includes('50000'), false); assert.equal((await f.call('history', 'other', { dealId: 37974 })).statusCode, 403);
     } finally { await f.close(); }
 });

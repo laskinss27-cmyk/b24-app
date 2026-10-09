@@ -3,15 +3,22 @@ import { PlacementBodySchema, PlacementQuerySchema, buildPlacementContext } from
 import { verifyBitrixRequest } from '../../security.js';
 import { B24ApiError, type B24Client } from '../../b24/client.js';
 export async function bindTelegramPlacement(client: B24Client, base: string): Promise<void> {
-    try {
-        await client.call('placement.bind', { PLACEMENT: 'CRM_DEAL_DETAIL_TAB', HANDLER: `${base.replace(/\/$/, '')}/placement/telegram`, TITLE: 'Переписка', LANG_ALL: { ru: { TITLE: 'Переписка' }, en: { TITLE: 'Conversations' } } });
-    }
-    catch (error) {
-        if (error instanceof B24ApiError && /already.*bind|ALREADY_BINDED/i.test(`${error.code} ${error.description}`))
-            return;
+
+    const handler=`${base.replace(/\/$/, '')}/placement/telegram`;
+    const rows=await client.call<{PLACEMENT:string;HANDLER:string;TITLE?:string}[]>('placement.get');
+    if(!Array.isArray(rows))throw new Error('Invalid placement list');
+    const previous=rows.find(row=>row.PLACEMENT==='CRM_DEAL_DETAIL_TAB' && row.HANDLER===handler);
+    if(previous?.TITLE==='Сообщения')return;
+    if(previous)await client.call('placement.unbind',{PLACEMENT:'CRM_DEAL_DETAIL_TAB',HANDLER:handler});
+    try { await client.call('placement.bind',{PLACEMENT:'CRM_DEAL_DETAIL_TAB',HANDLER:handler,TITLE:'Сообщения',LANG_ALL:{ru:{TITLE:'Сообщения'},en:{TITLE:'Messages'}}}); }
+    catch(error){
+        // Restore only our exact previous handler if renaming fails. Never unbind other app tabs.
+        if(previous){try{await client.call('placement.bind',{PLACEMENT:'CRM_DEAL_DETAIL_TAB',HANDLER:handler,TITLE:previous.TITLE||'Переписка'});}catch{/* Report registration failure to caller. */}}
+        if(!previous && error instanceof B24ApiError && /already.*bind|ALREADY_BINDED/i.test(`${error.code} ${error.description}`))return;
         throw error;
     }
 }
+
 export function registerTelegramPlacement(app: FastifyInstance): void {
     app.post('/placement/telegram', async (req, reply) => {
         const body = PlacementBodySchema.safeParse(req.body), query = PlacementQuerySchema.safeParse(req.query);

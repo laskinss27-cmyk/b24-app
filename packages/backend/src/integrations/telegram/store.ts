@@ -17,6 +17,7 @@ export interface Binding {
     chatId: string;
     title: string;
     dealId: number;
+    contactId?: number | null;
     cursor: number;
     reconcileCursor: number;
     enabled: boolean;
@@ -51,6 +52,8 @@ export class TelegramStore {
    CREATE TABLE IF NOT EXISTS telegram_crm_credentials(owner_id TEXT PRIMARY KEY,payload TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS telegram_auto_settings(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,last_run TEXT,enabled_at TEXT,error TEXT NOT NULL DEFAULT '');
    CREATE TABLE IF NOT EXISTS telegram_auto_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(account_id,chat_id));
+   CREATE TABLE IF NOT EXISTS telegram_contact_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,contact_id INTEGER NOT NULL,PRIMARY KEY(account_id,chat_id),FOREIGN KEY(account_id,chat_id) REFERENCES telegram_bindings(account_id,chat_id));
+   CREATE INDEX IF NOT EXISTS telegram_contact_links_contact ON telegram_contact_links(contact_id);
    CREATE INDEX IF NOT EXISTS telegram_messages_deal ON telegram_messages(deal_id,date,message_id);
    CREATE INDEX IF NOT EXISTS telegram_messages_account_id ON telegram_messages(account_id,message_id);`);
         if (!this.db.prepare('PRAGMA table_info(telegram_auto_settings)').all().some(r => r['name'] === 'enabled_at')) this.db.exec('ALTER TABLE telegram_auto_settings ADD COLUMN enabled_at TEXT');
@@ -128,7 +131,7 @@ export class TelegramStore {
         this.db.prepare('UPDATE telegram_accounts SET telegram_id=?,session=?,active=1 WHERE id=?').run(telegramId, this.seal(`session:${id}`, session), id);
     }
     deactivate(id: string): void { this.db.prepare('UPDATE telegram_accounts SET active=0,session=NULL WHERE id=?').run(id); }
-    bindings(id?: string): Binding[] { return (id ? this.db.prepare('SELECT * FROM telegram_bindings WHERE account_id=?').all(id) : this.db.prepare('SELECT * FROM telegram_bindings').all()).map(r => ({ accountId: String(r['account_id']), chatId: String(r['chat_id']), title: String(r['title']), dealId: Number(r['deal_id']), cursor: Number(r['cursor']), reconcileCursor: Number(r['reconcile_cursor']), enabled: Boolean(r['enabled']) })); }
+    bindings(id?: string): Binding[] { return (id ? this.db.prepare('SELECT * FROM telegram_bindings WHERE account_id=?').all(id) : this.db.prepare('SELECT * FROM telegram_bindings').all()).map(r => ({ accountId: String(r['account_id']), chatId: String(r['chat_id']), title: String(r['title']), dealId: Number(r['deal_id']), contactId: this.contactId(String(r['account_id']), String(r['chat_id'])), cursor: Number(r['cursor']), reconcileCursor: Number(r['reconcile_cursor']), enabled: Boolean(r['enabled']) })); }
     bind(accountId: string, chatId: string, title: string, dealId: number, peer: unknown): Binding {
         const previous = this.bindings(accountId).find(b => b.chatId === chatId);
         if (previous && previous.dealId !== dealId)
@@ -139,7 +142,32 @@ export class TelegramStore {
         this.db.prepare(`INSERT INTO telegram_deal_routes(account_id,chat_id,deal_id,from_date) SELECT ?,?,?,'1970-01-01T00:00:00.000Z' WHERE NOT EXISTS(SELECT 1 FROM telegram_deal_routes WHERE account_id=? AND chat_id=?)`).run(accountId, chatId, dealId, accountId, chatId);
         return this.bindings(accountId).find(b => b.chatId === chatId)!;
     }
-    /** Atomic boundary change: preserve cursor/history before the new deal, reroute only the delayed tail. */
+    contactId(accountId: string, chatId: string): number | null { const row=this.db.prepare('SELECT contact_id FROM telegram_contact_links WHERE account_id=? AND chat_id=?').get(accountId,chatId); return row ? Number(row['contact_id']) : null; }
+    attachContact(accountId: string, chatId: string, contactId: number): void {
+        if (!Number.isSafeInteger(contactId) || contactId<=0) throw new TelegramError('Некорректный контакт');
+        const previous=this.contactId(accountId,chatId);
+        if(previous && previous!==contactId) throw new TelegramError('Диалог уже связан с другим контактом. Автоматическое объединение запрещено',409);
+        this.db.prepare('INSERT OR IGNORE INTO telegram_contact_links(account_id,chat_id,contact_id) VALUES (?,?,?)').run(accountId,chatId,contactId);
+    }
+    bindContact(accountId: string, chatId: string, title: string, contactId: number, peer: unknown): Binding {
+        const previous=this.bindings(accountId).find(b=>b.chatId===chatId);
+        if(previous?.contactId && previous.contactId!==contactId) throw new TelegramError('Диалог уже связан с другим контактом',409);
+        this.db.exec('BEGIN IMMEDIATE');
+        try { this.bind(accountId,chatId,title,previous?.dealId ?? 0,peer); this.attachContact(accountId,chatId,contactId); this.db.exec('COMMIT'); }
+        catch(error){this.db.exec('ROLLBACK');throw error;}
+        return this.bindings(accountId).find(b=>b.chatId===chatId)!;
+    }
+    legacyDeals(binding: Binding): number[] { return this.db.prepare('SELECT DISTINCT deal_id FROM telegram_deal_routes WHERE account_id=? AND chat_id=? AND deal_id>0 UNION SELECT DISTINCT deal_id FROM telegram_messages WHERE account_id=? AND chat_id=? AND deal_id>0').all(binding.accountId,binding.chatId,binding.accountId,binding.chatId).map(r=>Number(r['deal_id'])); }
+    contactBindings(contactId: number): Binding[] { return this.bindings().filter(b=>b.contactId===contactId); }
+    contactHistory(contactId: number, accountId: string, chatId: string, before?: string) {
+        if(this.contactId(accountId,chatId)!==contactId) throw new TelegramError('Диалог не относится к выбранному контакту',404);
+        const parsed=before ? /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)\|([1-9]\d*)$/.exec(before) : null;
+        if(before && (!parsed || !Number.isSafeInteger(Number(parsed[2])))) throw new TelegramError('Некорректная страница истории');
+        const rows=parsed ? this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE account_id=? AND chat_id=? AND (date<? OR (date=? AND rowid<?)) ORDER BY date DESC,rowid DESC LIMIT 201').all(accountId,chatId,parsed[1]!,parsed[1]!,Number(parsed[2])) : this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE account_id=? AND chat_id=? ORDER BY date DESC,rowid DESC LIMIT 201').all(accountId,chatId);
+        const page=rows.slice(0,200),last=page.at(-1),binding=this.bindings(accountId).find(b=>b.chatId===chatId)!;
+        return {messages:page.map(row=>({...this.unseal<Message>(`message:${accountId}:${chatId}:${row['message_id']}`,String(row['payload'])),accountId,chatId,manager:this.account(accountId).label,dialog:binding.title})).reverse(),next:rows.length>200 && last ? `${last['date']}|${last['ordinal']}` : null};
+    }
+    /** Retired runtime rule, retained for migration and rollback tests. Atomic boundary change: preserve cursor/history before the new deal, reroute only the delayed tail. */
     rollover(binding: Binding, dealId: number, fromDate: string, revision: number): boolean {
         if (!Number.isSafeInteger(dealId) || dealId <= 0 || !Number.isFinite(Date.parse(fromDate))) throw new TelegramError('Неверная граница сделки');
         const cutoff = new Date(fromDate).toISOString();
@@ -147,7 +175,7 @@ export class TelegramStore {
         try {
             const current = this.bindings(binding.accountId).find(b => b.chatId === binding.chatId), state = this.autoState(binding.accountId);
             const latest = this.db.prepare('SELECT from_date FROM telegram_deal_routes WHERE account_id=? AND chat_id=? ORDER BY from_date DESC LIMIT 1').get(binding.accountId, binding.chatId);
-            if (!current?.enabled || current.dealId !== binding.dealId || current.dealId === dealId || !this.account(binding.accountId).active || !state.enabled || state.revision !== revision || !state.enabledAt || cutoff < state.enabledAt || (latest && cutoff <= String(latest['from_date']))) {
+            if (current?.contactId || !current?.enabled || current.dealId !== binding.dealId || current.dealId === dealId || !this.account(binding.accountId).active || !state.enabled || state.revision !== revision || !state.enabledAt || cutoff < state.enabledAt || (latest && cutoff <= String(latest['from_date']))) {
                 this.db.exec('ROLLBACK'); return false;
             }
             this.db.prepare('INSERT INTO telegram_deal_routes(account_id,chat_id,deal_id,from_date) VALUES (?,?,?,?)').run(binding.accountId, binding.chatId, dealId, cutoff);
@@ -162,6 +190,7 @@ export class TelegramStore {
         return this.bindings().filter(b => routes.some(r => r['account_id'] === b.accountId && r['chat_id'] === b.chatId)).map(b => ({ ...b, dealId, historical: b.dealId !== dealId }));
     }
     private messageDeal(binding: Binding, date: string): number {
+        if(this.contactId(binding.accountId,binding.chatId)) return 0;
         const route = this.db.prepare('SELECT deal_id FROM telegram_deal_routes WHERE account_id=? AND chat_id=? AND from_date<=? ORDER BY from_date DESC LIMIT 1').get(binding.accountId, binding.chatId, date);
         return route ? Number(route['deal_id']) : binding.dealId;
     }

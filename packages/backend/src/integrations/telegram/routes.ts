@@ -7,7 +7,8 @@ import { accessClientFrom, hasAppPermissions } from '../../access-policy.js';
 import { TelegramStore, TelegramError } from './store.js';
 import { TelegramService } from './service.js';
 import { telegramTransport } from './transport.js';
-import { TelegramAutoBinder } from './auto-binding.js';
+import { ContactAutoBinder } from './contact-auto-binding.js';
+import { contactFromCrm, dealContactIds, contactInDeal, legacyContact, validateLegacyChoice } from './contact-crm.js';
 import { TelegramCrmAccess } from './crm-access.js';
 const accountId = z.string().uuid();
 const chatId = z.string().regex(/^[1-9]\d{0,19}$/);
@@ -29,7 +30,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
             const check = await hasAppPermissions(app, auth, ['deals.view']);
             return Boolean(check.access && check.allowed);
         } });
-        service = new TelegramService(store, telegramTransport(apiId, apiHash, proxy), new TelegramAutoBinder(store, owner => crmAccess!.forOwner(owner)));
+        service = new TelegramService(store, telegramTransport(apiId, apiHash, proxy), new ContactAutoBinder(store, owner => crmAccess!.forOwner(owner)));
         service.start();
         return service;
     };
@@ -91,7 +92,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
         }
         if (String(deal.ID) !== String(input.dealId))
             throw new TelegramError('Сделка не найдена', 404);
-        return { ok: true, binding: runtime().bind(input.accountId, input.chatId, input.dealId), deal: { id: input.dealId, title: deal.TITLE ?? '' } };
+        throw new TelegramError('Привязка к сделке заменена привязкой к контакту. Обновите вкладку «Сообщения»',409);
     }));
     app.post('/api/telegram/auto-binding', { bodyLimit: 16384 }, wrap(async (actor, body) => {
         const input = z.object({ accountId, enabled: z.boolean(), refreshToken: z.string().min(1).max(4096).optional() }).parse(body);
@@ -110,19 +111,31 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
     }));
     app.post('/api/telegram/pause', wrap((actor, body) => { const input = z.object({ accountId, chatId }).parse(body); own(actor, input.accountId); runtime().store.pause(input.accountId, input.chatId); return { ok: true }; }));
     app.post('/api/telegram/disconnect', wrap(async (actor, body) => { const input = z.object({ accountId }).parse(body); own(actor, input.accountId); return { ok: true, ...await runtime().disconnect(input.accountId) }; }));
-    app.post('/api/telegram/history', wrap(async (_actor, body, client) => {
-        const input = z.object({ dealId, before: z.string().max(150).optional(), revision: z.number().int().nonnegative().optional() }).parse(body);
-        try {
-            const deal = await client.call<{
-                ID?: string;
-            }>('crm.deal.get', { id: input.dealId });
-            if (String(deal.ID) !== String(input.dealId))
-                throw new Error();
+
+    app.post('/api/telegram/client-context', wrap(async(actor,body,client)=>{
+        const input=z.object({dealId}).parse(body),ids=await dealContactIds(client,input.dealId),contacts=[];
+        for(const id of ids){try{contacts.push(await contactFromCrm(client,id));}catch{/* Other contacts remain independently accessible. */}}
+        const s=runtime();
+        // Migrate only this actor's legacy links (or the app owner's); no cross-owner writes by viewers.
+        let pendingMigration=0;
+        for(const binding of s.store.bindings().filter(b=>!b.contactId && s.store.legacyDeals(b).includes(input.dealId))){
+            if(s.store.account(binding.accountId).ownerId===actor||actor===APP_OWNER_USER_ID){try{const contact=await legacyContact(client,s.store,binding);if(contact)s.store.attachContact(binding.accountId,binding.chatId,contact.id);}catch{/* Keep the original encrypted rows and association. */}}
+            if(!s.store.contactId(binding.accountId,binding.chatId))pendingMigration++;
         }
-        catch {
-            throw new TelegramError('Нет доступа к этой сделке', 403);
-        }
-        const s = runtime();
-        return { ok: true, ...s.store.history(input.dealId, input.before, input.revision), bindings: s.store.bindingsForDeal(input.dealId).map(b => ({ ...b, manager: s.store.account(b.accountId).label, status: s.status(s.store.account(b.accountId)).phase, lastSync: s.status(s.store.account(b.accountId)).lastSync })) };
+        return {ok:true,contacts,pendingMigration,dialogs:contacts.flatMap(contact=>s.store.contactBindings(contact.id).map(b=>({...b,contactId:contact.id,messenger:'telegram',manager:s.store.account(b.accountId).label,status:s.status(s.store.account(b.accountId)).phase,lastSync:s.status(s.store.account(b.accountId)).lastSync})))};
     }));
+    app.post('/api/telegram/client-history',wrap(async(_actor,body,client)=>{
+        const input=z.object({dealId,contactId:dealId,accountId,chatId,before:z.string().max(150).optional()}).parse(body);
+        await contactInDeal(client,input.dealId,input.contactId);
+        return {ok:true,...runtime().store.contactHistory(input.contactId,input.accountId,input.chatId,input.before)};
+    }));
+    app.post('/api/telegram/bind-contact',wrap(async(actor,body,client)=>{
+        const input=z.object({accountId,chatId,contactId:dealId,dealId:dealId.optional()}).parse(body);own(actor,input.accountId);
+        const contact=input.dealId ? await contactInDeal(client,input.dealId,input.contactId) : await contactFromCrm(client,input.contactId);
+        const s=runtime(),previous=s.store.bindings(input.accountId).find(b=>b.chatId===input.chatId);
+        if(previous&&!previous.contactId)await validateLegacyChoice(client,s.store,previous,input.contactId);
+        return {ok:true,binding:s.bindContact(input.accountId,input.chatId,input.contactId),contact};
+    }));
+    // Cached clients must refresh instead of silently continuing the retired deal-scoped view.
+    app.post('/api/telegram/history',wrap(async(_actor,body,client)=>{const input=z.object({dealId}).parse(body);await dealContactIds(client,input.dealId);throw new TelegramError('Привязка изменена: обновите вкладку «Сообщения»',409);}));
 }

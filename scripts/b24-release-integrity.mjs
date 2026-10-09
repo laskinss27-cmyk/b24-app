@@ -4,7 +4,7 @@ import { resolve, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const legacyRoots = ['package.json', 'package-lock.json', 'tsconfig.base.json', 'packages'];
-export const sourceRoots = [...legacyRoots, 'Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs', 'docs/contracts/order-created.v1.example.json', 'tools/telegram-pilot/server.mjs', 'tools/telegram-pilot/public/index.html', 'tools/telegram-pilot/public/app.js', 'tools/telegram-pilot/public/style.css'];
+export const sourceRoots = [...legacyRoots, 'Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs', 'docs/contracts/order-created.v1.example.json', 'tools/telegram-pilot/server.mjs', 'tools/telegram-pilot/public/index.html', 'tools/telegram-pilot/public/app.js', 'tools/telegram-pilot/public/style.css', 'tools/whatsapp-pilot'];
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 export function sourceHash(data, normalizeEol = false) {
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -39,7 +39,7 @@ export function snapshot(root, { artifacts = false, legacy = false } = {}) {
   }
   for (const name of legacy ? legacyRoots : sourceRoots) {
     const path = resolve(root, name);
-    if (name === 'packages') visit(path);
+    if (name === 'packages' || name === 'tools/whatsapp-pilot') visit(path);
     else files[name] = sourceHash(readFileSync(path), legacy);
   }
   if (artifacts) {

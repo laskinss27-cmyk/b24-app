@@ -18,6 +18,7 @@ function fixture(t) {
   for (const name of ['Dockerfile', '.dockerignore', 'scripts/b24-release-integrity.mjs']) write(name, '# fixture\n');
   write('docs/contracts/order-created.v1.example.json', '{}\n');
   for (const name of ['server.mjs', 'public/index.html', 'public/app.js', 'public/style.css']) write('tools/telegram-pilot/' + name, 'fixture\n');
+  write('tools/whatsapp-pilot/model.mjs', 'fixture\n');
   write('packages/backend/src/app.ts', 'export const marker = "committed";\n');
   return { root, write };
 }
@@ -40,6 +41,15 @@ test('build rejects missing provenance, wrong SHA and changed/untracked source f
   assert.throws(() => checkInput(root, sha, tree), /forgotten.ts/);
   rmSync(join(root, '.release/source.json'));
   assert.throws(() => checkInput(root, sha, tree), /ENOENT/);
+});
+
+test('WhatsApp regression dependencies are covered by release integrity', (t) => {
+  const { root, write, sha, tree } = imageFixture(t);
+  write('tools/whatsapp-pilot/model.mjs', 'changed');
+  assert.throws(() => checkInput(root, sha, tree), /whatsapp-pilot\/model.mjs/);
+  write('tools/whatsapp-pilot/model.mjs', 'fixture\n');
+  write('tools/whatsapp-pilot/forgotten.mjs', 'untracked');
+  assert.throws(() => checkInput(root, sha, tree), /forgotten.mjs/);
 });
 
 test('image seal requires the catalog modules and verifies compiled artifacts and metadata', (t) => {

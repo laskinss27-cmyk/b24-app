@@ -42,7 +42,7 @@ export class TelegramService {
     private readonly live = new Map<string, Live>();
     private timer: ReturnType<typeof setInterval> | null = null;
     private closed = false;
-    constructor(readonly store: TelegramStore, private readonly factory: TransportFactory, readonly autoBinder?: TelegramAutoBinder) { }
+    constructor(readonly store: TelegramStore, private readonly factory: TransportFactory, readonly autoBinder?: Pick<TelegramAutoBinder, 'run' | 'reset' | 'close'>) { }
     status(account: Account) { const live = this.live.get(account.id); return { ...account, autoBinding: this.store.autoState(account.id), phase: this.storageErrors.has(account.id) ? 'error' : live?.phase ?? (account.active ? 'connecting' : 'offline'), qr: live?.qr ?? null, error: this.storageErrors.get(account.id) ?? live?.error ?? '', lastSync: live?.lastSync ?? null, nextAttempt: live?.nextAttempt ?? 0 }; }
     start(): void { this.timer = setInterval(() => { void this.tick(); }, 15000); this.timer.unref(); void this.tick(); }
     private make(id: string, saved: string): Live {
@@ -182,6 +182,7 @@ export class TelegramService {
     }
     bind(id: string, chatId: string, dealId: number): Binding { const live = this.requireLive(id), dialog = live.dialogs.get(chatId); if (!dialog)
         throw new TelegramError('Загрузите список и выберите клиентский диалог'); const binding = this.store.bind(id, chatId, dialog.title, dealId, dialog.peer); void this.sync(id, live); return binding; }
+    bindContact(id: string, chatId: string, contactId: number): Binding { const live=this.requireLive(id),dialog=live.dialogs.get(chatId);if(!dialog)throw new TelegramError('Загрузите список и выберите клиентский диалог');const binding=this.store.bindContact(id,chatId,dialog.title,contactId,dialog.peer);void this.sync(id,live);return binding; }
     async sync(id: string, live = this.live.get(id)): Promise<void> {
         if (!live || live.stopped || live.syncing || live.phase !== 'ready' || this.closed)
             return;

@@ -17,6 +17,7 @@ interface Binding {
     accountId: string;
     chatId: string;
     dealId: number;
+    contactId?: number | null;
     title: string;
     enabled: boolean;
     manager: string;
@@ -50,15 +51,18 @@ interface Dialog {
 }
 const phases: Record<string, string> = { offline: 'Отключён', connecting: 'Подключаем…', qr: 'Ожидает QR-входа', password: 'Нужен пароль', ready: 'Подключён', retry: 'Восстанавливаем связь', login_required: 'Войдите снова', error: 'Ошибка подключения' };
 const time = (value: string) => new Date(value).toLocaleString('ru-RU');
-export function TelegramWorkspace({ dealId, api = telegramApi }: {
+export function TelegramWorkspace({ dealId, contactId, managementOnly = false, api = telegramApi }: {
     dealId: number | null;
     api?: TelegramApi;
+    contactId?: number | null;
+    managementOnly?: boolean;
 }): JSX.Element {
     const [accounts, setAccounts] = useState<Account[]>([]), [configured, setConfigured] = useState(true), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
-    const [view, setView] = useState<'history' | 'accounts'>(dealId ? 'history' : 'accounts'), [history, setHistory] = useState<History>({ messages: [], next: null, bindings: [] });
-    const [label, setLabel] = useState(''), [active, setActive] = useState(''), [dialogs, setDialogs] = useState<Dialog[]>([]), [search, setSearch] = useState(''), [target, setTarget] = useState(dealId ? String(dealId) : ''), [password, setPassword] = useState('');
+    const [view, setView] = useState<'history' | 'accounts'>(!managementOnly && dealId ? 'history' : 'accounts'), [history, setHistory] = useState<History>({ messages: [], next: null, bindings: [] });
+    const [label, setLabel] = useState(''), [active, setActive] = useState(''), [dialogs, setDialogs] = useState<Dialog[]>([]), [search, setSearch] = useState(''), [target, setTarget] = useState(contactId ? String(contactId) : ''), [password, setPassword] = useState('');
     const [confirmDisconnect, setConfirmDisconnect] = useState('');
     const live = useRef(true), pending = useRef(false), accountSequence = useRef(0), historySequence = useRef(0), dialogSequence = useRef(0), requestId = useRef(crypto.randomUUID());
+    useEffect(()=>{setTarget(contactId ? String(contactId) : '');},[contactId]);
     const loadAccounts = useCallback(async () => { const seq = ++accountSequence.current; const result = await api<{
         accounts: Account[];
         configured: boolean;
@@ -68,7 +72,7 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
     } }, [api]);
     const expanded = useRef(false), historyRevision = useRef<number | undefined>(undefined);
     const loadHistory = useCallback(async (before?: string) => {
-        if (!dealId)
+        if (!dealId || managementOnly)
             return;
         const seq = ++historySequence.current;
         try {
@@ -95,7 +99,7 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
             }
             throw e;
         }
-    }, [api, dealId]);
+    }, [api, dealId, managementOnly]);
     useEffect(() => { live.current = true; setLoading(true); void loadAccounts().catch(e => { if (live.current)
         setError(e.message); }).finally(() => { if (live.current)
         setLoading(false); }); const timer = setInterval(() => { if (!document.hidden && !pending.current)
@@ -131,14 +135,14 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
     const bind = async (dialog: Dialog) => {
         const numeric = Number(target);
         if (!Number.isSafeInteger(numeric) || numeric <= 0)
-            throw new Error('Укажите номер сделки');
+            throw new Error('Укажите номер контакта');
         const result = await api<{
-            deal: {
+            contact: {
                 id: number;
                 title: string;
             };
-        }>('bind', { accountId: active, chatId: dialog.id, dealId: numeric });
-        setNotice(`Диалог «${dialog.title}» связан со сделкой № ${result.deal.id}. Сбор сообщений включён.`);
+        }>('bind-contact', { accountId: active, chatId: dialog.id, contactId: numeric, ...(dealId ? {dealId} : {}) });
+        setNotice(`Диалог «${dialog.title}» связан с контактом № ${result.contact.id}. Сбор сообщений включён.`);
         await choose(active);
         if (dealId)
             await loadHistory();
@@ -146,7 +150,7 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
     return <main className="tg-workspace" aria-busy={busy}>
   <header className="tg-heading"><div><p className="tg-eyebrow">Telegram · рабочие аккаунты</p><h1>{dealId ? `Переписка сделки № ${dealId}` : 'Подключения Telegram'}</h1></div><button type="button" disabled={busy} onClick={() => void action(async () => { await loadAccounts(); if (view === 'history')
         await loadHistory(); })}>Обновить</button></header>
-  <nav className="tg-nav" aria-label="Разделы переписки">{dealId && <button aria-pressed={view === 'history'} onClick={() => setView('history')}>Сообщения сделки</button>}<button aria-pressed={view === 'accounts'} onClick={() => setView('accounts')}>Аккаунты и привязки</button></nav>
+  <nav className="tg-nav" aria-label="Разделы переписки">{!managementOnly && dealId && <button aria-pressed={view === 'history'} onClick={() => setView('history')}>Сообщения сделки</button>}<button aria-pressed={view === 'accounts'} onClick={() => setView('accounts')}>Аккаунты и привязки</button></nav>
   {error && <div className="tg-error" role="alert">{error}</div>}{notice && <p className="tg-notice" role="status">{notice}</p>}
   {loading ? <p role="status">Проверяем подключения…</p> : !configured ? <section className="tg-empty"><h2>Telegram ещё не настроен</h2><p>Администратору нужно включить интеграцию на сервере. После этого здесь можно подключить рабочий аккаунт.</p></section> : view === 'history' ? <>
    <div className="tg-summary"><span>Сообщения появляются автоматически</span><span>Ответы отправляйте в обычном Telegram</span></div>
@@ -157,19 +161,19 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
     {!history.messages.length && <p className="tg-empty">История ещё не загружена. Сообщения появятся после первой синхронизации.</p>}
    </>}
   </> : <>
-   <p className="tg-intro">Подключите аккаунт по QR. Выберите диалоги вручную или включите поиск по телефону: контакт или лид → самая новая открытая сделка. Проверяем 500 недавних диалогов; без доступного номера нужен ручной выбор. При первой привязке загрузятся последние 100 сообщений, затем — все новые. Вложения пока открываются в Telegram.</p>
+   <p className="tg-intro">Подключите аккаунт по QR. Выберите диалоги вручную или включите поиск по телефону: единственный контакт CRM → все его сделки. Проверяем 500 недавних диалогов; без доступного номера нужен ручной выбор. При первой привязке загрузятся последние 100 сообщений, затем — все новые. Вложения пока открываются в Telegram.</p>
    <div className="tg-grid"><aside className="tg-accounts"><h2>Мои подключения</h2>
     {!accounts.length && <p className="tg-muted">Нет подключённых аккаунтов</p>}
     {accounts.map(account => <article key={account.id} className={`tg-account${active === account.id ? ' tg-selected' : ''}`}><h3>{account.label}</h3><p>{phases[account.phase] ?? account.phase}</p>{account.error && <p className="tg-error">{account.error}</p>}
      {account.phase === 'ready' ? <button disabled={busy} onClick={() => void action(() => choose(account.id))}>Выбрать диалог</button> : ['offline', 'error', 'login_required', 'retry'].includes(account.phase) ? <button disabled={busy} onClick={() => void action(() => connect(account))}>Подключить снова</button> : <button disabled={busy} onClick={() => { setActive(account.id); setPassword(''); }}>Продолжить вход</button>}
      <div className="tg-auto"><strong>Автопривязка по телефону: {account.autoBinding?.enabled ? 'включена' : 'выключена'}</strong>
-      <p className="tg-muted">После закрытия сделки переписка остаётся в ней до появления новой открытой сделки. Затем новые сообщения идут в новую сделку.</p>
+      <p className="tg-muted">Переписка принадлежит контакту и видна во всех его сделках. Диалоги разных менеджеров показываются отдельно.</p>
       {account.autoBinding?.enabled && <small>Привязано автоматически: {account.autoBinding.matched}. {account.autoBinding.lastRun ? `Проверка: ${time(account.autoBinding.lastRun)}` : 'Ожидаем проверку'}</small>}
       {account.autoBinding?.error && <p className="tg-error">{account.autoBinding.error}</p>}
-      <button disabled={busy || (!account.active && !account.autoBinding?.enabled)} onClick={() => void action(async () => { const enabled = !account.autoBinding?.enabled; await api('auto-binding', { accountId: account.id, enabled }); await loadAccounts(); setNotice(enabled ? 'Автопривязка включена. Сервер ищет сделки в фоне; первые результаты появятся через несколько минут.' : 'Автопривязка выключена. Существующие привязки и сбор сообщений сохранены.'); })}>{account.autoBinding?.enabled ? 'Выключить автопривязку' : 'Включить автопривязку'}</button>
+      <button disabled={busy || (!account.active && !account.autoBinding?.enabled)} onClick={() => void action(async () => { const enabled = !account.autoBinding?.enabled; await api('auto-binding', { accountId: account.id, enabled }); await loadAccounts(); setNotice(enabled ? 'Автопривязка включена. Сервер ищет контакты в фоне; первые результаты появятся через несколько минут.' : 'Автопривязка выключена. Существующие привязки и сбор сообщений сохранены.'); })}>{account.autoBinding?.enabled ? 'Выключить автопривязку' : 'Включить автопривязку'}</button>
      </div>
      <button className="tg-link" disabled={busy} onClick={() => setConfirmDisconnect(account.id)}>Отключить</button>
-     {confirmDisconnect === account.id && <div className="tg-confirm"><p>Сбор остановится. Сохранённая история останется в сделках.</p><button disabled={busy} onClick={() => void action(async () => { const result = await api<{
+     {confirmDisconnect === account.id && <div className="tg-confirm"><p>Сбор остановится. Сохранённая история останется у контакта.</p><button disabled={busy} onClick={() => void action(async () => { const result = await api<{
                 revoked: boolean;
             }>('disconnect', { accountId: account.id }); setConfirmDisconnect(''); if (active === account.id) {
                 setDialogs([]);
@@ -178,9 +182,9 @@ export function TelegramWorkspace({ dealId, api = telegramApi }: {
     </article>)}
     <form className="tg-connect" onSubmit={e => { e.preventDefault(); void action(() => connect()); }}><label htmlFor="tg-label">Название рабочего аккаунта</label><input id="tg-label" value={label} onChange={e => setLabel(e.target.value)} maxLength={120} required placeholder="Например, Сергей · продажи"/><button className="tg-primary" disabled={busy || accounts.length >= 8}>Подключить аккаунт по QR</button><small>До восьми аккаунтов на приложение</small></form>
    </aside><section className="tg-dialogs">
-    {selected?.qr ? <div className="tg-login"><h2>Подтвердите вход: {selected.label}</h2><img src={selected.qr} width={256} height={256} alt="QR-код входа в рабочий Telegram"/><p>Telegram → Настройки → Устройства → Подключить устройство.</p><p className="tg-muted">Подключение позволяет серверу читать аккаунт. В сделки сохраняются диалоги, выбранные вручную или найденные по телефону при включённой автопривязке.</p></div> : selected?.phase === 'password' ? <form className="tg-login" onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void action(async () => { await api('password', { accountId: active, password: value }); await loadAccounts(); }); }}><h2>Пароль Telegram</h2><label htmlFor="tg-password">Пароль двухэтапной проверки</label><input id="tg-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required maxLength={512}/><button className="tg-primary" disabled={busy}>Подтвердить вход</button></form> : selected?.phase === 'connecting' ? <p role="status">Соединяемся с Telegram…</p> : selected?.phase === 'ready' ? <>
-     <h2>Диалоги · {selected.label}</h2><div className="tg-fields"><label>Поиск по имени<input value={search} onChange={e => setSearch(e.target.value)} type="search"/></label><label>Номер сделки<input type="number" min="1" step="1" value={target} onChange={e => setTarget(e.target.value)} required/></label></div>
-     {!dialogs.length ? <p>Нажмите «Выбрать диалог» у аккаунта, чтобы загрузить список личных переписок.</p> : <ul className="tg-dialog-list">{dialogs.filter(d => d.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(d => <li key={d.id}><div><strong>{d.title}</strong>{d.binding && <small>Сделка № {d.binding.dealId} · {d.binding.enabled ? 'Сбор включён' : 'Сбор приостановлен'}</small>}</div>{d.binding?.enabled ? <button disabled={busy} onClick={() => void action(async () => { await api('pause', { accountId: active, chatId: d.id }); await choose(active); setNotice('Сбор приостановлен. История сохранена.'); })}>Приостановить</button> : <button disabled={busy || !target} onClick={() => void action(() => bind(d))}>{d.binding ? 'Возобновить сбор' : 'Привязать к сделке'}</button>}</li>)}</ul>}
+    {selected?.qr ? <div className="tg-login"><h2>Подтвердите вход: {selected.label}</h2><img src={selected.qr} width={256} height={256} alt="QR-код входа в рабочий Telegram"/><p>Telegram → Настройки → Устройства → Подключить устройство.</p><p className="tg-muted">Подключение позволяет серверу читать аккаунт. К контактам привязываются диалоги, выбранные вручную или найденные по телефону при включённой автопривязке.</p></div> : selected?.phase === 'password' ? <form className="tg-login" onSubmit={e => { e.preventDefault(); const value = password; setPassword(''); void action(async () => { await api('password', { accountId: active, password: value }); await loadAccounts(); }); }}><h2>Пароль Telegram</h2><label htmlFor="tg-password">Пароль двухэтапной проверки</label><input id="tg-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required maxLength={512}/><button className="tg-primary" disabled={busy}>Подтвердить вход</button></form> : selected?.phase === 'connecting' ? <p role="status">Соединяемся с Telegram…</p> : selected?.phase === 'ready' ? <>
+     <h2>Диалоги · {selected.label}</h2><div className="tg-fields"><label>Поиск по имени<input value={search} onChange={e => setSearch(e.target.value)} type="search"/></label><label>Номер контакта<input type="number" min="1" step="1" value={target} onChange={e => setTarget(e.target.value)} required/></label></div>
+     {!dialogs.length ? <p>Нажмите «Выбрать диалог» у аккаунта, чтобы загрузить список личных переписок.</p> : <ul className="tg-dialog-list">{dialogs.filter(d => d.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(d => <li key={d.id}><div><strong>{d.title}</strong>{d.binding && <small>{d.binding.contactId ? `Контакт № ${d.binding.contactId}` : 'Прежняя связь: требуется выбор контакта'} · {d.binding.enabled ? 'Сбор включён' : 'Сбор приостановлен'}</small>}</div>{d.binding?.enabled && d.binding.contactId ? <button disabled={busy} onClick={() => void action(async () => { await api('pause', { accountId: active, chatId: d.id }); await choose(active); setNotice('Сбор приостановлен. История сохранена.'); })}>Приостановить</button> : <button disabled={busy || !target} onClick={() => void action(() => bind(d))}>{d.binding?.contactId ? 'Возобновить сбор' : 'Привязать к контакту'}</button>}</li>)}</ul>}
     </> : <div className="tg-empty"><h2>Выберите рабочий аккаунт</h2><p>После подключения здесь появятся клиентские диалоги. Личные переписки можно оставить без привязки.</p></div>}
    </section></div>
   </>}
