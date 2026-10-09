@@ -1,3 +1,4 @@
+import { downloadPreview, type MediaPreview } from './media.js';
 import type { SocksProxyType } from 'teleproto/network/connection/TCPMTProxy.js';
 import { TelegramClient, Api } from 'teleproto';
 import { LogLevel } from 'teleproto/extensions/Logger.js';
@@ -20,6 +21,7 @@ export interface Batch {
     more: boolean;
 }
 export interface Transport {
+    preview?(peer: Dialog['peer'], messageId: number, signal: AbortSignal): Promise<MediaPreview>;
     connect(): Promise<void>;
     authorized(): Promise<boolean>;
     identity(): Promise<string>;
@@ -48,7 +50,8 @@ export type TransportFactory = (session: string) => Transport;
 export function toMessage(message: Api.Message): Message | null {
     if (message.ttlPeriod)
         return null;
-    const attachment = message.media ? message.media instanceof Api.MessageMediaPhoto ? 'Фото' : 'Файл или другое вложение' : null;
+    const audio = message.media instanceof Api.MessageMediaDocument && message.media.document instanceof Api.Document && message.media.document.attributes.find(a => a instanceof Api.DocumentAttributeAudio);
+    const attachment = audio ? (audio instanceof Api.DocumentAttributeAudio && audio.voice ? 'Голосовое сообщение' : 'Аудиофайл') : message.media ? message.media instanceof Api.MessageMediaPhoto ? 'Фото' : 'Файл или другое вложение' : null;
     return { id: message.id, date: new Date(message.date * 1000).toISOString(), outgoing: Boolean(message.out), text: message.message ?? '', attachment, edited: Boolean(message.editDate) };
 }
 export function telegramTransport(apiId: number, apiHash: string, proxy?: SocksProxyType): TransportFactory {
@@ -56,6 +59,7 @@ export function telegramTransport(apiId: number, apiHash: string, proxy?: SocksP
         const session = new StringSession(saved), client = new TelegramClient(session, apiId, apiHash, { ...(proxy ? { proxy } : {}), connectionRetries: 2, requestRetries: 1, floodSleepThreshold: 0, deviceModel: 'B24 CRM', appVersion: '1.0.0' });
         client.setLogLevel(LogLevel.NONE);
         return {
+            preview: (peer, messageId, signal) => downloadPreview(client, peer, messageId, signal),
             connect: () => client.connect().then(() => undefined), authorized: () => client.checkAuthorization(), identity: async () => String((await client.getMe()).id), save: () => session.save(),
             login: async (signal, qr, password) => String((await client.signInUserWithQrCode({ apiId, apiHash }, { abortSignal: signal, qrCode: async ({ token }) => qr(await QRCode.toDataURL(`tg://login?token=${token.toString('base64url')}`, { width: 256, margin: 2 })), password, onError: async () => true })).id),
             dialogs: async () => (await client.getDialogs({ limit: 500 })).filter(d => d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && !d.entity.deleted && d.inputEntity instanceof Api.InputPeerUser).map(d => ({ id: String(d.id), title: d.title || 'Без имени', phone: (d.entity as Api.User).phone, peer: { userId: String((d.inputEntity as Api.InputPeerUser).userId), accessHash: String((d.inputEntity as Api.InputPeerUser).accessHash) } })),

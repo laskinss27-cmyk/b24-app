@@ -4122,6 +4122,14 @@ html[data-theme="dark"] .msg-thread {
         border-top: 1px solid #34445a
     }
 }
+html[data-theme="dark"] .msg-preview {
+    border: 1px solid #34445a;
+    background: #202c3d;
+    color: #e5edf8
+}
+html[data-theme="dark"] .msg-preview::backdrop {
+    background: color-mix(in srgb, rgb(15 25 35) 60%, transparent)
+}
 html[data-theme="dark"] .rb-app {
     background: #172233
 }

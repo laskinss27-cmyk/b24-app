@@ -197,3 +197,10 @@ test('Background tick discovers and collects a new matching dialog without an op
         assert.equal(store.autoState(a.id).matched, 1); assert.equal(service.status(store.account(a.id)).phase, 'ready');
     } finally { await service.close(); store.close(); }
 });
+
+test('Only revoked authorized sessions create login alerts; intentional disconnect and temporary failures do not',async()=>{
+ for(const code of ['SESSION_REVOKED','FLOOD_WAIT_60','NETWORK','API_ID_INVALID']){
+  const f=await fixture();try{f.client.dialogs=async()=>{throw Object.assign(new Error('private'),{errorMessage:code});};await assert.rejects(f.service.dialogs(f.a.id));assert.equal(Boolean(f.store.loginAlert(f.a.id)?.needsLogin),code==='SESSION_REVOKED');}finally{await f.service.close();f.store.close();}
+ }
+ const f=await fixture();try{await f.service.disconnect(f.a.id);assert.equal(f.store.loginAlert(f.a.id),null);}finally{await f.service.close();f.store.close();}
+});

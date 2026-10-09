@@ -38,12 +38,13 @@ export function safeTelegramError(error: unknown): {
     return { message: error instanceof TelegramError ? error.message : 'Сервер не смог связаться с Telegram. Подключение будет повторено автоматически', retrySeconds: 60, authLost: false };
 }
 export class TelegramService {
+    private readonly mediaRequests = new Map<string, AbortController>();
     private readonly storageErrors = new Map<string, string>();
     private readonly live = new Map<string, Live>();
     private timer: ReturnType<typeof setInterval> | null = null;
     private closed = false;
-    constructor(readonly store: TelegramStore, private readonly factory: TransportFactory, readonly autoBinder?: Pick<TelegramAutoBinder, 'run' | 'reset' | 'close'>) { }
-    status(account: Account) { const live = this.live.get(account.id); return { ...account, autoBinding: this.store.autoState(account.id), phase: this.storageErrors.has(account.id) ? 'error' : live?.phase ?? (account.active ? 'connecting' : 'offline'), qr: live?.qr ?? null, error: this.storageErrors.get(account.id) ?? live?.error ?? '', lastSync: live?.lastSync ?? null, nextAttempt: live?.nextAttempt ?? 0 }; }
+    constructor(readonly store: TelegramStore, private readonly factory: TransportFactory, readonly autoBinder?: Pick<TelegramAutoBinder, 'run' | 'reset' | 'close'>, private readonly alerts?: { flush(): Promise<void>; close(): Promise<void> }) { }
+    status(account: Account) { const live = this.live.get(account.id); return { ...account, loginAlert: this.store.loginAlert(account.id), autoBinding: this.store.autoState(account.id), phase: this.storageErrors.has(account.id) ? 'error' : live?.phase ?? (this.store.loginAlert(account.id)?.needsLogin ? 'login_required' : account.active ? 'connecting' : 'offline'), qr: live?.qr ?? null, error: this.storageErrors.get(account.id) ?? live?.error ?? '', lastSync: live?.lastSync ?? null, nextAttempt: live?.nextAttempt ?? 0 }; }
     start(): void { this.timer = setInterval(() => { void this.tick(); }, 15000); this.timer.unref(); void this.tick(); }
     private make(id: string, saved: string): Live {
         const live: Live = { transport: this.factory(saved), phase: 'connecting', qr: null, error: '', lastSync: null, nextAttempt: 0, limited: false, syncing: false, task: null, abort: new AbortController(), password: null, rejectPassword: null, dialogs: new Map(), stopped: false };
@@ -153,8 +154,11 @@ export class TelegramService {
         live.qr = null;
         live.phase = safe.authLost ? 'login_required' : this.store.account(id).active ? 'retry' : 'error';
         live.nextAttempt = Date.now() + safe.retrySeconds * 1000;
-        if (safe.authLost)
+        if (safe.authLost) {
+            if (this.store.account(id).active && !/^API_ID/.test(String((error as {errorMessage?:string})?.errorMessage??''))) this.store.markLoginLost(id);
             this.store.deactivate(id);
+            void this.alerts?.flush();
+        }
         await live.transport.close().catch(() => { });
     }
     private requireLive(id: string): Live { const live = this.live.get(id); if (live?.phase !== 'ready')
@@ -183,6 +187,29 @@ export class TelegramService {
     bind(id: string, chatId: string, dealId: number): Binding { const live = this.requireLive(id), dialog = live.dialogs.get(chatId); if (!dialog)
         throw new TelegramError('Загрузите список и выберите клиентский диалог'); const binding = this.store.bind(id, chatId, dialog.title, dealId, dialog.peer); void this.sync(id, live); return binding; }
     bindContact(id: string, chatId: string, contactId: number): Binding { const live=this.requireLive(id),dialog=live.dialogs.get(chatId);if(!dialog)throw new TelegramError('Загрузите список и выберите клиентский диалог');const binding=this.store.bindContact(id,chatId,dialog.title,contactId,dialog.peer);void this.sync(id,live);return binding; }
+    async preview(contactId: number, id: string, chatId: string, messageId: number, signal: AbortSignal) {
+        this.store.contactMessage(contactId, id, chatId, messageId);
+        const live = this.requireLive(id);
+        if (!live.transport.preview) throw new TelegramError('Просмотр вложений недоступен', 503);
+        if (this.mediaRequests.has(id) || this.mediaRequests.size >= 2) throw new TelegramError('Другой файл ещё загружается. Повторите немного позже', 429);
+        const controller = new AbortController();
+        const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(90000)]);
+        this.mediaRequests.set(id, controller);
+        try {
+            const binding = this.store.bindings(id).find(b => b.chatId === chatId)!;
+            const result = await live.transport.preview(this.store.peer<Dialog['peer']>(binding), messageId, combined);
+            combined.throwIfAborted();
+            if (live.stopped || this.closed || !this.store.account(id).active) throw new TelegramError('Подключение закрыто', 409);
+            this.store.contactMessage(contactId, id, chatId, messageId);
+            return result;
+        } catch (error) {
+            if (combined.aborted) throw new TelegramError('Загрузка отменена или истекло время ожидания', 408);
+            if (error instanceof TelegramError) throw error;
+            const safe = safeTelegramError(error);
+            if (safe.limited || safe.authLost) await this.failed(id, live, error);
+            throw new TelegramError(safe.message, safe.limited ? 429 : 503);
+        } finally { this.mediaRequests.delete(id); }
+    }
     async sync(id: string, live = this.live.get(id)): Promise<void> {
         if (!live || live.stopped || live.syncing || live.phase !== 'ready' || this.closed)
             return;
@@ -217,6 +244,7 @@ export class TelegramService {
                     this.store.reconciled(binding, ids[ids.length - 1]!);
                 }
             }
+            if (live.stopped || this.closed || live.phase !== 'ready' || !this.store.account(id).active) return;
             this.store.authorize(id, this.store.account(id).telegramId!, live.transport.save());
             live.lastSync = new Date().toISOString();
             live.error = '';
@@ -232,6 +260,7 @@ export class TelegramService {
     async tick(): Promise<void> {
         if (this.closed)
             return;
+        void this.alerts?.flush();
         for (const account of this.store.accounts().filter(a => a.active)) {
             if (this.storageErrors.has(account.id))
                 continue;
@@ -249,6 +278,7 @@ export class TelegramService {
     async disconnect(id: string): Promise<{
         revoked: boolean;
     }> {
+        this.mediaRequests.get(id)?.abort();
         const account = this.store.account(id);
         let live = this.live.get(id);
         let revoked = true;
@@ -269,6 +299,7 @@ export class TelegramService {
         catch {
             revoked = false;
         }
+        this.store.resolveLoginAlert(id);
         this.store.setAuto(id, false);
         this.store.deactivate(id);
         if (live)
@@ -277,6 +308,6 @@ export class TelegramService {
         this.storageErrors.delete(id);
         return { revoked };
     }
-    async close(): Promise<void> { this.closed = true; if (this.timer)
-        clearInterval(this.timer); await this.autoBinder?.close(); await Promise.all([...this.live.values()].map(live => this.stopLive(live))); }
+    async close(): Promise<void> { this.closed = true; for (const request of this.mediaRequests.values()) request.abort(); if (this.timer)
+        clearInterval(this.timer); await this.autoBinder?.close(); await this.alerts?.close(); await Promise.all([...this.live.values()].map(live => this.stopLive(live))); }
 }

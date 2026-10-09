@@ -53,6 +53,9 @@ export class TelegramStore {
    CREATE TABLE IF NOT EXISTS telegram_auto_settings(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,last_run TEXT,enabled_at TEXT,error TEXT NOT NULL DEFAULT '');
    CREATE TABLE IF NOT EXISTS telegram_auto_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(account_id,chat_id));
    CREATE TABLE IF NOT EXISTS telegram_contact_links(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,contact_id INTEGER NOT NULL,PRIMARY KEY(account_id,chat_id),FOREIGN KEY(account_id,chat_id) REFERENCES telegram_bindings(account_id,chat_id));
+   CREATE TABLE IF NOT EXISTS telegram_manager_names(account_id TEXT NOT NULL REFERENCES telegram_accounts(id),from_date TEXT NOT NULL,label TEXT NOT NULL,PRIMARY KEY(account_id,from_date));
+   INSERT INTO telegram_manager_names(account_id,from_date,label) SELECT a.id,'1970-01-01T00:00:00.000Z',a.label FROM telegram_accounts a WHERE NOT EXISTS(SELECT 1 FROM telegram_manager_names n WHERE n.account_id=a.id);
+   CREATE TABLE IF NOT EXISTS telegram_connection_alerts(account_id TEXT PRIMARY KEY REFERENCES telegram_accounts(id),incident TEXT NOT NULL,needs_login INTEGER NOT NULL DEFAULT 1,state TEXT NOT NULL DEFAULT 'pending',next_at INTEGER NOT NULL DEFAULT 0,message_id TEXT,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);
    CREATE INDEX IF NOT EXISTS telegram_contact_links_contact ON telegram_contact_links(contact_id);
    CREATE INDEX IF NOT EXISTS telegram_messages_deal ON telegram_messages(deal_id,date,message_id);
    CREATE INDEX IF NOT EXISTS telegram_messages_account_id ON telegram_messages(account_id,message_id);`);
@@ -113,6 +116,7 @@ export class TelegramStore {
                 throw new TelegramError('Можно подключить до восьми аккаунтов', 409);
             const id = randomUUID();
             this.db.prepare('INSERT INTO telegram_accounts(id,owner_id,label,request_id) VALUES (?,?,?,?)').run(id, ownerId, label.slice(0, 120), requestId);
+            this.db.prepare('INSERT INTO telegram_manager_names VALUES (?,?,?)').run(id, '1970-01-01T00:00:00.000Z', label.slice(0,120));
             this.db.exec('COMMIT');
             return this.account(id);
         }
@@ -121,6 +125,33 @@ export class TelegramStore {
             throw e;
         }
     }
+    managerAt(id: string, at: string): string {
+        const row = this.db.prepare('SELECT label FROM telegram_manager_names WHERE account_id=? AND from_date<=? ORDER BY from_date DESC LIMIT 1').get(id, at);
+        return row ? String(row['label']) : this.account(id).label;
+    }
+    rename(id: string, label: string, expectedLabel: string, now = Date.now()): Account {
+        const clean = label.trim(); if (!clean || clean.length>120 || /[\x00-\x1f\x7f]/.test(clean)) throw new TelegramError('Укажите имя менеджера до 120 символов');
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            const previous = this.account(id); if (previous.label !== expectedLabel) throw new TelegramError('Имя уже изменилось. Обновите список',409);
+            if (clean !== previous.label) {
+                const last = this.db.prepare('SELECT max(from_date) AS at FROM telegram_manager_names WHERE account_id=?').get(id);
+                const at = new Date(Math.max(now, Date.parse(String(last?.['at'] ?? '1970-01-01')) + 1)).toISOString();
+                this.db.prepare('INSERT INTO telegram_manager_names VALUES (?,?,?)').run(id,at,clean);
+                this.db.prepare('UPDATE telegram_accounts SET label=? WHERE id=?').run(clean,id);
+            }
+            this.db.exec('COMMIT'); return this.account(id);
+        } catch(error) { this.db.exec('ROLLBACK'); throw error; }
+    }
+    loginAlert(id: string) { const row=this.db.prepare('SELECT * FROM telegram_connection_alerts WHERE account_id=?').get(id);return row ? {incident:String(row['incident']),needsLogin:Boolean(row['needs_login']),state:String(row['state']),error:String(row['error'])} : null; }
+    markLoginLost(id: string): void {
+        this.db.prepare(`INSERT INTO telegram_connection_alerts(account_id,incident,created_at) VALUES (?,?,?) ON CONFLICT(account_id) DO UPDATE SET incident=excluded.incident,needs_login=1,state='pending',next_at=0,message_id=NULL,error='',created_at=excluded.created_at WHERE needs_login=0`).run(id,randomUUID(),new Date().toISOString());
+    }
+    resolveLoginAlert(id: string): void { this.db.prepare("UPDATE telegram_connection_alerts SET needs_login=0,state=CASE WHEN state='sent' THEN state ELSE 'cancelled' END,error='' WHERE account_id=?").run(id); }
+    pendingLoginAlerts(now=Date.now()) { return this.db.prepare("SELECT account_id,incident FROM telegram_connection_alerts WHERE needs_login=1 AND state='pending' AND next_at<=?").all(now).map(row=>({accountId:String(row['account_id']),incident:String(row['incident'])})); }
+    claimLoginAlert(id:string,incident:string): boolean {return Boolean(this.db.prepare("UPDATE telegram_connection_alerts SET state='sending' WHERE account_id=? AND incident=? AND needs_login=1 AND state='pending'").run(id,incident).changes);}
+    finishLoginAlert(id:string,incident:string,state:string,error='',messageId='',nextAt=0): void { this.db.prepare("UPDATE telegram_connection_alerts SET state=?,error=?,message_id=?,next_at=? WHERE account_id=? AND incident=? AND needs_login=1 AND state IN ('pending','sending')").run(state,error,messageId,nextAt,id,incident); }
+    recoverLoginAlerts(): void {this.db.prepare("UPDATE telegram_connection_alerts SET state='uncertain',error='Не удалось подтвердить отправку. Проверьте чат менеджеров' WHERE state='sending' AND needs_login=1").run();}
     session(id: string): string | null { const row = this.db.prepare('SELECT session FROM telegram_accounts WHERE id=? AND active=1').get(id); return row?.['session'] ? this.unseal<string>(`session:${id}`, String(row['session'])) : null; }
     authorize(id: string, telegramId: string, session: string): void {
         const previous = this.account(id);
@@ -129,6 +160,7 @@ export class TelegramStore {
         if (this.accounts().some(a => a.id !== id && a.telegramId === telegramId))
             throw new TelegramError('Этот Telegram уже подключён', 409);
         this.db.prepare('UPDATE telegram_accounts SET telegram_id=?,session=?,active=1 WHERE id=?').run(telegramId, this.seal(`session:${id}`, session), id);
+        this.resolveLoginAlert(id);
     }
     deactivate(id: string): void { this.db.prepare('UPDATE telegram_accounts SET active=0,session=NULL WHERE id=?').run(id); }
     bindings(id?: string): Binding[] { return (id ? this.db.prepare('SELECT * FROM telegram_bindings WHERE account_id=?').all(id) : this.db.prepare('SELECT * FROM telegram_bindings').all()).map(r => ({ accountId: String(r['account_id']), chatId: String(r['chat_id']), title: String(r['title']), dealId: Number(r['deal_id']), contactId: this.contactId(String(r['account_id']), String(r['chat_id'])), cursor: Number(r['cursor']), reconcileCursor: Number(r['reconcile_cursor']), enabled: Boolean(r['enabled']) })); }
@@ -159,13 +191,21 @@ export class TelegramStore {
     }
     legacyDeals(binding: Binding): number[] { return this.db.prepare('SELECT DISTINCT deal_id FROM telegram_deal_routes WHERE account_id=? AND chat_id=? AND deal_id>0 UNION SELECT DISTINCT deal_id FROM telegram_messages WHERE account_id=? AND chat_id=? AND deal_id>0').all(binding.accountId,binding.chatId,binding.accountId,binding.chatId).map(r=>Number(r['deal_id'])); }
     contactBindings(contactId: number): Binding[] { return this.bindings().filter(b=>b.contactId===contactId); }
+    contactMessage(contactId: number, accountId: string, chatId: string, messageId: number): Message {
+        if (this.contactId(accountId, chatId) !== contactId) throw new TelegramError('Диалог не относится к выбранному контакту', 404);
+        const row = this.db.prepare('SELECT payload FROM telegram_messages WHERE account_id=? AND chat_id=? AND message_id=?').get(accountId, chatId, messageId);
+        if (!row) throw new TelegramError('Сообщение не найдено', 404);
+        const message = this.unseal<Message>(`message:${accountId}:${chatId}:${messageId}`, String(row['payload']));
+        if (message.deleted || !message.attachment) throw new TelegramError('Вложение недоступно', 404);
+        return message;
+    }
     contactHistory(contactId: number, accountId: string, chatId: string, before?: string) {
         if(this.contactId(accountId,chatId)!==contactId) throw new TelegramError('Диалог не относится к выбранному контакту',404);
         const parsed=before ? /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)\|([1-9]\d*)$/.exec(before) : null;
         if(before && (!parsed || !Number.isSafeInteger(Number(parsed[2])))) throw new TelegramError('Некорректная страница истории');
         const rows=parsed ? this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE account_id=? AND chat_id=? AND (date<? OR (date=? AND rowid<?)) ORDER BY date DESC,rowid DESC LIMIT 201').all(accountId,chatId,parsed[1]!,parsed[1]!,Number(parsed[2])) : this.db.prepare('SELECT rowid AS ordinal,* FROM telegram_messages WHERE account_id=? AND chat_id=? ORDER BY date DESC,rowid DESC LIMIT 201').all(accountId,chatId);
         const page=rows.slice(0,200),last=page.at(-1),binding=this.bindings(accountId).find(b=>b.chatId===chatId)!;
-        return {messages:page.map(row=>({...this.unseal<Message>(`message:${accountId}:${chatId}:${row['message_id']}`,String(row['payload'])),accountId,chatId,manager:this.account(accountId).label,dialog:binding.title})).reverse(),next:rows.length>200 && last ? `${last['date']}|${last['ordinal']}` : null};
+        return {messages:page.map(row=>({...this.unseal<Message>(`message:${accountId}:${chatId}:${row['message_id']}`,String(row['payload'])),accountId,chatId,manager:this.managerAt(accountId,String(row['date'])),dialog:binding.title})).reverse(),next:rows.length>200 && last ? `${last['date']}|${last['ordinal']}` : null};
     }
     /** Retired runtime rule, retained for migration and rollback tests. Atomic boundary change: preserve cursor/history before the new deal, reroute only the delayed tail. */
     rollover(binding: Binding, dealId: number, fromDate: string, revision: number): boolean {

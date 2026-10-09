@@ -50,6 +50,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<string, readonly AccessPermissionId[]>>
 	'/api/telegram/history': ['deals.view'],
     '/api/telegram/client-context': ['deals.view'],
     '/api/telegram/client-history': ['deals.view'],
+    '/api/telegram/media': ['deals.view'],
     '/api/telegram/bind-contact': ['deals.view'],
 	'/api/telegram/bind': ['deals.view'],
     '/api/telegram/auto-binding': ['deals.view'],

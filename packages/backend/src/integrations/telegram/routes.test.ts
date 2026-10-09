@@ -31,7 +31,7 @@ async function fixture() {
                 throw new Error('ACCESS_DENIED');
             } } as unknown as B24Client;
     }, crmAccess);
-    return { app, store, a, other, crmAccess, enrolls: () => enrolls, call: (action: string, token = 'owner', body: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: `/api/telegram/${action}`, payload: { domain: 'umniydom.bitrix24.ru', accessToken: token, ...body } }), close: async () => { await app.close(); store.close(); } };
+    return { app, store, a, other, service, crmAccess, enrolls: () => enrolls, call: (action: string, token = 'owner', body: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: `/api/telegram/${action}`, payload: { domain: 'umniydom.bitrix24.ru', accessToken: token, ...body } }), close: async () => { await app.close(); store.close(); } };
 }
 test('Telegram endpoints require authenticated active portal employee and isolate account controls', async () => {
     const f = await fixture();
@@ -135,4 +135,30 @@ test('Retired deal history API requires refresh without deleting historical rows
         assert.equal(r.statusCode, 409); assert.equal(f.store.history(37974).messages.length,1); assert.equal(r.body.includes('private message'),false);
         assert.equal(r.body.includes('50000'), false); assert.equal((await f.call('history', 'other', { dealId: 37974 })).statusCode, 403);
     } finally { await f.close(); }
+});
+
+test('Connect enrolls CRM and enables phone matching before QR; rejects missing grant without creating an account',async()=>{
+ const f=await fixture();try{
+  const requestId='cb747f50-24ce-4e6f-8f02-47a6bce3d003',input={requestId,label:'New manager'};
+  assert.equal((await f.call('connect','owner',input)).statusCode,409);assert.equal(f.store.accounts().length,2);
+  let connections=0; f.service.connect=async id=>{connections++;assert.equal(f.store.autoState(id).enabled,true);assert.equal(f.enrolls(),1);};
+  const result=await f.call('connect','owner',{...input,refreshToken:'grant'});assert.equal(connections,1);assert.equal(result.statusCode,200,result.body);
+  assert.equal(f.enrolls(),1);assert.equal(f.store.accounts().length,3);assert.equal(result.json().account.autoBinding.enabled,true);
+  assert.equal(result.body.includes('grant'),false);
+ }finally{await f.close();}
+});
+test('Rename is limited to owner/admin, uses compare and set and preserves account owner',async()=>{
+ const f=await fixture();try{
+  const input={accountId:f.a.id,label:'Петя',expectedLabel:'Рабочий'};
+  assert.equal((await f.call('rename','other',input)).statusCode,404);
+  const good=await f.call('rename','owner',input);assert.equal(good.statusCode,200);assert.equal(good.json().account.label,'Петя');assert.equal(good.json().account.ownerId,'1858');
+  assert.equal((await f.call('rename','owner',input)).statusCode,409);
+ }finally{await f.close();}
+});
+test('Connect cannot undo a disconnect while waiting for background CRM enrollment',async()=>{
+ const f=await fixture();let release!:()=>void;try{
+  let started!:()=>void;const ready=new Promise<void>(r=>{started=r;});const gate=new Promise<void>(r=>{release=r;});f.crmAccess.enroll=async()=>{started();await gate;};
+  const result=f.call('connect','owner',{accountId:f.a.id,requestId:'cb747f50-24ce-4e6f-8f02-47a6bce3d004',label:'Рабочий',refreshToken:'grant'});const pending=result.then(r=>r);
+  await ready;await f.call('disconnect','owner',{accountId:f.a.id});release();assert.equal((await pending).statusCode,409);assert.equal(f.store.autoState(f.a.id).enabled,false);
+ }finally{release?.();await f.close();}
 });

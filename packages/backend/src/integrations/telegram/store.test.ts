@@ -106,3 +106,16 @@ test('Telegram reconciles all stored messages in rotating bounded batches', () =
 finally {
     store.close();
 } });
+
+test('Manager names and pending login incident survive restart; legacy names migrate without rewriting history', () => {
+    const dir=mkdtempSync(join(tmpdir(),'telegram-names-')),path=join(dir,'state.sqlite');let store:TelegramStore|undefined;
+    try {
+        store=new TelegramStore(path,key);const a=store.create('9','Вася');store.authorize(a.id,'100','session');const b=store.bindContact(a.id,'200','Клиент',7,{});store.ingest(b,[message(2)],2);
+        const ciphertext=store.db.prepare('SELECT payload FROM telegram_messages').get()!['payload'];
+        store.db.exec('DROP TABLE telegram_manager_names');store.close();store=new TelegramStore(path,key);
+        assert.equal(store.contactHistory(7,a.id,'200').messages[0]?.manager,'Вася');
+        store.rename(a.id,'Петя','Вася',Date.parse('2026-10-09T12:00:00.000Z'));store.markLoginLost(a.id);const incident=store.loginAlert(a.id)!.incident;store.close();store=new TelegramStore(path,key);
+        assert.equal(store.loginAlert(a.id)!.incident,incident);assert.equal(store.loginAlert(a.id)!.state,'pending');
+        assert.equal(store.account(a.id).label,'Петя');assert.equal(store.contactHistory(7,a.id,'200').messages[0]?.manager,'Вася');assert.equal(store.db.prepare('SELECT payload FROM telegram_messages').get()!['payload'],ciphertext);
+    } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
+});

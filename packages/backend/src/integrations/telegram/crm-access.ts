@@ -37,7 +37,7 @@ export class TelegramCrmAccess {
     private async refresh(token: string): Promise<CrmCredential> {
         if (!this.options.clientId || !this.options.clientSecret) throw new TelegramError('На сервере не настроен OAuth для фоновой привязки', 503);
         const result = await (this.options.refresh?.(token) ?? refreshAccessToken({ clientId: this.options.clientId, clientSecret: this.options.clientSecret, refreshToken: token, signal: AbortSignal.timeout(15000) }));
-        if (!result.accessToken || !result.refreshToken || !result.expiresIn || result.expiresIn <= 0) throw new TelegramError('Не удалось продлить доступ CRM. Включите автопривязку заново', 409);
+        if (!result.accessToken || !result.refreshToken || !result.expiresIn || result.expiresIn <= 0) throw new TelegramError('Не удалось продлить доступ CRM. Подключите аккаунт заново из Битрикс24', 409);
         let endpoint: URL;
         try { endpoint = new URL(result.clientEndpoint ?? ''); } catch { throw new TelegramError('Битрикс24 не вернул адрес портала. Откройте вкладку заново', 409); }
         if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port || endpoint.search || endpoint.hash || endpoint.pathname !== '/rest/' || endpoint.hostname.toLowerCase() !== this.options.domain.toLowerCase()) throw new TelegramError('Доступ CRM относится к другому порталу', 403);
@@ -53,7 +53,7 @@ export class TelegramCrmAccess {
     async forOwner(owner: string): Promise<CrmReader> {
         return this.locked(owner, async () => {
             let auth = this.store.crmCredential<CrmCredential>(owner);
-            if (!auth) throw new TelegramError('Включите автопривязку из Битрикс24', 409);
+            if (!auth) throw new TelegramError('Подключите аккаунт из Битрикс24', 409);
             if (auth.expiresAt < Date.now() + 300000) {
                 auth = await this.refresh(auth.refreshToken);
                 // Never send a token to a domain supplied by an unexpected OAuth response.

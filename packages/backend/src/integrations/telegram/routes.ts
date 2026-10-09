@@ -1,3 +1,4 @@
+import { TelegramConnectionAlerts, managerAlertChat } from './connection-alerts.js';
 import { join } from 'node:path';
 import { readTelegramConfig, type TelegramConfig } from './config.js';
 import type { FastifyInstance } from 'fastify';
@@ -30,7 +31,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
             const check = await hasAppPermissions(app, auth, ['deals.view']);
             return Boolean(check.access && check.allowed);
         } });
-        service = new TelegramService(store, telegramTransport(apiId, apiHash, proxy), new ContactAutoBinder(store, owner => crmAccess!.forOwner(owner)));
+        service = new TelegramService(store, telegramTransport(apiId, apiHash, proxy), new ContactAutoBinder(store, owner => crmAccess!.forOwner(owner)), new TelegramConnectionAlerts(store, () => crmAccess!.forOwner(APP_OWNER_USER_ID), managerAlertChat(app.config.portalDomain)));
         service.start();
         return service;
     };
@@ -40,7 +41,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
         if (!supplied)
             service.store.close();
     } });
-    const wrap = (fn: (actor: string, body: Record<string, unknown>, client: NonNullable<ReturnType<typeof accessClientFrom>>) => Promise<unknown> | unknown) => async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
+    const wrap = (fn: (actor: string, body: Record<string, unknown>, client: NonNullable<ReturnType<typeof accessClientFrom>>, reply: import('fastify').FastifyReply, req: import('fastify').FastifyRequest) => Promise<unknown> | unknown) => async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
         reply.header('Cache-Control', 'no-store');
         try {
             const body = (req.body ?? {}) as Record<string, unknown>;
@@ -54,7 +55,7 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
             const actor = String(user.ID ?? '');
             if (!/^\d+$/.test(actor) || user.ACTIVE === false || user.ACTIVE === 'N')
                 throw new TelegramError('Нет доступа', 403);
-            return await fn(actor, body, client);
+            return await fn(actor, body, client, reply, req);
         }
         catch (e) {
             if (e instanceof z.ZodError)
@@ -68,12 +69,28 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
     const own = (actor: string, id: string) => { const a = runtime().store.account(id); if (a.ownerId !== actor && actor !== APP_OWNER_USER_ID)
         throw new TelegramError('Аккаунт не найден', 404); return a; };
     app.post('/api/telegram/accounts', wrap(actor => ({ ok: true, configured: Boolean(service) || configured(), maxAccounts: 8, accounts: service || configured() ? runtime().store.accounts().filter(a => a.ownerId === actor || actor === APP_OWNER_USER_ID).map(a => runtime().status(a)) : [] })));
-    app.post('/api/telegram/connect', wrap(async (actor, body) => {
-        const input = z.object({ accountId: accountId.optional(), requestId: z.string().uuid(), label: z.string().trim().min(1).max(120) }).parse(body);
-        const account = input.accountId ? own(actor, input.accountId) : runtime().store.create(actor, input.label, input.requestId);
-        if (!['connecting', 'qr', 'password', 'ready'].includes(runtime().status(account).phase))
-            await runtime().connect(account.id);
-        return { ok: true, account: runtime().status(account) };
+    app.post('/api/telegram/connect', { bodyLimit: 16384 }, wrap(async (actor, body) => {
+        const input = z.object({ accountId: accountId.optional(), requestId: z.string().uuid(), label: z.string().trim().min(1).max(120), refreshToken: z.string().min(1).max(4096).optional() }).parse(body);
+        const s = runtime(), previous = input.accountId ? own(actor, input.accountId) : null;
+        const owner = previous?.ownerId ?? actor, revision = previous ? s.store.autoState(previous.id).revision : null;
+        if (!crmAccess) throw new TelegramError('На сервере не настроен фоновый доступ к CRM',503);
+        try { await crmAccess.forOwner(owner); }
+        catch {
+            if (owner !== actor) throw new TelegramError('Для подключения требуется вход владельца аккаунта в Битрикс24',403);
+            if (!input.refreshToken) throw new TelegramError('Обновите вкладку в Битрикс24, чтобы подключить фоновый поиск контактов',409);
+            await crmAccess.enroll(actor, input.refreshToken);
+        }
+        if (previous && s.store.autoState(previous.id).revision !== revision) throw new TelegramError('Настройки изменились во время подключения. Обновите список',409);
+        const account = previous ?? s.store.create(actor, input.label, input.requestId);
+        if (!s.store.autoState(account.id).enabled) s.store.setAuto(account.id,true);
+        s.autoBinder?.reset(account.id);
+        if (!['connecting','qr','password','ready'].includes(s.status(account).phase)) await s.connect(account.id);
+        return {ok:true,account:s.status(s.store.account(account.id))};
+    }));
+    app.post('/api/telegram/rename', wrap((actor, body) => {
+        const input=z.object({accountId,label:z.string().trim().min(1).max(120),expectedLabel:z.string().min(1).max(120)}).parse(body);
+        own(actor,input.accountId);
+        return {ok:true,account:runtime().status(runtime().store.rename(input.accountId,input.label,input.expectedLabel))};
     }));
     app.post('/api/telegram/password', { bodyLimit: 4096 }, wrap((actor, body) => { const input = z.object({ accountId, password: z.string().min(1).max(512) }).parse(body); own(actor, input.accountId); runtime().password(input.accountId, input.password); return { ok: true }; }));
     app.post('/api/telegram/dialogs', wrap(async (actor, body) => { const input = z.object({ accountId }).parse(body); own(actor, input.accountId); return { ok: true, dialogs: await runtime().dialogs(input.accountId) }; }));
@@ -128,6 +145,22 @@ export function registerTelegramRoutes(app: FastifyInstance, supplied?: Telegram
         const input=z.object({dealId,contactId:dealId,accountId,chatId,before:z.string().max(150).optional()}).parse(body);
         await contactInDeal(client,input.dealId,input.contactId);
         return {ok:true,...runtime().store.contactHistory(input.contactId,input.accountId,input.chatId,input.before)};
+    }));
+    app.post('/api/telegram/media', { bodyLimit: 16384 }, wrap(async (_actor, body, client, reply, req) => {
+        reply.header('Cache-Control', 'private, no-store, max-age=0').header('Pragma', 'no-cache').header('X-Accel-Buffering', 'no');
+        const input = z.object({ dealId, contactId: dealId, accountId, chatId, messageId: z.number().int().positive().max(2147483647) }).parse(body);
+        await contactInDeal(client, input.dealId, input.contactId);
+        const controller = new AbortController(), abort = () => controller.abort();
+        req.raw.on('aborted', abort); reply.raw.on('close', abort);
+        try {
+            const media = await runtime().preview(input.contactId, input.accountId, input.chatId, input.messageId, controller.signal);
+            await contactInDeal(client, input.dealId, input.contactId);
+            controller.signal.throwIfAborted();
+            runtime().store.contactMessage(input.contactId, input.accountId, input.chatId, input.messageId);
+            return reply.header('Content-Type', media.mime).header('X-Content-Type-Options', 'nosniff')
+                .header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(media.name)}`)
+                .header('X-Media-Kind', media.kind).header('X-Media-Name', encodeURIComponent(media.name)).send(media.bytes);
+        } finally { req.raw.off('aborted', abort); reply.raw.off('close', abort); }
     }));
     app.post('/api/telegram/bind-contact',wrap(async(actor,body,client)=>{
         const input=z.object({accountId,chatId,contactId:dealId,dealId:dealId.optional()}).parse(body);own(actor,input.accountId);
