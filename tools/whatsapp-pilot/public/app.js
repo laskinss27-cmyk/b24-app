@@ -17,7 +17,7 @@ function renderState() {
   if (status.qr && $('qr').getAttribute('src') !== status.qr) $('qr').src = status.qr;
   if (!status.qr) $('qr').removeAttribute('src');
   $('account').textContent = status.account?.name || '';
-  if (status.error) report(Error(status.error));
+  if (status.error) report(Error(status.error)); renderHistory();
   if (status.state === 'setup') { dialogs = []; signature = ''; $('dialogs').replaceChildren(); clearThread(); }
 }
 function renderDialogs() {
@@ -33,7 +33,7 @@ function renderDialogs() {
     text.textContent = dialog.title; meta.className = 'meta'; meta.textContent = `${dialog.phone || 'Номер не передан'} · ${dialog.count} сообщений`; text.append(meta); label.append(input,text);
     input.addEventListener('change', () => { const requested = input.checked; run(async () => { try { status = await api('select',{chatId:dialog.id,selected:requested}); } finally { if (opened === dialog.id && !requested) clearThread(); signature = ''; await loadDialogs(); } }); });
     button.type = 'button'; button.textContent = 'Открыть'; button.disabled = !dialog.selected; button.dataset.chat = dialog.id;
-    button.addEventListener('click',() => run(async () => { opened = dialog.id; await loadMessages(); $('thread-title').focus(); await requestHistory(); }));
+    button.addEventListener('click',() => run(async () => { opened = dialog.id; await loadMessages(); $('thread-title').focus(); if (!status.history?.requests?.some(r=>r.id===opened)) await requestHistory(); }));
     li.append(label,button); return li;
   });
   $('dialogs').replaceChildren(...items);
@@ -50,7 +50,7 @@ async function loadMessages() {
   if (!opened) return;
   const id = opened, currentEpoch = epoch;
   const result = await api('messages?chatId=' + encodeURIComponent(id)); if (epoch !== currentEpoch || id !== opened) return;
-  $('history').hidden = false;
+  $('history').hidden = false; renderHistory();
   const nextSignature = JSON.stringify(result); if (nextSignature === messageSignature) return; messageSignature = nextSignature;
   $('thread-title').textContent = result.title; $('phone').textContent = result.phone ? `Номер для поиска в CRM: ${result.phone}` : 'Номер пока не передан. Автопривязка по телефону недоступна.';
   $('freshness').textContent = 'Получено сообщений: ' + result.messages.length + '. Обновлено: ' + new Date().toLocaleTimeString('ru');
@@ -65,6 +65,15 @@ async function run(action) {
   busy = true; $('error').hidden = true; $('notice').hidden = true;
   if (status) renderState();
   try { await action(); } catch(error) { report(error); } finally { busy = false; if (status) renderState(); }
+}
+function renderHistory() {
+  const h=status?.history;
+  $('sync-summary').hidden=!h||!status.account;
+  if(h&&status.account) $('sync-summary').textContent=h.expandedChats>0 ? 'Получена история нескольких сообщений: '+h.expandedChats+' диалогов.' : h.initialTimeout ? 'За 90 секунд расширенная история не получена. Дальше ждать не нужно: требуется проверка синхронизации.' : 'Проверяем первоначальную загрузку истории. Это займёт не более 90 секунд.';
+  const request=h?.requests?.find(r=>r.id===opened);
+  if(!request)return;
+  const texts={pending:'Запрос отправлен. Ожидаем ответ телефона не более 90 секунд.',timeout:'Телефон не передал предыдущие сообщения за 90 секунд. Дальше ждать не нужно.',failed:'Запрос истории завершился ошибкой. Новые сообщения можно проверять отдельно.',received:'Из истории получены дополнительные сообщения: '+request.added+'. Это не гарантия полного архива.'};
+  $('history-note').textContent=texts[request.state]||''; $('history-note').hidden=false;
 }
 async function requestHistory() {
   if (!opened) return;

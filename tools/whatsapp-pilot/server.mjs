@@ -38,7 +38,7 @@ export function createPilotServer(pilot = new WhatsAppPilot()) {
       const body = await bodyOf(request);
       if (url.pathname === '/api/connect') await pilot.connect();
       else if (url.pathname === '/api/history') return reply(200,await pilot.requestHistory(body.chatId));
-      else if (url.pathname === '/api/select') pilot.model.select(body.chatId,body.selected);
+      else if (url.pathname === '/api/select') { pilot.model.select(body.chatId,body.selected); pilot.saveSession?.(); }
       else if (url.pathname === '/api/disconnect') return reply(200,await pilot.disconnect());
       else throw fail('Страница не найдена.',404);
       reply(200,pilot.status());
@@ -48,8 +48,10 @@ export function createPilotServer(pilot = new WhatsAppPilot()) {
   return { server,pilot };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const port = Number(process.env.WHATSAPP_PILOT_PORT || 5201); const {server,pilot} = createPilotServer();
+  // Baileys uses global fetch; it must use the same Undici major as its proxy dispatcher.
+  globalThis.fetch = (await import('undici')).fetch;
+  const port = Number(process.env.WHATSAPP_PILOT_PORT || 5201); const {server,pilot} = createPilotServer(new WhatsAppPilot({sessionFile:resolve('.local/whatsapp-pilot/session.enc'),keyFile:resolve('.secrets/whatsapp-pilot.key')}));
   server.listen(port,'127.0.0.1',() => console.log(`WhatsApp pilot: http://127.0.0.1:${port}`));
-  const stop = async () => { await pilot.disconnect(); server.closeAllConnections(); server.close(() => process.exit(0)); };
+  const stop = async () => { await pilot.shutdown(); server.closeAllConnections(); server.close(() => process.exit(0)); };
   process.once('SIGINT',stop); process.once('SIGTERM',stop);
 }

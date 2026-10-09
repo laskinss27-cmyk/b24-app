@@ -3,10 +3,17 @@ const normalize = (id) => typeof id === 'string' ? id.replace(/:\d+@/, '@') : ''
 const phoneOf = (id) => /^\d{7,15}@s\.whatsapp\.net$/.test(id) ? '+' + id.split('@')[0] : null;
 export const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 
-// Bounded, memory-only data. No message bodies are logged or written to disk.
+// Bounded preview; persistence uses the encrypted session envelope, never plaintext logs.
 export class WhatsAppModel {
   constructor() { this.clear(); }
   clear() { this.chats = new Map(); this.aliases = new Map(); this.selected = new Set(); this.selfIds = new Set(); this.revision = 0; this.lastEventAt = null; this.historyReceived = false; }
+  snapshot() {return {chats:[...this.chats].map(([id,chat])=>[id,{...chat,messages:[...chat.messages]}]),aliases:[...this.aliases],selected:[...this.selected],selfIds:[...this.selfIds],historyReceived:this.historyReceived,lastEventAt:this.lastEventAt};}
+  restore(value) {
+    if(!value)return;
+    this.clear();this.aliases=new Map((value.aliases||[]).slice(0,5000));this.selfIds=new Set(value.selfIds||[]);
+    for(const [id,chat] of (value.chats||[]).slice(0,120)){if(!personal(id)||this.isSelf(id))continue;this.chats.set(id,{...chat,messages:new Map((chat.messages||[]).slice(-50))});}
+    this.selected=new Set((value.selected||[]).filter(id=>this.chats.has(id)).slice(0,2));this.historyReceived=value.historyReceived===true;this.lastEventAt=value.lastEventAt||null;this.revision++;
+  }
   canonical(id) { return this.aliases.get(normalize(id)) || normalize(id); }
   setSelf(...ids) { for (const id of ids) if (id) this.selfIds.add(normalize(id)); for (const [id] of this.chats) if (this.isSelf(id)) { this.chats.delete(id); this.selected.delete(id); } }
   isSelf(id) { return [...this.selfIds].some((self) => this.canonical(self) === this.canonical(id)); }

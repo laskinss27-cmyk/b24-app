@@ -33,6 +33,12 @@ try {
  await page.waitForFunction(()=>!document.querySelector('#dialogs button').disabled);
  await page.locator('#dialogs button').nth(0).click();await page.getByText('Ответ с телефона — подмена').waitFor();
  assert.equal(await page.locator('#messages img').count(),0); await page.getByText('История запрошена с телефона.').waitFor();
+ status.history={expandedChats:0,initialTimeout:true,requests:[{id:'1',state:'timeout',added:0}]};
+ await page.getByText('Телефон не передал предыдущие сообщения за 90 секунд. Дальше ждать не нужно.').waitFor();
+ await page.getByText('За 90 секунд расширенная история не получена. Дальше ждать не нужно: требуется проверка синхронизации.').waitFor();
+ status.history={expandedChats:1,initialTimeout:false,requests:[{id:'1',state:'received',added:1}]};
+ await page.getByText('Из истории получены дополнительные сообщения: 1. Это не гарантия полного архива.').waitFor();
+
  await page.locator('#dialogs input').nth(1).check(); await page.waitForTimeout(100);
  await page.locator('#dialogs input').nth(2).check();await page.getByRole('alert').filter({hasText:'двух диалогов'}).waitFor();
  assert.equal(await page.locator('#dialogs input').nth(2).isChecked(),false);

@@ -1,7 +1,9 @@
 import { WhatsAppModel, fail } from './model.mjs';
+import { EncryptedSession } from './session.mjs';
+import { HistoryMonitor } from './history.mjs';
 export class WhatsAppPilot {
-  constructor() { this.model = new WhatsAppModel(); this.state = 'setup'; this.error = ''; this.qr = null; this.account = null; this.generation = 0; this.socket = null; this.retries = 0; this.auth = null; this.historyRequests = new Map(); }
-  status() { return { state: this.state, error: this.error, qr: this.qr, account: this.account, revision: this.model.revision, historyReceived: this.model.historyReceived, lastEventAt: this.model.lastEventAt, chats: this.model.chats.size, selected: [...this.model.selected] }; }
+  constructor(options = {}) { this.options=options; this.history=new HistoryMonitor(); this.model = new WhatsAppModel(); this.state = 'setup'; this.error = ''; this.qr = null; this.account = null; this.generation = 0; this.socket = null; this.retries = 0; this.auth = null; this.historyRequests = new Map(); }
+  status() { return { state: this.state, error: this.error, qr: this.qr, account: this.account, revision: this.model.revision, historyReceived: this.model.historyReceived, lastEventAt: this.model.lastEventAt, chats: this.model.chats.size, selected: [...this.model.selected], history: this.history.summary() }; }
   async connect() {
     if (!['setup','error'].includes(this.state) || this.socket) throw fail('Подключение уже начато.');
     const generation = ++this.generation;
@@ -9,7 +11,7 @@ export class WhatsAppPilot {
     try {
       this.lib = await import('@whiskeysockets/baileys');
       this.qrcode = (await import('qrcode')).default;
-      this.logger = (await import('pino')).default({ level: 'silent' });
+      this.logger = this.history.logger();
       const proxyPort = process.env.WHATSAPP_PILOT_PROXY_PORT;
       if (proxyPort && !this.network) {
         if (!/^\d+$/.test(proxyPort) || Number(proxyPort) < 1 || Number(proxyPort) > 65535) throw Error('Invalid local proxy port');
@@ -19,33 +21,37 @@ export class WhatsAppPilot {
       }
       if (generation !== this.generation) return;
       if (!this.auth) {
-        const data = new Map();
-        this.auth = { creds: this.lib.initAuthCreds(), keys: {
+        const codec={stringify:value=>JSON.stringify(value,this.lib.BufferJSON.replacer),parse:value=>JSON.parse(value,this.lib.BufferJSON.reviver)};
+        this.sessionStore=this.options.sessionFile?new EncryptedSession(this.options.sessionFile,this.options.keyFile,codec):null;
+        const saved=this.sessionStore?.load();
+        const data = new Map(saved?.keys || []); this.model.restore(saved?.preview);
+        this.saveSession=()=>{ if(this.auth)this.sessionStore?.save({creds:this.auth.creds,keys:[...data],preview:this.model.snapshot()}); };
+        this.auth = { creds: saved?.creds || this.lib.initAuthCreds(), keys: {
           get: async (type, ids) => Object.fromEntries(ids.map((id) => {
             let value = data.get(`${type}:${id}`);
             if (value && type === 'app-state-sync-key') value = this.lib.proto.Message.AppStateSyncKeyData.fromObject(value);
             return [id, value];
           })),
-          set: async (updates) => { for (const [type, values] of Object.entries(updates)) for (const [id, value] of Object.entries(values)) { if (value) data.set(`${type}:${id}`, value); else data.delete(`${type}:${id}`); } }
+          set: async (updates) => { for (const [type, values] of Object.entries(updates)) for (const [id, value] of Object.entries(values)) { if (value) data.set(`${type}:${id}`, value); else data.delete(`${type}:${id}`); } this.saveSession(); }
         } };
       }
       this.open(generation);
-    } catch { if (generation === this.generation) { this.state = 'error'; this.error = 'Не удалось запустить подключение WhatsApp.'; this.socket = null; } }
+    } catch { if (generation === this.generation) { this.state = 'error'; this.error = 'Не удалось запустить WhatsApp или прочитать сохранённую сессию. Данные не сброшены.'; this.socket = null; } }
   }
   open(generation) {
     if (generation !== this.generation) return;
-    this.socket = this.lib.default({ ...this.network, auth: this.auth, logger: this.logger, browser: this.lib.Browsers.windows('Chrome'), markOnlineOnConnect: false, syncFullHistory: false, connectTimeoutMs: 25000, defaultQueryTimeoutMs: 30000, maxMsgRetryCount: 2, enableAutoSessionRecreation: false, getMessage: async () => undefined });
+    this.socket = this.lib.default({ ...this.network, auth: this.auth, logger: this.logger, browser: this.lib.Browsers.windows('Chrome'), markOnlineOnConnect: false, syncFullHistory: true, shouldSyncHistoryMessage: () => true, connectTimeoutMs: 25000, defaultQueryTimeoutMs: 30000, maxMsgRetryCount: 2, enableAutoSessionRecreation: false, getMessage: async () => undefined });
     const socket = this.socket;
     const active = () => generation === this.generation && socket === this.socket;
-    const on = (event, handler) => socket.ev.on(event, (...args) => { if (active()) { try { handler(...args); } catch { this.error = 'Часть данных WhatsApp не удалось обработать. Полнота истории пока не подтверждена.'; } } });
-    on('creds.update', (update) => { Object.assign(this.auth.creds, update); this.model.setSelf(this.auth.creds.me?.id, this.auth.creds.me?.lid); });
+    const on = (event, handler) => socket.ev.on(event, (...args) => { if (active()) { try { handler(...args); this.saveSession?.(); } catch { this.error = 'Часть данных WhatsApp не удалось обработать. Полнота истории пока не подтверждена.'; } } });
+    on('creds.update', (update) => { Object.assign(this.auth.creds, update); this.saveSession?.(); this.model.setSelf(this.auth.creds.me?.id, this.auth.creds.me?.lid); });
     on('lid-mapping.update', ({ lid, pn }) => this.model.mapIds(lid, pn));
-    on('messaging-history.set', ({ chats = [], contacts = [], messages = [], lidPnMappings = [] }) => {
+    on('messaging-history.set', ({ chats = [], contacts = [], messages = [], lidPnMappings = [], syncType }) => {
       for (const item of lidPnMappings) this.model.mapIds(item.lid, item.pn);
       for (const chat of chats) this.model.ensure(chat.id, chat.name);
       for (const item of contacts) this.model.contact(item);
       for (const message of messages) this.model.ingest(message);
-      this.model.historyReceived = true; this.model.revision++;
+      this.model.historyReceived = true; this.model.revision++; this.history.frame(syncType,messages,this.model);
     });
     for (const event of ['contacts.upsert','contacts.update']) on(event, (items) => { for (const item of items) this.model.contact(item); });
     for (const event of ['chats.upsert','chats.update']) on(event, (items) => { for (const item of items) this.model.ensure(item.id, item.name); });
@@ -65,6 +71,7 @@ export class WhatsAppPilot {
       if (update.connection === 'open') {
         this.pendingQr = null; this.qr = null; this.state = 'ready'; this.error = ''; this.retries = 0;
         this.model.setSelf(socket.user?.id, socket.user?.lid);
+        this.history.connected(this.model); this.saveSession?.();
         this.account = { name: socket.user?.name || 'Подключённый аккаунт WhatsApp' };
       }
       if (update.connection === 'close') {
@@ -89,25 +96,29 @@ export class WhatsAppPilot {
     if (thread.messages.length >= 50) return { requested:false, note:'Уже загружены 50 сообщений — предел локальной пробы.' };
     const oldest = [...chat.messages.values()].sort((a,b) => a.time - b.time)[0];
     if (!oldest) return { requested:false, note:'Нужна хотя бы одна полученная запись этого диалога. Откройте его в WhatsApp на телефоне и дождитесь синхронизации.' };
-    if (Date.now() - (this.historyRequests.get(id) || 0) < 60000) return { requested:false, note:'Запрос истории уже отправлен. Держите WhatsApp открытым на телефоне и подождите до минуты.' };
-    this.historyRequests.set(id,Date.now());
+    if (Date.now() - (this.historyRequests.get(id) || 0) < 90000) return { requested:false, note:'Запрос истории уже отправлен. Держите WhatsApp открытым на телефоне и результат будет показан в течение 90 секунд.' };
+    this.historyRequests.set(id,Date.now()); this.history.request(id,new Set(chat.messages.keys()));
     const generation = this.generation;
-    // Baileys README documents messageTimestamp (seconds) despite the proto field's Ms suffix.
-    await this.socket.fetchMessageHistory(50, oldest.sourceKey, oldest.time / 1000);
+    // Seconds are intentional: also confirmed by whatsmeow BuildHistorySyncRequest despite the Ms suffix.
+    try { await this.socket.fetchMessageHistory(50, oldest.sourceKey, oldest.time / 1000); } catch(error) { this.history.failed(id); throw error; }
     if (generation !== this.generation || !this.model.selected.has(id)) throw fail('Диалог больше не выбран.',409);
-    return { requested:true, note:'История запрошена с телефона. Держите WhatsApp открытым; сообщения появятся по мере получения.' };
+    return { requested:true, note:'Запрос отправлен. Откройте WhatsApp на телефоне; результат проверим в течение 90 секунд. Если ответа нет, экран покажет тайм-аут.' };
+  }
+  async shutdown() {
+    this.saveSession?.(); ++this.generation; clearTimeout(this.timer); this.pendingQr=null;
+    const socket=this.socket; this.socket=null; socket?.end(undefined);
   }
   async disconnect() {
     ++this.generation; clearTimeout(this.timer); this.pendingQr = null;
     const socket = this.socket; this.socket = null;
-    const hadSession = Boolean(this.auth?.creds?.registered); let revoked = !hadSession;
+    const hadSession = Boolean(this.auth?.creds?.registered || this.auth?.creds?.me?.id); let revoked = !hadSession;
     this.state = 'disconnecting'; this.qr = null;
     if (socket) {
       let timeout;
       try { await Promise.race([socket.logout(), new Promise((_,reject) => { timeout = setTimeout(() => reject(new Error('timeout')), 5000); })]); revoked = true; } catch { revoked = !hadSession; }
       finally { clearTimeout(timeout); socket.end(undefined); }
     }
-    this.auth = null; this.historyRequests.clear(); this.model.clear(); this.account = null; this.state = 'setup'; this.error = '';
+    this.sessionStore?.forget(); this.sessionStore=null; this.history=new HistoryMonitor(); this.auth = null; this.historyRequests.clear(); this.model.clear(); this.account = null; this.state = 'setup'; this.error = '';
     return { revoked, warning: revoked ? '' : 'Завершите сессию пилота вручную: WhatsApp → Связанные устройства. Данные на этом компьютере очищены.' };
   }
 }

@@ -57,7 +57,7 @@ test('WhatsApp HTTP pilot rejects foreign origins, missing cookies, rebinding an
   const code = await new Promise((resolve,reject)=>{const req=http.get(base+'/api/status',{headers:{...headers,Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode)});req.on('error',reject);}); assert.equal(code,403);
 });
 test('WhatsApp disconnect clears data even when remote revocation fails, and warns truthfully', async () => {
-  const pilot = new WhatsAppPilot(); pilot.auth={creds:{registered:true}}; pilot.model.ingest(message()); pilot.model.select(pn,true);
+  const pilot = new WhatsAppPilot(); pilot.auth={creds:{registered:false,me:{id:pn}}}; pilot.model.ingest(message()); pilot.model.select(pn,true);
   let ended = false; pilot.socket={logout:async()=>{throw Error('private token must not escape')},end:()=>{ended=true}};
   const result=await pilot.disconnect(); assert.equal(result.revoked,false); assert.match(result.warning,/вручную/); assert.equal(ended,true);
   assert.equal(pilot.model.chats.size,0); assert.equal(pilot.auth,null); assert.equal(pilot.status().state,'setup');
@@ -83,4 +83,53 @@ test('WhatsApp history uses selected message key, throttles repeats and refuses 
   assert.equal(calls,1);assert.deepEqual(args,[50,{remoteJid:lid,fromMe:false,id:'one'},1]);
   assert.equal((await pilot.requestHistory(pn)).requested,false);assert.equal(calls,1);
   assert.equal(JSON.stringify(pilot.model.messages(pn)).includes('sourceKey'),false);
+});
+
+test('WhatsApp history monitor times out, and unrelated/live messages cannot claim history delivery', async () => {
+  const {HistoryMonitor}=await import(new URL('../../../../tools/whatsapp-pilot/history.mjs',import.meta.url).href);
+  let now=1000;const history=new HistoryMonitor(()=>now),model=new WhatsAppModel();model.ingest(message());
+  history.connected();history.request(pn,new Set(model.chats.get(pn).messages.keys()));
+  now+=90001;assert.equal(history.requestState(pn).state,'timeout');
+  model.ingest(message(pn,'live',false,2));history.frame(3,[message('79990000001@s.whatsapp.net','other')],model);
+  assert.equal(history.requestState(pn).state,'timeout');
+  const old=message(pn,'older',true,0);model.ingest(old);history.frame(6,[old],model);
+  assert.deepEqual(history.requestState(pn),{state:'received',added:1});
+  const log=history.logger();log.error({err:{message:'SECRET',code:'ENOTFOUND'},token:'SECRET'},'error in history');log.info({histNotification:{syncType:2,mediaKey:'SECRET',directPath:'SECRET'},process:true},'got history notification');
+  assert.equal(JSON.stringify(history.summary()).includes('SECRET'),false);assert.equal(history.summary().notifications[0].accepted,true);
+});
+
+test('WhatsApp encrypted session persists buffers and rejects tampering or a missing key without replacing data', async () => {
+  const {mkdtempSync,readFileSync,writeFileSync,unlinkSync,rmSync,realpathSync}=await import('node:fs');
+  const {tmpdir}=await import('node:os');const {join,dirname,basename}=await import('node:path');
+  const {EncryptedSession}=await import(new URL('../../../../tools/whatsapp-pilot/session.mjs',import.meta.url).href);
+  const root=realpathSync(tmpdir()),dir=mkdtempSync(join(root,'b24-wa-test-'));
+  try{
+    const file=join(dir,'state','session.enc'),key=join(dir,'key','session.key'),store=new EncryptedSession(file,key);
+    assert.equal(store.load(),null);store.save({secret:'private-credential',keys:[['x',{type:'Buffer',data:[1,2,3]}]]});
+    assert.equal(readFileSync(file).includes(Buffer.from('private-credential')),false);
+    assert.equal(new EncryptedSession(file,key).load().secret,'private-credential');
+    const original=readFileSync(file),corrupted=Buffer.from(original);corrupted.writeUInt8(corrupted.readUInt8(corrupted.length-1)^1,corrupted.length-1);writeFileSync(file,corrupted);
+    assert.throws(()=>store.load());assert.deepEqual(readFileSync(file),corrupted);
+    writeFileSync(file,original);unlinkSync(key);assert.throws(()=>store.load());assert.deepEqual(readFileSync(file),original);
+    store.forget();store.save({secret:'late'});assert.equal(store.load(),null);
+  }finally{const resolved=realpathSync(dir);assert.equal(dirname(resolved),root);assert.ok(basename(resolved).startsWith('b24-wa-test-'));rmSync(resolved,{recursive:true});}
+});
+
+test('WhatsApp pilot requests initial expanded history and accepts FULL frames', () => {
+  const pilot=new WhatsAppPilot();let config:any;
+  pilot.lib={default:(value:any)=>{config=value;return {ev:{on:()=>{}}}},Browsers:{windows:()=>['Windows','Chrome','test']}};pilot.open(pilot.generation);
+  assert.equal(config.syncFullHistory,true);assert.equal(config.shouldSyncHistoryMessage({syncType:2}),true);assert.equal(config.markOnlineOnConnect,false);
+});
+
+
+test('WhatsApp preview survives a restart with selection, phone aliases and history request boundary', async () => {
+  const {HistoryMonitor}=await import(new URL('../../../../tools/whatsapp-pilot/history.mjs',import.meta.url).href);
+  const original=new WhatsAppModel();original.ingest(message(lid,'first',false,2));original.ingest(message(pn,'second',true,3));original.mapIds(lid,pn);original.select(pn,true);
+  const restored=new WhatsAppModel();restored.restore(JSON.parse(JSON.stringify(original.snapshot())));
+  assert.deepEqual(restored.messages(lid),{...original.messages(lid),revision:restored.revision});
+  const history=new HistoryMonitor(()=>1000);history.connected(restored);assert.equal(history.summary().expandedChats,1);
+  const pilot=new WhatsAppPilot();pilot.model=restored;pilot.state='ready';let args:unknown[]=[];
+  pilot.socket={fetchMessageHistory:async(...values:unknown[])=>{args=values}};
+  await pilot.requestHistory(pn);assert.deepEqual(args,[50,{remoteJid:lid,id:'first',fromMe:false},2]);
+  restored.select(pn,false);assert.throws(()=>restored.messages(lid),/не выбран/);
 });
